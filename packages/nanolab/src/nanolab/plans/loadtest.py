@@ -1,6 +1,6 @@
 from sonata_tasks.execution.models import CommandOptions
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -64,7 +64,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.metrics.catalogue import queries_for
 from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
-from nanolab.plans.functions import resolve_function, sonata_function
+from nanolab.plans.functions import resolve_function, resolve_function_definition, sonata_function
 from nanolab.plans.diagnostics import collect_control_plane_log
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
@@ -222,6 +222,60 @@ _CONCURRENCY_FUNCTION_RESOURCES: dict[str, object] = {
 }
 
 
+def payload_corpus_path(config: ScenarioConfig, root: Path, function: str) -> Path | None:
+    """The corpus the generator should send, or None to keep its built-in text.
+
+    The corpora live in the nanoFaaS checkout, one per FAMILY rather than per
+    function: `word-stats-java` and `word-stats-java-lite` replay the same bytes, so
+    a difference between them is the runtime and not the input. See
+    docs/loadtest-payload-profile.md in that repository.
+
+    Missing corpus raises rather than falling back. A silent fallback would leave the
+    run driving an idle function while reporting success, which is precisely the
+    failure this knob exists to prevent.
+    """
+    if config.payload_profile is None:
+        return None
+    family = resolve_function_definition(function).family
+    corpus = root / "functions" / "test-data" / family / f"performance-{config.payload_profile}.json"
+    if not corpus.is_file():
+        raise FileNotFoundError(
+            f"payloadProfile {config.payload_profile!r} needs {corpus}, which does not exist"
+        )
+    return corpus
+
+
+def _concurrency_function_resources(config: ScenarioConfig, function: str) -> dict[str, object]:
+    """The cap for one function: what the scenario declared, else the default above.
+
+    The default used to be applied unconditionally, so a scenario that declared
+    `resources` for a function under concurrency control had them silently discarded
+    — while the schema validates those very keys against the selected functions, which
+    reads as a promise that they apply.
+
+    It matters more than tidiness because the cap is a CALIBRATION, and a calibration
+    goes stale: see the note on _CONCURRENCY_FUNCTION_CPUS. Making it a per-scenario
+    value lets one run be re-tuned without moving the constant under every other run
+    and breaking comparability with the campaigns already recorded.
+    """
+    declared = config.resources.get(function)
+    if declared is None:
+        return _CONCURRENCY_FUNCTION_RESOURCES
+    resolved = {
+        key: dict(value)  # type: ignore[arg-type]
+        for key, value in _CONCURRENCY_FUNCTION_RESOURCES.items()
+    }
+    for section in ("requests", "limits"):
+        quantity = getattr(declared, section, None)
+        if quantity is None:
+            continue
+        if quantity.cpu is not None:
+            resolved[section]["cpu"] = float(quantity.cpu)
+        if quantity.memory_mib is not None:
+            resolved[section]["memoryMiB"] = int(quantity.memory_mib)
+    return resolved
+
+
 def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | None:
     """Fixed replicas, adaptive per-replica concurrency.
 
@@ -248,6 +302,27 @@ _TARGET_LATENCY_MS = 10
 # where a concurrency limit puts the wait it saves, so the two numbers cannot be equal without
 # either forbidding queueing altogether or lying about one of them.
 _END_TO_END_P95_BUDGET_MS = 50
+
+# What the budget above assumes: the generator's built-in ~20-word inputs, whose
+# uncontended service time is around 1 ms warm. Selecting a heavier corpus with
+# `payloadProfile` changes the amount of work in a request by orders of magnitude
+# (5,000 and 50,000 words against 20), and a promise of 50 ms means something else
+# entirely for each. Holding the number fixed would turn the threshold into a test
+# of "is the payload small" rather than "does the platform keep its promise".
+#
+# So the budget is restated per profile, keeping the ratio the original calibration
+# used - roughly fifty times the uncontended service time - rather than relaxed to
+# whatever the last run happened to produce. Measured on the DGX Spark described in
+# the nanoFaaS campaign README, medium on two cores gave p95 68.8 ms, which sits
+# under this budget with room while still leaving a doubling detectable.
+_PAYLOAD_P95_BUDGET_MS: dict[str, int] = {"small": 60, "medium": 120, "large": 600}
+
+
+def end_to_end_p95_budget_ms(config: ScenarioConfig) -> int:
+    """The p95 the load generator holds the run to, for the work it is sending."""
+    if config.payload_profile is None:
+        return _END_TO_END_P95_BUDGET_MS
+    return _PAYLOAD_P95_BUDGET_MS[config.payload_profile]
 
 
 def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
@@ -321,7 +396,7 @@ def _resolve_functions(
     prebuilt_control_plane_image: str | None,
     prebuilt_function_images: Mapping[str, str] | None,
     concurrency: int = 4,
-    resources: dict[str, object] | None = None,
+    resources_for: Callable[[str], dict[str, object]] | None = None,
     function_concurrency: int | None = None,
     function_queue_size: int | None = None,
 ) -> tuple[tuple[Any, ...], bool]:
@@ -341,7 +416,11 @@ def _resolve_functions(
                 timeout_ms=30000,
                 concurrency=concurrency,
                 queue_size=_CONCURRENCY_QUEUE_SIZE,
-                **({"resources": resources} if resources is not None else {}),
+                **(
+                    {"resources": resources_for(function.name)}
+                    if resources_for is not None
+                    else {}
+                ),
             )
             for function in functions
         )
@@ -661,7 +740,7 @@ def k6_environment(
         # service time. The controller works from the mean of what the function itself took, which
         # is the right input for a control loop and the wrong thing to promise anyone — a run
         # measured a mean inside its 10ms target while the tail reached 24ms.
-        env["K6_MAX_P95_MS"] = str(_END_TO_END_P95_BUDGET_MS)
+        env["K6_MAX_P95_MS"] = str(end_to_end_p95_budget_ms(config))
     if config.load_profile == "saturation":
         # Shedding load is what this profile is for. Holding it to the ordinary failure budget
         # would mark every saturation run red for doing its job.
@@ -735,6 +814,7 @@ def _build_run_k6(
     config: ScenarioConfig,
     env_overrides: Mapping[str, str] | None = None,
     remote: bool,
+    payload_path: Path | None = None,
 ) -> K6Task:
     return K6Task(
         executor=executor,
@@ -758,6 +838,7 @@ def _build_run_k6(
                 **k6_environment(config, control_plane_url, target.name),
                 **dict(env_overrides or {}),
             },
+            payload_path=payload_path,
         ),
         # Solo per un ruolo di carico remoto. L'executor locale rifiuta qualunque
         # remote_dir, e un load-test `container` DEVE girare su un environment locale
@@ -1275,7 +1356,11 @@ def build_loadtest_plan(
         prebuilt_control_plane_image,
         prebuilt_function_images,
         concurrency=_CONCURRENCY_CEILING if config.concurrency_control else 4,
-        resources=_CONCURRENCY_FUNCTION_RESOURCES if config.concurrency_control else None,
+        resources_for=(
+            (lambda name: _concurrency_function_resources(config, name))
+            if config.concurrency_control
+            else None
+        ),
         function_concurrency=function_concurrency,
         function_queue_size=function_queue_size,
     )
@@ -1340,6 +1425,7 @@ def build_loadtest_plan(
         config=config,
         env_overrides=k6_env_overrides,
         remote=environment.provider != "local",
+        payload_path=payload_corpus_path(config, root, target.name),
     )
     watcher, replica_probe = _build_replica_watcher(
         config=config,

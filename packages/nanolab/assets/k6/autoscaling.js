@@ -37,17 +37,39 @@ export const options = {
     thresholds: thresholds(),
 };
 
-const TEXTS = [
+// The generator's own sentences: about twenty words each, which is almost no work
+// for word-stats. Fine for checking that requests flow; useless for any scenario
+// whose verdict depends on the function being BUSY, because twenty words cannot
+// contend for anything however tightly the container's CPU is capped.
+const BUILT_IN_TEXTS = [
     'The quick brown fox jumps over the lazy dog. The dog barked at the fox while the fox ran away quickly.',
     'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
     'To be or not to be that is the question whether tis nobler in the mind to suffer the slings and arrows of outrageous fortune.',
     'It was the best of times it was the worst of times it was the age of wisdom it was the age of foolishness.',
 ];
 
+// NANOFAAS_PAYLOAD names a repository-owned corpus
+// (functions/test-data/<family>/performance-<profile>.json in the nanoFaaS checkout,
+// selected by a scenario's `payloadProfile`). Loaded in the init context because k6
+// only allows open() there; every VU then shares these inputs.
+const INPUTS = loadInputs();
+
+function loadInputs() {
+    const corpusPath = __ENV.NANOFAAS_PAYLOAD;
+    if (!corpusPath) {
+        return BUILT_IN_TEXTS.map((text) => ({ text: text, topN: 5 }));
+    }
+    const corpus = JSON.parse(open(corpusPath));
+    const cases = corpus.cases || [];
+    if (cases.length === 0) {
+        throw new Error(`payload corpus ${corpusPath} carries no cases`);
+    }
+    return cases.map((entry) => entry.input);
+}
+
 export default function () {
-    const text = TEXTS[Math.floor(Math.random() * TEXTS.length)];
     const payload = JSON.stringify({
-        input: { text: text, topN: 5 },
+        input: INPUTS[Math.floor(Math.random() * INPUTS.length)],
     });
 
     const res = http.post(`${BASE_URL}/v1/functions/${FN}:invoke`, payload, {

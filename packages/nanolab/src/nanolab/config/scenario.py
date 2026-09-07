@@ -81,6 +81,16 @@ LoadProfile = Literal["cycle", "saturation", "burst", "openloop", "comparison", 
 # rebuild it — measured at rest, the JVM build held 212 MiB against the native
 # build's 31 MiB, and started in 1.59s against 0.14s.
 ControlPlaneRuntime = Literal["jvm", "native"]
+# Which repository-owned corpus the load generator sends, from
+# `functions/test-data/<family>/performance-<profile>.json` in the nanoFaaS checkout.
+# For word-stats those are 100, 5,000 and 50,000 words per input.
+#
+# Unset keeps the generator's own built-in sentences, which are ~20 words. That is
+# almost no work, and it is why a run can look like it is loading a function while
+# leaving it idle: capping the function's CPU changes nothing when there is nothing
+# to compute. A scenario whose verdict depends on the function actually being busy
+# should say so here rather than hope the host is slow enough.
+PayloadProfile = Literal["small", "medium", "large"]
 
 
 class ScenarioConfig(BaseModel):
@@ -91,6 +101,11 @@ class ScenarioConfig(BaseModel):
     build: BuildStrategy = "docker"
     functions: list[str] = Field(min_length=1)
     resources: dict[str, ResourceSpec] = Field(default_factory=dict)
+    payload_profile: PayloadProfile | None = Field(
+        default=None,
+        alias="payloadProfile",
+        validation_alias=AliasChoices("payloadProfile", "payload_profile"),
+    )
     handler_envelope: bool = Field(
         default=False,
         alias="handlerEnvelope",
