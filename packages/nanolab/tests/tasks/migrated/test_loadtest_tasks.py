@@ -530,3 +530,65 @@ def test_capture_prometheus_snapshot_adds_scrape_margin_without_server_time(tmp_
     queried = client.calls[0][1]
     assert (window.start - queried.start).total_seconds() == 30
     assert (queried.end - window.end).total_seconds() == 30
+
+
+def test_build_run_k6_omits_remote_dir_for_a_local_load_role() -> None:
+    """A local load role must not carry remote_dir.
+
+    The local executor rejects any remote_dir outright, and a container load-test is
+    *required* to run on a local environment (`_container_urls`). Setting it
+    unconditionally therefore made every container load scenario unrunnable: local is
+    the only environment they accept, and local is the one executor that refuses the
+    option. Observed as "the host executor does not support remote_dir" at the k6 step,
+    after the whole stack had already been deployed.
+    """
+    from nanolab.plans.loadtest import _build_run_k6
+
+    executor = _Executor()
+    task = _build_run_k6(
+        executor=executor,
+        load_role="stack",
+        control_plane_url="http://127.0.0.1:8080",
+        script_path=Path("script.js"),
+        summary_path=Path("summary.json"),
+        target=_StubTarget(),
+        stages=(),
+        config=_loadtest_config(),
+        remote=False,
+    )
+    task.run(TaskInputs.empty())
+
+    assert executor.spec is not None
+    assert executor.spec.options.remote_dir is None
+
+
+def test_build_run_k6_keeps_remote_dir_for_a_remote_load_role() -> None:
+    from nanolab.plans.loadtest import _build_run_k6
+
+    executor = _Executor()
+    task = _build_run_k6(
+        executor=executor,
+        load_role="loadgen",
+        control_plane_url="http://10.0.0.5:8080",
+        script_path=Path("script.js"),
+        summary_path=Path("summary.json"),
+        target=_StubTarget(),
+        stages=(),
+        config=_loadtest_config(),
+        remote=True,
+    )
+    task.run(TaskInputs.empty())
+
+    assert executor.spec is not None
+    assert executor.spec.options.remote_dir == "."
+
+
+class _StubTarget:
+    name = "stack"
+
+
+def _loadtest_config():
+    """The real config, not a stub: k6_environment reads a dozen fields off it."""
+    from nanolab.config import ScenarioConfig
+
+    return ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])

@@ -734,6 +734,7 @@ def _build_run_k6(
     stages: tuple[tuple[str, int], ...] | None,
     config: ScenarioConfig,
     env_overrides: Mapping[str, str] | None = None,
+    remote: bool,
 ) -> K6Task:
     return K6Task(
         executor=executor,
@@ -758,7 +759,13 @@ def _build_run_k6(
                 **dict(env_overrides or {}),
             },
         ),
-        remote_dir=_REMOTE_DIR,
+        # Solo per un ruolo di carico remoto. L'executor locale rifiuta qualunque
+        # remote_dir, e un load-test `container` DEVE girare su un environment locale
+        # (_container_urls lo impone): passarlo sempre rendeva impossibile eseguire ogni
+        # scenario container con carico - l'unico environment che accettano e' quello
+        # che rifiuta l'opzione. Si vedeva come "the host executor does not support
+        # remote_dir" allo step k6, dopo aver gia' costruito e avviato tutto lo stack.
+        remote_dir=_REMOTE_DIR if remote else None,
     )
 
 
@@ -1332,6 +1339,7 @@ def build_loadtest_plan(
         stages=stages,
         config=config,
         env_overrides=k6_env_overrides,
+        remote=environment.provider != "local",
     )
     watcher, replica_probe = _build_replica_watcher(
         config=config,
