@@ -659,9 +659,9 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.8" },
-    { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99" },
+    { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0" },
     { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
-    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345" },
+    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=c47e93de66132b40e95225af9e41c44a03185c15" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
@@ -1242,7 +1242,7 @@ wheels = [
 [[package]]
 name = "shellcraft"
 version = "0.1.0"
-source = { git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99#b6547835aac88d058810c7b9a592ad442c54ac99" }
+source = { git = "https://github.com/miciav/shellcraft.git?rev=9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0#9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0" }
 
 [[package]]
 name = "shellingham"
@@ -1270,7 +1270,7 @@ source = { git = "https://github.com/miciav/sonata.git?rev=e81d559#e81d559952d4a
 [[package]]
 name = "sonata-tasks"
 version = "0.2.0"
-source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345#5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345" }
+source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=c47e93de66132b40e95225af9e41c44a03185c15#c47e93de66132b40e95225af9e41c44a03185c15" }
 dependencies = [
     { name = "sonata-engine" },
 ]

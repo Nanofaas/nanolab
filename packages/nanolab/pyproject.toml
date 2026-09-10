@@ -11,14 +11,14 @@ dependencies = [
     "plotly>=5.24",
     "pydantic-settings>=2.5",
     "proxmox-sdk @ git+https://github.com/miciav/proxmox-sdk.git@9e2070384c92a03dffdfb3ac7e248f0861cb0537",
-    "shellcraft @ git+https://github.com/miciav/shellcraft.git@b6547835aac88d058810c7b9a592ad442c54ac99",
+    "shellcraft @ git+https://github.com/miciav/shellcraft.git@9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0",
     "typer>=0.12.5",
     "questionary>=2.1.1",
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
     "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
-    "sonata-tasks[shell,prometheus,multipass,azure,proxmox] @ git+https://github.com/miciav/sonata.git@5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345#subdirectory=packages/sonata-tasks",
+    "sonata-tasks[shell,prometheus,multipass,azure,proxmox] @ git+https://github.com/miciav/sonata.git@c47e93de66132b40e95225af9e41c44a03185c15#subdirectory=packages/sonata-tasks",
     "tui-toolkit",
 ]
 
@@ -56,7 +56,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345", subdirectory = "packages/sonata-tasks" }
+sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "c47e93de66132b40e95225af9e41c44a03185c15", subdirectory = "packages/sonata-tasks" }
 tui-toolkit = { workspace = true }
 
 [tool.pytest.ini_options]
