@@ -16,7 +16,7 @@ members = [
     "nanolab-workspace",
     "tui-toolkit",
 ]
-overrides = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" }]
+overrides = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0" }]
 
 [[package]]
 name = "annotated-doc"
@@ -653,15 +653,15 @@ requires-dist = [
     { name = "multipass-sdk", git = "https://github.com/miciav/multipass-sdk.git?rev=402c4061e6b32cc6dda5e7a9876fa7cefd6f9ae1" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "plotly", specifier = ">=5.24" },
-    { name = "proxmox-sdk", git = "https://github.com/miciav/proxmox-sdk.git?rev=9e2070384c92a03dffdfb3ac7e248f0861cb0537" },
+    { name = "proxmox-sdk", git = "https://github.com/miciav/proxmox-sdk.git?rev=b82c68c3ed5ecfdb9b90c047bb43df4749dd9817" },
     { name = "pydantic", specifier = ">=2.9.2" },
     { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.8" },
     { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0" },
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
-    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=c47e93de66132b40e95225af9e41c44a03185c15" },
+    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0" },
+    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
@@ -685,7 +685,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" }]
+requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0" }]
 
 [[package]]
 name = "narwhals"
@@ -892,7 +892,7 @@ wheels = [
 [[package]]
 name = "proxmox-sdk"
 version = "0.2.0"
-source = { git = "https://github.com/miciav/proxmox-sdk.git?rev=9e2070384c92a03dffdfb3ac7e248f0861cb0537#9e2070384c92a03dffdfb3ac7e248f0861cb0537" }
+source = { git = "https://github.com/miciav/proxmox-sdk.git?rev=b82c68c3ed5ecfdb9b90c047bb43df4749dd9817#b82c68c3ed5ecfdb9b90c047bb43df4749dd9817" }
 dependencies = [
     { name = "paramiko" },
     { name = "proxmoxer" },
@@ -1265,12 +1265,12 @@ wheels = [
 [[package]]
 name = "sonata-engine"
 version = "0.5.0"
-source = { git = "https://github.com/miciav/sonata.git?rev=e81d559#e81d559952d4a168edffbe3c7108bd9a017046e9" }
+source = { git = "https://github.com/miciav/sonata.git?rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0#82369b962e2a3f9ebe36c8ec0e761a631ae921d0" }
 
 [[package]]
 name = "sonata-tasks"
 version = "0.2.0"
-source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=c47e93de66132b40e95225af9e41c44a03185c15#c47e93de66132b40e95225af9e41c44a03185c15" }
+source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0#82369b962e2a3f9ebe36c8ec0e761a631ae921d0" }
 dependencies = [
     { name = "sonata-engine" },
 ]
