@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
-import sys
 from typing import Any
 
 from rich.table import Table
 from rich.text import Text
+from tui_toolkit import Choice, render_screen_frame, select
+from tui_toolkit.console import console as default_console
 
 from nanolab.cli import diagnostics
 from nanolab.cli.execution import resolve_loadtest_urls
@@ -22,8 +24,6 @@ from nanolab.cli.product import (
 from nanolab.cli.provisioning import provision_environment
 from nanolab.tui.workflow_controller import TuiWorkflowController
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
-from tui_toolkit import Choice, render_screen_frame, select
-from tui_toolkit.console import console as default_console
 
 _INSPECT_SCENARIO_TITLE = "Inspect scenario"
 
@@ -148,6 +148,7 @@ _PROVIDER_GUIDANCE = {
     ),
 }
 
+
 # Control-flow signals returned by the workflow-selection helpers.
 class _WorkflowBack:
     """Sentinel: the user backed out to the environment menu."""
@@ -178,6 +179,15 @@ class NanofaasTUI:
         console: Any = default_console,
         input_stream: Any = None,
     ) -> None:
+        """Wire up the menu loop's collaborators.
+
+        ``choose`` is the prompt callable, defaulting to the toolkit's
+        ``select``; ``dispatch_scenario`` decides what a scenario selection does
+        and defaults to this instance's workflow menu. Workflow runs go through
+        ``controller`` when supplied, otherwise through a fresh
+        ``TuiWorkflowController`` bound to ``console``, and ``input_stream``
+        (stdin by default) is what the static screens wait on.
+        """
         self._choose = choose
         self._dispatch_scenario = dispatch_scenario or self._workflow_menu
         self._controller = controller or TuiWorkflowController(console=console)
@@ -185,6 +195,13 @@ class NanofaasTUI:
         self._input_stream = sys.stdin if input_stream is None else input_stream
 
     def run(self) -> None:
+        """Drive the main menu until the user exits or interrupts.
+
+        Each selection is handed to ``_dispatch_section``, which either
+        dispatches a scenario or opens the section's submenu; a
+        ``KeyboardInterrupt`` at the prompt ends the loop instead of
+        propagating.
+        """
         try:
             while True:
                 section = self._choose(
@@ -239,9 +256,7 @@ class NanofaasTUI:
             if selected == "back":
                 return
             try:
-                scenario = _scenario(
-                    discover_tool_root() / "scenarios-v2" / selected
-                )
+                scenario = _scenario(discover_tool_root() / "scenarios-v2" / selected)
                 body = scenario.model_dump_json(by_alias=True, indent=2)
             except Exception as exc:
                 body = str(exc)
@@ -271,7 +286,11 @@ class NanofaasTUI:
                 Choice(path.stem, str(path), f"Use {path.name}.")
                 for path in environment_paths
             ]
-            for provider, (label, template_name, target_name) in _PROVIDER_SETUP.items():
+            for provider, (
+                label,
+                template_name,
+                target_name,
+            ) in _PROVIDER_SETUP.items():
                 if (environment_dir / template_name).is_file() and not (
                     environment_dir / target_name
                 ).is_file():
@@ -283,7 +302,9 @@ class NanofaasTUI:
                         )
                     )
             if not choices:
-                raise RuntimeError("at least one YAML environment or template is required")
+                raise RuntimeError(
+                    "at least one YAML environment or template is required"
+                )
 
             selected = self._choose(
                 "Environment",
@@ -328,7 +349,9 @@ class NanofaasTUI:
                 return
             break
 
-        assert environment_path is not None
+        # Narrowing only: the loop above returns unless `_select_environment`
+        # produced a path, which is the step the checker cannot follow.
+        assert environment_path is not None  # nosec B101
         preview = self._preview_workflow(scenario, environment, title)
         if preview is None:
             return
@@ -408,7 +431,7 @@ class NanofaasTUI:
         scenario: Any,
         environment: Any,
         title: str,
-    ) -> bool | None | _WorkflowAbort:
+    ) -> bool | _WorkflowAbort | None:
         """Return the keep policy, ``None`` on "back", ``_WORKFLOW_ABORT`` on error."""
         cleanup_choice = self._choose(
             "Cleanup policy",
@@ -484,9 +507,7 @@ class NanofaasTUI:
                     f"Environment: {environment_path.name}",
                     f"Cleanup: {'keep' if keep else 'cleanup'}",
                 ],
-                planned_steps=[
-                    title for _task_id, title in self._plan_rows(preview)
-                ],
+                planned_steps=[title for _task_id, title in self._plan_rows(preview)],
                 action=lambda _dashboard, _sink: self._run_current_workflow(
                     scenario,
                     environment,
@@ -524,7 +545,9 @@ class NanofaasTUI:
                 )
                 workflow.keep = keep
                 observers = _workflow_observers(scenario_path)
-                return workflow.run(observers=observers) if observers else workflow.run()
+                return (
+                    workflow.run(observers=observers) if observers else workflow.run()
+                )
         workflow = self._build_workflow(scenario, environment, dry_run=False)
         workflow.keep = keep
         observers = _workflow_observers(scenario_path)

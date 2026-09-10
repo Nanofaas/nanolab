@@ -1,21 +1,22 @@
 """Tests for tui_toolkit.pickers — select, multiselect, Choice, Separator."""
+
 from __future__ import annotations
 
 import asyncio
 from unittest.mock import patch
 
-from prompt_toolkit.input import create_pipe_input
-from prompt_toolkit.output import DummyOutput
 import pytest
 import questionary
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from tui_toolkit.brand import AppBrand
 from tui_toolkit.context import UIContext, bind_ui
 from tui_toolkit.pickers import (
-    Choice,
-    Separator,
     _ESCAPE_RESULT,
     _INTERRUPT_RESULT,
+    Choice,
+    Separator,
     _build_select_application,
     multiselect,
     select,
@@ -49,9 +50,11 @@ def test_select_non_tty_falls_back_to_questionary(monkeypatch):
         captured["choices"] = kwargs.get("choices")
         captured["default"] = kwargs.get("default")
         captured["style"] = kwargs.get("style")
+
         class _Q:
             def ask(self):
                 return "v1"
+
         return _Q()
 
     monkeypatch.setattr(questionary, "select", fake_select)
@@ -73,9 +76,11 @@ def test_select_with_back_choice_appends_back_option(monkeypatch):
 
     def fake_select(message, **kwargs):
         captured["choices"] = kwargs["choices"]
+
         class _Q:
             def ask(self):
                 return "v1"
+
         return _Q()
 
     monkeypatch.setattr(questionary, "select", fake_select)
@@ -97,9 +102,11 @@ def test_multiselect_non_tty_falls_back_to_questionary(monkeypatch):
     def fake_checkbox(message, **kwargs):
         captured["message"] = message
         captured["default"] = kwargs.get("default")
+
         class _Q:
             def ask(self):
                 return ["v1", "v2"]
+
         return _Q()
 
     monkeypatch.setattr(questionary, "checkbox", fake_checkbox)
@@ -207,9 +214,11 @@ def test_select_uses_theme_via_to_questionary_style(monkeypatch):
 
     def fake_select(message, **kwargs):
         captured["style"] = kwargs["style"]
+
         class _Q:
             def ask(self):
                 return "v"
+
         return _Q()
 
     monkeypatch.setattr(questionary, "select", fake_select)

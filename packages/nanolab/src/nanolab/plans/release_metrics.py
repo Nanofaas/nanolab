@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import override
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
+
 from nanolab.release.metrics import (
     PerformanceAggregate,
     PerformanceProfile,
@@ -36,6 +37,11 @@ class AggregateBenchmarks(Task[PerformanceAggregate]):
         profile: PerformanceProfile,
         title: str = "Aggregate benchmarks",
     ) -> None:
+        """Configure the task to read `benchmark_count` summaries from `run_dir`.
+
+        The summaries are expected at ``run_dir/run-<i>/summary.json`` and are
+        aggregated under `profile`.
+        """
         self.title = title
         self._run_dir = run_dir
         self._benchmark_count = benchmark_count
@@ -88,6 +94,12 @@ class EvaluateRegressionGate(Task[RegressionDecision]):
         autoscaling_passed: bool,
         title: str = "Evaluate regression gate",
     ) -> None:
+        """Configure the gate with the aggregate to judge and its baseline.
+
+        A `None` baseline turns off the comparison and leaves only the fixed
+        `k6_passed`/`autoscaling_passed` gates; a present one must carry the
+        same profile as `aggregate`.
+        """
         self.title = title
         self._aggregate = aggregate
         self._baseline = baseline

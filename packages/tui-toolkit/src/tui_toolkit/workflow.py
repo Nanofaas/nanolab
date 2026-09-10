@@ -4,6 +4,7 @@ The workflow event types, context management, event builders, and reporting
 helpers live in sonata_engine. The Rich renderer lives in
 nanolab/tui/workflow.py.
 """
+
 from __future__ import annotations
 
 from rich.markup import escape

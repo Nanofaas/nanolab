@@ -71,8 +71,15 @@ def test_vm_command_task_can_declare_remote_dir() -> None:
 
 
 def test_task_result_reports_success_from_expected_exit_codes() -> None:
-    success = TaskResult(task_id="x", status="passed", return_code=17, expected_exit_codes=frozenset({17}))
-    failure = TaskResult(task_id="x", status="failed", return_code=17, expected_exit_codes=frozenset({0}))
+    success = TaskResult(
+        task_id="x",
+        status="passed",
+        return_code=17,
+        expected_exit_codes=frozenset({17}),
+    )
+    failure = TaskResult(
+        task_id="x", status="failed", return_code=17, expected_exit_codes=frozenset({0})
+    )
 
     assert success.ok is True
     assert failure.ok is False
@@ -457,7 +464,9 @@ from controlplane_tool.tasks.rendering import render_task_command
 - Change `_render_operation` to:
 
 ```python
-def _render_operation(operation: RemoteCommandOperation, *, remote_dir: str | None = None) -> str:
+def _render_operation(
+    operation: RemoteCommandOperation, *, remote_dir: str | None = None
+) -> str:
     task = operation_to_task_spec(operation, remote_dir=remote_dir)
     return render_task_command(task)
 ```
@@ -562,7 +571,11 @@ class HostCommandTaskExecutor:
             env=task.env,
             dry_run=dry_run,
         )
-        status = "passed" if shell_result.return_code in task.expected_exit_codes else "failed"
+        status = (
+            "passed"
+            if shell_result.return_code in task.expected_exit_codes
+            else "failed"
+        )
         return TaskResult(
             task_id=task.task_id,
             status=status,
@@ -606,7 +619,9 @@ from controlplane_tool.tasks.executors import VmCommandRunner, VmCommandTaskExec
 
 class _RecordingVmRunner:
     def __init__(self) -> None:
-        self.commands: list[tuple[tuple[str, ...], dict[str, str], str | None, bool]] = []
+        self.commands: list[
+            tuple[tuple[str, ...], dict[str, str], str | None, bool]
+        ] = []
 
     def run_vm_command(
         self,
@@ -686,7 +701,9 @@ class VmCommandTaskExecutor:
             remote_dir=task.remote_dir,
             dry_run=dry_run,
         )
-        status = "passed" if result.return_code in task.expected_exit_codes else "failed"
+        status = (
+            "passed" if result.return_code in task.expected_exit_codes else "failed"
+        )
         return TaskResult(
             task_id=task.task_id,
             status=status,
@@ -730,8 +747,12 @@ from controlplane_tool.tasks.models import CommandTaskSpec, TaskResult
 
 
 def test_task_result_to_shell_result_preserves_command_and_output() -> None:
-    task = CommandTaskSpec(task_id="x", summary="X", argv=("echo", "hi"), env={"A": "B"})
-    result = TaskResult(task_id="x", status="passed", return_code=0, stdout="hi\n", stderr="")
+    task = CommandTaskSpec(
+        task_id="x", summary="X", argv=("echo", "hi"), env={"A": "B"}
+    )
+    result = TaskResult(
+        task_id="x", status="passed", return_code=0, stdout="hi\n", stderr=""
+    )
 
     shell_result = task_result_to_shell_result(task, result)
 
@@ -812,7 +833,9 @@ Report risk and d=1 callers before editing.
 In `tests/test_e2e_runner.py`, add a focused assertion to existing operation conversion tests:
 
 ```python
-def test_operation_to_plan_step_preserves_command_env_and_step_id_after_task_bridge() -> None:
+def test_operation_to_plan_step_preserves_command_env_and_step_id_after_task_bridge() -> (
+    None
+):
     operation = RemoteCommandOperation(
         operation_id="x.step",
         summary="Run step",
@@ -935,7 +958,9 @@ def task_started_event(task: CommandTaskSpec) -> WorkflowEvent:
 def task_result_event(task: CommandTaskSpec, result: TaskResult) -> WorkflowEvent:
     kind = "ok" if result.ok else "fail"
     message = result.stderr.strip() or result.stdout.strip() or None
-    return WorkflowEvent(kind=kind, task_id=task.task_id, title=task.summary, message=message)
+    return WorkflowEvent(
+        kind=kind, task_id=task.task_id, title=task.summary, message=message
+    )
 ```
 
 Adjust field names to match actual `WorkflowEvent`.
@@ -981,7 +1006,9 @@ def test_bootstrap_task_result_exposes_task_id_metadata_on_steps() -> None:
     adapter = _FakeAdapter(preflight_missing=["k6"])
     request = _loadtest_request()
 
-    result = bootstrap_loadtest_task(adapter=adapter, request=request, run_dir=Path("/tmp/run"))
+    result = bootstrap_loadtest_task(
+        adapter=adapter, request=request, run_dir=Path("/tmp/run")
+    )
 
     assert result.steps[0].name == "preflight"
 ```
@@ -1201,4 +1228,3 @@ uv run pytest -q tests/test_task_models.py tests/test_task_rendering.py tests/te
 git add pyproject.toml uv.lock ../nanofaas-tasks src tests
 git commit -m "Extract NanoFaaS task primitives"
 ```
-

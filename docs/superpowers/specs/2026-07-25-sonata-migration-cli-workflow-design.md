@@ -76,8 +76,9 @@ class Selection:
     start: str | None = None
     until: str | None = None
 
+
 workflow.run(select=Selection(only="list-functions"))
-workflow.compile(select=...)   # stesso filtro, per il dry-run
+workflow.compile(select=...)  # stesso filtro, per il dry-run
 ```
 
 Regole:

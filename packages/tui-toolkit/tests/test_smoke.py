@@ -1,4 +1,5 @@
 """Bootstrap smoke test — verifies the package can be imported."""
+
 import tui_toolkit
 
 

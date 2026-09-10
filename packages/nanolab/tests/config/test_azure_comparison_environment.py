@@ -48,7 +48,9 @@ def test_the_node_ports_are_not_opened_at_creation() -> None:
 
     assert request.azure_open_ports is None
     assert azure is not None
-    assert azure.operator_source_cidr, "the example must ship a CIDR to be replaced, not none"
+    assert azure.operator_source_cidr, (
+        "the example must ship a CIDR to be replaced, not none"
+    )
 
 
 def test_the_stack_is_sized_for_a_native_build() -> None:

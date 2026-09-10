@@ -85,7 +85,10 @@ def test_manifest_records_what_was_attempted(tmp_path: Path) -> None:
     cells = build_matrix(VARIANTS, 3)
 
     path = write_manifest(
-        tmp_path, cells, functions=("word-stats-java", "word-stats-javascript"), registry="r:5000"
+        tmp_path,
+        cells,
+        functions=("word-stats-java", "word-stats-javascript"),
+        registry="r:5000",
     )
     manifest = json.loads(path.read_text(encoding="utf-8"))
 
@@ -114,7 +117,9 @@ def test_a_matrix_resumes_the_cells_that_have_no_results(tmp_path: Path) -> None
         run_dir = cell.run_dir(tmp_path)
         (run_dir / "metrics").mkdir(parents=True)
         (run_dir / "k6-summary.json").write_text("{}", encoding="utf-8")
-        (run_dir / "metrics" / "prometheus-snapshot.json").write_text("{}", encoding="utf-8")
+        (run_dir / "metrics" / "prometheus-snapshot.json").write_text(
+            "{}", encoding="utf-8"
+        )
 
     todo = pending(cells, tmp_path)
 

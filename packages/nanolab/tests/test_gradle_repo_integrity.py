@@ -4,10 +4,11 @@ import os
 import re
 from pathlib import Path
 
-
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 SETTINGS_GRADLE = NANOFAAS_ROOT / "settings.gradle"
-JAVA_INCLUDE_PATTERN = re.compile(r"""include(?:\()?\s*['"]functions:java:([^'")]+)['"]\)?""")
+JAVA_INCLUDE_PATTERN = re.compile(
+    r"""include(?:\()?\s*['"]functions:java:([^'")]+)['"]\)?"""
+)
 
 
 def test_java_example_includes_point_to_existing_directories() -> None:

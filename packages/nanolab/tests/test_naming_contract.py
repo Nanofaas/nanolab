@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import os
-from pathlib import Path
 import subprocess
 import tomllib
-
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

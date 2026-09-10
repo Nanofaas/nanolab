@@ -39,7 +39,9 @@ class RespondingExecutor(RecordingExecutor):
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(task_id="", status="passed", return_code=0, stdout=self.stdout)
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout=self.stdout
+        )
 
 
 @dataclass
@@ -107,8 +109,11 @@ def test_cli_apply_writes_the_manifest_on_the_target_not_here() -> None:
 
 
 def test_cli_delete_accepts_only_a_clean_exit() -> None:
-    """The CLI already exits 0 when the function is absent, so tolerating 1 would
-    hide real cleanup failures."""
+    """Accept only a clean exit from the CLI delete.
+
+    The CLI already exits 0 when the function is absent, so tolerating 1 would
+    hide real cleanup failures.
+    """
     executor = RecordingExecutor()
 
     task = CliFunctionDeleteTask(
@@ -142,7 +147,11 @@ def test_http_set_replicas_sends_the_requested_target() -> None:
     executor = RecordingExecutor()
 
     _ = http_function.HttpFunctionSetReplicasTask(
-        "word-stats", replicas=2, endpoint="http://cp:8080", executor=executor, role="host"
+        "word-stats",
+        replicas=2,
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="host",
     ).run(TaskInputs.empty())
 
     assert executor.seen[0].argv == (
@@ -160,7 +169,10 @@ def test_http_set_replicas_sends_the_requested_target() -> None:
 
 def test_http_replica_status_waits_for_the_requested_ready_target() -> None:
     executor = SequencedExecutor(
-        responses=['{"desiredReplicas":2,"readyReplicas":1}', '{"desiredReplicas":2,"readyReplicas":2}']
+        responses=[
+            '{"desiredReplicas":2,"readyReplicas":1}',
+            '{"desiredReplicas":2,"readyReplicas":2}',
+        ]
     )
 
     _ = http_function.HttpFunctionReplicaStatusTask(
@@ -412,11 +424,14 @@ def test_http_delete_tolerates_an_unreachable_or_absent_target() -> None:
 
 
 def test_a_remote_role_still_gets_a_plain_argv() -> None:
-    """No shell wrapper, even for a VM: every executor quotes the argv it is
+    """Pass a plain argv to a remote role, with no shell wrapper.
+
+    No shell wrapper, even for a VM: every executor quotes the argv it is
     handed — multipass with shlex.join, proxmox with shlex.quote per argument,
     azure structurally. The task pre-quoting as well would be a second round for
     nobody, and it was only ever there to carry a `$(...)` the endpoint no longer
-    needs."""
+    needs.
+    """
     executor = RecordingExecutor()
 
     _ = HttpFunctionRegisterTask(
@@ -467,8 +482,11 @@ def test_http_register_retries_a_refused_connection() -> None:
 
 @dataclass
 class ConflictThenExecutor(RecordingExecutor):
-    """First call fails as curl's "HTTP error" (22); every call after that
-    succeeds with the given body — the shape of register-then-GET-to-check."""
+    """A test double that answers curl's HTTP 22 once, then succeeds.
+
+    First call fails as curl's "HTTP error" (22); every call after that
+    succeeds with the given body — the shape of register-then-GET-to-check.
+    """
 
     follow_up_stdout: str = ""
 
@@ -476,15 +494,20 @@ class ConflictThenExecutor(RecordingExecutor):
         self.seen.append(task)
         if len(self.seen) == 1:
             return TaskResult(task_id="", status="failed", return_code=22)
-        return TaskResult(task_id="", status="passed", return_code=0, stdout=self.follow_up_stdout)
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout=self.follow_up_stdout
+        )
 
 
 def test_http_register_tolerates_a_409_for_the_same_function_already_restored() -> None:
-    """The control plane reconciles its persisted catalog on every restart
+    """Tolerate a 409 for the same function already restored.
+
+    The control plane reconciles its persisted catalog on every restart
     (FunctionCatalogRestorer) before serving traffic again, so a function that
     survived a mid-workflow restart is still legitimately registered. A
     workflow re-registering it after such a restart should see success, not
-    the conflict a stale assumption of a clean registry would produce."""
+    the conflict a stale assumption of a clean registry would produce.
+    """
     executor = ConflictThenExecutor(
         follow_up_stdout=json.dumps(
             {
@@ -504,9 +527,12 @@ def test_http_register_tolerates_a_409_for_the_same_function_already_restored() 
 
 
 def test_http_register_still_fails_a_409_for_a_conflicting_function() -> None:
-    """A 409 on a name that already holds a *different* function (a different
+    """Still fail a 409 when the name holds a different function.
+
+    A 409 on a name that already holds a *different* function (a different
     image, say) is a real conflict, not a restart artifact - it must still
-    fail."""
+    fail.
+    """
     executor = ConflictThenExecutor(
         follow_up_stdout=json.dumps(
             {
@@ -526,20 +552,27 @@ def test_http_register_still_fails_a_409_for_a_conflicting_function() -> None:
 
 
 def test_http_register_fails_when_the_existing_function_check_itself_fails() -> None:
-    """If the function is genuinely gone (the GET also errors), the original
+    """Surface the register failure when the existence check also errors.
+
+    If the function is genuinely gone (the GET also errors), the original
     register failure is what should surface - not a second, more confusing one
-    about the GET."""
+    about the GET.
+    """
 
     @dataclass
     class AlwaysConflictExecutor(RecordingExecutor):
         def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
             self.seen.append(task)
-            return TaskResult(task_id="", status="failed", return_code=22, stderr="boom")
+            return TaskResult(
+                task_id="", status="failed", return_code=22, stderr="boom"
+            )
 
     executor = AlwaysConflictExecutor()
     task = HttpFunctionRegisterTask(
         MANIFEST, endpoint="http://cp:8080", executor=executor, role="host"
     )
 
-    with pytest.raises(RuntimeError, match="Register word-stats failed \\(exit 22\\): boom"):
+    with pytest.raises(
+        RuntimeError, match="Register word-stats failed \\(exit 22\\): boom"
+    ):
         _ = task.run(TaskInputs.empty())

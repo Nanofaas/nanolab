@@ -439,4 +439,3 @@ Do not start the Azure canary, remove `nanolab release run`, or weaken the
 fail-closed guard until Tasks 1-9 are green. Do not fix the current Sonata workflow
 with isolated command/path patches: each migrated phase must carry cleanup,
 evidence, resume and publication-barrier tests in the same task.
-

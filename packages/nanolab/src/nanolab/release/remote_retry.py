@@ -14,12 +14,13 @@ caller knows the operations are idempotent. The SDK must not retry.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import sys
 import time
+from collections.abc import Callable
 
 # paramiko's "channel closed without an exit status" sentinel.
 CONNECTION_DEAD = -1
+
 
 # Generic so a caller keeps the type it passed in: this hands back whatever the
 # operation produced, and returning `object` made every caller and every test
@@ -36,10 +37,13 @@ def retry_on_connection_death[T](
         last = attempt == attempts
         try:
             result = operation()
-        except Exception as error:  # noqa: BLE001 - reconnect on any transport error
+        except Exception as error:
             if last:
                 raise
-            _log(f"  ⟳ {describe} connection error ({error}); retry {attempt}/{attempts - 1}")
+            _log(
+                f"  ⟳ {describe} connection error ({error}); "
+                f"retry {attempt}/{attempts - 1}"
+            )
             sleep(min(5 * attempt, 30))
             continue
         if int(getattr(result, "return_code", 0)) == CONNECTION_DEAD and not last:

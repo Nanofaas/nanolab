@@ -17,7 +17,9 @@ def test_tool_paths_preserve_separate_source_and_tool_roots() -> None:
     assert paths.scenario_payloads_dir == Path("/nanolab/scenarios/payloads")
 
 
-def test_default_tool_paths_requires_nanofaas_root(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_tool_paths_requires_nanofaas_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("NANOFAAS_ROOT", raising=False)
 
     with pytest.raises(RuntimeError, match="NANOFAAS_ROOT"):
@@ -48,5 +50,5 @@ def test_default_tool_paths_rejects_invalid_nanofaas_checkout(
     checkout.mkdir()
     monkeypatch.setenv("NANOFAAS_ROOT", os.fspath(checkout))
 
-    with pytest.raises(RuntimeError, match="build.gradle, settings.gradle"):
+    with pytest.raises(RuntimeError, match=r"build.gradle, settings.gradle"):
         default_tool_paths()

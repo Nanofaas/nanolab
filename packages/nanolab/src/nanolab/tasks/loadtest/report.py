@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
@@ -49,14 +50,17 @@ def counter_delta(points: list[dict[str, Any]]) -> float:
     """
     values = [float(point["value"]) for point in points if "value" in point]
     total = 0.0
-    for previous, current in zip(values, values[1:]):
+    for previous, current in pairwise(values):
         total += current - previous if current >= previous else current
     return total
 
 
 def _scalar(value: object) -> float:
-    """A pandas reduction is typed as possibly-a-Series; at these call sites it is
-    always one number, and saying so once beats a cast at every use."""
+    """Cast a pandas reduction known to be a single number.
+
+    It is typed as possibly-a-Series; at these call sites it is always one
+    number, and saying so once beats a cast at every use.
+    """
     return float(cast(Any, value))
 
 
@@ -75,8 +79,11 @@ def _phase_of(elapsed: float, phases: tuple[ReportPhase, ...]) -> str:
 
 
 def _shade_phases(figure: go.Figure, phases: tuple[ReportPhase, ...]) -> None:
-    """Alternate bands behind the traces so a change can be read against the
-    phase that caused it rather than against a bare time axis."""
+    """Draw alternating bands behind the traces, one per phase.
+
+    The bands let a change be read against the phase that caused it rather than
+    against a bare time axis.
+    """
     for index, phase in enumerate(phases):
         if index % 2:
             continue
@@ -98,7 +105,9 @@ def _shade_phases(figure: go.Figure, phases: tuple[ReportPhase, ...]) -> None:
         )
 
 
-def _layout(figure: go.Figure, title: str, y_title: str, y2_title: str | None = None) -> None:
+def _layout(
+    figure: go.Figure, title: str, y_title: str, y2_title: str | None = None
+) -> None:
     figure.update_layout(
         title=title,
         template="plotly_white",
@@ -110,12 +119,19 @@ def _layout(figure: go.Figure, title: str, y_title: str, y2_title: str | None = 
         yaxis_title=y_title,
     )
     if y2_title:
-        figure.update_layout(yaxis2={"title": y2_title, "overlaying": "y", "side": "right"})
+        figure.update_layout(
+            yaxis2={"title": y2_title, "overlaying": "y", "side": "right"}
+        )
 
 
-def _limit_and_queue(frame: pd.DataFrame, phases: tuple[ReportPhase, ...], queue_size: int) -> go.Figure:
-    """The whole argument in one chart: what the controller granted, and how much
-    work that decision parked in the buffer."""
+def _limit_and_queue(
+    frame: pd.DataFrame, phases: tuple[ReportPhase, ...], queue_size: int
+) -> go.Figure:
+    """Chart the concurrency granted against the queue it parked.
+
+    The whole argument in one figure: what the controller granted, and how much
+    work that decision parked in the buffer.
+    """
     figure = go.Figure()
     for index, (name, group) in enumerate(frame.groupby("function", sort=True)):
         colour = _PALETTE[index % len(_PALETTE)]
@@ -145,14 +161,23 @@ def _limit_and_queue(frame: pd.DataFrame, phases: tuple[ReportPhase, ...], queue
         annotation_position="top left",
     )
     _shade_phases(figure, phases)
-    _layout(figure, "Granted limit and the queue it produced", "queue depth", "effective concurrency")
+    _layout(
+        figure,
+        "Granted limit and the queue it produced",
+        "queue depth",
+        "effective concurrency",
+    )
     return figure
 
 
-def _wait_against_service(frame: pd.DataFrame, phases: tuple[ReportPhase, ...]) -> go.Figure:
-    """Where the caller's latency actually goes. The controller steers the solid
-    line; the caller experiences the sum, and the dashed line is usually the
-    larger half."""
+def _wait_against_service(
+    frame: pd.DataFrame, phases: tuple[ReportPhase, ...]
+) -> go.Figure:
+    """Chart where the caller's latency actually goes.
+
+    The controller steers the solid line; the caller experiences the sum, and
+    the dashed line is usually the larger half.
+    """
     figure = go.Figure()
     for index, (name, group) in enumerate(frame.groupby("function", sort=True)):
         colour = _PALETTE[index % len(_PALETTE)]
@@ -177,7 +202,9 @@ def _wait_against_service(frame: pd.DataFrame, phases: tuple[ReportPhase, ...]) 
     return figure
 
 
-def _throughput_and_rejections(frame: pd.DataFrame, phases: tuple[ReportPhase, ...]) -> go.Figure:
+def _throughput_and_rejections(
+    frame: pd.DataFrame, phases: tuple[ReportPhase, ...]
+) -> go.Figure:
     figure = go.Figure()
     for index, (name, group) in enumerate(frame.groupby("function", sort=True)):
         colour = _PALETTE[index % len(_PALETTE)]
@@ -204,9 +231,12 @@ def _throughput_and_rejections(frame: pd.DataFrame, phases: tuple[ReportPhase, .
 
 
 def _depth_distribution(frame: pd.DataFrame, queue_size: int) -> go.Figure:
-    """How often the buffer was near full, which the mean hides: a queue that is
-    empty most of the time and full occasionally reports a comfortable average
-    while the callers who arrived during the burst waited for all of it."""
+    """Chart how often the buffer was near full, which the mean hides.
+
+    A queue that is empty most of the time and full occasionally reports a
+    comfortable average while the callers who arrived during the burst waited
+    for all of it.
+    """
     figure = go.Figure()
     for index, (name, group) in enumerate(frame.groupby("function", sort=True)):
         figure.add_trace(
@@ -272,7 +302,9 @@ def _footprint(frame: pd.DataFrame, phases: tuple[ReportPhase, ...]) -> go.Figur
             )
         )
     _shade_phases(figure, phases)
-    _layout(figure, "Container footprint", "resident memory (MiB)", "CPU (% of one core)")
+    _layout(
+        figure, "Container footprint", "resident memory (MiB)", "CPU (% of one core)"
+    )
     return figure
 
 
@@ -289,7 +321,9 @@ def _footprint_table(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _phase_table(frame: pd.DataFrame, phases: tuple[ReportPhase, ...]) -> pd.DataFrame:
     working = frame.copy()
-    working["phase"] = working["elapsed_seconds"].map(lambda value: _phase_of(value, phases))
+    working["phase"] = working["elapsed_seconds"].map(
+        lambda value: _phase_of(value, phases)
+    )
     grouped = working.groupby(["function", "phase"], sort=False).agg(
         limit_mean=("effective_concurrency", "mean"),
         limit_min=("effective_concurrency", "min"),
@@ -318,7 +352,9 @@ def _k6_table(k6_summary: dict[str, Any]) -> pd.DataFrame:
             {
                 "metric": name,
                 "values": " · ".join(
-                    f"{key} {value:.4g}" if isinstance(value, (int, float)) else f"{key} {value}"
+                    f"{key} {value:.4g}"
+                    if isinstance(value, (int, float))
+                    else f"{key} {value}"
                     for key, value in values.items()
                     if not isinstance(value, dict)
                 ),
@@ -328,8 +364,10 @@ def _k6_table(k6_summary: dict[str, Any]) -> pd.DataFrame:
 
 
 def _tail_table(queries: dict[str, Any]) -> pd.DataFrame:
-    """The percentiles, which are the numbers a queue is least honest about in
-    the mean."""
+    """Build the table of percentiles that the mean hides.
+
+    The tail is the number a queue is least honest about in the mean.
+    """
     rows: list[dict[str, Any]] = []
     for key, entry in sorted(queries.items()):
         if "p95" not in key or not isinstance(entry, dict):
@@ -365,36 +403,42 @@ def _counter_table(queries: dict[str, Any]) -> pd.DataFrame:
         points = entry.get("points") or []
         if not points:
             continue
-        rows.append({"counter": key, "increase over run": f"{counter_delta(points):,.0f}"})
+        rows.append(
+            {"counter": key, "increase over run": f"{counter_delta(points):,.0f}"}
+        )
     return pd.DataFrame(rows)
 
 
 def _table_html(frame: pd.DataFrame, caption: str) -> str:
     if frame.empty:
         return ""
-    return (
-        f'<h3>{caption}</h3>\n'
-        + frame.to_html(index=False, border=0, classes="data", justify="left", na_rep="—")
+    return f"<h3>{caption}</h3>\n" + frame.to_html(
+        index=False, border=0, classes="data", justify="left", na_rep="—"
     )
 
 
 _STYLE = """
 :root { color-scheme: light dark; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+       sans-serif;
        max-width: 1180px; margin: 0 auto; padding: 32px 24px 72px; line-height: 1.55;
        color: #111827; background: #ffffff; }
 h1 { font-size: 1.85rem; margin-bottom: 4px; }
-h2 { font-size: 1.3rem; margin-top: 44px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+h2 { font-size: 1.3rem; margin-top: 44px; border-bottom: 1px solid #e5e7eb;
+     padding-bottom: 8px; }
 h3 { font-size: 1.02rem; margin-top: 26px; color: #374151; }
 p.lede { color: #6b7280; margin-top: 0; }
 p.note { color: #4b5563; background: #f9fafb; border-left: 3px solid #d1d5db;
          padding: 10px 16px; margin: 18px 0; }
-table.data { border-collapse: collapse; width: 100%; margin: 12px 0 24px; font-size: 0.88rem; }
-table.data th, table.data td { border-bottom: 1px solid #e5e7eb; padding: 7px 10px; text-align: left; }
+table.data { border-collapse: collapse; width: 100%; margin: 12px 0 24px;
+             font-size: 0.88rem; }
+table.data th, table.data td { border-bottom: 1px solid #e5e7eb; padding: 7px 10px;
+                               text-align: left; }
 table.data th { background: #f3f4f6; font-weight: 600; }
 table.data tr:hover td { background: #f9fafb; }
 .cards { display: flex; flex-wrap: wrap; gap: 14px; margin: 20px 0 8px; }
-.card { flex: 1 1 170px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; }
+.card { flex: 1 1 170px; border: 1px solid #e5e7eb; border-radius: 8px;
+        padding: 12px 16px; }
 .card .value { font-size: 1.5rem; font-weight: 650; }
 .card .label { color: #6b7280; font-size: 0.8rem; text-transform: uppercase;
                letter-spacing: 0.04em; }
@@ -420,7 +464,8 @@ def _cards(frame: pd.DataFrame, k6_summary: dict[str, Any], queue_size: int) -> 
     peak_depth = _scalar(frame["queue_depth"].max())
     mean_wait = _scalar(frame["mean_queue_wait_ms"].mean())
     entries = [
-        ("requests", f"{_scalar(requests.get('count', 0)):,.0f}"),
+        # `requests` is the k6 summary's `http_reqs` metric dict, not the library.
+        ("requests", f"{_scalar(requests.get('count', 0)):,.0f}"),  # nosec B113
         ("refused", f"{refused:,.0f}"),
         ("refused share", f"{_scalar(failed.get('value', 0)) * 100:.3f}%"),
         ("end-to-end p95", f"{_scalar(duration.get('p(95)', float('nan'))):.1f} ms"),
@@ -448,6 +493,11 @@ class WriteConcurrencyReport:
     subtitle: str = ""
 
     def run(self) -> Path:
+        """Write `concurrency-report.html` under `output_dir` and return its path.
+
+        Raises FileNotFoundError when no concurrency series was written, since
+        there would be nothing to chart.
+        """
         frames = [
             _series_frame(path)
             for path in sorted(self.data_dir.glob("concurrency-series-*.json"))
@@ -470,7 +520,9 @@ class WriteConcurrencyReport:
         queries: dict[str, Any] = {}
         if prom_path.exists():
             try:
-                queries = json.loads(prom_path.read_text(encoding="utf-8")).get("queries", {})
+                queries = json.loads(prom_path.read_text(encoding="utf-8")).get(
+                    "queries", {}
+                )
             except json.JSONDecodeError:
                 queries = {}
 
@@ -508,24 +560,31 @@ class WriteConcurrencyReport:
             f"<h1>{self.title}</h1>"
             f"<p class='lede'>{self.subtitle}</p>"
             + _cards(frame, k6_summary, self.queue_size)
-            + "<p class='note'>A concurrency limit does not remove work, it moves it into the "
-            "queue. Service time is what the controller steers; queue wait is what the limit "
-            "charges the caller, and end-to-end latency is their sum.</p>"
-            "<h2>Over time</h2>" + charts
+            + "<p class='note'>A concurrency limit does not remove work, it moves it "
+            "into the queue. Service time is what the controller steers; queue wait "
+            "is what the limit charges the caller, and end-to-end latency is their "
+            "sum.</p>"
+            "<h2>Over time</h2>"
+            + charts
             + "<h2>By phase</h2>"
             + _table_html(_phase_table(frame, phases), "Per function, per phase")
             + (
                 "<h2>Footprint</h2>"
-                "<p class='note'>Resident set, not heap. A JVM measured here held 22 MB of heap "
-                "inside a 190 MiB resident set: the rest is class metadata, JIT-compiled code and "
-                "thread stacks, none of which a heap gauge shows and all of which a node has to "
-                "find room for.</p>"
-                + _table_html(_footprint_table(resources), "Per container, over the run")
+                "<p class='note'>Resident set, not heap. A JVM measured here held "
+                "22 MB of heap inside a 190 MiB resident set: the rest is class "
+                "metadata, JIT-compiled code and thread stacks, none of which a "
+                "heap gauge shows and all of which a node has to find room "
+                "for.</p>"
+                + _table_html(
+                    _footprint_table(resources), "Per container, over the run"
+                )
                 if not resources.empty
                 else ""
             )
             + "<h2>Tail latency</h2>"
-            + _table_html(_tail_table(queries), "Percentiles, from the Prometheus histograms")
+            + _table_html(
+                _tail_table(queries), "Percentiles, from the Prometheus histograms"
+            )
             + "<h2>Counters</h2>"
             + _table_html(_counter_table(queries), "Increase over the run")
             + "<h2>Load generator</h2>"

@@ -5,23 +5,23 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from nanolab.tasks.platform import PlatformFunction
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.metrics.catalogue import container_queries
 from nanolab.plans import loadtest as loadtest_mod
 from nanolab.plans import runtime_comparison as comparison_mod
-from nanolab.metrics.catalogue import container_queries
 from nanolab.plans.loadtest import _resolve_functions
 from nanolab.plans.runtime_comparison import (
-    NO_STAGES,
     MIXED_SCRIPT_NAME,
+    NO_STAGES,
     SCRIPT_NAME,
-    script_for,
     _variant_image,
     build_runtime_comparison_plan,
     comparison_k6_environment,
     is_runtime_comparison,
+    script_for,
 )
+from nanolab.tasks.platform import PlatformFunction
 
 PAIR = ["word-stats-java", "word-stats-javascript"]
 
@@ -58,7 +58,11 @@ def test_the_mixed_profile_is_this_plan_with_a_different_generator() -> None:
 
 
 def test_names_both_functions_to_the_generator() -> None:
-    """`k6_environment` only volunteers a neighbour for co-tenancy, which needs a governor."""
+    """Name both functions to the generator.
+
+    `k6_environment` only volunteers a neighbour for co-tenancy, which needs a
+    governor.
+    """
     assert comparison_k6_environment(_config()) == {
         "NANOFAAS_NEIGHBOUR": "word-stats-javascript"
     }
@@ -99,7 +103,11 @@ def test_refuses_a_governor_or_an_autoscaler() -> None:
 
 
 def test_the_variant_names_an_image_in_the_vm_local_registry() -> None:
-    """k3s pulls from the VM registry; a locally tagged image is invisible to containerd."""
+    """Name the variant's image in the VM-local registry.
+
+    k3s pulls from the VM registry; a locally tagged image is invisible to
+    containerd.
+    """
     assert (
         _variant_image(_config(controlPlaneVariant="native-o3-g1"))
         == "127.0.0.1:5000/nanofaas/control-plane:native-o3-g1"
@@ -153,8 +161,16 @@ def test_container_cost_is_queried_for_the_control_plane_and_every_function() ->
 
 
 def test_cpu_is_a_rate_not_a_counter() -> None:
-    """A counter only rises, so charting it says nothing about when the work happened."""
-    cpu = next(q for q in container_queries(_config().functions) if q.name == "container_cpu_cores@control-plane")
+    """Read CPU as a rate, not a counter.
+
+    A counter only rises, so charting it says nothing about when the work
+    happened.
+    """
+    cpu = next(
+        q
+        for q in container_queries(_config().functions)
+        if q.name == "container_cpu_cores@control-plane"
+    )
 
     assert cpu.expr.startswith("rate(container_cpu_usage_seconds_total")
     assert "[30s]" in cpu.expr
@@ -163,7 +179,9 @@ def test_cpu_is_a_rate_not_a_counter() -> None:
 def test_functions_are_separated_by_pod_prefix() -> None:
     """Every function container is named `function`; only the pod tells them apart."""
     java = next(
-        q for q in container_queries(_config().functions) if q.name == "container_memory_bytes@word-stats-java"
+        q
+        for q in container_queries(_config().functions)
+        if q.name == "container_memory_bytes@word-stats-java"
     )
 
     assert 'container="function"' in java.expr
@@ -198,7 +216,9 @@ def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
 
     environment = EnvironmentConfig.model_validate(
         yaml.safe_load(
-            _Path("packages/nanolab/environments/azure-comparison.yaml.example").read_text()
+            _Path(
+                "packages/nanolab/environments/azure-comparison.yaml.example"
+            ).read_text()
         )
     )
     from nanolab.cli.vm_provider import vm_request_for_role
@@ -226,7 +246,9 @@ def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
 
 
 def test_the_comparison_does_not_require_the_heap_gauge() -> None:
-    """The G1 build publishes no heap pools: SubstrateVM registers no heap
+    """Leave the heap gauge out of the comparison's required set.
+
+    The G1 build publishes no heap pools: SubstrateVM registers no heap
     MemoryPoolMXBean under it.
 
     Measured across the matrix — the JVM build and both serial-collector native
@@ -255,7 +277,11 @@ def test_the_comparison_does_not_require_the_heap_gauge() -> None:
 
 
 def test_the_container_memory_series_is_the_guard_instead() -> None:
-    """cAdvisor reports it for every build alike, so its absence means a broken scrape."""
+    """Use the container memory series as the guard instead.
+
+    CAdvisor reports it for every build alike, so its absence means a broken
+    scrape.
+    """
     required = [q.name for q in container_queries(_config().functions) if q.required]
 
     assert required == ["container_memory_bytes@control-plane"]
@@ -286,7 +312,9 @@ def test_comparison_pins_two_slots_and_twenty_queue_entries(
     assert captured["function_queue_size"] == 20
 
 
-def test_fixed_function_limits_reach_the_registration_shape(nanofaas_root: Path) -> None:
+def test_fixed_function_limits_reach_the_registration_shape(
+    nanofaas_root: Path,
+) -> None:
     functions, _ = _resolve_functions(
         _config(),
         nanofaas_root,
@@ -298,7 +326,9 @@ def test_fixed_function_limits_reach_the_registration_shape(nanofaas_root: Path)
         function_queue_size=20,
     )
 
-    assert {(function.concurrency, function.queue_size) for function in functions} == {(8, 20)}
+    assert {(function.concurrency, function.queue_size) for function in functions} == {
+        (8, 20)
+    }
 
 
 def test_a_two_function_comparison_records_both_functions_refusals() -> None:

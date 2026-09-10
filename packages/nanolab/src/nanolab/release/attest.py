@@ -7,15 +7,14 @@ once every signature has verified.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import json
-from pathlib import Path
 import re
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from nanolab.release.metrics import render_history, render_release_record
 from nanolab.release.model import ArtifactEvidence, digest_path
-
 
 ATTEST_PHASES = ("attest", "finalize")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
@@ -29,6 +28,11 @@ def build_release_predicate(
     benchmark_record_digest: str,
     image_digests: Mapping[str, str],
 ) -> dict[str, Any]:
+    """Build the predicate that pins everything a release claims to have built.
+
+    Requires a benchmark record digest and at least one image digest, each a
+    full sha256, so a partially evidenced release cannot be signed.
+    """
     if not _DIGEST.fullmatch(benchmark_record_digest):
         raise ValueError("benchmark record digest must be a sha256 digest")
     if not image_digests:
@@ -47,10 +51,12 @@ def build_release_predicate(
 
 
 def render_predicate(predicate: Mapping[str, Any]) -> str:
+    """Render a predicate as canonical, newline-terminated JSON."""
     return json.dumps(predicate, indent=2, sort_keys=True) + "\n"
 
 
 def performance_root(repo_root: Path) -> Path:
+    """Return the directory holding the published performance records."""
     return repo_root / "docs" / "performance"
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from io import StringIO
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -263,7 +263,9 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         lambda **kwargs: frame_calls.append(kwargs) or frame,
     )
     console = RecordingConsole()
-    chooser = ScriptedChooser(iter(["inspect", "deployment-lifecycle-container.yaml", "back"]))
+    chooser = ScriptedChooser(
+        iter(["inspect", "deployment-lifecycle-container.yaml", "back"])
+    )
 
     NanofaasTUI(
         choose=chooser,
@@ -281,7 +283,9 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         "autoscaling-cycle-k8s.yaml",
         "edge-cloud-offload-policy.yaml",
     ]
-    assert loaded_paths == [tmp_path / "scenarios-v2" / "deployment-lifecycle-container.yaml"]
+    assert loaded_paths == [
+        tmp_path / "scenarios-v2" / "deployment-lifecycle-container.yaml"
+    ]
     assert json.loads(str(frame_calls[0]["body"])) == {
         "workflow": "offload-loadtest",
         "x-function": "echo",
@@ -424,7 +428,10 @@ def test_plan_uses_cli_helpers_and_renders_without_running(
     )._workflow_menu("cli-contract-container.yaml")
 
     assert [call[0] for call in helper_calls] == ["scenario", "environment", "workflow"]
-    assert helper_calls[0] == ("scenario", tmp_path / "scenarios-v2" / "cli-contract-container.yaml")
+    assert helper_calls[0] == (
+        "scenario",
+        tmp_path / "scenarios-v2" / "cli-contract-container.yaml",
+    )
     assert workflow.run_calls == 0
     assert len(frame_calls) == 1
     assert frame_calls[0]["title"] == "CLI"
@@ -545,7 +552,9 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
         workflow=workflow,
         calls=helper_calls,
     )
-    monkeypatch.setattr(tui_app, "_workflow_observers", lambda _scenario_path: observers)
+    monkeypatch.setattr(
+        tui_app, "_workflow_observers", lambda _scenario_path: observers
+    )
     controller = RecordingController()
 
     NanofaasTUI(
@@ -644,7 +653,9 @@ def test_local_run_never_offers_or_enters_provisioning(
     )
     chooser = ScriptedChooser(iter([str(environment_path), "run", "cleanup"]))
 
-    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-contract-container.yaml")
+    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu(
+        "cli-contract-container.yaml"
+    )
 
     assert "Provision environment?" not in [message for message, _ in chooser.calls]
     assert provision_calls == []
@@ -749,12 +760,17 @@ def test_kubernetes_provisioned_rejects_local_environment(
         input_stream=RecordingInput(tty=False),
     )._workflow_menu("cli-contract-k8s.yaml")
 
-    assert [call[0] for call in helper_calls] == ["scenario", "environment", "workflow", "workflow"]
+    assert [call[0] for call in helper_calls] == [
+        "scenario",
+        "environment",
+        "workflow",
+        "workflow",
+    ]
     assert frame_calls == []
     assert controller.calls
 
 
-def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_avoids_legacy_provisioning(
+def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_avoids_legacy_provisioning(  # noqa: E501 - the test name cannot be wrapped
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
@@ -778,7 +794,9 @@ def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_av
     controller = RecordingController()
     chooser = ScriptedChooser(iter([str(environment_path), "run", "cleanup"]))
 
-    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-contract-k8s.yaml")
+    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu(
+        "cli-contract-k8s.yaml"
+    )
 
     # No "Provision environment?" question anywhere in the flow.
     assert [message for message, _ in chooser.calls] == [
@@ -861,9 +879,9 @@ def test_kubernetes_provisioned_back_from_cleanup_returns_to_action(
         iter([str(environment_path), "run", "back", "back", "back"])
     )
 
-    NanofaasTUI(
-        choose=chooser, controller=RecordingController()
-    )._workflow_menu("cli-contract-k8s.yaml")
+    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu(
+        "cli-contract-k8s.yaml"
+    )
 
     # Back from Cleanup returns straight to Action (the "Provision environment?"
     # state is never inserted for this path), and this is not local-environment
@@ -899,9 +917,7 @@ def test_non_local_run_enters_existing_provisioning_context(
     monkeypatch.setattr(tui_app, "provision_environment", provision)
 
     NanofaasTUI(
-        choose=ScriptedChooser(
-            iter([str(environment_path), "run", "cleanup"])
-        ),
+        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=RecordingController(),
     )._workflow_menu("cli-contract-container.yaml")
 
@@ -970,9 +986,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
     monkeypatch.setattr(tui_app, "provision_environment", provision)
 
     NanofaasTUI(
-        choose=ScriptedChooser(
-            iter([str(environment_path), "run", "cleanup"])
-        ),
+        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
     )._workflow_menu("autoscaling-cycle-k8s.yaml")
 
@@ -992,7 +1006,9 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
     ]
     assert preview.run_calls == 0
     assert workflow.run_calls == 1
-    assert [(event.kind, event.title, event.line) for event in controller.sink.events] == [
+    assert [
+        (event.kind, event.title, event.line) for event in controller.sink.events
+    ] == [
         ("task.started", "Provision stack", ""),
         ("log.line", "", "cleanup complete"),
     ]
@@ -1033,7 +1049,9 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
     listener.input_is_tty = True
     monkeypatch.setattr(tui_app, "provision_environment", provision)
     monkeypatch.setattr(TuiWorkflowSink, "emit", record_emit)
-    monkeypatch.setattr(workflow_controller_module, "Live", MagicMock(return_value=live))
+    monkeypatch.setattr(
+        workflow_controller_module, "Live", MagicMock(return_value=live)
+    )
     monkeypatch.setattr(
         workflow_controller_module,
         "WorkflowKeyListener",
@@ -1042,9 +1060,7 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
     controller = TuiWorkflowController(console=MagicMock())
 
     NanofaasTUI(
-        choose=ScriptedChooser(
-            iter([str(environment_path), "run", "cleanup"])
-        ),
+        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
     )._workflow_menu("cli-contract-container.yaml")
 
@@ -1100,7 +1116,9 @@ def test_remote_environment_runs_with_automatic_provisioning(
     remote_path = local_path.parent / "remote.yaml"
     remote_path.write_text("provider: multipass\n", encoding="utf-8")
     workflow = FakeSonataWorkflow()
-    monkeypatch.setattr(tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="offload-loadtest"))
+    monkeypatch.setattr(
+        tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="offload-loadtest")
+    )
     monkeypatch.setattr(
         tui_app,
         "_environment",
@@ -1132,7 +1150,9 @@ def test_remote_environment_runs_with_automatic_provisioning(
         )
     )
 
-    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-contract-container.yaml")
+    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu(
+        "cli-contract-container.yaml"
+    )
 
     assert len(provision_calls) == 1
     assert workflow.run_calls == 1
@@ -1154,7 +1174,17 @@ def test_workflow_failure_returns_to_the_previous_submenu(
         workflow=workflow,
     )
     chooser = ScriptedChooser(
-        iter(["cli", "container", str(environment_path), "run", "cleanup", "back", "exit"])
+        iter(
+            [
+                "cli",
+                "container",
+                str(environment_path),
+                "run",
+                "cleanup",
+                "back",
+                "exit",
+            ]
+        )
     )
 
     NanofaasTUI(choose=chooser, controller=RecordingController()).run()
@@ -1190,9 +1220,7 @@ def test_environment_selection_offers_provider_setup_when_templates_exist(
     environment_path = _install_paths(monkeypatch, tmp_path)
     environment_dir = environment_path.parent
     (environment_dir / "azure.yaml.example").write_text("example\n", encoding="utf-8")
-    (environment_dir / "proxmox.yaml.example").write_text(
-        "example\n", encoding="utf-8"
-    )
+    (environment_dir / "proxmox.yaml.example").write_text("example\n", encoding="utf-8")
     chooser = ScriptedChooser(iter([str(environment_path)]))
 
     NanofaasTUI(choose=chooser)._select_environment()
@@ -1259,9 +1287,7 @@ def test_provider_setup_guidance_returns_to_rebuilt_environment_picker(
     environment_path = _install_paths(monkeypatch, tmp_path)
     environment_dir = environment_path.parent
     (environment_dir / "azure.yaml.example").write_text("example\n", encoding="utf-8")
-    (environment_dir / "proxmox.yaml.example").write_text(
-        "example\n", encoding="utf-8"
-    )
+    (environment_dir / "proxmox.yaml.example").write_text("example\n", encoding="utf-8")
     chooser = ScriptedChooser(
         iter(["setup:azure", "setup:proxmox", str(environment_path)])
     )
@@ -1286,9 +1312,7 @@ def test_provider_setup_guidance_returns_to_rebuilt_environment_picker(
     assert selected == environment_path
     assert len(chooser.calls) == 3
     assert all(call[0] == "Environment" for call in chooser.calls)
-    second_picker_values = [
-        choice.value for choice in chooser.calls[1][1]["choices"]
-    ]
+    second_picker_values = [choice.value for choice in chooser.calls[1][1]["choices"]]
     assert str(environment_dir / "azure.yaml") in second_picker_values
     assert "setup:azure" not in second_picker_values
     assert "setup:proxmox" in second_picker_values
@@ -1301,7 +1325,9 @@ def test_provider_setup_guidance_returns_to_rebuilt_environment_picker(
         "cp packages/nanolab/environments/azure.yaml.example "
         "packages/nanolab/environments/azure.yaml" in azure_body
     )
-    assert all(value in azure_body for value in ("provider", "ssh_key_path", "az login"))
+    assert all(
+        value in azure_body for value in ("provider", "ssh_key_path", "az login")
+    )
     proxmox_body = screens[1][2]
     assert (
         "cp packages/nanolab/environments/proxmox.yaml.example "
@@ -1405,11 +1431,14 @@ def test_workflow_back_navigation_returns_to_exact_parent(
         provider=provider,
     )
     resolved_answers = iter(
-        str(environment_path) if answer == "environment" else answer for answer in answers
+        str(environment_path) if answer == "environment" else answer
+        for answer in answers
     )
     chooser = ScriptedChooser(resolved_answers)
 
-    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-contract-container.yaml")
+    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu(
+        "cli-contract-container.yaml"
+    )
 
     assert [message for message, _ in chooser.calls] == expected_messages
     assert all(kwargs["include_back"] is True for _, kwargs in chooser.calls)
@@ -1465,14 +1494,16 @@ def test_ctrl_c_from_every_workflow_depth_propagates_to_exit(
         workflow=FakeSonataWorkflow(),
         provider=provider,
     )
-    resolved_answers = iter([
-        "cli",
-        "container",
-        *(
-            str(environment_path) if answer == "environment" else answer
-            for answer in answers
-        ),
-    ])
+    resolved_answers = iter(
+        [
+            "cli",
+            "container",
+            *(
+                str(environment_path) if answer == "environment" else answer
+                for answer in answers
+            ),
+        ]
+    )
     chooser = ScriptedChooser(resolved_answers)
 
     NanofaasTUI(choose=chooser, controller=RecordingController()).run()

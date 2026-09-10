@@ -145,7 +145,10 @@ def _spawner(process: FakeProcess, seen: list[dict[str, object]]):
 
 def test_it_builds_a_sonata_resource() -> None:
     resource = managed_process_resource(
-        title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(FakeProcess(), [])
+        title="Acquire thing",
+        argv=("run",),
+        ready=lambda: True,
+        spawn=_spawner(FakeProcess(), []),
     )
 
     assert isinstance(resource, Resource)
@@ -227,7 +230,10 @@ def test_acquire_fails_immediately_when_the_process_exits() -> None:
 def test_release_terminates_a_live_process() -> None:
     process = FakeProcess()
     resource = managed_process_resource(
-        title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(process, [])
+        title="Acquire thing",
+        argv=("run",),
+        ready=lambda: True,
+        spawn=_spawner(process, []),
     )
 
     resource.acquire()
@@ -255,7 +261,10 @@ def test_release_kills_a_process_that_ignores_terminate() -> None:
 
     process = Stubborn()
     resource = managed_process_resource(
-        title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(process, [])
+        title="Acquire thing",
+        argv=("run",),
+        ready=lambda: True,
+        spawn=_spawner(process, []),
     )
 
     resource.acquire()
@@ -266,7 +275,10 @@ def test_release_kills_a_process_that_ignores_terminate() -> None:
 
 def test_release_is_a_no_op_when_nothing_was_started() -> None:
     resource = managed_process_resource(
-        title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(FakeProcess(), [])
+        title="Acquire thing",
+        argv=("run",),
+        ready=lambda: True,
+        spawn=_spawner(FakeProcess(), []),
     )
 
     resource.release()  # must not raise
@@ -333,7 +345,9 @@ def managed_process_resource(
 
     def acquire() -> None:
         nonlocal process
-        current = spawn(argv, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        current = spawn(
+            argv, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        )
         if current is None:  # pragma: no cover - invalid injected spawn contract
             raise RuntimeError(f"{title} failed to start")
         process = current
@@ -490,7 +504,9 @@ def test_the_external_resource_is_released_when_a_task_fails() -> None:
 
 def test_a_function_with_build_argv_gets_an_image_build_task() -> None:
     executor = ScriptedExecutor()
-    function = replace(FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"))
+    function = replace(
+        FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage")
+    )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(function,)), _bindings(executor)
     )
@@ -537,7 +553,9 @@ def test_the_control_plane_build_runs_before_images_and_acquire() -> None:
 
 def test_the_image_build_runs_before_the_function_is_registered() -> None:
     executor = ScriptedExecutor()
-    function = replace(FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"))
+    function = replace(
+        FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage")
+    )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(function,)), _bindings(executor)
     )
@@ -545,7 +563,9 @@ def test_the_image_build_runs_before_the_function_is_registered() -> None:
     workflow.run()
 
     titles = executor.titles
-    assert titles.index("Build image word-stats-java") < titles.index("Apply word-stats-java")
+    assert titles.index("Build image word-stats-java") < titles.index(
+        "Apply word-stats-java"
+    )
 
 
 def test_without_build_argv_nothing_extra_is_emitted() -> None:
@@ -634,7 +654,8 @@ def build_cli_workflow(
                 )
             )
     resources = tuple(
-        _function_resource(request, function, executor, cwd) for function in request.functions
+        _function_resource(request, function, executor, cwd)
+        for function in request.functions
     )
     workflow.add(
         CommandTask(
@@ -650,7 +671,9 @@ def build_cli_workflow(
         workflow.add(
             CommandTask(
                 title=f"Invoke {function.name}",
-                argv=_cli_argv(request, "invoke", function.name, "--data", function.payload),
+                argv=_cli_argv(
+                    request, "invoke", function.name, "--data", function.payload
+                ),
                 executor=executor,
                 role=request.cli_role,
                 cwd=cwd,
@@ -751,7 +774,8 @@ def test_container_backend_builds_the_control_plane_with_the_container_module() 
         RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
     )
     build = next(
-        task for task in plan.compile().tasks
+        task
+        for task in plan.compile().tasks
         if task.task_id.endswith(".build-local-control-plane")
     )
 
@@ -771,7 +795,9 @@ def test_container_backend_targets_the_local_control_plane_port() -> None:
         RoleBindings(host=executor, stack=RecordingExecutor()),
     )
     invoke = next(
-        task for task in plan.compile().tasks if task.task_id.endswith(".invoke-word-stats-java")
+        task
+        for task in plan.compile().tasks
+        if task.task_id.endswith(".invoke-word-stats-java")
     )
 
     assert "http://127.0.0.1:18080" in " ".join(invoke.task.argv)
@@ -785,7 +811,8 @@ def test_k8s_backend_keeps_the_explicit_endpoint_and_starts_nothing() -> None:
     )
     task_ids = [task.task_id for task in plan.compile().tasks]
     invoke = next(
-        task for task in plan.compile().tasks
+        task
+        for task in plan.compile().tasks
         if task.task_id.endswith(".invoke-word-stats-java")
     )
 
@@ -905,7 +932,9 @@ def build_cli_plan(
     if config.workflow != "cli":
         raise ValueError("CLI plan requires a cli scenario")
     if config.backend not in ("container", "k8s"):
-        raise ValueError(f"cli workflow supports container or k8s, not {config.backend!r}")
+        raise ValueError(
+            f"cli workflow supports container or k8s, not {config.backend!r}"
+        )
     root = repo_root or Path.cwd()
     local = config.backend == "container"
     if local and cli_role != "host":
@@ -918,7 +947,9 @@ def build_cli_plan(
         CliFunction(
             name=resolved.name,
             image=resolved.image,
-            payload=json.dumps(json.loads(resolved.payload)["input"], separators=(",", ":")),
+            payload=json.dumps(
+                json.loads(resolved.payload)["input"], separators=(",", ":")
+            ),
             resources=resolved.resources,
             build_argv=resolved.build_argv if local else None,
         )

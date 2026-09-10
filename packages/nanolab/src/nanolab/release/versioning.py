@@ -1,3 +1,10 @@
+"""Version reading, preparation and consistency checks for a release.
+
+The root Gradle version is the source of truth. Every curated release
+location is expected to carry it an exact number of times, so preparation can
+rewrite them all and prove that nothing outside those locations changed.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -5,7 +12,6 @@ import os
 import re
 import subprocess
 from pathlib import Path
-
 
 _VERSION_PATTERN = re.compile(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 _GRADLE_VERSION_PATTERN = re.compile(r"(?m)^\s*version\s*=\s*'([^']+)'\s*$")
@@ -20,7 +26,9 @@ _CURATED_COUNTS = {
     Path("sdks/python/uv.lock"): 1,
     Path("functions/python/roman-numeral/uv.lock"): 1,
     Path("tools/fn-init/src/fn_init/main.py"): 1,
-    Path("clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands/RootCommandTest.java"): 1,
+    Path(
+        "clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands/RootCommandTest.java"
+    ): 1,
 }
 _LOCKFILE_COMMANDS = (
     (("cargo", "check"), Path("runtimes/watchdog")),
@@ -75,7 +83,12 @@ def read_project_version(repo_root: Path) -> str:
 
 
 def verify_version_consistency(repo_root: Path) -> str:
-    """Confirm every curated release location contains the root version exactly as expected."""
+    """Return the root version once every curated file carries it as expected.
+
+    Counts the version's occurrences in each curated location and raises
+    ValueError when any count differs from the one the release expects, since
+    a mismatch means preparation would rewrite the wrong number of tags.
+    """
     current = read_project_version(repo_root)
     _validate_replacement_counts(repo_root, current)
     return current
@@ -86,12 +99,16 @@ def prepare_version(repo_root: Path, requested: str) -> tuple[Path, ...]:
     current = verify_version_consistency(repo_root)
     requested_plain, _ = normalize_version(requested)
     if _version_key(requested_plain) <= _version_key(current):
-        raise ValueError(f"requested version {requested_plain} must be newer than {current}")
+        raise ValueError(
+            f"requested version {requested_plain} must be newer than {current}"
+        )
 
     before = _snapshot_regular_files(repo_root)
     operation_error: BaseException | None = None
     try:
-        updates = _prepared_updates(repo_root, current, requested_plain, _PRIMARY_COUNTS)
+        updates = _prepared_updates(
+            repo_root, current, requested_plain, _PRIMARY_COUNTS
+        )
         for path, content in updates:
             path.write_text(content, encoding="utf-8")
         for command, relative_cwd in _LOCKFILE_COMMANDS:
@@ -102,7 +119,9 @@ def prepare_version(repo_root: Path, requested: str) -> tuple[Path, ...]:
         raise
     finally:
         try:
-            _ensure_only_curated_files_changed(before, _snapshot_regular_files(repo_root))
+            _ensure_only_curated_files_changed(
+                before, _snapshot_regular_files(repo_root)
+            )
         except ValueError as scope_error:
             if operation_error is not None:
                 raise scope_error from operation_error
@@ -138,7 +157,8 @@ def _validate_replacement_counts(repo_root: Path, version: str) -> None:
         actual_count = _count_version(path.read_text(encoding="utf-8"), version)
         if actual_count != expected_count:
             raise ValueError(
-                f"replacement count in {relative_path} is {actual_count}, expected {expected_count}"
+                f"replacement count in {relative_path} is {actual_count}, "
+                f"expected {expected_count}"
             )
 
 
@@ -155,7 +175,8 @@ def _prepared_updates(
         actual_count = _count_version(source, current)
         if actual_count != expected_count:
             raise ValueError(
-                f"replacement count in {relative_path} is {actual_count}, expected {expected_count}"
+                f"replacement count in {relative_path} is {actual_count}, "
+                f"expected {expected_count}"
             )
         updates.append((path, _version_pattern(current).sub(requested, source)))
     return tuple(updates)
@@ -168,7 +189,9 @@ def _run_command(command: tuple[str, ...], cwd: Path) -> None:
 def _snapshot_regular_files(repo_root: Path) -> dict[Path, str]:
     snapshot: dict[Path, str] = {}
     for directory, subdirectories, filenames in os.walk(repo_root):
-        subdirectories[:] = [name for name in subdirectories if name not in _SNAPSHOT_EXCLUDED_DIRS]
+        subdirectories[:] = [
+            name for name in subdirectories if name not in _SNAPSHOT_EXCLUDED_DIRS
+        ]
         base = Path(directory)
         for filename in filenames:
             if filename in _SNAPSHOT_EXCLUDED_DIRS:
@@ -179,7 +202,9 @@ def _snapshot_regular_files(repo_root: Path) -> dict[Path, str]:
     return snapshot
 
 
-def _ensure_only_curated_files_changed(before: dict[Path, str], after: dict[Path, str]) -> None:
+def _ensure_only_curated_files_changed(
+    before: dict[Path, str], after: dict[Path, str]
+) -> None:
     changed = sorted(
         path
         for path in before.keys() | after.keys()

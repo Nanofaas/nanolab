@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from sonata_tasks.prometheus import PrometheusRetryPolicy
 
@@ -19,7 +21,9 @@ def test_the_product_client_configures_bounded_retries() -> None:
     assert client._retry == PrometheusRetryPolicy(attempts=3, backoff_seconds=2)
 
 
-def test_server_time_delegates_to_the_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_server_time_delegates_to_the_shared_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakeClient:
         def server_time(self) -> float:
             return 1780728785.1
@@ -32,7 +36,8 @@ def test_server_time_delegates_to_the_shared_client(monkeypatch: pytest.MonkeyPa
 def test_range_queries_delegate_without_hiding_protocol_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A malformed query fails the same way every time; retrying only wastes the budget."""
+    """A malformed query fails the same way every time; a retry wastes the budget."""
+
     class RefusingClient:
         def query_range(self, *args: object) -> object:
             raise RuntimeError("prometheus query failed: bad query")
@@ -41,7 +46,10 @@ def test_range_queries_delegate_without_hiding_protocol_failures(
 
     with pytest.raises(RuntimeError, match="bad query"):
         prom.query_prometheus_range_series(
-            "http://p", "up", prom.datetime.now(prom.timezone.utc), prom.datetime.now(prom.timezone.utc)
+            "http://p",
+            "up",
+            datetime.now(UTC),
+            datetime.now(UTC),
         )
 
 
@@ -62,7 +70,7 @@ def test_a_timeout_says_it_means_unreachable() -> None:
 
 
 def test_other_failures_get_no_hint() -> None:
-    """A malformed query is not a reachability problem and must not be dressed as one."""
+    """A malformed query is not a reachability problem, so it gets no hint."""
     from nanolab.tasks.loadtest.tasks import _unreachable_hint
 
     assert _unreachable_hint(RuntimeError("prometheus api failed: bad_data")) == ""

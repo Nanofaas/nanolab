@@ -35,14 +35,18 @@ def _environment() -> EnvironmentConfig:
                 "loadgen_vm_size": "Standard_D2s_v5",
                 "arm_vm_size": "Standard_D8ps_v5",
                 "image_urn": "Canonical:ubuntu-24_04-lts:server:24.04.202607140",
-                "arm_image_urn": ("Canonical:ubuntu-24_04-lts:server-arm64:24.04.202607140"),
+                "arm_image_urn": (
+                    "Canonical:ubuntu-24_04-lts:server-arm64:24.04.202607140"
+                ),
                 "operator_source_cidr": "8.8.8.8/32",
             },
         }
     )
 
 
-def test_execution_guard_validates_metadata_before_cloud_resource(tmp_path: Path) -> None:
+def test_execution_guard_validates_metadata_before_cloud_resource(
+    tmp_path: Path,
+) -> None:
     events: list[str] = []
 
     class Credentials:
@@ -58,13 +62,14 @@ def test_execution_guard_validates_metadata_before_cloud_resource(tmp_path: Path
         acquire=lambda _inputs: events.append("cloud"),
         release=lambda _inputs, _value: None,
         requires=(guard,),
-            )
+    )
 
     @dataclass
     class Consume(Task[None]):
         title: str = "Consume cloud"
 
-        def run(self, _inputs: TaskInputs) -> TaskOutcome[None]:
+        def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+            del inputs
             return TaskOutcome()
 
     workflow = Workflow("guard-order")
@@ -115,7 +120,11 @@ class FakeProvider:
         return SimpleNamespace(
             location="westeurope",
             vm_size=(
-                "Standard_D8ps_v5" if arm else "Standard_D2s_v5" if loadgen else "Standard_D8s_v5"
+                "Standard_D8ps_v5"
+                if arm
+                else "Standard_D2s_v5"
+                if loadgen
+                else "Standard_D8s_v5"
             ),
             disk_size_gb=64 if arm else 30 if loadgen else 128,
             image_urn=(
@@ -125,7 +134,9 @@ class FakeProvider:
             ),
         )
 
-    def restrict_inbound_sources(self, request, *, ports, source_cidrs, priority_base=1010) -> None:
+    def restrict_inbound_sources(
+        self, request, *, ports, source_cidrs, priority_base=1010
+    ) -> None:
         self.events.append(f"restrict:{request.name}:{','.join(map(str, ports))}")
         self.restrictions.append((request.name, ports, source_cidrs, priority_base))
 
@@ -149,7 +160,9 @@ def _workflow(
         provider.events.append(f"bootstrap:{role}")
 
     monkeypatch.setattr(release_resources, "_bootstrap_role", bootstrap)
-    resources = release_resources.build_release_resources(_environment(), Path("/repo"), provider)
+    resources = release_resources.build_release_resources(
+        _environment(), Path("/repo"), provider
+    )
     workflow = Workflow("release-resources")
     workflow.add(
         ConsumeEndpoints(resources.endpoints),
@@ -167,7 +180,9 @@ def test_release_resources_acquire_verify_secure_and_bootstrap_in_role_order(
     workflow.run()
 
     assert [
-        event for event in provider.events if event.startswith(("ensure:", "facts:", "bootstrap:"))
+        event
+        for event in provider.events
+        if event.startswith(("ensure:", "facts:", "bootstrap:"))
     ] == [
         "ensure:nanofaas-azure-release",
         "facts:nanofaas-azure-release",
@@ -278,9 +293,12 @@ def test_keep_retains_what_did_not_ask_to_be_released(
 
 
 def test_release_credentials_never_survive_a_kept_run() -> None:
-    """The one declaration the whole inversion rests on: a GHCR token or a Cosign
+    """Assert released credentials never survive a kept run.
+
+    The one declaration the whole inversion rests on: a GHCR token or a Cosign
     signing key left on a retained VM is signing authority handed to whoever gets
-    that VM or a snapshot of its disk."""
+    that VM or a snapshot of its disk.
+    """
     ghcr = ghcr_credentials_resource(
         provider=object(),
         request=object(),
@@ -326,7 +344,10 @@ def test_source_archive_is_created_once_and_checksum_verified_on_stack_and_arm(
         stack_request=stack,
         arm_request=arm,
     )
-    assert all(resource.always_release for resource in (resources.local, resources.stack, resources.arm))
+    assert all(
+        resource.always_release
+        for resource in (resources.local, resources.stack, resources.arm)
+    )
     # Acquire/release directly keeps the contract test independent of a dummy task.
     local = resources.local.acquire(TaskInputs.empty())
     inputs = TaskInputs._for_resources({resources.local: local}, {resources.local})
@@ -351,7 +372,9 @@ def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
 
         def transfer_to(self, _request, *, source: Path, destination: str):
             self.transfers.append((source.name, destination))
-            return SimpleNamespace(return_code=1 if len(self.transfers) == 2 else 0, stderr="boom")
+            return SimpleNamespace(
+                return_code=1 if len(self.transfers) == 2 else 0, stderr="boom"
+            )
 
         def exec_argv(self, _request, argv):
             self.commands.append(argv)
@@ -420,14 +443,23 @@ def test_arm_build_inputs_cleanup_propagates_programming_errors(
 
 @pytest.mark.parametrize(
     ("source", "archive"),
-    (
+    [
         ("relative/source", "relative/source.tar"),
         ("/", "/source.tar"),
-        ("/home/user/nanofaas-release/v1/../source", "/home/user/nanofaas-release/v1/source.tar"),
+        (
+            "/home/user/nanofaas-release/v1/../source",
+            "/home/user/nanofaas-release/v1/source.tar",
+        ),
         ("/tmp/source", "/tmp/source.tar"),
-        ("/home/user/nanofaas-release/v1/source", "/home/user/nanofaas-release/v2/source.tar"),
-        ("/home/user/nanofaas-release/v1/source.tar", "/home/user/nanofaas-release/v1/source"),
-    ),
+        (
+            "/home/user/nanofaas-release/v1/source",
+            "/home/user/nanofaas-release/v2/source.tar",
+        ),
+        (
+            "/home/user/nanofaas-release/v1/source.tar",
+            "/home/user/nanofaas-release/v1/source",
+        ),
+    ],
 )
 def test_release_source_resources_reject_unsafe_remote_paths(
     source: str, archive: str, tmp_path: Path
@@ -447,7 +479,7 @@ def test_release_source_resources_reject_unsafe_remote_paths(
 
 @pytest.mark.parametrize(
     "remote_root",
-    ("relative", "/", "/tmp/release", "/home/user/nanofaas-release/v1/.."),
+    ["relative", "/", "/tmp/release", "/home/user/nanofaas-release/v1/.."],
 )
 def test_arm_inputs_reject_unsafe_remote_root(remote_root: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="release remote"):
@@ -476,7 +508,9 @@ def test_source_resource_normal_release_propagates_remote_cleanup_failure(
             ArtifactEvidence("local", str(destination), digest),
         )[-1],
     )
-    monkeypatch.setattr(release_resources, "stage_source_archive", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        release_resources, "stage_source_archive", lambda *_args, **_kwargs: None
+    )
 
     class Provider:
         def exec_argv(self, _request, _argv):

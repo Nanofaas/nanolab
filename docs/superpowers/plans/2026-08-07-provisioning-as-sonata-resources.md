@@ -140,7 +140,9 @@ from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 Replace the body of `vm_provider_for_environment` with:
 
 ```python
-def vm_provider_for_environment(environment: EnvironmentConfig, repo_root: Path) -> object:
+def vm_provider_for_environment(
+    environment: EnvironmentConfig, repo_root: Path
+) -> object:
     return provider_for(VmRequest(lifecycle=environment.provider), repo_root)
 ```
 
@@ -197,7 +199,12 @@ class FakeProvider:
 
     def ensure_running(self, request: VmRequest) -> object:
         self.ensured.append(
-            VmConfig(name=request.name or "x", cpus=request.cpus, memory=request.memory, disk=request.disk)
+            VmConfig(
+                name=request.name or "x",
+                cpus=request.cpus,
+                memory=request.memory,
+                disk=request.disk,
+            )
         )
         return _Result(return_code=0)
 
@@ -205,7 +212,14 @@ class FakeProvider:
         return "10.0.0.5"
 
     def teardown(self, request: VmRequest) -> None:
-        self.destroyed.append(VmInfo(name=request.name or "x", host="10.0.0.5", user="ubuntu", home="/home/ubuntu"))
+        self.destroyed.append(
+            VmInfo(
+                name=request.name or "x",
+                host="10.0.0.5",
+                user="ubuntu",
+                home="/home/ubuntu",
+            )
+        )
 
 
 @dataclass
@@ -414,14 +428,18 @@ def test_remote_operations_filters_non_remote() -> None:
 
 def test_run_bootstrap_operations_records_each_command() -> None:
     provider = FakeOrchestrator()
-    op = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm", "install"))
+    op = RemoteCommandOperation(
+        operation_id="k3s", summary="install", argv=("helm", "install")
+    )
     run_bootstrap_operations(provider, [op], role="stack")
     assert provider.shell.seen[0].argv == ("helm", "install")
 
 
 def test_retarget_cloud_operations_uses_ssh_endpoint() -> None:
     provider = FakeOrchestrator()
-    context = scenario_context(Path("/repo"), VmRequest(lifecycle="proxmox", name="stack"), Path("/assets"))
+    context = scenario_context(
+        Path("/repo"), VmRequest(lifecycle="proxmox", name="stack"), Path("/assets")
+    )
     op = RemoteCommandOperation(
         operation_id="base",
         summary="base",
@@ -464,9 +482,12 @@ from sonata_tasks.provisioning.resources import VerifiedLifecycle, provisioned_v
 
 __all__ = [
     "provider_for",
-    "VerifiedLifecycle", "provisioned_vm",
-    "scenario_context", "remote_operations",
-    "retarget_cloud_operations", "run_bootstrap_operations",
+    "VerifiedLifecycle",
+    "provisioned_vm",
+    "scenario_context",
+    "remote_operations",
+    "retarget_cloud_operations",
+    "run_bootstrap_operations",
 ]
 ```
 
@@ -581,7 +602,9 @@ class _Result:
 def test_provision_roles_ensures_runs_operations_and_destroys(tmp_path) -> None:
     provider = FakeOrchestrator()
     request = VmRequest(lifecycle="multipass", name="stack")
-    op = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm", "install"))
+    op = RemoteCommandOperation(
+        operation_id="k3s", summary="install", argv=("helm", "install")
+    )
     with provision_roles(
         provider,
         (ProvisionedRole(role="stack", request=request, operations=(op,)),),
@@ -759,6 +782,7 @@ In `packages/nanolab/src/nanolab/cli/execution.py`: replace the `vm_provider_for
 
 ```python
 from sonata_tasks.provisioning.providers import provider_for
+
 ...
 provider = vm_provider or provider_for(
     vm_request_for_role(environment, "stack", loadtest=True),

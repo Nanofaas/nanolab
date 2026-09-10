@@ -1,7 +1,12 @@
 from pathlib import Path
 
 import pytest
-from sonata_engine import JournalConfig, TaskInputs, Workflow, WorkflowTopologyMismatchError
+from sonata_engine import (
+    JournalConfig,
+    TaskInputs,
+    Workflow,
+    WorkflowTopologyMismatchError,
+)
 from sonata_tasks.execution.models import TaskResult
 from sonata_tasks.testing import RecordingExecutor
 

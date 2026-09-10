@@ -1,10 +1,20 @@
+"""The scenario file: what a workflow runs and how the load is shaped.
+
+`ScenarioConfig` is the validated form of a `scenarios/*.yaml`. Which fields are
+required, and which combinations are legal, depend on the workflow and the load
+profile, so an incoherent scenario is rejected at parse time rather than
+discovered mid-run.
+"""
+
 from __future__ import annotations
 
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-WorkflowName = Literal["validate", "cli", "loadtest", "offload", "offload-loadtest", "release"]
+WorkflowName = Literal[
+    "validate", "cli", "loadtest", "offload", "offload-loadtest", "release"
+]
 BackendName = Literal["container", "k8s"]
 BuildStrategy = Literal["docker", "buildpack"]
 AutoscalingStrategy = Literal["INTERNAL", "HPA"]
@@ -18,6 +28,12 @@ CONTROL_PLANE_RESOURCES = "control-plane"
 
 
 class ResourceQuantity(BaseModel):
+    """One CPU or memory amount, in the units the chart uses.
+
+    Either field may be left unset, so a quantity can carry a CPU ask, a memory
+    ask, or both.
+    """
+
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     cpu: float | None = Field(default=None, gt=0, multiple_of=0.001)
@@ -25,13 +41,24 @@ class ResourceQuantity(BaseModel):
 
 
 class ResourceSpec(BaseModel):
+    """One function's or the control plane's requests and limits.
+
+    Either half may be omitted; when both are present the validator keeps the
+    request at or below the limit.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     requests: ResourceQuantity | None = None
     limits: ResourceQuantity | None = None
 
     @model_validator(mode="after")
-    def requests_within_limits(self) -> "ResourceSpec":
+    def requests_within_limits(self) -> ResourceSpec:
+        """Reject a spec whose request exceeds its limit.
+
+        Only the fields both halves set are compared, so a request without a
+        limit — or a limit without a request — passes through untouched.
+        """
         if self.requests is None or self.limits is None:
             return self
         for field in ("cpu", "memory_mib"):
@@ -57,9 +84,10 @@ class ReleaseConfig(BaseModel):
     error_rate_max: float = Field(default=0.30, ge=0, le=1)
 
 
-# SOJOURN decides from what the caller experiences — queue wait plus service — where the other
-# two decide from service time alone. Comparing it against ADAPTIVE_PER_POD isolates the signal,
-# since both govern one function at a time and neither divides a budget.
+# SOJOURN decides from what the caller experiences — queue wait plus service —
+# where the other two decide from service time alone. Comparing it against
+# ADAPTIVE_PER_POD isolates the signal, since both govern one function at a time
+# and neither divides a budget.
 ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # `burst` is the two-function profile: variable closed-loop load calibrated to
 # fill the queue without automatically overflowing it, so queue depth, queue
@@ -94,6 +122,13 @@ PayloadProfile = Literal["small", "medium", "large"]
 
 
 class ScenarioConfig(BaseModel):
+    """Scenario file settings: workflow, functions and load shaping.
+
+    One validated form for every workflow. Fields only some workflows use carry
+    defaults, and `validate_workflow` rejects the combinations the run could not
+    carry out.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     workflow: WorkflowName
@@ -129,9 +164,10 @@ class ScenarioConfig(BaseModel):
     concurrency_mode: ConcurrencyMode = Field(
         default="ADAPTIVE_PER_POD", alias="concurrencyMode"
     )
-    # `cycle` exercises the controller's trajectory; `saturation` offers more than the queue can
-    # hold, which is the only condition under which a request is ever rejected. Whether one
-    # controller sheds fewer than another cannot be asked of a run where neither shed any.
+    # `cycle` exercises the controller's trajectory; `saturation` offers more
+    # than the queue can hold, which is the only condition under which a request
+    # is ever rejected. Whether one controller sheds fewer than another cannot be
+    # asked of a run where neither shed any.
     load_profile: LoadProfile = Field(default="cycle", alias="loadProfile")
     # La composizione del carico misto. Con entrambe a zero il generatore misto e'
     # il generatore puramente sincrono, che e' come si guida un braccio di
@@ -142,16 +178,16 @@ class ScenarioConfig(BaseModel):
     control_plane_runtime: ControlPlaneRuntime = Field(
         default="jvm", alias="controlPlaneRuntime"
     )
-    autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
+    autoscaling_strategy: AutoscalingStrategy = Field(
+        default="INTERNAL", alias="autoscalingStrategy"
+    )
     hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
     # Which control-plane build this run measures. A plain string rather than a
     # Literal: the catalogue of builds lives with the code that compiles them, and
     # importing it here would make the scenario schema depend on the image layer.
     # The name is checked against that catalogue by the plan, which can also say
     # what the alternatives are.
-    control_plane_variant: str | None = Field(
-        default=None, alias="controlPlaneVariant"
-    )
+    control_plane_variant: str | None = Field(default=None, alias="controlPlaneVariant")
     # The CPU budget of the control plane under test. Unset means the chart's
     # own default, which is 1 CPU: every comparison so far ran against that
     # without saying so, and `process_cpu_usage` sat at 1.00 in all fourteen
@@ -170,7 +206,15 @@ class ScenarioConfig(BaseModel):
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")
-    def validate_workflow(self) -> "ScenarioConfig":  # NOSONAR (S3776): declarative validation rules
+    def validate_workflow(
+        self,
+    ) -> ScenarioConfig:  # NOSONAR (S3776): declarative validation rules
+        """Reject a scenario whose options do not fit its workflow.
+
+        Checks the backend against the workflow, then the autoscaler, the
+        concurrency governor and the load profile against what each supports,
+        and returns the instance unchanged once every rule holds.
+        """
         if self.workflow in ("validate", "cli") and self.backend is None:
             raise ValueError(f"backend is required for {self.workflow} workflow")
         if self.workflow == "offload" and self.backend is not None:
@@ -183,12 +227,16 @@ class ScenarioConfig(BaseModel):
         if self.autoscaling and self.workflow != "loadtest":
             raise ValueError("autoscaling is only supported by the loadtest workflow")
         if self.concurrency_control and self.workflow != "loadtest":
-            raise ValueError("concurrencyControl is only supported by the loadtest workflow")
+            raise ValueError(
+                "concurrencyControl is only supported by the loadtest workflow"
+            )
         if self.concurrency_mode != "ADAPTIVE_PER_POD" and not self.concurrency_control:
             raise ValueError("concurrencyMode requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
-        if self.load_profile != "mixed" and (self.async_share is not None or self.idem_share is not None):
+        if self.load_profile != "mixed" and (
+            self.async_share is not None or self.idem_share is not None
+        ):
             raise ValueError("asyncShare and idemShare belong to loadProfile: mixed")
         if (self.async_share or 0.0) + (self.idem_share or 0.0) > 1.0:
             raise ValueError("asyncShare + idemShare cannot exceed 1.0")
@@ -213,10 +261,16 @@ class ScenarioConfig(BaseModel):
             raise ValueError("HPA autoscaling requires the k8s backend")
         if self.hpa_scale_to_zero and self.autoscaling_strategy != "HPA":
             raise ValueError("HPA scale-to-zero requires autoscalingStrategy=HPA")
-        if self.async_load and (self.workflow != "validate" or self.backend != "container"):
-            raise ValueError("async load requires the validate workflow with the container backend")
+        if self.async_load and (
+            self.workflow != "validate" or self.backend != "container"
+        ):
+            raise ValueError(
+                "async load requires the validate workflow with the container backend"
+            )
         if self.persistent_recovery and self.workflow != "validate":
-            raise ValueError("persistentRecovery is only supported by the validate workflow")
+            raise ValueError(
+                "persistentRecovery is only supported by the validate workflow"
+            )
         if self.workflow == "release" and self.release is None:
             raise ValueError("release workflow requires a 'release' config block")
         return self

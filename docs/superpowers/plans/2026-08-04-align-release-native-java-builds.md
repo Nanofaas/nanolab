@@ -76,7 +76,10 @@ def test_java_function_native_cells_derive_task_and_binary_from_the_family() -> 
         native = cell.target.native_build
         if cell.flavor != "native" or native is None:
             continue
-        if not cell.target.name.startswith("java-") or cell.target.name == "java-warm-echo":
+        if (
+            not cell.target.name.startswith("java-")
+            or cell.target.name == "java-warm-echo"
+        ):
             continue
         family = cell.target.name.removeprefix("java-")
         assert native.task == f":functions:java:{family}:nativeCompile"
@@ -156,35 +159,38 @@ class ImageTarget:
 In `ImageCell`, replace the `gradle_command` property with these three, and leave `platform` and `prerequisite_command` untouched for now:
 
 ```python
-    @property
-    def native_build(self) -> NativeBuild | None:
-        """The native contract for this cell, or None if it is not a Java native cell."""
-        if self.flavor != "native":
-            return None
-        return self.target.native_build
+@property
+def native_build(self) -> NativeBuild | None:
+    """The native contract for this cell, or None if it is not a Java native cell."""
+    if self.flavor != "native":
+        return None
+    return self.target.native_build
 
-    @property
-    def dockerfile(self) -> Path:
-        native = self.native_build
-        return NATIVE_JAVA_DOCKERFILE if native is not None else self.target.dockerfile
 
-    @property
-    def context(self) -> Path:
-        # The shared native Dockerfile does `COPY . .` — it only builds from the
-        # repository root, never from the target's own directory.
-        native = self.native_build
-        return Path(".") if native is not None else self.target.context
+@property
+def dockerfile(self) -> Path:
+    native = self.native_build
+    return NATIVE_JAVA_DOCKERFILE if native is not None else self.target.dockerfile
 
-    @property
-    def build_args(self) -> dict[str, str]:
-        native = self.native_build
-        if native is None:
-            return {}
-        return {
-            "NATIVE_TASK": native.task,
-            "NATIVE_BINARY": native.binary.as_posix(),
-            "GRADLE_ARGS": " ".join(native.gradle_args),
-        }
+
+@property
+def context(self) -> Path:
+    # The shared native Dockerfile does `COPY . .` — it only builds from the
+    # repository root, never from the target's own directory.
+    native = self.native_build
+    return Path(".") if native is not None else self.target.context
+
+
+@property
+def build_args(self) -> dict[str, str]:
+    native = self.native_build
+    if native is None:
+        return {}
+    return {
+        "NATIVE_TASK": native.task,
+        "NATIVE_BINARY": native.binary.as_posix(),
+        "GRADLE_ARGS": " ".join(native.gradle_args),
+    }
 ```
 
 `GRADLE_ARGS` is emitted even when empty, matching the script, which always passes the arg.
@@ -194,54 +200,58 @@ In `ImageCell`, replace the `gradle_command` property with these three, and leav
 In `_all_targets`, replace the control-plane and warm-echo native metadata:
 
 ```python
-        ImageTarget(
-            name="control-plane",
-            flavors=("jvm", "native"),
-            dockerfile=Path("platform/control-plane/Dockerfile"),
-            context=Path("platform/control-plane"),
-            native_build=NativeBuild(
-                task=":control-plane:nativeCompile",
-                binary=Path("platform/control-plane/build/native/nativeCompile/control-plane"),
-                gradle_args=("-PcontrolPlaneModules=all",),
+(
+    ImageTarget(
+        name="control-plane",
+        flavors=("jvm", "native"),
+        dockerfile=Path("platform/control-plane/Dockerfile"),
+        context=Path("platform/control-plane"),
+        native_build=NativeBuild(
+            task=":control-plane:nativeCompile",
+            binary=Path(
+                "platform/control-plane/build/native/nativeCompile/control-plane"
             ),
-            jvm_prerequisite_arguments=(
-                ":control-plane:bootJar",
-                "-PcontrolPlaneModules=all",
-            ),
+            gradle_args=("-PcontrolPlaneModules=all",),
         ),
-        ImageTarget(
-            name="java-warm-echo",
-            flavors=("jvm", "native"),
-            dockerfile=Path("services/java/warm-echo/Dockerfile"),
-            context=Path("services/java/warm-echo"),
-            native_build=NativeBuild(
-                task=":services:java:warm-echo:nativeCompile",
-                binary=Path("services/java/warm-echo/build/native/nativeCompile/warm-echo"),
-            ),
-            jvm_prerequisite_arguments=(":services:java:warm-echo:bootJar",),
+        jvm_prerequisite_arguments=(
+            ":control-plane:bootJar",
+            "-PcontrolPlaneModules=all",
         ),
+    ),
+)
+(
+    ImageTarget(
+        name="java-warm-echo",
+        flavors=("jvm", "native"),
+        dockerfile=Path("services/java/warm-echo/Dockerfile"),
+        context=Path("services/java/warm-echo"),
+        native_build=NativeBuild(
+            task=":services:java:warm-echo:nativeCompile",
+            binary=Path("services/java/warm-echo/build/native/nativeCompile/warm-echo"),
+        ),
+        jvm_prerequisite_arguments=(":services:java:warm-echo:bootJar",),
+    ),
+)
 ```
 
 In `_function_target`, replace the `function.runtime == "java"` branch's native metadata:
 
 ```python
-    if function.runtime == "java":
-        return ImageTarget(
-            name=name,
-            flavors=("jvm", "native"),
-            dockerfile=source_dir / "Dockerfile",
-            context=source_dir,
-            native_build=NativeBuild(
-                task=f":functions:java:{function.family}:nativeCompile",
-                binary=Path(
-                    f"functions/java/{function.family}"
-                    f"/build/native/nativeCompile/{function.family}"
-                ),
+if function.runtime == "java":
+    return ImageTarget(
+        name=name,
+        flavors=("jvm", "native"),
+        dockerfile=source_dir / "Dockerfile",
+        context=source_dir,
+        native_build=NativeBuild(
+            task=f":functions:java:{function.family}:nativeCompile",
+            binary=Path(
+                f"functions/java/{function.family}"
+                f"/build/native/nativeCompile/{function.family}"
             ),
-            jvm_prerequisite_arguments=(
-                f":functions:java:{function.family}:bootJar",
-            ),
-        )
+        ),
+        jvm_prerequisite_arguments=(f":functions:java:{function.family}:bootJar",),
+    )
 ```
 
 Leave the `java-lite` branch alone: it has no `native_build`, and its own multi-stage Dockerfile with a root context already works.
@@ -427,7 +437,9 @@ def test_amd64_commands_contain_no_gradle_image_builds() -> None:
         remote_source_dir="/remote/source",
     )
 
-    assert not any(spec.task_id.startswith("release.images.native.") for spec in commands)
+    assert not any(
+        spec.task_id.startswith("release.images.native.") for spec in commands
+    )
     assert not any("bootBuildImage" in " ".join(spec.argv) for spec in commands)
     assert any(spec.task_id == "release.images.bake.amd64" for spec in commands)
 ```
@@ -445,7 +457,9 @@ def test_arm64_commands_contain_no_gradle_image_builds() -> None:
         registry_upstream="203.0.113.10",
     )
 
-    assert not any(spec.task_id.startswith("release.arm64.native.") for spec in commands)
+    assert not any(
+        spec.task_id.startswith("release.arm64.native.") for spec in commands
+    )
     assert not any("dashaun/builder" in " ".join(spec.argv) for spec in commands)
     assert any(spec.task_id == "release.images.bake.arm64" for spec in commands)
 ```
@@ -461,7 +475,9 @@ def test_arm64_plan_covers_the_live_matrix_without_loss() -> None:
 
     assert plan.cells
     assert {cell.architecture for cell in plan.cells} == {"arm64"}
-    assert len({(cell.target.name, cell.flavor) for cell in plan.cells}) == len(plan.cells)
+    assert len({(cell.target.name, cell.flavor) for cell in plan.cells}) == len(
+        plan.cells
+    )
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**

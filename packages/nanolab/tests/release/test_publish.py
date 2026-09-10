@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
 from nanolab.release import publish
 from nanolab.release.model import ArtifactEvidence
-
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 LOCAL_REGISTRY = "localhost:5000/nanofaas"
@@ -30,7 +29,9 @@ def _source_digest(reference: str) -> str:
 
 def _evidence(plan: publish.PublishPlan) -> tuple[ArtifactEvidence, ...]:
     return tuple(
-        ArtifactEvidence("remote", f"docker://{copy.source}", _source_digest(copy.source))
+        ArtifactEvidence(
+            "remote", f"docker://{copy.source}", _source_digest(copy.source)
+        )
         for copy in plan.copies
     )
 
@@ -69,7 +70,10 @@ class _PublishProvider:
     ) -> _Result:
         del request, env, remote_dir, dry_run
         self.commands.append(argv)
-        if self.fail_on_prefix is not None and argv[: len(self.fail_on_prefix)] == self.fail_on_prefix:
+        if (
+            self.fail_on_prefix is not None
+            and argv[: len(self.fail_on_prefix)] == self.fail_on_prefix
+        ):
             return _Result(return_code=1, stderr=self.failure_stderr)
         if argv[:2] == ("skopeo", "copy"):
             source = argv[-2].removeprefix("docker://")
@@ -106,7 +110,8 @@ class _PublishProvider:
             else:
                 payload = ",".join(sorted(sources))
                 self.ghcr_digests[tag] = (
-                    "sha256:" + hashlib.sha256(f"manifest:{payload}".encode()).hexdigest()
+                    "sha256:"
+                    + hashlib.sha256(f"manifest:{payload}".encode()).hexdigest()
                 )
             return _Result()
         if argv[:4] == ("docker", "buildx", "imagetools", "inspect"):
@@ -117,8 +122,7 @@ class _PublishProvider:
                 reference, ("linux/amd64", "linux/arm64")
             )
             lines = [f"Name:      {reference}", "Manifests:"]
-            for platform in platforms:
-                lines.append(f"  Platform:    {platform}")
+            lines.extend(f"  Platform:    {platform}" for platform in platforms)
             return _Result(stdout="\n".join(lines) + "\n")
         return _Result()
 
@@ -184,7 +188,9 @@ def test_control_plane_and_watchdog_follow_the_tag_policy() -> None:
     assert control_plane_alias.reference == f"{ghcr}/control-plane:{VERSION}"
     assert control_plane_alias.source == f"{ghcr}/control-plane:{VERSION}-native"
 
-    watchdog_copies = {copy.destination for copy in plan.copies if copy.target == "watchdog"}
+    watchdog_copies = {
+        copy.destination for copy in plan.copies if copy.target == "watchdog"
+    }
     assert watchdog_copies == {
         f"{ghcr}/watchdog:{VERSION}-amd64",
         f"{ghcr}/watchdog:{VERSION}-arm64",
@@ -231,7 +237,8 @@ def test_architecture_upload_copies_the_whole_index_not_one_instance() -> None:
     digests = publish.require_publication_evidence(plan, _evidence(plan))
     provider = _PublishProvider(
         index_instances={
-            digest: "sha256:" + hashlib.sha256(f"instance:{digest}".encode()).hexdigest()
+            digest: "sha256:"
+            + hashlib.sha256(f"instance:{digest}".encode()).hexdigest()
             for digest in digests.values()
         }
     )
@@ -244,7 +251,9 @@ def test_architecture_upload_copies_the_whole_index_not_one_instance() -> None:
         authfile="/tmp/creds/docker/config.json",
     )
 
-    assert [item.digest for item in evidence] == [digests[copy.source] for copy in plan.copies]
+    assert [item.digest for item in evidence] == [
+        digests[copy.source] for copy in plan.copies
+    ]
 
 
 def test_architecture_copies_preserve_digests_and_use_the_authfile() -> None:
@@ -260,7 +269,9 @@ def test_architecture_copies_preserve_digests_and_use_the_authfile() -> None:
         authfile="/tmp/creds/docker/config.json",
     )
 
-    copies = [command for command in provider.commands if command[:2] == ("skopeo", "copy")]
+    copies = [
+        command for command in provider.commands if command[:2] == ("skopeo", "copy")
+    ]
     assert len(copies) == len(plan.copies)
     for command in copies:
         assert "--preserve-digests" in command
@@ -395,7 +406,9 @@ def test_attestation_manifest_rows_are_tolerated_but_missing_arm64_is_not() -> N
 
 def test_manifest_failure_prevents_every_alias() -> None:
     plan = _plan()
-    provider = _PublishProvider(fail_on_prefix=("docker", "buildx", "imagetools", "create"))
+    provider = _PublishProvider(
+        fail_on_prefix=("docker", "buildx", "imagetools", "create")
+    )
     architecture_digests = _published(provider, plan)
 
     with pytest.raises(RuntimeError):
@@ -446,7 +459,10 @@ def test_aliases_are_created_last_and_verified_against_their_manifest() -> None:
 
     assert len(evidence) == len(plan.aliases)
     for alias in plan.aliases:
-        assert provider.ghcr_digests[alias.reference] == provider.ghcr_digests[alias.source]
+        assert (
+            provider.ghcr_digests[alias.reference]
+            == provider.ghcr_digests[alias.source]
+        )
 
 
 def test_alias_digest_mismatch_fails_the_release() -> None:

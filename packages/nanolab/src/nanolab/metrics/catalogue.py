@@ -41,11 +41,19 @@ def _fn(function_name: str) -> str:
 
 
 def core_queries(function_name: str) -> Queries:
-    """What the control plane publishes on its own, with no module loaded."""
+    """Build the queries for what the control plane publishes on its own.
+
+    The base meters: asked of every run, whatever modules the control plane was
+    built with.
+    """
     function = _fn(function_name)
     return (
-        PrometheusQuery("function_dispatch_total", f"function_dispatch_total{function}", True),
-        PrometheusQuery("function_success_total", f"function_success_total{function}", True),
+        PrometheusQuery(
+            "function_dispatch_total", f"function_dispatch_total{function}", True
+        ),
+        PrometheusQuery(
+            "function_success_total", f"function_success_total{function}", True
+        ),
         PrometheusQuery("function_error_total", f"function_error_total{function}"),
         PrometheusQuery("function_retry_total", f"function_retry_total{function}"),
         PrometheusQuery("function_timeout_total", f"function_timeout_total{function}"),
@@ -100,13 +108,17 @@ def core_queries(function_name: str) -> Queries:
         # esecuzioni ancora in volo, che nessun tetto limita. Chiedere solo la
         # prima misurerebbe il tetto e non la memoria: se sotto il tetto la
         # memoria non scende, e' questa serie a dire perche'.
-        PrometheusQuery("execution_in_flight_records", "execution_in_flight_records", True),
+        PrometheusQuery(
+            "execution_in_flight_records", "execution_in_flight_records", True
+        ),
         # Keys held. Their lifetime is derived from the execution retention, so this is
         # the only reading that says what that derivation costs: at 2x with 5% keyed
         # arrivals a run files roughly 19,000, and whether they are released on
         # schedule is otherwise invisible until the heap says so.
         PrometheusQuery("idempotency_keys_held", "idempotency_keys_held"),
-        PrometheusQuery("function_cold_start_total", f"function_cold_start_total{function}"),
+        PrometheusQuery(
+            "function_cold_start_total", f"function_cold_start_total{function}"
+        ),
         # Not per-function: both are process-wide, and both answer the question
         # the retention rewrite exists for. The store used to be declared in time
         # and unbounded in space, which under sustained load produced a live set
@@ -114,7 +126,9 @@ def core_queries(function_name: str) -> Queries:
         # holds is the reading that says whether that is still true. The key
         # count belongs beside it: a key outliving its record duplicates an
         # execution, and a key store that empties early does the same.
-        PrometheusQuery("execution_store_size", f"execution_store_size{CONTROL_PLANE_SELECTOR}"),
+        PrometheusQuery(
+            "execution_store_size", f"execution_store_size{CONTROL_PLANE_SELECTOR}"
+        ),
         PrometheusQuery(
             "execution_in_flight_records",
             f"execution_in_flight_records{CONTROL_PLANE_SELECTOR}",
@@ -122,9 +136,13 @@ def core_queries(function_name: str) -> Queries:
         PrometheusQuery(
             "idempotency_keys_held", f"idempotency_keys_held{CONTROL_PLANE_SELECTOR}"
         ),
-        PrometheusQuery("function_warm_start_total", f"function_warm_start_total{function}"),
         PrometheusQuery(
-            "function_latency_count", f"function_latency_ms_seconds_count{function}", True
+            "function_warm_start_total", f"function_warm_start_total{function}"
+        ),
+        PrometheusQuery(
+            "function_latency_count",
+            f"function_latency_ms_seconds_count{function}",
+            True,
         ),
         PrometheusQuery(
             "function_latency_sum", f"function_latency_ms_seconds_sum{function}", True
@@ -134,10 +152,12 @@ def core_queries(function_name: str) -> Queries:
             f"function_init_duration_ms_seconds_count{function}",
         ),
         PrometheusQuery(
-            "function_init_duration_sum", f"function_init_duration_ms_seconds_sum{function}"
+            "function_init_duration_sum",
+            f"function_init_duration_ms_seconds_sum{function}",
         ),
         PrometheusQuery(
-            "function_queue_wait_count", f"function_queue_wait_ms_seconds_count{function}"
+            "function_queue_wait_count",
+            f"function_queue_wait_ms_seconds_count{function}",
         ),
         PrometheusQuery(
             "function_queue_wait_sum", f"function_queue_wait_ms_seconds_sum{function}"
@@ -158,7 +178,8 @@ def core_queries(function_name: str) -> Queries:
             f"(rate(function_e2e_latency_ms_seconds_bucket{function}[30s]))) * 1000",
         ),
         PrometheusQuery(
-            "function_e2e_latency_count", f"function_e2e_latency_ms_seconds_count{function}"
+            "function_e2e_latency_count",
+            f"function_e2e_latency_ms_seconds_count{function}",
         ),
         PrometheusQuery(
             "function_e2e_latency_sum", f"function_e2e_latency_ms_seconds_sum{function}"
@@ -167,7 +188,7 @@ def core_queries(function_name: str) -> Queries:
 
 
 def runtime_queries(_function_name: str, *, heap_required: bool = True) -> Queries:
-    """The process itself, published by Spring rather than by nanoFaaS.
+    """Build the queries for the process itself, published by Spring not nanoFaaS.
 
     `heap_required` is a property of the run, not of the metric: measured here,
     the JVM and both serial-collector native builds publish
@@ -280,25 +301,37 @@ def runtime_queries(_function_name: str, *, heap_required: bool = True) -> Queri
         PrometheusQuery(
             "jvm_gc_young_count",
             "jvm_gc_collection_count_total"
-            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation|young generation scavenger"}'),
+            + CONTROL_PLANE_SELECTOR.replace(
+                "}",
+                ',gc=~"Copy|PS Scavenge|G1 Young Generation'
+                '|young generation scavenger"}',
+            ),
         ),
         PrometheusQuery(
             "jvm_gc_full_count",
             "jvm_gc_collection_count_total"
             + CONTROL_PLANE_SELECTOR.replace(
-                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC|complete scavenger"}'
+                "}",
+                ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation'
+                '|G1 Concurrent GC|complete scavenger"}',
             ),
         ),
         PrometheusQuery(
             "jvm_gc_young_time",
             "jvm_gc_collection_time_seconds_total"
-            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation|young generation scavenger"}'),
+            + CONTROL_PLANE_SELECTOR.replace(
+                "}",
+                ',gc=~"Copy|PS Scavenge|G1 Young Generation'
+                '|young generation scavenger"}',
+            ),
         ),
         PrometheusQuery(
             "jvm_gc_full_time",
             "jvm_gc_collection_time_seconds_total"
             + CONTROL_PLANE_SELECTOR.replace(
-                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC|complete scavenger"}'
+                "}",
+                ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation'
+                '|G1 Concurrent GC|complete scavenger"}',
             ),
         ),
         # What happens to a request before the application sees it. At the peak of
@@ -540,7 +573,7 @@ def _async_queue_queries(function_name: str) -> Queries:
 
 
 def _sync_queue_queries(function_name: str) -> Queries:
-    """The sync queue's own counters, which nothing else republishes.
+    """Collect the sync queue's own counters, which nothing else republishes.
 
     Absent from the harness until a comparison run reported zero rejections
     against 29,555 real ones: the platform's `function_queue_rejected_total`
@@ -550,18 +583,26 @@ def _sync_queue_queries(function_name: str) -> Queries:
     function = _fn(function_name)
     return (
         PrometheusQuery("sync_queue_depth", f"sync_queue_depth{function}"),
-        PrometheusQuery("sync_queue_admitted_total", f"sync_queue_admitted_total{function}"),
-        PrometheusQuery("sync_queue_rejected_total", f"sync_queue_rejected_total{function}"),
-        PrometheusQuery("sync_queue_timedout_total", f"sync_queue_timedout_total{function}"),
+        PrometheusQuery(
+            "sync_queue_admitted_total", f"sync_queue_admitted_total{function}"
+        ),
+        PrometheusQuery(
+            "sync_queue_rejected_total", f"sync_queue_rejected_total{function}"
+        ),
+        PrometheusQuery(
+            "sync_queue_timedout_total", f"sync_queue_timedout_total{function}"
+        ),
         PrometheusQuery(
             "sync_queue_wait_count", f"sync_queue_wait_seconds_count{function}"
         ),
-        PrometheusQuery("sync_queue_wait_sum", f"sync_queue_wait_seconds_sum{function}"),
+        PrometheusQuery(
+            "sync_queue_wait_sum", f"sync_queue_wait_seconds_sum{function}"
+        ),
     )
 
 
 def _autoscaler_queries(function_name: str) -> Queries:
-    """What the internal scaler decided, which no other source records."""
+    """Collect what the internal scaler decided, which no other source records."""
     function = _fn(function_name)
     return (
         PrometheusQuery(
@@ -572,8 +613,12 @@ def _autoscaler_queries(function_name: str) -> Queries:
             "internal_scaling_desired_replicas",
             f"function_scaling_desired_replicas{function}",
         ),
-        PrometheusQuery("internal_scaling_limited", f"function_scaling_limited{function}"),
-        PrometheusQuery("internal_scaling_ratio_milli", f"function_scaling_ratio_milli{function}"),
+        PrometheusQuery(
+            "internal_scaling_limited", f"function_scaling_limited{function}"
+        ),
+        PrometheusQuery(
+            "internal_scaling_ratio_milli", f"function_scaling_ratio_milli{function}"
+        ),
     )
 
 
@@ -601,7 +646,7 @@ MODULES_WITHOUT_QUERIES: frozenset[str] = frozenset(
 
 
 def hpa_queries(function_name: str) -> Queries:
-    """The HPA controller's own verdict, published by kube-state-metrics.
+    """Collect the HPA controller's own verdict, published by kube-state-metrics.
 
     Labelled by object name, not by the `function` label the control plane's
     series carry; the HPA is named after the deployment.
@@ -618,12 +663,12 @@ def hpa_queries(function_name: str) -> Queries:
         ),
         PrometheusQuery(
             "hpa_scaling_active",
-            f'kube_horizontalpodautoscaler_status_condition{{horizontalpodautoscaler='
+            f"kube_horizontalpodautoscaler_status_condition{{horizontalpodautoscaler="
             f'{json.dumps(f"fn-{function_name}")},condition="ScalingActive",status="true"}}',
         ),
         PrometheusQuery(
             "hpa_scaling_limited",
-            f'kube_horizontalpodautoscaler_status_condition{{horizontalpodautoscaler='
+            f"kube_horizontalpodautoscaler_status_condition{{horizontalpodautoscaler="
             f'{json.dumps(f"fn-{function_name}")},condition="ScalingLimited",status="true"}}',
         ),
     )
@@ -657,9 +702,15 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     "jvm_gc_young_time": _SUBSTRATE_G1_NO_GC_MXBEAN,
     "jvm_gc_full_count": _SUBSTRATE_G1_NO_GC_MXBEAN,
     "jvm_gc_full_time": _SUBSTRATE_G1_NO_GC_MXBEAN,
-    "jvm_gc_pause_count": "Micrometer's notification binder does not exist on a native image",
-    "jvm_gc_pause_sum": "Micrometer's notification binder does not exist on a native image",
-    "jvm_gc_time_fraction": "polled binder, absent when the collector publishes no MXBean",
+    "jvm_gc_pause_count": (
+        "Micrometer's notification binder does not exist on a native image"
+    ),
+    "jvm_gc_pause_sum": (
+        "Micrometer's notification binder does not exist on a native image"
+    ),
+    "jvm_gc_time_fraction": (
+        "polled binder, absent when the collector publishes no MXBean"
+    ),
     # Spring registers http_server_requests per observed outcome, so the
     # status="429" series does not exist until something has actually been
     # refused. Requiring it made the run fail precisely when the control plane
@@ -670,11 +721,21 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     # Absence here is a reading: nobody got a 429. It is not a blind spot either,
     # because http_server_ok_count stays required - if the whole
     # http_server_requests family were missing, that is what would fail.
-    "http_server_rejected_count": "no 429 was served, so Spring never created the series",
-    "http_server_rejected_sum": "no 429 was served, so Spring never created the series",
-    "gc_metrics_source_mxbean": "absent IS the reading: the build has no usable collector MXBean",
-    "jfr_vm_operation_count": "the JFR stream is opened only where the MXBeans cannot answer",
-    "jfr_gc_operation_time": "no JFR stream, or SubstrateVM names its GC operation otherwise",
+    "http_server_rejected_count": (
+        "no 429 was served, so Spring never created the series"
+    ),
+    "http_server_rejected_sum": (
+        "no 429 was served, so Spring never created the series"
+    ),
+    "gc_metrics_source_mxbean": (
+        "absent IS the reading: the build has no usable collector MXBean"
+    ),
+    "jfr_vm_operation_count": (
+        "the JFR stream is opened only where the MXBeans cannot answer"
+    ),
+    "jfr_gc_operation_time": (
+        "no JFR stream, or SubstrateVM names its GC operation otherwise"
+    ),
     # jvm_heap_used_bytes is governed by the run instead, through
     # runtime_queries(heap_required=...): absent means the build's collector keeps
     # no heap pools, which is what G1 does under SubstrateVM. process_cpu_usage is
@@ -744,7 +805,7 @@ def queries_for(
 
 
 def neighbour_queries(neighbour: str, *, modules: Iterable[str]) -> Queries:
-    """The same queue readings for the second function of a two-function run.
+    """Collect the same queue readings for the second function of a two-function run.
 
     Suffixed so the primary series stay exactly where every existing reader looks
     for them. Without these a two-function run records one side of a question
@@ -752,7 +813,9 @@ def neighbour_queries(neighbour: str, *, modules: Iterable[str]) -> Queries:
     """
     function = _fn(neighbour)
     queries = [
-        PrometheusQuery(f"function_dispatch_total@{neighbour}", f"function_dispatch_total{function}"),
+        PrometheusQuery(
+            f"function_dispatch_total@{neighbour}", f"function_dispatch_total{function}"
+        ),
         PrometheusQuery(
             f"function_queue_rejected_total@{neighbour}",
             f"function_queue_rejected_total{function}",
@@ -808,7 +871,7 @@ def neighbour_queries(neighbour: str, *, modules: Iterable[str]) -> Queries:
 
 
 def container_queries(function_names: Iterable[str]) -> Queries:
-    """What each container cost, from cAdvisor, for every pod in the run.
+    """Collect what each container cost, from cAdvisor, for every pod in the run.
 
     Enabling the scrape in the chart is not enough — the snapshot only records
     the queries it is given, and the default list asks the control plane's own

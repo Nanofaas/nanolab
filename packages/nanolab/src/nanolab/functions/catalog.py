@@ -1,3 +1,9 @@
+"""The catalogue of nanoFaaS example functions and the presets over them.
+
+Functions are discovered from a checkout's ``functions/`` tree and described by
+their ``function.yaml`` manifests, with fixture entries appended from here.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,14 +12,15 @@ from typing import cast
 
 import yaml
 
-from nanolab.tasks.deployment import LOCAL_REGISTRY
-
 from nanolab.core.models import FunctionRuntimeKind
+from nanolab.tasks.deployment import LOCAL_REGISTRY
 from nanolab.workspace.paths import default_tool_paths
 
 
 @dataclass(frozen=True)
 class FunctionDefinition:
+    """One example function: its catalogue key, family, runtime and default image."""
+
     key: str
     family: str
     runtime: FunctionRuntimeKind
@@ -25,6 +32,8 @@ class FunctionDefinition:
 
 @dataclass(frozen=True)
 class FunctionPreset:
+    """A named selection whose member functions have already been resolved."""
+
     name: str
     description: str
     functions: tuple[FunctionDefinition, ...]
@@ -32,6 +41,8 @@ class FunctionPreset:
 
 @dataclass(frozen=True)
 class FunctionPresetSpec:
+    """A named selection of functions, stored as catalogue keys on disk."""
+
     name: str
     description: str
     keys: tuple[str, ...]
@@ -102,7 +113,9 @@ def _runtime_from_dir(runtime_dir: str, family: str) -> FunctionRuntimeKind:
     try:
         return _RUNTIME_DIR_TO_CATALOG_RUNTIME[runtime_dir]
     except KeyError as exc:
-        raise ValueError(f"Unsupported function runtime directory: {runtime_dir}") from exc
+        raise ValueError(
+            f"Unsupported function runtime directory: {runtime_dir}"
+        ) from exc
 
 
 def _family_from_dir(function_dir_name: str, runtime: FunctionRuntimeKind) -> str:
@@ -149,9 +162,8 @@ def _discover_example_function(
 
     fallback_runtime = _runtime_from_dir(runtime_dir, example_dir.name)
     runtime = _catalog_runtime(catalog, manifest_path) or fallback_runtime
-    family = (
-        _catalog_string(catalog, "family", manifest_path)
-        or _family_from_dir(example_dir.name, runtime)
+    family = _catalog_string(catalog, "family", manifest_path) or _family_from_dir(
+        example_dir.name, runtime
     )
     key = f"{family}-{runtime}"
 
@@ -164,9 +176,7 @@ def _discover_example_function(
         example_dir=example_dir,
         default_image=_catalog_string(catalog, "defaultImage", manifest_path)
         or _default_image(runtime_dir, runtime, family),
-        default_payload_file=_catalog_string(
-            catalog, "defaultPayload", manifest_path
-        )
+        default_payload_file=_catalog_string(catalog, "defaultPayload", manifest_path)
         or _default_payload(payloads_root, family),
     )
 
@@ -181,12 +191,16 @@ def _discover_example_functions(
     discovered: list[FunctionDefinition] = []
     seen: set[str] = set()
 
-    for runtime_root in sorted(path for path in examples_root.iterdir() if path.is_dir()):
+    for runtime_root in sorted(
+        path for path in examples_root.iterdir() if path.is_dir()
+    ):
         runtime_dir = runtime_root.name
         if runtime_dir in _IGNORED_DISCOVERY_DIRS:
             continue
 
-        for example_dir in sorted(path for path in runtime_root.iterdir() if path.is_dir()):
+        for example_dir in sorted(
+            path for path in runtime_root.iterdir() if path.is_dir()
+        ):
             definition = _discover_example_function(
                 runtime_dir, example_dir, payloads_root
             )
@@ -240,12 +254,17 @@ def _definition_from_index(
 
 
 def list_functions(root: Path | None = None) -> list[FunctionDefinition]:
+    """Return every known function, catalogued entries before fixture entries."""
     return list(_load_functions(root))
 
 
 def resolve_function_definition(
     key: str, root: Path | None = None
 ) -> FunctionDefinition:
+    """Return the function registered under ``key``.
+
+    Raises ValueError when no function has that key.
+    """
     return _definition_from_index(_function_index(root), key)
 
 
@@ -332,10 +351,15 @@ PRESET_SPEC_INDEX = {spec.name: spec for spec in PRESET_SPECS}
 
 
 def list_function_presets() -> list[FunctionPreset]:
+    """Return every preset, each with its member functions resolved."""
     return [_resolve_preset(spec) for spec in PRESET_SPECS]
 
 
 def resolve_function_preset(name: str) -> FunctionPreset:
+    """Return the preset registered under ``name``, its functions resolved.
+
+    Raises ValueError when no preset has that name.
+    """
     try:
         return _resolve_preset(PRESET_SPEC_INDEX[name])
     except KeyError as exc:

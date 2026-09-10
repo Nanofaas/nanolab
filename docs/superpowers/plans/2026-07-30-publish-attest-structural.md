@@ -55,10 +55,15 @@ steps_list.append(
     CommandTask(
         title="Write registry digest evidence",
         argv=(
-            "sh", "-c",
+            "sh",
+            "-c",
             f"cat > {digest_file} << 'DIGESTS_EOF'\n"
-            + json.dumps({cell.image: f"$({skopeo_inspect_cmd(cell.image)})"
-                          for cell in plan.cells})
+            + json.dumps(
+                {
+                    cell.image: f"$({skopeo_inspect_cmd(cell.image)})"
+                    for cell in plan.cells
+                }
+            )
             + "\nDIGESTS_EOF",
         ),
         executor=executor,
@@ -135,7 +140,14 @@ def publish_architectures_composite(
     if not steps:
         return Steps(
             title=title,
-            steps=(CommandTask(title="No images to publish", argv=("true",), executor=executor, role=role),),
+            steps=(
+                CommandTask(
+                    title="No images to publish",
+                    argv=("true",),
+                    executor=executor,
+                    role=role,
+                ),
+            ),
         )
     return Steps(title=title, steps=tuple(steps))
 ```
@@ -145,9 +157,11 @@ def publish_architectures_composite(
 ```python
 def test_copies_each_cell_without_digest_pinning(self) -> None:
     executor = RecordingExecutor()
-    plan = _FakePublishPlan(copies=(
-        _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
-    ))
+    plan = _FakePublishPlan(
+        copies=(
+            _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
+        )
+    )
     composite = publish_architectures_composite(plan, executor, "host", "/auth.json")
     workflow = Workflow("publish-arch")
     workflow.add(composite)
@@ -218,7 +232,14 @@ When `pub_plan.copies` is empty (no evidence yet), `attest_composite` gets an em
 if not images:
     return Steps(
         title=title,
-        steps=(CommandTask(title="No images to attest", argv=("true",), executor=executor, role=role),),
+        steps=(
+            CommandTask(
+                title="No images to attest",
+                argv=("true",),
+                executor=executor,
+                role=role,
+            ),
+        ),
     )
 ```
 
@@ -235,15 +256,21 @@ if not images:
 
 ```python
 pub_arch = publish_architectures_composite(
-    pub_plan, executor=executor, role="stack",
+    pub_plan,
+    executor=executor,
+    role="stack",
     authfile="/tmp/ghcr-auth/config.json",
 )
 pub_manifests = publish_manifests_composite(
-    pub_plan, executor=executor, role="stack",
+    pub_plan,
+    executor=executor,
+    role="stack",
     docker_config="/tmp/ghcr-auth",
 )
 pub_aliases = publish_aliases_composite(
-    pub_plan, executor=executor, role="stack",
+    pub_plan,
+    executor=executor,
+    role="stack",
     docker_config="/tmp/ghcr-auth",
 )
 ```

@@ -1,6 +1,6 @@
-from __future__ import annotations
+"""The offload workflow: one hop from an edge control plane to a cloud one."""
 
-from sonata_tasks.execution.models import CommandOptions
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -8,16 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from sonata_engine import Resource, Steps, Workflow
+from sonata_tasks.command import CommandTask
+from sonata_tasks.docker import DockerPushTask
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
     RoleBoundCommandTaskExecutor,
 )
-
-from sonata_tasks.command import CommandTask
-from sonata_tasks.docker import DockerPushTask
-from nanolab.tasks.function import function_resource
+from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.gradle import GradleTask
+
+from nanolab.tasks.function import function_resource
 from nanolab.tasks.http_function import (
     HttpFunctionDeleteTask,
     HttpFunctionInvokeTask,
@@ -43,7 +44,9 @@ class OffloadFunction:
     queue_size: int = 20
     max_retries: int = 3
 
-    def _manifest(self, *, execution_mode: str, offload: dict[str, Any] | None) -> FunctionManifest:
+    def _manifest(
+        self, *, execution_mode: str, offload: dict[str, Any] | None
+    ) -> FunctionManifest:
         return FunctionManifest(
             name=self.name,
             image=self.image,
@@ -56,11 +59,11 @@ class OffloadFunction:
         )
 
     def cloud_manifest(self) -> FunctionManifest:
-        """The cloud runs the real thing, through the container-local backend."""
+        """Describe the cloud copy: a DEPLOYMENT run by the container-local backend."""
         return self._manifest(execution_mode="DEPLOYMENT", offload=None)
 
     def edge_manifest(self) -> FunctionManifest:
-        """The edge holds no implementation: every invocation must be proxied."""
+        """Describe the edge copy: a LOCAL function whose every invocation proxies."""
         return self._manifest(execution_mode="LOCAL", offload={"mode": "always"})
 
 
@@ -80,6 +83,7 @@ class OffloadWorkflowRequest:
     modules: tuple[str, ...] = ("offload", "container-deployment-provider")
 
     def __post_init__(self) -> None:
+        """Reject a request with no functions to offload."""
         if not self.functions:
             raise ValueError("offload workflow requires at least one function")
 

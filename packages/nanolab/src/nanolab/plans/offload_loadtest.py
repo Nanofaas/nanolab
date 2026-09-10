@@ -1,43 +1,50 @@
+"""Build the offload-load-test workflow: an edge cluster that sheds to a cloud.
+
+Two control planes run at once — a stack-role edge with a one-slot function
+queue, and a cloud-role cluster that absorbs the overflow — driven by the
+`offload-mixed` k6 script. The run ends by checking that every request the edge
+reports offloading also arrives and succeeds on the cloud, so the summary is a
+conservation proof rather than a throughput number.
+"""
+
 from __future__ import annotations
 
-from sonata_tasks.execution.models import CommandOptions
-
-from dataclasses import dataclass, replace
 import json
-from pathlib import Path
-from typing import Any, cast, Literal
 import urllib.request
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any, Literal, cast
 
 from multipass import MultipassClient
 from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.registry import docker_registry_resource
+from sonata_tasks.vm.multipass import resolve_connection_host
+
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans.diagnostics import collect_control_plane_log
+from nanolab.plans.functions import resolve_function, sonata_function
+from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT
-from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, REGISTRY_CONTAINER_NAME
+from nanolab.tasks.k6 import K6Task
 from nanolab.tasks.loadtest import FetchResultsTask, RunK6Task, SideCommandTask
+from nanolab.tasks.loadtest.models import K6Config
+from nanolab.tasks.loadtest.offload_conservation import evaluate_conservation
+from nanolab.tasks.loadtest.ports import RemoteFileFetcher
+from nanolab.tasks.loadtest.tasks import FetchVmResults
 from nanolab.tasks.offload_loadtest import (
     EvaluateConservationTask,
     OffloadLoadtestRequest,
     build_offload_loadtest_workflow,
 )
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
-from sonata_tasks.registry import docker_registry_resource
-from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
-from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from nanolab.tasks.k6 import K6Task
-from nanolab.tasks.loadtest.models import K6Config
-from nanolab.tasks.loadtest.offload_conservation import evaluate_conservation
-from nanolab.tasks.loadtest.ports import RemoteFileFetcher
-from nanolab.tasks.loadtest.tasks import FetchVmResults
-from nanolab.plans.diagnostics import collect_control_plane_log
 from nanolab.tasks.vm.models import VmRequest
-from sonata_tasks.vm.multipass import resolve_connection_host
-
-from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.scenario import ScenarioConfig
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
-from nanolab.plans.functions import resolve_function, sonata_function
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = CONTROL_PLANE_NODE_PORT
@@ -70,11 +77,23 @@ def _role_host(environment: EnvironmentConfig, role: Role, *, dry_run: bool) -> 
 
 
 def _fetch_text(url: str, *, timeout: float = 10.0) -> str:
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+    # A bare `url` arrives here as a parameter, so the scheme is pinned rather
+    # than assumed: urlopen would otherwise accept file:/ and custom schemes.
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"only http(s) URLs can be fetched, got {url!r}")
+    # Bandit's B310 is a call-site blacklist: it reports every urlopen call
+    # whether or not the argument is guarded, so the nosec stays even with the
+    # check above. Both callers pass this module's actuator Prometheus URLs.
+    with urllib.request.urlopen(url, timeout=timeout) as response:  # nosec B310
         return response.read().decode("utf-8")
 
 
 def format_offload_summary(numbers: dict[str, float]) -> str:
+    """Render the offload summary table shown at the end of a run.
+
+    Each row pairs a metric from `numbers` with a note that appears only when
+    the run offloaded nothing, where the absence itself is the finding.
+    """
     no_offloads = numbers["k6_offloaded_requests"] == 0
     rows = (
         ("k6_offloadable_requests", ""),
@@ -83,7 +102,10 @@ def format_offload_summary(numbers: dict[str, float]) -> str:
             "Edge served all requests." if no_offloads else "",
         ),
         ("k6_offloaded_requests", ""),
-        ("edge_offload_total", "Edge did not offload any requests." if no_offloads else ""),
+        (
+            "edge_offload_total",
+            "Edge did not offload any requests." if no_offloads else "",
+        ),
         (
             "cloud_function_success_offloadable",
             "Cloud did not process any offloaded requests." if no_offloads else "",
@@ -93,7 +115,8 @@ def format_offload_summary(numbers: dict[str, float]) -> str:
     return "\n".join(
         ["Offload load-test summary"]
         + [
-            f"{label + ':':<{width + 2}} {numbers[label]:g}{'  ' + note if note else ''}"
+            f"{label + ':':<{width + 2}} "
+            f"{numbers[label]:g}{'  ' + note if note else ''}"
             for label, note in rows
         ]
     )
@@ -101,6 +124,14 @@ def format_offload_summary(numbers: dict[str, float]) -> str:
 
 @dataclass
 class EvaluateOffloadConservation:
+    """Check one run's conservation and persist the report it produces.
+
+    Reads the k6 summary beside whichever host ran the load, plus both
+    clusters' Prometheus endpoints, and asks `evaluate_conservation` whether
+    the traffic the edge shed actually arrived at the cloud. The verdict is
+    written to `output_path` as `offload-report.json`.
+    """
+
     task_id: str
     title: str
     k6_summary_path: Path
@@ -111,6 +142,12 @@ class EvaluateOffloadConservation:
     output_path: Path
 
     def run(self) -> dict[str, object]:
+        """Evaluate conservation and write the run's offload report.
+
+        A failed check raises `RuntimeError` with the failed assertions joined,
+        rather than returning a verdict: a run whose offloads are unaccounted
+        for must not report a passing summary.
+        """
         k6_summary = json.loads(self.k6_summary_path.read_text(encoding="utf-8"))
         edge_metrics = _fetch_text(self.edge_metrics_url)
         cloud_metrics = _fetch_text(self.cloud_metrics_url)
@@ -134,7 +171,9 @@ class EvaluateOffloadConservation:
             encoding="utf-8",
         )
         if not report.passed:
-            raise RuntimeError("offload conservation check failed: " + "; ".join(report.failures))
+            raise RuntimeError(
+                "offload conservation check failed: " + "; ".join(report.failures)
+            )
         return {"passed": report.passed}
 
 
@@ -237,8 +276,7 @@ def _local_requirements(
         cwd=root,
         requires=(registry,),
     )
-    requirements = (registry, compose)
-    return requirements
+    return (registry, compose)
 
 
 def _loadtest_paths(
@@ -329,7 +367,9 @@ def build_offload_loadtest_plan(
     if config.workflow != "offload-loadtest":
         raise ValueError("offload load-test plan requires an offload-loadtest scenario")
     if len(config.functions) != 2:
-        raise ValueError("offload-loadtest requires exactly two functions: [offloadable, control]")
+        raise ValueError(
+            "offload-loadtest requires exactly two functions: [offloadable, control]"
+        )
     offloadable_key, control_key = config.functions
     root = repo_root or Path.cwd()
     # timeout_ms is also the offload gateway's remote-call budget (edge gives up
@@ -337,7 +377,9 @@ def build_offload_loadtest_plan(
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
         sonata_function(
-            resolve_function(config, offloadable_key, source_root=repo_root, tool_root=tool_root)
+            resolve_function(
+                config, offloadable_key, source_root=repo_root, tool_root=tool_root
+            )
         ),
         concurrency=2,
         queue_size=8,
@@ -345,7 +387,9 @@ def build_offload_loadtest_plan(
     )
     control = replace(
         sonata_function(
-            resolve_function(config, control_key, source_root=repo_root, tool_root=tool_root)
+            resolve_function(
+                config, control_key, source_root=repo_root, tool_root=tool_root
+            )
         ),
         concurrency=2,
         queue_size=8,
@@ -452,8 +496,18 @@ def build_offload_loadtest_plan(
                 task_id="",
                 title="Evaluate offload conservation",
                 k6_summary_path=local_summary_path,
-                edge_metrics_url=f"http://{edge_host}:{_LOCAL_EDGE_ACTUATOR_PORT if local else _ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
-                cloud_metrics_url=f"http://{cloud_host}:{_LOCAL_CLOUD_ACTUATOR_PORT if local else _ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
+                # NOSONAR (S5332): the actuator ports are local and plain HTTP is
+                # what the control plane serves.
+                edge_metrics_url=(
+                    f"http://{edge_host}:"
+                    f"{_LOCAL_EDGE_ACTUATOR_PORT if local else _ACTUATOR_PORT}"
+                    "/actuator/prometheus"
+                ),
+                cloud_metrics_url=(
+                    f"http://{cloud_host}:"
+                    f"{_LOCAL_CLOUD_ACTUATOR_PORT if local else _ACTUATOR_PORT}"
+                    "/actuator/prometheus"
+                ),
                 offloadable=offloadable.name,
                 control=control.name,
                 output_path=run_dir / "offload-report.json",

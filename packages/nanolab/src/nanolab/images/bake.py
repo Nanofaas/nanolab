@@ -1,3 +1,11 @@
+"""Render an image plan as the JSON input Buildx Bake consumes.
+
+Every cell becomes one Bake target, and the targets are grouped by
+architecture plus one group holding all of them, so a release can build a
+single architecture or the whole matrix without restating the plan on the
+command line.
+"""
+
 from __future__ import annotations
 
 import json
@@ -31,7 +39,9 @@ def render_bake(
         raise ValueError(f"selector has no Bake cells: {', '.join(sorted(requested))}")
 
     names_by_architecture = {
-        architecture: [_bake_name(cell) for cell in cells if cell.architecture == architecture]
+        architecture: [
+            _bake_name(cell) for cell in cells if cell.architecture == architecture
+        ]
         for architecture in ("amd64", "arm64")
     }
     all_names = names_by_architecture["amd64"] + names_by_architecture["arm64"]
@@ -52,11 +62,15 @@ def render_bake_json(
     selectors: Sequence[str] = (),
     flavors: Sequence[ImageFlavor] = ("jvm", "native", "default"),
 ) -> str:
-    return json.dumps(
-        render_bake(plan, selectors=selectors, flavors=flavors),
-        indent=2,
-        ensure_ascii=False,
-    ) + "\n"
+    """Return the Bake file serialized as indented JSON with a trailing newline."""
+    return (
+        json.dumps(
+            render_bake(plan, selectors=selectors, flavors=flavors),
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
 
 
 def _bake_name(cell: ImageCell) -> str:
@@ -65,7 +79,7 @@ def _bake_name(cell: ImageCell) -> str:
 
 def _bake_target(cell: ImageCell) -> dict[str, list[str] | str | dict[str, str]]:
     dockerfile = cell.dockerfile
-    if cell.context != Path("."):
+    if cell.context != Path():
         dockerfile = dockerfile.relative_to(cell.context)
     target: dict[str, list[str] | str | dict[str, str]] = {
         "context": cell.context.as_posix(),

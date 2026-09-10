@@ -1,9 +1,12 @@
-"""
-Tests for scenario_path_from_env() - extracted from the duplicate inline pattern
-in k3s_e2e_commands, cli_e2e_commands, local_e2e_commands.
+"""Tests for scenario_path_from_env().
 
-Gate: CLI arg takes precedence; env var used as fallback; None returned when both absent.
+Extracted from the duplicate inline pattern in k3s_e2e_commands,
+cli_e2e_commands, local_e2e_commands.
+
+Gate: CLI arg takes precedence; env var used as fallback; None returned when
+both absent.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

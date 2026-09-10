@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 import os
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -9,12 +9,11 @@ import pytest
 from nanolab.functions.catalog import list_functions
 from nanolab.images.plan import NATIVE_JAVA_DOCKERFILE, build_image_plan
 
-
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 REGISTRY = "registry.test:5000/nanofaas"
 
 
-def _plan(**kwargs):  # noqa: ANN003, ANN202
+def _plan(**kwargs):
     return build_image_plan(NANOFAAS_ROOT, "v0.18.0", registry=REGISTRY, **kwargs)
 
 
@@ -99,7 +98,9 @@ def test_candidate_tags_include_architecture_and_non_default_flavor() -> None:
         )
         for cell in plan.cells
     )
-    assert all(cell.image == f"{REGISTRY}/{cell.target.name}:{cell.tag}" for cell in plan.cells)
+    assert all(
+        cell.image == f"{REGISTRY}/{cell.target.name}:{cell.tag}" for cell in plan.cells
+    )
 
 
 def test_default_candidate_registry_is_stack_local_never_ghcr() -> None:
@@ -163,7 +164,9 @@ def test_target_selector_filters_before_cell_expansion() -> None:
     plan = _plan(selectors=("watchdog", "java-word-stats"))
 
     assert plan.target_names == frozenset({"watchdog", "java-word-stats"})
-    assert [(cell.target.name, cell.architecture, cell.flavor) for cell in plan.cells] == [
+    assert [
+        (cell.target.name, cell.architecture, cell.flavor) for cell in plan.cells
+    ] == [
         ("java-word-stats", "amd64", "jvm"),
         ("java-word-stats", "amd64", "native"),
         ("watchdog", "amd64", "default"),
@@ -251,7 +254,7 @@ def test_java_native_cells_build_from_the_shared_native_dockerfile() -> None:
     assert native, "expected Java native cells in the matrix"
     for cell in native:
         assert cell.dockerfile == NATIVE_JAVA_DOCKERFILE
-        assert cell.context == Path(".")
+        assert cell.context == Path()
         assert set(cell.build_args) == {
             "NATIVE_TASK",
             "NATIVE_BINARY",
@@ -269,7 +272,9 @@ def test_control_plane_native_cell_carries_the_script_build_args() -> None:
     )
     assert cell.build_args == {
         "NATIVE_TASK": ":control-plane:nativeCompile",
-        "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
+        "NATIVE_BINARY": (
+            "platform/control-plane/build/native/nativeCompile/control-plane"
+        ),
         "GRADLE_ARGS": (
             "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1 "
             "-PnanofaasBuildType=native -PnanofaasBuildVariant=native-o3-g1 "
@@ -280,9 +285,12 @@ def test_control_plane_native_cell_carries_the_script_build_args() -> None:
 
 
 def test_function_images_do_not_receive_control_plane_build_metadata() -> None:
-    """The control plane's identity travels with its own build only: a function
+    """Keep control-plane build metadata out of function images.
+
+    The control plane's identity travels with its own build only: a function
     rebuilt with -PnanofaasBuildType etc. would be a second moving part in every
-    comparison the variant matrix is trying to isolate (see control_plane_variants).
+    comparison the variant matrix is trying to isolate (see
+    control_plane_variants).
     """
     plan = _plan(architectures=("amd64",))
     for cell in plan.cells:
@@ -314,7 +322,10 @@ def test_java_function_native_cells_derive_task_and_binary_from_the_family() -> 
         native = cell.target.native_build
         if cell.flavor != "native" or native is None:
             continue
-        if not cell.target.name.startswith("java-") or cell.target.name == "java-warm-echo":
+        if (
+            not cell.target.name.startswith("java-")
+            or cell.target.name == "java-warm-echo"
+        ):
             continue
         family = cell.target.name.removeprefix("java-")
         assert native.task == f":functions:java:{family}:nativeCompile"

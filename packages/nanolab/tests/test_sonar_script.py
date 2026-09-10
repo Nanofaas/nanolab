@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -10,14 +9,8 @@ def test_sonar_script_scans_every_workspace_package() -> None:
     assert 'SONAR_IMAGE="sonarqube:26.7.0.124771-community"' in script
     assert 'SONAR_HOST="http://127.0.0.1:9000"' in script
     assert "-Dsonar.projectKey=nanolab-python" in script
-    assert (
-        "-Dsonar.sources=packages/nanolab/src,packages/tui-toolkit/src"
-        in script
-    )
-    assert (
-        "-Dsonar.tests=packages/nanolab/tests,packages/tui-toolkit/tests"
-        in script
-    )
+    assert "-Dsonar.sources=packages/nanolab/src,packages/tui-toolkit/src" in script
+    assert "-Dsonar.tests=packages/nanolab/tests,packages/tui-toolkit/tests" in script
     assert 'docker rm -f "$CONTAINER_NAME"' in script
 
 
@@ -45,4 +38,4 @@ def test_sonar_script_exports_detailed_findings_without_credentials() -> None:
     script = (REPO_ROOT / "scripts/sonar.sh").read_text(encoding="utf-8")
 
     assert "ps=500" in script
-    assert '.scannerwork/issues.json' in script
+    assert ".scannerwork/issues.json" in script

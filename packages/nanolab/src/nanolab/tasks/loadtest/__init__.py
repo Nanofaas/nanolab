@@ -1,3 +1,5 @@
+"""The load-test workflow and the steps that measure and report a run."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -6,7 +8,10 @@ from pathlib import Path
 from typing import Any, override
 
 from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+
+from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from nanolab.tasks.loadtest.autoscaling import (
     AutoscalingSummary,
     InitialReplicaCheck,
@@ -23,16 +28,15 @@ from nanolab.tasks.loadtest.concurrency import (
 )
 from nanolab.tasks.loadtest.models import K6RunResult, TimeWindow
 from nanolab.tasks.loadtest.report import ReportPhase as ReportPhase
-from nanolab.tasks.loadtest.report import WriteConcurrencyReport as WriteConcurrencyReport
+from nanolab.tasks.loadtest.report import (
+    WriteConcurrencyReport as WriteConcurrencyReport,
+)
 from nanolab.tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
     WriteK6Report,
     WriteLoadtestSummary,
 )
-
-from sonata_tasks.command import CommandTask
-from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from nanolab.tasks.platform import PlatformRequest, add_platform
 
 # Sonata steps over the load-test implementations in the sibling submodules
@@ -68,7 +72,7 @@ class LoadtestOutcome:
 
 
 def load_outcome(inputs: TaskInputs, title: str) -> LoadtestOutcome:
-    """The load run's outcome from the preceding step, or a legible refusal.
+    """Return the outcome the preceding step produced, or raise naming the step.
 
     Public because `offload_loadtest` reconciles the same run from its own
     module: a step that needs what the load produced should not have to reach
@@ -100,6 +104,7 @@ class RunK6Task(Task[LoadtestOutcome]):
         initial_replicas: InitialReplicaCheck | None = None,
         title: str = "Run k6",
     ) -> None:
+        """Wire the k6 run, the sampler bracketing it and the replica check."""
         self.title = title
         self._run_k6 = run_k6
         self._watcher = watcher
@@ -138,6 +143,7 @@ class VerifyAutoscalingTask(Task[LoadtestOutcome]):
         verifier: VerifyAutoscalingReplicas,
         title: str = "Verify autoscaling replicas",
     ) -> None:
+        """Record the verifier whose verdict this step carries forward."""
         self.title = title
         self._verifier = verifier
 
@@ -164,6 +170,7 @@ class VerifyConcurrencyTask(Task[LoadtestOutcome]):
         series_path: Path | None = None,
         title: str = "Verify concurrency governor",
     ) -> None:
+        """Record the watcher, the function it sampled and where to write it."""
         self.title = title
         self._watcher = watcher
         self._function_name = function_name
@@ -200,6 +207,7 @@ class ReportCoTenancyTask(Task[LoadtestOutcome]):
         series_dir: Path | None = None,
         title: str = "Report co-tenancy",
     ) -> None:
+        """Record the watcher group and where to write each function's series."""
         self.title = title
         self._watchers = watchers
         self._series_dir = series_dir
@@ -210,7 +218,9 @@ class ReportCoTenancyTask(Task[LoadtestOutcome]):
         summaries = self._watchers.summaries()
         for name, summary in summaries.items():
             if self._series_dir is not None:
-                write_series(summary, self._series_dir / f"concurrency-series-{name}.json")
+                write_series(
+                    summary, self._series_dir / f"concurrency-series-{name}.json"
+                )
             print(summary.describe())
         for summary in summaries.values():
             verify_observable(summary)
@@ -234,6 +244,7 @@ class CapturePrometheusTask(Task[LoadtestOutcome]):
         snapshot: Callable[[TimeWindow], CapturePrometheusSnapshot],
         title: str = "Capture Prometheus snapshot",
     ) -> None:
+        """Record the snapshot factory, called once the window is known."""
         self.title = title
         self._snapshot = snapshot
 
@@ -249,7 +260,9 @@ class CapturePrometheusTask(Task[LoadtestOutcome]):
             return TaskOutcome(
                 value=replace(
                     outcome,
-                    prometheus_snapshot=snapshot.output_dir / "metrics" / "prometheus-snapshot.json",
+                    prometheus_snapshot=snapshot.output_dir
+                    / "metrics"
+                    / "prometheus-snapshot.json",
                     snapshot_gaps=str(exc),
                 )
             )
@@ -259,7 +272,10 @@ class CapturePrometheusTask(Task[LoadtestOutcome]):
 class WriteReportTask(Task[LoadtestOutcome]):
     """Render the HTML report from what the run left on disk."""
 
-    def __init__(self, *, report: WriteK6Report, title: str = "Write the report") -> None:
+    def __init__(
+        self, *, report: WriteK6Report, title: str = "Write the report"
+    ) -> None:
+        """Record the report writer this step runs."""
         self.title = title
         self._report = report
 
@@ -282,6 +298,7 @@ class WriteConcurrencyReportTask(Task[LoadtestOutcome]):
         report: WriteConcurrencyReport,
         title: str = "Write the concurrency report",
     ) -> None:
+        """Record the charted report writer this step runs."""
         self.title = title
         self._report = report
 
@@ -301,6 +318,7 @@ class WriteSummaryTask(Task[LoadtestOutcome]):
         summary: Callable[[AutoscalingSummary | None], WriteLoadtestSummary],
         title: str = "Write the summary",
     ) -> None:
+        """Record the factory that builds the summary writer from the verdict."""
         self.title = title
         self._summary = summary
 
@@ -321,6 +339,7 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
     """
 
     def __init__(self, *, title: str = "Evaluate the thresholds") -> None:
+        """Set the title of the step that judges the run."""
         self.title = title
 
     @override
@@ -365,6 +384,7 @@ class SideCommandTask(Task[LoadtestOutcome]):
     """
 
     def __init__(self, *, command: Task[Any], title: str) -> None:
+        """Record the command whose side effect this step performs."""
         self.title = title
         self._command = command
 
@@ -379,6 +399,7 @@ class FetchResultsTask(Task[LoadtestOutcome]):
     """Bring a remote loadgen's summary back to the run directory."""
 
     def __init__(self, *, fetch: FetchVmResults) -> None:
+        """Adopt the fetch task's title and remember it to run."""
         # The fetch already carries the title the compiler slugifies; a second one
         # here could only disagree with it.
         self.title = fetch.title
@@ -399,7 +420,7 @@ def loadtest_composite(
     steps_after_run: tuple[Task[Any], ...],
     title: str = "Run the load test",
 ) -> Steps:
-    """The whole load test as one compiled unit.
+    """Bundle the load test's steps into the one compiled unit the workflow adds.
 
     One unit because the steps are not independently runnable: every one after
     the run needs what the run produced. The legacy workflow made them separate

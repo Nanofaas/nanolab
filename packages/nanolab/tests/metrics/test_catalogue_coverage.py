@@ -26,12 +26,14 @@ from nanolab.metrics.catalogue import (
     runtime_queries,
 )
 
-_METRIC_BUILDER = re.compile(r'(?:Counter|Gauge|Timer|DistributionSummary)\.builder\(\s*"([a-z_0-9]+)"')
+_METRIC_BUILDER = re.compile(
+    r'(?:Counter|Gauge|Timer|DistributionSummary)\.builder\(\s*"([a-z_0-9]+)"'
+)
 _COUNTER_HELPER = re.compile(r'counter\(\s*\w+,\s*"([a-z_0-9]+)"')
 # Enough of the call to know how Prometheus will name the result: the builder
 # type decides the suffix and `baseUnit` inserts a unit before it.
 _TYPED_BUILDER = re.compile(
-    r'(Counter|FunctionCounter|Gauge|Timer|DistributionSummary)\.builder\('
+    r"(Counter|FunctionCounter|Gauge|Timer|DistributionSummary)\.builder\("
     r'\s*"([a-z_0-9]+)"(?P<tail>.{0,400}?)\.register\(',
     re.DOTALL,
 )
@@ -39,14 +41,16 @@ _BASE_UNIT = re.compile(r'\.baseUnit\(\s*"([a-z]+)"\s*\)')
 
 
 def exported_name(kind: str, name: str, base_unit: str | None) -> tuple[str, ...]:
-    """What Prometheus will call a meter, which is not what the code called it.
+    """Compute the names Prometheus will serve for a registered meter.
 
-    Micrometer renames on export and the difference is invisible in the source:
-    a counter gains `_total`, a declared base unit is inserted before it, and a
-    timer becomes a `_seconds_count`/`_seconds_sum` pair. Querying the registered
-    name returns nothing at all — silently, because an empty series is
-    indistinguishable from an idle one.
+    Micrometer renames on export, so the served name is not the registered one
+    and the difference is invisible in the source: a counter gains `_total`, a
+    declared base unit is inserted before it, and a timer becomes a
+    `_seconds_count`/`_seconds_sum` pair. Querying the registered name returns
+    nothing at all — silently, because an empty series is indistinguishable from
+    an idle one.
     """
+
     def suffixed(stem: str, suffix: str) -> str:
         # Verified against a live /actuator/prometheus: a name that already ends
         # in the suffix keeps it once. `function_dispatch_total` is served as
@@ -66,7 +70,7 @@ def exported_name(kind: str, name: str, base_unit: str | None) -> tuple[str, ...
 
 
 def _exported_metrics(source_dir: Path) -> dict[str, tuple[str, ...]]:
-    """Registered name -> the names Prometheus will actually serve."""
+    """Map each registered name to the names Prometheus will actually serve."""
     exported: dict[str, tuple[str, ...]] = {}
     for path in source_dir.rglob("*.java"):
         if "/build/" in str(path) or "/test/" in str(path):
@@ -78,6 +82,7 @@ def _exported_metrics(source_dir: Path) -> dict[str, tuple[str, ...]]:
             exported[name] = exported_name(kind, name, unit.group(1) if unit else None)
     return exported
 
+
 # Names the catalogue deliberately does not collect in a run snapshot, with the
 # reason. Anything not listed here and not queried is a gap, not a decision.
 _NOT_COLLECTED: dict[str, str] = {
@@ -88,7 +93,9 @@ _NOT_COLLECTED: dict[str, str] = {
     # The admin API's own behaviour, not the platform's under load.
     "controlplane_runtime_config_revision": "admin API, not a load reading",
     "controlplane_runtime_config_updates_total": "admin API, not a load reading",
-    "controlplane_runtime_config_apply_duration_seconds": "admin API, not a load reading",
+    "controlplane_runtime_config_apply_duration_seconds": (
+        "admin API, not a load reading"
+    ),
     # Published by the HPA-facing adapter, read through kube-state-metrics instead.
     "gateway_service_target_load": "read via kube-state-metrics",
     # An info gauge that is always 1; it labels the profile rather than measuring it.
@@ -148,7 +155,9 @@ def test_every_module_is_classified() -> None:
 
 @pytest.mark.parametrize("module", sorted(MODULE_QUERIES))
 def test_a_queried_module_has_every_metric_it_publishes_collected(module: str) -> None:
-    published = _published_metrics(_nanofaas_root() / "platform" / "modules" / module / "src" / "main")
+    published = _published_metrics(
+        _nanofaas_root() / "platform" / "modules" / module / "src" / "main"
+    )
     queried = _queried_names("word-stats-java", (module,))
     missing = {
         name
@@ -156,11 +165,15 @@ def test_a_queried_module_has_every_metric_it_publishes_collected(module: str) -
         if name not in _NOT_COLLECTED and not any(name in q for q in queried)
     }
 
-    assert not missing, f"{module} publishes metrics the catalogue never asks for: {sorted(missing)}"
+    assert not missing, (
+        f"{module} publishes metrics the catalogue never asks for: {sorted(missing)}"
+    )
 
 
 def test_the_core_metrics_are_collected() -> None:
-    published = _published_metrics(_nanofaas_root() / "platform" / "control-plane" / "src" / "main")
+    published = _published_metrics(
+        _nanofaas_root() / "platform" / "control-plane" / "src" / "main"
+    )
     catalogue = core_queries("word-stats-java") + runtime_queries("word-stats-java")
     queried = {n for q in catalogue for n in re.findall(r"[a-z_0-9]+", q.expr)}
     # Core timers are exported by Micrometer with _seconds_count/_sum suffixes,
@@ -172,7 +185,9 @@ def test_the_core_metrics_are_collected() -> None:
         and not any(name in q or q.startswith(name) for q in queried)
     }
 
-    assert not missing, f"the core publishes metrics nothing collects: {sorted(missing)}"
+    assert not missing, (
+        f"the core publishes metrics nothing collects: {sorted(missing)}"
+    )
 
 
 def test_async_queue_snapshot_collects_dispatch_capacity() -> None:
@@ -181,7 +196,9 @@ def test_async_queue_snapshot_collects_dispatch_capacity() -> None:
         for query in queries_for("word-stats-java", modules=("async-queue",))
     }
 
-    assert queries["function_inFlight"] == 'function_inFlight{function="word-stats-java"}'
+    assert (
+        queries["function_inFlight"] == 'function_inFlight{function="word-stats-java"}'
+    )
     assert queries["function_effective_concurrency"] == (
         'function_effective_concurrency{function="word-stats-java"}'
     )
@@ -194,7 +211,10 @@ def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
     }
     function = '{function="word-stats-java"}'
 
-    assert queries["function_dispatchable_backlog"] == f"function_dispatchable_backlog{function}"
+    assert (
+        queries["function_dispatchable_backlog"]
+        == f"function_dispatchable_backlog{function}"
+    )
     assert queries["function_queue_offer_duration_count"] == (
         f"function_queue_offer_duration_seconds_count{function}"
     )
@@ -278,7 +298,9 @@ def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
     )
 
 
-def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers() -> None:
+def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers() -> (
+    None
+):
     """Micrometer renames on export, and the rename is invisible in the source.
 
     The first version of this catalogue asked for `jvm_gc_collection_count`, which
@@ -289,7 +311,9 @@ def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers()
     root = _nanofaas_root()
     exported = _exported_metrics(root / "platform" / "control-plane" / "src" / "main")
     for module in MODULE_QUERIES:
-        exported |= _exported_metrics(root / "platform" / "modules" / module / "src" / "main")
+        exported |= _exported_metrics(
+            root / "platform" / "modules" / module / "src" / "main"
+        )
 
     catalogue = queries_for("word-stats-java", modules=tuple(MODULE_QUERIES), hpa=True)
     expressions = " ".join(query.expr for query in catalogue)
@@ -314,10 +338,13 @@ def _required(queries, name: str) -> bool:
 
 
 def test_a_run_without_heap_pools_still_has_to_answer_for_its_cpu() -> None:
-    """The two used to share one flag, so a release that could not publish heap
+    """Require process_cpu_usage even when a run publishes no heap pools.
+
+    The two used to share one flag, so a release that could not publish heap
     pools also stopped requiring process_cpu_usage - and a broken actuator scrape
     would have read as a normal G1 run. Measured on the v0.20.0 release: the G1
-    native control plane publishes process_cpu_usage and no heap series."""
+    native control plane publishes process_cpu_usage and no heap series.
+    """
     queries = queries_for("word-stats-java", modules=(), heap_metrics_required=False)
 
     assert _required(queries, "process_cpu_usage") is True
@@ -336,11 +363,16 @@ def _by_name(queries) -> dict[str, bool]:
 
 
 def test_container_queries_are_promoted_like_everything_else_in_the_catalogue() -> None:
-    """They used to arrive as extra_prometheus_queries, appended after
-    queries_for had already run its promotion - so an empty series read as a
-    quiet zero, which is the failure this catalogue was written to stop."""
+    """Promote container queries through the catalogue like any other metric.
+
+    They used to arrive as extra_prometheus_queries, appended after queries_for
+    had already run its promotion - so an empty series read as a quiet zero,
+    which is the failure this catalogue was written to stop.
+    """
     required = _by_name(
-        queries_for("word-stats-java", modules=(), container_functions=("word-stats-java",))
+        queries_for(
+            "word-stats-java", modules=(), container_functions=("word-stats-java",)
+        )
     )
 
     assert required["container_memory_bytes@control-plane"] is True
@@ -351,10 +383,15 @@ def test_container_queries_are_promoted_like_everything_else_in_the_catalogue() 
 
 
 def test_the_cfs_counters_stay_optional_because_a_run_may_set_no_cpu_limit() -> None:
-    """Promotion without this would fail every run that caps nothing: the cgroup
-    keeps no quota accounting, so the series never exists."""
+    """Leave the CFS counters optional, since a run may set no CPU limit.
+
+    Promotion without this would fail every run that caps nothing: the cgroup
+    keeps no quota accounting, so the series never exists.
+    """
     required = _by_name(
-        queries_for("word-stats-java", modules=(), container_functions=("word-stats-java",))
+        queries_for(
+            "word-stats-java", modules=(), container_functions=("word-stats-java",)
+        )
     )
 
     assert required["container_cpu_throttled_periods@control-plane"] is False

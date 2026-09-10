@@ -1,3 +1,5 @@
+"""The registration body a nanoFaaS function is created from."""
+
 from __future__ import annotations
 
 import json
@@ -27,6 +29,7 @@ class FunctionManifest:
     offload: dict[str, Any] | None = None
 
     def body(self) -> dict[str, Any]:
+        """Return the registration payload the control plane expects."""
         body: dict[str, Any] = {
             "name": self.name,
             "image": self.image,

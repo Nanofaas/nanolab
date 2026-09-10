@@ -41,14 +41,22 @@ class ScriptedExecutor:
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(task_id="", status="passed", return_code=0, stdout=self.stdout)
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout=self.stdout
+        )
 
 
 def test_the_manifest_carries_an_offload_policy_when_there_is_one() -> None:
-    """The edge registers the same function as LOCAL with a policy; without this
-    field the body could not say so."""
+    """Carry the offload policy in the manifest when there is one.
+
+    The edge registers the same function as LOCAL with a policy; without this
+    field the body could not say so.
+    """
     body = FunctionManifest(
-        name="word-stats", image="img", execution_mode="LOCAL", offload={"mode": "always"}
+        name="word-stats",
+        image="img",
+        execution_mode="LOCAL",
+        offload={"mode": "always"},
     ).body()
 
     assert body["offload"] == {"mode": "always"}
@@ -77,8 +85,11 @@ def test_an_offloaded_invocation_passes_and_reads_the_body_behind_the_headers() 
 
 
 def test_an_answer_computed_locally_fails_even_though_it_is_a_valid_response() -> None:
-    """The point of the invocation is that it was proxied. A perfectly good
-    local answer is the failure this catches."""
+    """Fail an answer computed locally even though it is a valid response.
+
+    The point of the invocation is that it was proxied. A perfectly good
+    local answer is the failure this catches.
+    """
     task = HttpFunctionInvokeTask(
         "word-stats",
         payload="{}",
@@ -113,15 +124,22 @@ def test_an_invocation_that_asks_for_no_header_is_unchanged() -> None:
     executor = ScriptedExecutor(stdout='{"status":"success","output":1}')
 
     _ = HttpFunctionInvokeTask(
-        "word-stats", payload="{}", endpoint="http://cp:8080", executor=executor, role="host"
+        "word-stats",
+        payload="{}",
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="host",
     ).run(TaskInputs.empty())
 
     assert "-fsS" in executor.seen[0].argv
 
 
 def test_the_scrape_check_names_the_sample_that_was_missing() -> None:
-    """Two `grep -F` calls joined by `&&` exited 1 and said nothing: a missing
-    metric and an unexpected failure counter looked identical."""
+    """Name the sample that was missing from the scrape.
+
+    Two `grep -F` calls joined by `&&` exited 1 and said nothing: a missing
+    metric and an unexpected failure counter looked identical.
+    """
     task = PrometheusScrapeCheckTask(
         url="http://edge:18081/actuator/prometheus",
         executor=ScriptedExecutor(stdout="jvm_memory_used_bytes 1.0\n"),
@@ -129,7 +147,9 @@ def test_the_scrape_check_names_the_sample_that_was_missing() -> None:
         expect=('nanofaas_offload_total{function="word-stats",trigger="eager"}',),
     )
 
-    with pytest.raises(RuntimeError, match=r"expected sample not scraped: nanofaas_offload_total"):
+    with pytest.raises(
+        RuntimeError, match=r"expected sample not scraped: nanofaas_offload_total"
+    ):
         task.run(TaskInputs.empty())
 
 
@@ -148,7 +168,9 @@ def test_the_scrape_check_names_the_sample_that_should_not_be_there() -> None:
 def test_the_scrape_check_passes_when_both_halves_hold() -> None:
     task = PrometheusScrapeCheckTask(
         url="http://edge:18081/actuator/prometheus",
-        executor=ScriptedExecutor(stdout='nanofaas_offload_total{trigger="eager"} 4.0\n'),
+        executor=ScriptedExecutor(
+            stdout='nanofaas_offload_total{trigger="eager"} 4.0\n'
+        ),
         role="host",
         expect=('nanofaas_offload_total{trigger="eager"}',),
         reject=("nanofaas_offload_failure_total",),
@@ -181,12 +203,15 @@ def test_the_status_check_accepts_the_status_it_was_told_to_expect() -> None:
     argv = executor.seen[0].argv
     # Not -f: a 502 has to be read, not turned into a non-zero exit.
     assert "-f" not in argv
-    assert ("-w", "%{http_code}") == argv[argv.index("-w") : argv.index("-w") + 2]
+    assert argv[argv.index("-w") : argv.index("-w") + 2] == ("-w", "%{http_code}")
 
 
 def test_a_working_offload_fails_the_no_fallback_check() -> None:
-    """200 here would mean the edge answered it locally, which is the thing this
-    workflow exists to rule out."""
+    """Fail the no-fallback check when the offload actually worked.
+
+    200 here would mean the edge answered it locally, which is the thing this
+    workflow exists to rule out.
+    """
     task = HttpStatusCheckTask(
         url="http://edge:18080/v1/functions/word-stats:invoke",
         expected_status=502,
@@ -229,8 +254,11 @@ def _plane(name: str):  # pyright: ignore[reportMissingParameterType]
 
 @dataclass
 class WorkflowExecutor(ScriptedExecutor):
-    """Answers each command of a whole offload run plausibly, so a test that
-    exercises the assembly is not stopped by the assertions inside it."""
+    """A scripted executor that answers a whole offload run plausibly.
+
+    Answers each command of a whole offload run plausibly, so a test that
+    exercises the assembly is not stopped by the assertions inside it.
+    """
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
@@ -240,7 +268,10 @@ class WorkflowExecutor(ScriptedExecutor):
         elif ":invoke" in rendered:
             stdout = OFFLOADED
         elif "actuator/prometheus" in rendered:
-            stdout = 'nanofaas_offload_total{function="word-stats-java",trigger="eager"} 1.0\n'
+            stdout = (
+                'nanofaas_offload_total{function="word-stats-java",trigger="eager"}'
+                " 1.0\n"
+            )
         else:
             stdout = ""
         return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
@@ -284,7 +315,9 @@ def test_it_pushes_function_images_when_requested() -> None:
             cloud=_plane("cloud"),
             edge=_plane("edge"),
             push_function_images=True,
-        ).compile().tasks
+        )
+        .compile()
+        .tasks
     ]
 
     assert ids[:3] == [
@@ -295,9 +328,12 @@ def test_it_pushes_function_images_when_requested() -> None:
 
 
 def test_the_no_fallback_check_runs_before_the_registrations_are_released() -> None:
-    """It declares the probe's registrations so the compiler keeps them alive
+    """Run the no-fallback check before the registrations are released.
+
+    It declares the probe's registrations so the compiler keeps them alive
     until it has run. Without that the releases land first and the edge answers
-    404 — a different failure that would look like the same one."""
+    404 — a different failure that would look like the same one.
+    """
     ids = [task.task_id for task in _workflow(ScriptedExecutor()).compile().tasks]
 
     assert ids.index("009.verify-word-stats-java-has-no-local-fallback") < ids.index(
@@ -322,7 +358,9 @@ def test_the_build_selects_the_modules_the_hop_needs() -> None:
     _workflow(executor).run()
 
     build = next(
-        " ".join(spec.argv) for spec in executor.seen if "gradlew" in " ".join(spec.argv)
+        " ".join(spec.argv)
+        for spec in executor.seen
+        if "gradlew" in " ".join(spec.argv)
     )
     assert "-PcontrolPlaneModules=offload,container-deployment-provider" in build
 
@@ -333,9 +371,12 @@ def test_it_refuses_a_request_with_no_functions() -> None:
 
 
 def test_a_failed_check_still_deregisters_both_sides_and_stops_both_planes() -> None:
-    """The legacy workflow kept the deletes in a cleanup list the caller had to
+    """Deregister both sides and stop both planes when a check fails.
+
+    The legacy workflow kept the deletes in a cleanup list the caller had to
     remember to run; anything that crashed before that call leaked both
-    registrations."""
+    registrations.
+    """
     stopped: list[str] = []
 
     def plane(name: str):  # pyright: ignore[reportMissingParameterType]
@@ -348,8 +389,12 @@ def test_a_failed_check_still_deregisters_both_sides_and_stops_both_planes() -> 
     class NeverOffloads(WorkflowExecutor):
         def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
             result = super().run(task, dry_run=dry_run)
-            if ":invoke" in " ".join(task.argv) and "http_code" not in " ".join(task.argv):
-                return TaskResult(task_id="", status="passed", return_code=0, stdout=LOCAL)
+            if ":invoke" in " ".join(task.argv) and "http_code" not in " ".join(
+                task.argv
+            ):
+                return TaskResult(
+                    task_id="", status="passed", return_code=0, stdout=LOCAL
+                )
             return result
 
     executor = NeverOffloads()
@@ -363,7 +408,11 @@ def test_a_failed_check_still_deregisters_both_sides_and_stops_both_planes() -> 
     with pytest.raises(RuntimeError, match="no X-NanoFaaS-Offloaded header"):
         workflow.run()
 
-    deletes = [" ".join(spec.argv) for spec in executor.seen if "-X DELETE" in " ".join(spec.argv)]
+    deletes = [
+        " ".join(spec.argv)
+        for spec in executor.seen
+        if "-X DELETE" in " ".join(spec.argv)
+    ]
     assert len(deletes) == 2
     assert any("19090" in command for command in deletes)  # cloud
     assert any("18080" in command for command in deletes)  # edge

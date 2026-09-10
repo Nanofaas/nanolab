@@ -1,3 +1,11 @@
+"""Turn an environment's role targets into VM requests and VM providers.
+
+Each role in an `EnvironmentConfig` (stack, loadgen, arm-builder) carries its
+own host, credentials and size; these helpers fold that target, plus the
+provider-specific settings the request needs, into the `VmRequest` the
+orchestrator is asked about.
+"""
+
 from __future__ import annotations
 
 import os
@@ -5,12 +13,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.tasks.provisioning.providers import command_provider_for
 from nanolab.tasks.vm.models import VmRequest
-
-from nanolab.config.environment import EnvironmentConfig, ExecutionRole
-
 
 _DEFAULT_NAMES = {
     ("azure", "stack"): "nanofaas-azure",
@@ -27,6 +33,14 @@ def vm_request_for_role(
     *,
     loadtest: bool = False,
 ) -> VmRequest:
+    """Build the VM request for one role from its environment target.
+
+    The provider decides what is filled in: Azure requests carry the size,
+    resource group, image and key, Proxmox requests its host, node and template,
+    and a local environment has no VM at all and is rejected. `loadtest` is
+    forwarded so the stack request opens the NodePorts a load run needs, unless
+    an operator CIDR already bounds the ingress.
+    """
     provider = environment.provider
     if provider == "local":
         raise ValueError("local environments do not have a VM request")
@@ -49,7 +63,9 @@ def vm_request_for_role(
     }
     if provider == "azure":
         azure = environment.azure
-        assert azure is not None
+        # Narrowing only: EnvironmentConfig's validator raises for an azure
+        # provider with no azure block, so this cannot fire at runtime.
+        assert azure is not None  # nosec B101
         if role == "loadgen":
             vm_size = azure.loadgen_vm_size
         elif role == "arm-builder":
@@ -77,7 +93,9 @@ def vm_request_for_role(
         )
     if provider == "proxmox":
         proxmox = environment.proxmox
-        assert proxmox is not None
+        # Narrowing only: EnvironmentConfig's validator raises for a proxmox
+        # provider with no proxmox block, so this cannot fire at runtime.
+        assert proxmox is not None  # nosec B101
         return VmRequest(
             **common,
             proxmox_host=proxmox.host,
@@ -96,7 +114,7 @@ def provider_for_environment(
     *,
     orchestrator_factory: Callable[[Path], Any] | None = None,
 ) -> Any:
-    """The VM provider an environment's stack role is driven through.
+    """Return the VM provider an environment's stack role is driven through.
 
     Config translation only: which provider serves which lifecycle is sonata's
     to decide, in `command_provider_for`. What belongs here is turning an

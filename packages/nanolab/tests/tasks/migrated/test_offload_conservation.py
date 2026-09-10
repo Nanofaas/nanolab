@@ -17,19 +17,27 @@ def _edge_metrics(
     lines = [
         f'function_success_total{{function="{OFFLOADABLE}"}} {success_offloadable}',
         f'nanofaas_offload_total{{function="{OFFLOADABLE}",trigger="depth"}} {depth}',
-        f'nanofaas_offload_total{{function="{OFFLOADABLE}",trigger="est_wait"}} {est_wait}',
+        f'nanofaas_offload_total{{function="{OFFLOADABLE}",trigger="est_wait"}}'
+        f" {est_wait}",
         f'function_retry_total{{function="{OFFLOADABLE}"}} {retry_offloadable}',
         f'function_retry_total{{function="{CONTROL}"}} {retry_control}',
     ]
     if control_offload:
-        lines.append(f'nanofaas_offload_total{{function="{CONTROL}",trigger="depth"}} {control_offload}')
+        lines.append(
+            f'nanofaas_offload_total{{function="{CONTROL}",trigger="depth"}}'
+            f" {control_offload}"
+        )
     if with_failure_meter:
         lines.append(f'nanofaas_offload_failure_total{{function="{OFFLOADABLE}"}} 3.0')
     return "\n".join(lines) + "\n"
 
 
-def _cloud_metrics(*, success_offloadable: float = 598, leak_control: bool = False) -> str:
-    lines = [f'function_success_total{{function="{OFFLOADABLE}"}} {success_offloadable}']
+def _cloud_metrics(
+    *, success_offloadable: float = 598, leak_control: bool = False
+) -> str:
+    lines = [
+        f'function_success_total{{function="{OFFLOADABLE}"}} {success_offloadable}'
+    ]
     if leak_control:
         lines.append(f'function_success_total{{function="{CONTROL}"}} 5.0')
     return "\n".join(lines) + "\n"
@@ -73,7 +81,10 @@ def test_offload_count_mismatch_beyond_tolerance_fails() -> None:
     )
 
     assert report.passed is False
-    assert any("cloud function_success_total for offloadable" in failure for failure in report.failures)
+    assert any(
+        "cloud function_success_total for offloadable" in failure
+        for failure in report.failures
+    )
 
 
 def test_control_function_leaking_to_cloud_fails() -> None:
@@ -86,7 +97,10 @@ def test_control_function_leaking_to_cloud_fails() -> None:
     )
 
     assert report.passed is False
-    assert any("cloud metrics mention the control function" in failure for failure in report.failures)
+    assert any(
+        "cloud metrics mention the control function" in failure
+        for failure in report.failures
+    )
 
 
 def test_zero_offloaded_requests_fails() -> None:
@@ -112,7 +126,10 @@ def test_control_offloaded_on_edge_fails() -> None:
     )
 
     assert report.passed is False
-    assert any("control function" in failure and "expected 0" in failure for failure in report.failures)
+    assert any(
+        "control function" in failure and "expected 0" in failure
+        for failure in report.failures
+    )
 
 
 def test_offload_failure_meter_on_edge_fails() -> None:
@@ -125,7 +142,9 @@ def test_offload_failure_meter_on_edge_fails() -> None:
     )
 
     assert report.passed is False
-    assert any("nanofaas_offload_failure_total" in failure for failure in report.failures)
+    assert any(
+        "nanofaas_offload_failure_total" in failure for failure in report.failures
+    )
 
 
 def test_retries_on_edge_fail() -> None:

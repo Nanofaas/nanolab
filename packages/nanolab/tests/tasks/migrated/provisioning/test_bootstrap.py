@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from sonata_tasks.shell import SubprocessShell
+from sonata_tasks.tasks.executors import HostCommandTaskExecutor
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.vm.models import VmRequest as SharedVmRequest
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.provisioning.bootstrap import (
@@ -15,11 +20,7 @@ from nanolab.tasks.provisioning.bootstrap import (
     run_bootstrap_operations,
     scenario_context,
 )
-from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from sonata_tasks.tasks.executors import HostCommandTaskExecutor
-from sonata_tasks.shell import SubprocessShell
 from nanolab.tasks.vm.models import VmRequest
-from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 
 @dataclass
@@ -36,11 +37,14 @@ class FakeOrchestrator(ProxmoxVmProvider):
     shell: RecordingShell = field(default_factory=RecordingShell)
     retargeted: list[str] = field(default_factory=list)
 
-    def ssh_endpoint(self, request: VmRequest) -> tuple[str, int]:
+    # Both overrides take the shared request, not nanolab's: a provider is
+    # asked about any request the engine carries, and this is a spy for the
+    # two methods `retarget_cloud_operations` reaches for.
+    def ssh_endpoint(self, request: SharedVmRequest) -> tuple[str, int]:
         return "10.0.0.5", 22
 
-    def ssh_private_key_path(self, request: VmRequest) -> str:
-        return "/keys/id_rsa"
+    def ssh_private_key_path(self, request: SharedVmRequest) -> Path | None:
+        return Path("/keys/id_rsa")
 
 
 def test_scenario_context_carries_request() -> None:
@@ -57,13 +61,17 @@ def test_remote_operations_filters_non_remote() -> None:
 
 def test_run_bootstrap_operations_records_each_command() -> None:
     provider = FakeOrchestrator()
-    op = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm", "install"))
+    op = RemoteCommandOperation(
+        operation_id="k3s", summary="install", argv=("helm", "install")
+    )
     run_bootstrap_operations(provider, [op], role="stack")
     assert provider.shell.seen[0].argv == ("helm", "install")
 
 
 def test_operation_task_returns_the_concrete_operation_task() -> None:
-    operation = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm",))
+    operation = RemoteCommandOperation(
+        operation_id="k3s", summary="install", argv=("helm",)
+    )
     task = operation_task(operation, HostCommandTaskExecutor(SubprocessShell()))
     assert isinstance(task, OperationTask)
     assert task.spec.argv == ("helm",)
@@ -74,21 +82,32 @@ def test_run_bootstrap_operations_keeps_stdout_failure_alongside_stderr() -> Non
     class FailingShell:
         def run(self, command: list[str], /, *, cwd, env, dry_run: bool) -> TaskResult:
             return TaskResult(
-                task_id="x", status="failed", return_code=2,
-                stdout="fatal: k6 download failed", stderr="warning: remote_tmp"
+                task_id="x",
+                status="failed",
+                return_code=2,
+                stdout="fatal: k6 download failed",
+                stderr="warning: remote_tmp",
             )
 
     provider = FakeOrchestrator(shell=cast(RecordingShell, FailingShell()))
     with pytest.raises(RuntimeError, match="fatal: k6 download failed") as error:
         run_bootstrap_operations(
-            provider, [RemoteCommandOperation(operation_id="k6", summary="install", argv=("k6",))], role="loadgen"
+            provider,
+            [
+                RemoteCommandOperation(
+                    operation_id="k6", summary="install", argv=("k6",)
+                )
+            ],
+            role="loadgen",
         )
     assert "warning: remote_tmp" in str(error.value)
 
 
 def test_retarget_cloud_operations_uses_ssh_endpoint() -> None:
     provider = FakeOrchestrator()
-    context = scenario_context(Path("/repo"), VmRequest(lifecycle="proxmox", name="stack"), Path("/assets"))
+    context = scenario_context(
+        Path("/repo"), VmRequest(lifecycle="proxmox", name="stack"), Path("/assets")
+    )
     op = RemoteCommandOperation(
         operation_id="base",
         summary="base",
@@ -135,7 +154,12 @@ def test_retarget_cloud_operations_repoints_synthetic_host_for_non_cloud() -> No
         RemoteCommandOperation(
             operation_id="repo.sync_to_vm",
             summary="sync",
-            argv=("rsync", "-az", "repo/", "ubuntu@stack.internal:/home/ubuntu/nanofaas/"),
+            argv=(
+                "rsync",
+                "-az",
+                "repo/",
+                "ubuntu@stack.internal:/home/ubuntu/nanofaas/",
+            ),
         ),
     )
     retargeted = retarget_cloud_operations(object(), context, ops)

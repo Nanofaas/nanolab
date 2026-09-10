@@ -1,10 +1,14 @@
-from dataclasses import dataclass, field, replace
+import contextlib
 import json
 import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
 import yaml
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.registry import docker_registry_resource
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -13,10 +17,7 @@ from nanolab.plans.offload_loadtest import (
     EvaluateOffloadConservation,
     build_offload_loadtest_plan,
 )
-from sonata_tasks.execution.bindings import RoleBindings
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
-from sonata_tasks.registry import docker_registry_resource
-from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +40,9 @@ class RecordingExecutor:
         self.seen.append(task)
         # Each platform resolves its control plane's address before anything can
         # register against it.
-        stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        stdout = (
+            "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        )
         return TaskResult(
             task_id=task.task_id, status="passed", return_code=0, stdout=stdout
         )
@@ -63,12 +66,18 @@ def _external_environment() -> EnvironmentConfig:
 
 
 def _bindings(executor: RecordingExecutor) -> RoleBindings:
-    return RoleBindings({'host': executor, 'stack': executor, 'loadgen': executor, 'cloud': executor})
+    return RoleBindings(
+        {"host": executor, "stack": executor, "loadgen": executor, "cloud": executor}
+    )
 
 
 def test_platform_returns_helm_arguments_in_the_platform_request() -> None:
     request = offload_loadtest_plan._platform(
-        (PlatformFunction(name="f", image="image", payload="{}", build_argv=("true",)),),
+        (
+            PlatformFunction(
+                name="f", image="image", payload="{}", build_argv=("true",)
+            ),
+        ),
         label="stack",
         role="stack",
         build="docker",
@@ -84,9 +93,12 @@ def test_platform_returns_helm_arguments_in_the_platform_request() -> None:
 
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The conservation check scrapes two Prometheus endpoints over urllib. These
-    tests run the workflow rather than inspecting it, so without this each one
-    waits out two connection timeouts — the file took two minutes."""
+    """Stub out the network the conservation check reaches for.
+
+    It scrapes two Prometheus endpoints over urllib. These tests run the
+    workflow rather than inspecting it, so without this each one waits out two
+    connection timeouts — the file took two minutes.
+    """
     monkeypatch.setattr(
         offload_loadtest_plan, "_fetch_text", lambda _url, **_kwargs: ""
     )
@@ -101,13 +113,11 @@ def _run(workflow, executor: RecordingExecutor) -> list[CommandTaskSpec]:  # pyr
     """Run it and return every spec that reached the executor.
 
     The load steps live inside a composite, so nothing about them appears in the
-    compiled unit list — only running reveals what they did."""
-    try:
+    compiled unit list — only running reveals what they did.
+    """
+    with contextlib.suppress(Exception):
         workflow.run()
-    except Exception:
-        pass
     return executor.seen
-
 
 
 class _UnusedFetcher:
@@ -135,7 +145,9 @@ def test_rejects_wrong_function_count() -> None:
     with pytest.raises(ValueError, match="exactly two functions"):
         build_offload_loadtest_plan(
             ScenarioConfig(
-                workflow="offload-loadtest", backend="k8s", functions=["word-stats-java"]
+                workflow="offload-loadtest",
+                backend="k8s",
+                functions=["word-stats-java"],
             ),
             _local_environment(),
             _bindings(RecordingExecutor()),
@@ -143,7 +155,9 @@ def test_rejects_wrong_function_count() -> None:
         )
 
 
-def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path: Path) -> None:
+def test_deployment_then_registration_then_k6_then_evaluation_ordering(
+    tmp_path: Path,
+) -> None:
     workflow = build_offload_loadtest_plan(
         SCENARIO,
         _external_environment(),
@@ -158,9 +172,19 @@ def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path:
     # The cloud is up before the edge, so the edge's chart comes up pointing at
     # something that answers. k6 and the reconciliation are steps of one unit,
     # so the plan names the load test rather than its internals.
-    cloud = next(task for task in ids if task.endswith("acquire-helm-release-nanofaas-on-the-cloud"))
-    edge = next(task for task in ids if task.endswith("acquire-helm-release-nanofaas-on-the-edge"))
-    function = next(task for task in ids if task.endswith("acquire-word-stats-java-on-the-edge"))
+    cloud = next(
+        task
+        for task in ids
+        if task.endswith("acquire-helm-release-nanofaas-on-the-cloud")
+    )
+    edge = next(
+        task
+        for task in ids
+        if task.endswith("acquire-helm-release-nanofaas-on-the-edge")
+    )
+    function = next(
+        task for task in ids if task.endswith("acquire-word-stats-java-on-the-edge")
+    )
     load = next(task for task in ids if task.endswith("run-the-offload-load-test"))
     assert ids.index(cloud) < ids.index(edge) < ids.index(function) < ids.index(load)
 
@@ -179,13 +203,19 @@ def test_local_provider_runs_k6_on_stack_without_fetch(tmp_path: Path) -> None:
 
     commands = _run(workflow, executor)
     preflight = next(spec for spec in commands if spec.argv == ("k6", "version"))
-    k6 = next(" ".join(spec.argv) for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
+    k6 = next(
+        " ".join(spec.argv)
+        for spec in commands
+        if spec.argv[0] == "k6" and "run" in spec.argv
+    )
 
     assert preflight.execution_role == "stack"
     assert str(tool_root / "assets/k6/offload-mixed.js") in k6
 
 
-def test_local_provider_uses_one_compose_platform_with_distinct_endpoints(tmp_path: Path) -> None:
+def test_local_provider_uses_one_compose_platform_with_distinct_endpoints(
+    tmp_path: Path,
+) -> None:
     executor = RecordingExecutor()
     workflow = build_offload_loadtest_plan(
         SCENARIO,
@@ -200,7 +230,10 @@ def test_local_provider_uses_one_compose_platform_with_distinct_endpoints(tmp_pa
     command_lines = [" ".join(command.argv) for command in commands]
 
     assert any(task.endswith("acquire-local-registry") for task in ids)
-    assert any("acquire-docker-compose-project-nanofaas-offload-loadtest" in task for task in ids)
+    assert any(
+        "acquire-docker-compose-project-nanofaas-offload-loadtest" in task
+        for task in ids
+    )
     assert not any("kubectl" in task or "helm" in task for task in ids)
     assert any("http://127.0.0.1:8080" in command for command in command_lines)
     assert any("http://127.0.0.1:19090" in command for command in command_lines)
@@ -213,7 +246,9 @@ def test_local_provider_uses_one_compose_platform_with_distinct_endpoints(tmp_pa
     ]
 
 
-def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path) -> None:
+def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(
+    tmp_path: Path,
+) -> None:
     fetched: list[tuple[str, Path]] = []
 
     class Fetcher:
@@ -232,7 +267,9 @@ def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path
 
     commands = _run(workflow, executor)
     preflight = next(spec for spec in commands if spec.argv == ("k6", "version"))
-    k6_spec = next(spec for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
+    k6_spec = next(
+        spec for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv
+    )
     k6 = " ".join(k6_spec.argv)
 
     assert preflight.execution_role == "loadgen"
@@ -314,11 +351,15 @@ def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
     )
 
     installs = [
-        " ".join(spec.argv) for spec in _run(workflow, executor) if "helm upgrade" in " ".join(spec.argv)
+        " ".join(spec.argv)
+        for spec in _run(workflow, executor)
+        if "helm upgrade" in " ".join(spec.argv)
     ]
     # Only the edge's chart is told where to offload to; the cloud is the target.
     assert sum("NANOFAAS_OFFLOAD_TARGETURL" in command for command in installs) == 1
-    edge_install = next(command for command in installs if "NANOFAAS_OFFLOAD_TARGETURL" in command)
+    edge_install = next(
+        command for command in installs if "NANOFAAS_OFFLOAD_TARGETURL" in command
+    )
     assert "].value=http://cloud.example:30080" in edge_install
     assert "SYNC_QUEUE_MAX_DEPTH" in edge_install
     # Located by name, not by position: `extraEnv[5]` broke the day two dead
@@ -372,13 +413,18 @@ class _MkdirFetcher:
         Path(local).mkdir(parents=True, exist_ok=True)
 
 
-def test_each_cluster_answers_for_itself_in_its_own_control_plane_log(tmp_path: Path) -> None:
-    """One log would answer for whichever side happened to be asked, and the
+def test_each_cluster_answers_for_itself_in_its_own_control_plane_log(
+    tmp_path: Path,
+) -> None:
+    """Keep each cluster's control-plane log separate.
+
+    One log would answer for whichever side happened to be asked, and the
     failures worth this run are the ones where edge and cloud disagree.
 
     Taken before the evaluation on purpose: a run that fails its conservation
     check is exactly the run whose logs are wanted, and this workflow does fail
-    it here - the k6 summary never exists under a recording executor."""
+    it here - the k6 summary never exists under a recording executor.
+    """
 
     class _PerRoleExecutor(RecordingExecutor):
         def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:

@@ -1,4 +1,5 @@
 """The end-to-end budget is a promise about a given amount of work."""
+
 from __future__ import annotations
 
 from nanolab.config import ScenarioConfig
@@ -6,8 +7,12 @@ from nanolab.plans.loadtest import end_to_end_p95_budget_ms
 
 
 def _config(**overrides) -> ScenarioConfig:
-    base = dict(workflow="loadtest", backend="container", concurrencyControl=True,
-                functions=["word-stats-java"])
+    base = {
+        "workflow": "loadtest",
+        "backend": "container",
+        "concurrencyControl": True,
+        "functions": ["word-stats-java"],
+    }
     base.update(overrides)
     return ScenarioConfig(**base)
 
@@ -24,12 +29,16 @@ def test_a_heavier_corpus_gets_a_budget_scaled_to_its_work() -> None:
     payload small", not "does the platform keep its promise".
     """
     assert end_to_end_p95_budget_ms(_config(payloadProfile="medium")) > 50
-    assert end_to_end_p95_budget_ms(_config(payloadProfile="large")) > \
-        end_to_end_p95_budget_ms(_config(payloadProfile="medium"))
+    assert end_to_end_p95_budget_ms(
+        _config(payloadProfile="large")
+    ) > end_to_end_p95_budget_ms(_config(payloadProfile="medium"))
 
 
 def test_the_budget_still_leaves_a_regression_room_to_show() -> None:
-    """68.8 ms was measured for medium on two cores; the budget must sit above it
-    with headroom, yet below a doubling of it, or it would catch nothing."""
+    """Keep the budget above the measured medium result, but not twice it.
+
+    68.8 ms was measured for medium on two cores; the budget must sit above it
+    with headroom, yet below a doubling of it, or it would catch nothing.
+    """
     budget = end_to_end_p95_budget_ms(_config(payloadProfile="medium"))
     assert 68.8 < budget < 2 * 68.8

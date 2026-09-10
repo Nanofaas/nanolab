@@ -1,4 +1,11 @@
-from sonata_tasks.execution.models import CommandOptions
+"""Build the `cli` workflow: drive the nanofaas CLI against a real control plane.
+
+Two shapes share the module. On the `container` backend the control plane runs
+on this machine under Docker and the CLI runs beside it; on a provisioned k8s
+environment the VM is created, the bootstrap tasks are retargeted at it, the
+Helm release is installed, and the CLI is synced in and run from inside the VM.
+"""
+
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -7,18 +14,28 @@ from typing import Any, cast
 
 from multipass import find_ssh_public_key
 from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_tasks.command import CommandTask
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
+from sonata_tasks.process import managed_process_resource
+from sonata_tasks.registry import docker_registry_resource
+from sonata_tasks.vm.ssh import find_ssh_private_key_path
+
+from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans import _local_control_plane
+from nanolab.plans.functions import resolve_function
+from nanolab.release.environment import secure_release_endpoints
+from nanolab.release.publish import GHCR_REPOSITORY
+from nanolab.release.versioning import normalize_version, read_project_version
 from nanolab.tasks.cli import (
     RUNTIME_CONFIG_NAMESPACE,
     CliFunction,
     CliWorkflowRequest,
     build_cli_workflow,
 )
-from sonata_tasks.command import CommandTask
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, DEFAULT_NAMESPACE, LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
-from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
-from sonata_tasks.process import managed_process_resource
-from sonata_tasks.registry import docker_registry_resource
-from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.components.bootstrap import (
     plan_k3s_install,
     plan_repo_sync_to_vm,
@@ -29,21 +46,20 @@ from nanolab.tasks.components.bootstrap import (
 from nanolab.tasks.components.context import ScenarioExecutionContext
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.components.images import control_image
-from nanolab.tasks.components.operations import RemoteCommandOperation, ScenarioOperation
-from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from nanolab.tasks.components.operations import (
+    RemoteCommandOperation,
+    ScenarioOperation,
+)
+from nanolab.tasks.deployment import (
+    CONTROL_PLANE_NODE_PORT,
+    DEFAULT_NAMESPACE,
+    LOCAL_REGISTRY,
+    REGISTRY_CONTAINER_NAME,
+)
 from nanolab.tasks.execution import ExecutionRole
+from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
-from sonata_tasks.vm.ssh import find_ssh_private_key_path
 from nanolab.tasks.vm.sync import repo_sync_ssh_rsh
-
-from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
-from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans import _local_control_plane
-from nanolab.plans.functions import resolve_function
-from nanolab.release.publish import GHCR_REPOSITORY
-from nanolab.release.environment import secure_release_endpoints
-from nanolab.release.versioning import normalize_version, read_project_version
 
 LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
 # The runtime-config module carries both the admin API `control-plane config`
@@ -98,7 +114,11 @@ _BOOTSTRAP_STEPS: tuple[
 def _local_control_plane_resource(
     repo_root: Path, *, requires: tuple[Resource[Any], ...] = ()
 ) -> Resource:
-    """The control plane running on this machine, deploying functions with Docker."""
+    """Build the resource for the control plane this machine runs under Docker.
+
+    The admin runtime-config API is switched on, because this workflow exercises
+    `nanofaas control-plane config` against it.
+    """
     return replace(
         managed_process_resource(
             title="Acquire local control plane",
@@ -110,8 +130,10 @@ def _local_control_plane_resource(
     )
 
 
-def _placeholder_context(repo_root: Path, vm_request: VmRequest) -> ScenarioExecutionContext:
-    """A context good enough to plan the bootstrap operations before any VM exists.
+def _placeholder_context(
+    repo_root: Path, vm_request: VmRequest
+) -> ScenarioExecutionContext:
+    """Build a context able to plan bootstrap operations before a VM exists.
 
     Only `vm_request.host` is genuinely unknown at this point; the ansible/rsync
     planners only read `user`/`home`, which are already fixed by the request.
@@ -132,10 +154,14 @@ def _resolved_context(
     context: ScenarioExecutionContext, info: VmInfo
 ) -> ScenarioExecutionContext:
     resolved_request = context.vm_request.model_copy(
-        update={"lifecycle": "external", "host": info.host, "user": info.user, "home": info.home}
+        update={
+            "lifecycle": "external",
+            "host": info.host,
+            "user": info.user,
+            "home": info.home,
+        }
     )
-    resolved_context = cast(ScenarioExecutionContext, replace(context, vm_request=resolved_request))
-    return resolved_context
+    return cast(ScenarioExecutionContext, replace(context, vm_request=resolved_request))
 
 
 def _bootstrap_tasks(
@@ -145,7 +171,7 @@ def _bootstrap_tasks(
     vm: Resource[VmInfo],
     executor: RoleBoundCommandTaskExecutor,
 ) -> tuple[CommandTask, ...]:
-    """The 5 provisioning steps as Sonata tasks, retargeted at the resolved VM.
+    """Build the bootstrap provisioning steps, retargeted at the resolved VM.
 
     Each planner runs once, eagerly, against a placeholder context (no VM is up
     yet). The resulting operation's argv is then re-resolved at run time — once
@@ -167,11 +193,15 @@ def _bootstrap_tasks(
     for title, planner in _BOOTSTRAP_STEPS:
         (raw_operation,) = planner(placeholder_context, discover_private_key=False)
         if not isinstance(raw_operation, RemoteCommandOperation):
-            raise TypeError(f"bootstrap operation is not a remote command: {raw_operation}")
+            raise TypeError(
+                f"bootstrap operation is not a remote command: {raw_operation}"
+            )
         base_operation = raw_operation
 
         def resolve_argv(
-            inputs: TaskInputs, *, base_operation: RemoteCommandOperation = base_operation
+            inputs: TaskInputs,
+            *,
+            base_operation: RemoteCommandOperation = base_operation,
         ) -> tuple[str, ...]:
             info = inputs.resource(vm)
             retargeted = retarget_bootstrap_operation(
@@ -235,7 +265,7 @@ def _control_plane_helm_resource(
     executor: RoleBoundCommandTaskExecutor,
     vm: Resource[VmInfo],
 ) -> Resource[HelmReleaseSpec]:
-    """The control plane Helm release, deployed inside the VM.
+    """Build the Helm release that runs the control plane inside the VM.
 
     This workflow verifies the CLI end-to-end, not the control plane build: it
     uses the official image release matching the product checkout. A freshly
@@ -257,7 +287,9 @@ def _control_plane_helm_resource(
         namespace=namespace,
         values=helm_set_args(values),
     )
-    resource = helm_release_resource(spec, executor=executor, role="stack", requires=(vm,))
+    resource = helm_release_resource(
+        spec, executor=executor, role="stack", requires=(vm,)
+    )
     # Retitled so the compiled id reads "acquire-control-plane-helm-release":
     # `helm_release_resource`'s own title is generic ("Acquire Helm release
     # <name>"), but this workflow's topology names the release by what it's for.
@@ -285,6 +317,7 @@ def _build_k8s_plan(
     orchestrator = provider_for_environment(
         environment, repo_root, orchestrator_factory=orchestrator_factory
     )
+
     def after_ensure(_info: VmInfo) -> None:
         if (
             environment.provider == "azure"
@@ -308,7 +341,9 @@ def _build_k8s_plan(
     _, version_tag = normalize_version(read_project_version(repo_root))
     helm = _control_plane_helm_resource(
         namespace=namespace,
-        control_plane_image=_published_image(control_image(_LOCAL_REGISTRY), version_tag),
+        control_plane_image=_published_image(
+            control_image(_LOCAL_REGISTRY), version_tag
+        ),
         executor=executor,
         vm=vm,
     )
@@ -317,7 +352,9 @@ def _build_k8s_plan(
         CliFunction(
             name=resolved.name,
             image=_published_image(resolved.image, version_tag),
-            payload=json.dumps(json.loads(resolved.payload)["input"], separators=(",", ":")),
+            payload=json.dumps(
+                json.loads(resolved.payload)["input"], separators=(",", ":")
+            ),
             resources=resolved.resources,
             # Function images use the same published release as the control
             # plane; this workflow deliberately has no image build/push phase.
@@ -356,6 +393,13 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     environment: EnvironmentConfig | None = None,
     orchestrator_factory: Callable[[Path], Any] | None = None,
 ) -> Workflow:
+    """Compile the CLI scenario into a Sonata workflow.
+
+    Picks the deployment graph the scenario asks for: the container backend
+    starts a control plane on the host and runs the CLI beside it, while a
+    non-local environment is handled by `_build_k8s_plan`, which provisions the
+    VM and runs the CLI from inside it.
+    """
     if config.workflow != "cli":
         raise ValueError("CLI plan requires a cli scenario")
     root = repo_root or Path.cwd()
@@ -374,12 +418,16 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     if not local and endpoint is None:
         raise ValueError("k8s cli workflow requires an explicit control-plane URL")
     target_endpoint = LOCAL_ENDPOINT if local else endpoint
-    assert target_endpoint is not None
+    # Narrowing only: the None case was rejected just above for non-local runs,
+    # and LOCAL_ENDPOINT is a non-optional module constant.
+    assert target_endpoint is not None  # nosec B101
     functions = tuple(
         CliFunction(
             name=resolved.name,
             image=resolved.image,
-            payload=json.dumps(json.loads(resolved.payload)["input"], separators=(",", ":")),
+            payload=json.dumps(
+                json.loads(resolved.payload)["input"], separators=(",", ":")
+            ),
             resources=resolved.resources,
             build_argv=resolved.build_argv if local else None,
             image_build_argv=resolved.image_build_argv if local else None,

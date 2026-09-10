@@ -10,11 +10,9 @@ import pytest
 from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 from sonata_engine.errors import NoUpstreamValueError
 from sonata_engine.workflow.context import bind_workflow_sink
-from nanolab.tasks.loadtest.autoscaling import AutoscalingSummary
-from nanolab.tasks.loadtest.models import K6RunResult, TimeWindow
+from sonata_tasks.command import CommandTask
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from sonata_tasks.command import CommandTask
 from nanolab.tasks.loadtest import (
     CapturePrometheusTask,
     EvaluateGateTask,
@@ -25,6 +23,8 @@ from nanolab.tasks.loadtest import (
     WriteSummaryTask,
     loadtest_composite,
 )
+from nanolab.tasks.loadtest.autoscaling import AutoscalingSummary
+from nanolab.tasks.loadtest.models import K6RunResult, TimeWindow
 
 STARTED = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
 ENDED = datetime(2026, 7, 28, 10, 5, tzinfo=UTC)
@@ -32,7 +32,10 @@ ENDED = datetime(2026, 7, 28, 10, 5, tzinfo=UTC)
 
 def _k6(passed: bool = True) -> K6RunResult:
     return K6RunResult(
-        summary_path=Path("k6-summary.json"), started_at=STARTED, ended_at=ENDED, passed=passed
+        summary_path=Path("k6-summary.json"),
+        started_at=STARTED,
+        ended_at=ENDED,
+        passed=passed,
     )
 
 
@@ -76,7 +79,9 @@ class RecordingExecutor:
         self.seen.append(task)
         # The platform half resolves the control plane's address before anything
         # can register against it.
-        stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        stdout = (
+            "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        )
         return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
 
@@ -93,8 +98,11 @@ class Sink:
 
 
 def test_the_watcher_brackets_the_run() -> None:
-    """Sampling has to start before the load and stop after it, whatever the
-    load does — including raising."""
+    """Start sampling before the load and stop after it.
+
+    Sampling has to start before the load and stop after it, whatever the
+    load does — including raising.
+    """
     watcher = FakeWatcher()
 
     _ = RunK6Task(run_k6=FakeRunK6(), watcher=watcher).run(TaskInputs.empty())
@@ -251,9 +259,12 @@ def test_the_gate_passes_a_clean_run() -> None:
     ],
 )
 def test_no_step_can_see_a_run_that_did_not_happen(task: Any) -> None:
-    """The whole reason this is one composite. In the legacy workflow these were
+    """Refuse to read a run's outcome when no run happened.
+
+    The whole reason this is one composite. In the legacy workflow these were
     separate tasks reading a mutable result attribute, so selecting one on its
-    own failed for an unrelated ordering detail."""
+    own failed for an unrelated ordering detail.
+    """
     with pytest.raises(NoUpstreamValueError):
         _ = task.run(TaskInputs.empty())
 
@@ -267,7 +278,10 @@ def test_the_composite_is_one_unit_whose_steps_are_visible() -> None:
     executor = RecordingExecutor()
     composite = loadtest_composite(
         preflight=CommandTask(
-            title="Check k6 is usable", argv=("k6", "version"), executor=executor, role="loadgen"
+            title="Check k6 is usable",
+            argv=("k6", "version"),
+            executor=executor,
+            role="loadgen",
         ),
         prepare=CommandTask(
             title="Prepare the run directory",
@@ -285,10 +299,10 @@ def test_the_composite_is_one_unit_whose_steps_are_visible() -> None:
     with bind_workflow_sink(sink):
         workflow.run()
 
-    assert [task.task_id for task in workflow.compile().tasks] == ["001.run-the-load-test"]
-    assert [
-        event.task_id for event in sink.events if event.kind == "task.started"
-    ] == [
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.run-the-load-test"
+    ]
+    assert [event.task_id for event in sink.events if event.kind == "task.started"] == [
         "001.run-the-load-test",
         "001.run-the-load-test/check-k6-is-usable",
         "001.run-the-load-test/prepare-the-run-directory",
@@ -301,10 +315,16 @@ def test_a_breached_threshold_fails_the_whole_unit() -> None:
     executor = RecordingExecutor()
     composite = loadtest_composite(
         preflight=CommandTask(
-            title="Check k6 is usable", argv=("k6", "version"), executor=executor, role="loadgen"
+            title="Check k6 is usable",
+            argv=("k6", "version"),
+            executor=executor,
+            role="loadgen",
         ),
         prepare=CommandTask(
-            title="Prepare the run directory", argv=("mkdir",), executor=executor, role="loadgen"
+            title="Prepare the run directory",
+            argv=("mkdir",),
+            executor=executor,
+            role="loadgen",
         ),
         run_k6=RunK6Task(run_k6=FakeRunK6(result_value=_k6(passed=False))),
         steps_after_run=(EvaluateGateTask(),),
@@ -338,10 +358,16 @@ def _load(executor: RecordingExecutor) -> Any:
 
     return loadtest_composite(
         preflight=CommandTask(
-            title="Check k6 is usable", argv=("k6", "version"), executor=executor, role="loadgen"
+            title="Check k6 is usable",
+            argv=("k6", "version"),
+            executor=executor,
+            role="loadgen",
         ),
         prepare=CommandTask(
-            title="Prepare the run directory", argv=("mkdir",), executor=executor, role="loadgen"
+            title="Prepare the run directory",
+            argv=("mkdir",),
+            executor=executor,
+            role="loadgen",
         ),
         run_k6=RunK6Task(run_k6=FakeRunK6()),
         steps_after_run=(EvaluateGateTask(),),
@@ -349,8 +375,11 @@ def _load(executor: RecordingExecutor) -> Any:
 
 
 def test_loadtest_reuses_the_platform_validate_deploys() -> None:
-    """The two workflows differ only in what they do once the platform is up, so
-    the eight deployment units are the shared half rather than a second copy."""
+    """Share the platform deployment units with the validate workflow.
+
+    The two workflows differ only in what they do once the platform is up, so
+    the eight deployment units are the shared half rather than a second copy.
+    """
     from sonata_engine import Workflow as SonataWorkflow
     from sonata_tasks.execution.bindings import RoleBindings
 
@@ -386,10 +415,16 @@ def test_a_failed_load_test_still_deregisters_what_it_registered() -> None:
     executor = RecordingExecutor()
     breached = loadtest_composite(
         preflight=CommandTask(
-            title="Check k6 is usable", argv=("k6", "version"), executor=executor, role="loadgen"
+            title="Check k6 is usable",
+            argv=("k6", "version"),
+            executor=executor,
+            role="loadgen",
         ),
         prepare=CommandTask(
-            title="Prepare the run directory", argv=("mkdir",), executor=executor, role="loadgen"
+            title="Prepare the run directory",
+            argv=("mkdir",),
+            executor=executor,
+            role="loadgen",
         ),
         run_k6=RunK6Task(run_k6=FakeRunK6(result_value=_k6(passed=False))),
         steps_after_run=(EvaluateGateTask(),),

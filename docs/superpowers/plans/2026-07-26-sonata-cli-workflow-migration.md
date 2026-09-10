@@ -415,7 +415,10 @@ def test_duplicate_titles_stay_legal_without_a_selection() -> None:
     workflow.add(_Noop("Build"))
     workflow.add(_Noop("Build"))
 
-    assert [task.task_id for task in workflow.compile().tasks] == ["001.build", "002.build"]
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.build",
+        "002.build",
+    ]
 
 
 def test_inverted_range_is_rejected() -> None:
@@ -437,7 +440,10 @@ def test_compilation_stays_deterministic_under_selection() -> None:
     workflow, _resource_ = _workflow_with_resource()
     selection = Selection(start="list")
 
-    assert workflow.compile(select=selection).tasks == workflow.compile(select=selection).tasks
+    assert (
+        workflow.compile(select=selection).tasks
+        == workflow.compile(select=selection).tasks
+    )
 
 
 def test_selection_does_not_mutate_the_workflow() -> None:
@@ -494,60 +500,61 @@ from sonata_engine.errors import (
 Sostituisci il metodo `compile` esistente e aggiungi `_select`. Il corpo di `compile` diventa:
 
 ```python
-    def compile(self, *, select: Selection | None = None) -> CompiledWorkflow:
-        """Assign stable, deterministic IDs to the recorded task definitions.
+def compile(self, *, select: Selection | None = None) -> CompiledWorkflow:
+    """Assign stable, deterministic IDs to the recorded task definitions.
 
-        Each `Resource` referenced across `requires` gets one acquire unit
-        spliced immediately before its first consumer and one release unit
-        immediately after its last consumer. Releases landing at the same point
-        run in reverse acquisition order (last-acquired-first-released). IDs are
-        `{ordinal:03d}.{slug}` derived from position in the final merged
-        sequence; duplicate titles are disambiguated by ordinal.
+    Each `Resource` referenced across `requires` gets one acquire unit
+    spliced immediately before its first consumer and one release unit
+    immediately after its last consumer. Releases landing at the same point
+    run in reverse acquisition order (last-acquired-first-released). IDs are
+    `{ordinal:03d}.{slug}` derived from position in the final merged
+    sequence; duplicate titles are disambiguated by ordinal.
 
-        `select` filters consumer definitions BEFORE resources are spliced, so
-        the surviving consumers still get their acquire/release units. Ordinals
-        renumber over the survivors: a sliced run is a different topology, and
-        the journal fingerprint will refuse to resume across it.
-        """
-        if not self.workflow_id:
-            raise ValueError("Workflow.compile() requires a non-empty workflow_id")
+    `select` filters consumer definitions BEFORE resources are spliced, so
+    the surviving consumers still get their acquire/release units. Ordinals
+    renumber over the survivors: a sliced run is a different topology, and
+    the journal fingerprint will refuse to resume across it.
+    """
+    if not self.workflow_id:
+        raise ValueError("Workflow.compile() requires a non-empty workflow_id")
 
-        merged = self._merge_resources(self._select(select))
-        compiled_tasks = tuple(
-            CompiledTask(
-                task_id=f"{ordinal:03d}.{_slugify(entry.task.title)}",
-                task=entry.task,
-                required_resources=entry.required_resources,
-                kind=entry.kind,
-                resource=entry.resource,
-            )
-            for ordinal, entry in enumerate(merged, start=1)
+    merged = self._merge_resources(self._select(select))
+    compiled_tasks = tuple(
+        CompiledTask(
+            task_id=f"{ordinal:03d}.{_slugify(entry.task.title)}",
+            task=entry.task,
+            required_resources=entry.required_resources,
+            kind=entry.kind,
+            resource=entry.resource,
         )
-        return CompiledWorkflow(workflow_id=self.workflow_id, tasks=compiled_tasks)
+        for ordinal, entry in enumerate(merged, start=1)
+    )
+    return CompiledWorkflow(workflow_id=self.workflow_id, tasks=compiled_tasks)
 
-    def _select(
-        self, select: Selection | None
-    ) -> list[tuple[Task[Any], tuple[Resource, ...]]]:
-        """Filter consumer definitions by title slug, leaving resources to the compiler."""
-        slugs = [_slugify(task.title) for task, _requires in self._definitions]
-        for slug, (task, _requires) in zip(slugs, self._definitions):
-            if not slug:
-                raise ValueError(f"task title {task.title!r} produces an empty slug")
-        if select is None or select.is_empty:
-            return list(self._definitions)
-        if select.only is not None:
-            return [self._definitions[_resolve_slug(slugs, select.only)]]
-        first = _resolve_slug(slugs, select.start) if select.start is not None else 0
-        last = (
-            _resolve_slug(slugs, select.until)
-            if select.until is not None
-            else len(self._definitions) - 1
+
+def _select(
+    self, select: Selection | None
+) -> list[tuple[Task[Any], tuple[Resource, ...]]]:
+    """Filter consumer definitions by title slug, leaving resources to the compiler."""
+    slugs = [_slugify(task.title) for task, _requires in self._definitions]
+    for slug, (task, _requires) in zip(slugs, self._definitions):
+        if not slug:
+            raise ValueError(f"task title {task.title!r} produces an empty slug")
+    if select is None or select.is_empty:
+        return list(self._definitions)
+    if select.only is not None:
+        return [self._definitions[_resolve_slug(slugs, select.only)]]
+    first = _resolve_slug(slugs, select.start) if select.start is not None else 0
+    last = (
+        _resolve_slug(slugs, select.until)
+        if select.until is not None
+        else len(self._definitions) - 1
+    )
+    if first > last:
+        raise SelectionError(
+            f"start {select.start!r} comes after until {select.until!r}"
         )
-        if first > last:
-            raise SelectionError(
-                f"start {select.start!r} comes after until {select.until!r}"
-            )
-        return list(self._definitions[first : last + 1])
+    return list(self._definitions[first : last + 1])
 ```
 
 - [ ] **Step 5: Far prendere le definizioni a `_merge_resources` come parametro**
@@ -1038,7 +1045,9 @@ def test_a_passing_command_carries_its_result_as_the_outcome_value() -> None:
     executor = RecordingExecutor(
         result=TaskResult(task_id="", status="passed", return_code=0, stdout="ok")
     )
-    task = CommandTask(title="List functions", argv=("cli", "fn", "list"), executor=executor)
+    task = CommandTask(
+        title="List functions", argv=("cli", "fn", "list"), executor=executor
+    )
 
     outcome = task.run()
 
@@ -1073,22 +1082,30 @@ def test_role_and_cwd_reach_the_spec() -> None:
 
 def test_a_failing_command_raises_with_stderr_in_the_message() -> None:
     executor = RecordingExecutor(
-        result=TaskResult(task_id="", status="failed", return_code=2, stderr="no such function")
+        result=TaskResult(
+            task_id="", status="failed", return_code=2, stderr="no such function"
+        )
     )
     task = CommandTask(title="Invoke thing", argv=("cli",), executor=executor)
 
-    with pytest.raises(RuntimeError, match="Invoke thing failed \\(exit 2\\): no such function"):
+    with pytest.raises(
+        RuntimeError, match="Invoke thing failed \\(exit 2\\): no such function"
+    ):
         task.run()
 
 
 def test_a_failing_command_falls_back_to_stdout_then_to_a_placeholder() -> None:
     stdout_only = RecordingExecutor(
-        result=TaskResult(task_id="", status="failed", return_code=1, stdout="bad request")
+        result=TaskResult(
+            task_id="", status="failed", return_code=1, stdout="bad request"
+        )
     )
     with pytest.raises(RuntimeError, match="bad request"):
         CommandTask(title="Apply", argv=("cli",), executor=stdout_only).run()
 
-    silent = RecordingExecutor(result=TaskResult(task_id="", status="failed", return_code=1))
+    silent = RecordingExecutor(
+        result=TaskResult(task_id="", status="failed", return_code=1)
+    )
     with pytest.raises(RuntimeError, match="no output"):
         CommandTask(title="Apply", argv=("cli",), executor=silent).run()
 
@@ -1191,7 +1208,9 @@ class CommandTask(Task[TaskResult]):
         result = self.executor.run(self._spec())
         if result.status != "passed":
             detail = result.stderr.strip() or result.stdout.strip() or "no output"
-            raise RuntimeError(f"{self.title} failed (exit {result.return_code}): {detail}")
+            raise RuntimeError(
+                f"{self.title} failed (exit {result.return_code}): {detail}"
+            )
         if self.verify is not None:
             self.verify(result)
         return TaskOutcome(value=result)
@@ -1473,7 +1492,10 @@ def test_invoke_rejects_a_response_without_output() -> None:
     executor = ScriptedExecutor(
         responses={
             "invoke word-stats-java": TaskResult(
-                task_id="", status="passed", return_code=0, stdout='{"status":"success"}'
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout='{"status":"success"}',
             )
         }
     )
@@ -1567,7 +1589,9 @@ def test_apply_builds_the_manifest_on_the_target_not_in_this_process() -> None:
 
     workflow.run()
 
-    apply_spec = next(spec for spec in executor.seen if spec.summary.startswith("Apply"))
+    apply_spec = next(
+        spec for spec in executor.seen if spec.summary.startswith("Apply")
+    )
     script = apply_spec.argv[-1]
     assert apply_spec.argv[:2] == ("bash", "-lc")
     assert "mktemp" in script
@@ -1583,7 +1607,9 @@ def test_delete_keeps_real_cli_failures_visible() -> None:
 
     workflow.run()
 
-    delete_spec = next(spec for spec in executor.seen if spec.summary.startswith("Delete"))
+    delete_spec = next(
+        spec for spec in executor.seen if spec.summary.startswith("Delete")
+    )
     # The nanoFaaS CLI already exits 0 when DELETE returns 404. Accepting 1
     # would also hide network, server, and other real cleanup failures.
     assert delete_spec.expected_exit_codes == frozenset({0})
@@ -1686,9 +1712,13 @@ def _verify_invocation(result: TaskResult) -> None:
             f"invocation response was not JSON: {result.stdout[:200]!r}"
         ) from error
     if not isinstance(response, dict):
-        raise RuntimeError(f"invocation response was not JSON object: {result.stdout[:200]!r}")
+        raise RuntimeError(
+            f"invocation response was not JSON object: {result.stdout[:200]!r}"
+        )
     if response.get("status") != "success":
-        raise RuntimeError(f"invocation did not report success: {response.get('status')!r}")
+        raise RuntimeError(
+            f"invocation did not report success: {response.get('status')!r}"
+        )
     if "output" not in response:
         raise RuntimeError("invocation carried no output")
 ```
@@ -1780,7 +1810,9 @@ def _function_resource(
             try:
                 delete_task.run()
             except BaseException as cleanup_error:
-                error.add_note(f"Best-effort delete after a failed apply failed: {cleanup_error}")
+                error.add_note(
+                    f"Best-effort delete after a failed apply failed: {cleanup_error}"
+                )
             raise
 
     def release() -> None:
@@ -1820,7 +1852,8 @@ def build_cli_workflow(
         )
     )
     resources = tuple(
-        _function_resource(request, function, executor, cwd) for function in request.functions
+        _function_resource(request, function, executor, cwd)
+        for function in request.functions
     )
     workflow.add(
         CommandTask(
@@ -1836,7 +1869,9 @@ def build_cli_workflow(
         workflow.add(
             CommandTask(
                 title=f"Invoke {function.name}",
-                argv=_cli_argv(request, "invoke", function.name, "--data", function.payload),
+                argv=_cli_argv(
+                    request, "invoke", function.name, "--data", function.payload
+                ),
                 executor=executor,
                 role=request.cli_role,
                 cwd=cwd,
@@ -2044,7 +2079,11 @@ def test_cli_plan_rejects_a_non_cli_scenario() -> None:
     with pytest.raises(ValueError, match="cli scenario"):
         build_cli_plan(
             ScenarioConfig.model_validate(
-                {"workflow": "validate", "backend": "k8s", "functions": ["word-stats-java"]}
+                {
+                    "workflow": "validate",
+                    "backend": "k8s",
+                    "functions": ["word-stats-java"],
+                }
             ),
             RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
         )
@@ -2192,7 +2231,9 @@ def build_cli_plan(
         CliFunction(
             name=resolved.name,
             image=resolved.image,
-            payload=json.dumps(json.loads(resolved.payload)["input"], separators=(",", ":")),
+            payload=json.dumps(
+                json.loads(resolved.payload)["input"], separators=(",", ":")
+            ),
             resources=resolved.resources,
         )
         for key in config.functions
@@ -2330,25 +2371,23 @@ Sempre in `run_command`, sostituisci il blocco:
 con:
 
 ```python
-                    workflow = _workflow(
-                        scenario_config,
-                        environment_config,
-                        control_plane_url=effective_control_plane_url,
-                        prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-                        run_dir=effective_run_dir,
-                    )
-                    if uses_sonata(scenario_config):
-                        workflow.keep_infrastructure = keep
-                        try:
-                            workflow.run(
-                                select=Selection(only=only, start=start, until=until)
-                            )
-                        except SelectionError as error:
-                            raise typer.BadParameter(str(error)) from None
-                    else:
-                        workflow = _slice(workflow, only=only, start=start, until=until)
-                        workflow.keep_infrastructure = keep
-                        workflow.run()
+workflow = _workflow(
+    scenario_config,
+    environment_config,
+    control_plane_url=effective_control_plane_url,
+    prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+    run_dir=effective_run_dir,
+)
+if uses_sonata(scenario_config):
+    workflow.keep_infrastructure = keep
+    try:
+        workflow.run(select=Selection(only=only, start=start, until=until))
+    except SelectionError as error:
+        raise typer.BadParameter(str(error)) from None
+else:
+    workflow = _slice(workflow, only=only, start=start, until=until)
+    workflow.keep_infrastructure = keep
+    workflow.run()
 ```
 
 In `plan_command`, sostituisci il blocco:
@@ -2399,32 +2438,38 @@ con:
 In `packages/nanolab/src/nanolab/cli/product.py`, in `run_command` e in `plan_command`, sostituisci le tre dichiarazioni di opzione:
 
 ```python
-        only: str | None = typer.Option(None, "--only"),
-        start: str | None = typer.Option(None, "--from"),
-        until: str | None = typer.Option(None, "--until"),
+only: str | None = (typer.Option(None, "--only"),)
+start: str | None = (typer.Option(None, "--from"),)
+until: str | None = (typer.Option(None, "--until"),)
 ```
 
 con:
 
 ```python
-        only: str | None = typer.Option(
-            None,
-            "--only",
-            help=(
-                "Run a single task. Migrated workflows address tasks by title slug "
-                "(e.g. list-functions) and do not run their prerequisites for you."
-            ),
+only: str | None = (
+    typer.Option(
+        None,
+        "--only",
+        help=(
+            "Run a single task. Migrated workflows address tasks by title slug "
+            "(e.g. list-functions) and do not run their prerequisites for you."
         ),
-        start: str | None = typer.Option(
-            None,
-            "--from",
-            help="Start from this task, inclusive. Same addressing as --only.",
-        ),
-        until: str | None = typer.Option(
-            None,
-            "--until",
-            help="Stop after this task, inclusive. Same addressing as --only.",
-        ),
+    ),
+)
+start: str | None = (
+    typer.Option(
+        None,
+        "--from",
+        help="Start from this task, inclusive. Same addressing as --only.",
+    ),
+)
+until: str | None = (
+    typer.Option(
+        None,
+        "--until",
+        help="Stop after this task, inclusive. Same addressing as --only.",
+    ),
+)
 ```
 
 - [ ] **Step 8: Eseguire la suite nanolab**
@@ -2740,17 +2785,15 @@ Sostituisci il corpo del ciclo in `_render_plan`. Da:
 a:
 
 ```python
-    def _render_plan(
-        self, *, title: str, workflow: Any, scenario: ScenarioConfig
-    ) -> None:
-        table = Table(expand=True)
-        table.add_column("#", justify="right", style="cyan", no_wrap=True)
-        table.add_column("Task", style="bold")
-        table.add_column("Description")
-        for index, (task_id, task_title) in enumerate(
-            self._plan_rows(scenario, workflow), start=1
-        ):
-            table.add_row(f"{index:02d}", task_id, task_title)
+def _render_plan(self, *, title: str, workflow: Any, scenario: ScenarioConfig) -> None:
+    table = Table(expand=True)
+    table.add_column("#", justify="right", style="cyan", no_wrap=True)
+    table.add_column("Task", style="bold")
+    table.add_column("Description")
+    for index, (task_id, task_title) in enumerate(
+        self._plan_rows(scenario, workflow), start=1
+    ):
+        table.add_row(f"{index:02d}", task_id, task_title)
 ```
 
 Aggiorna la chiamata (attorno alla riga 365):
@@ -2762,15 +2805,15 @@ Aggiorna la chiamata (attorno alla riga 365):
 Sostituisci la riga che calcola i passi pianificati (attorno alla riga 425):
 
 ```python
-                planned_steps=preview.phase_titles,
+planned_steps = (preview.phase_titles,)
 ```
 
 con:
 
 ```python
-                planned_steps=[
-                    task_title for _task_id, task_title in self._plan_rows(scenario, preview)
-                ],
+planned_steps = (
+    [task_title for _task_id, task_title in self._plan_rows(scenario, preview)],
+)
 ```
 
 - [ ] **Step 7: Eseguire la suite nanolab**

@@ -4,14 +4,15 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from multipass import MultipassCommandError
-from sonata_tasks.shell import ShellBackend, RecordingShell, ShellExecutionResult
+from sonata_tasks.shell import RecordingShell, ShellBackend, ShellExecutionResult
 from sonata_tasks.vm.models import VmRequest
-from nanolab.tasks.vm.orchestrator import VmOrchestrator
 
+from nanolab.tasks.vm.orchestrator import VmOrchestrator
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_orch(
     repo_root: Path = Path("/repo"),
@@ -24,13 +25,12 @@ def _make_orch(
         shell = RecordingShell()
     mock_ansible = ansible if ansible is not None else MagicMock()
     mock_client = multipass_client if multipass_client is not None else MagicMock()
-    orch = VmOrchestrator(
+    return VmOrchestrator(
         repo_root=repo_root,
         shell=shell,
         ansible=mock_ansible,
         multipass_client=mock_client,
     )
-    return orch
 
 
 def _ok_result(command: list[str] | None = None) -> ShellExecutionResult:
@@ -44,6 +44,7 @@ def _err_result(command: list[str] | None = None) -> ShellExecutionResult:
 # ---------------------------------------------------------------------------
 # Existing tests (unchanged)
 # ---------------------------------------------------------------------------
+
 
 def test_remote_project_dir_uses_nanofaas_suffix() -> None:
     orch = VmOrchestrator(repo_root=Path("/repo"), shell=RecordingShell())
@@ -72,6 +73,7 @@ def test_remote_path_for_local_uses_repo_root_as_default_root() -> None:
 # ---------------------------------------------------------------------------
 # New tests
 # ---------------------------------------------------------------------------
+
 
 def test_kubeconfig_path_ends_with_kube_config() -> None:
     orch = _make_orch()
@@ -140,7 +142,9 @@ def test_install_k3s_delegates_to_ansible_provision_k3s() -> None:
     mock_ansible.provision_k3s.assert_called_once()
     call_kwargs = mock_ansible.provision_k3s.call_args
     # kubeconfig_path is passed as a keyword argument
-    kube_path = call_kwargs.kwargs.get("kubeconfig_path") or call_kwargs[1].get("kubeconfig_path")
+    kube_path = call_kwargs.kwargs.get("kubeconfig_path") or call_kwargs[1].get(
+        "kubeconfig_path"
+    )
     assert kube_path is not None
     assert kube_path.endswith("/.kube/config")
 
@@ -197,7 +201,9 @@ def test_export_kubeconfig_external_dry_run_records_scp_command() -> None:
     orch = _make_orch(shell=shell)
     request = VmRequest(lifecycle="external", host="vm.example.test", user="dev")
 
-    result = orch.export_kubeconfig(request, destination=Path("/tmp/kube/config"), dry_run=True)
+    result = orch.export_kubeconfig(
+        request, destination=Path("/tmp/kube/config"), dry_run=True
+    )
 
     assert "scp" in result.command
 
@@ -207,7 +213,9 @@ def test_export_kubeconfig_multipass_dry_run_records_transfer_command() -> None:
     orch = _make_orch(shell=shell)
     request = VmRequest(lifecycle="multipass", name="nanofaas-e2e")
 
-    result = orch.export_kubeconfig(request, destination=Path("/tmp/kube/config"), dry_run=True)
+    result = orch.export_kubeconfig(
+        request, destination=Path("/tmp/kube/config"), dry_run=True
+    )
 
     rendered = " ".join(result.command)
     assert "multipass" in rendered or "transfer" in rendered
@@ -224,7 +232,9 @@ def test_export_kubeconfig_multipass_live_success_returns_zero() -> None:
     orch = _make_orch(shell=shell, multipass_client=mock_client)
     request = VmRequest(lifecycle="multipass", name="nanofaas-e2e")
 
-    result = orch.export_kubeconfig(request, destination=Path("/tmp/kube/config"), dry_run=False)
+    result = orch.export_kubeconfig(
+        request, destination=Path("/tmp/kube/config"), dry_run=False
+    )
 
     assert result.return_code == 0
 
@@ -245,6 +255,8 @@ def test_export_kubeconfig_multipass_propagates_multipass_command_error() -> Non
     orch = _make_orch(shell=shell, multipass_client=mock_client)
     request = VmRequest(lifecycle="multipass", name="nanofaas-e2e")
 
-    result = orch.export_kubeconfig(request, destination=Path("/tmp/kube/config"), dry_run=False)
+    result = orch.export_kubeconfig(
+        request, destination=Path("/tmp/kube/config"), dry_run=False
+    )
 
     assert result.return_code != 0

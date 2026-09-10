@@ -75,6 +75,36 @@ jobs:
       - name: Lint
         run: uv run --locked --all-packages --all-groups ruff check packages
 
+  # ---------------------------------------------------------------------------
+  # The same hooks a developer runs locally.
+  #
+  # This adds what the jobs above do not cover: bandit, the format check, the
+  # generic file hygiene, and the guarantee that local and CI cannot drift.
+  # ---------------------------------------------------------------------------
+  pre-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out nanolab
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
+
+      - name: Install pre-commit
+        run: python -m pip install --upgrade pip pre-commit
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure --color=always
+
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 15

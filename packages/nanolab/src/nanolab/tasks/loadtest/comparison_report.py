@@ -50,12 +50,22 @@ class CellData:
     series: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     def peak(self, metric: str) -> float:
+        """Return the highest value the metric reached in this run."""
         frame = self.series.get(metric)
-        return _scalar(frame["value"].max()) if frame is not None and not frame.empty else float("nan")
+        return (
+            _scalar(frame["value"].max())
+            if frame is not None and not frame.empty
+            else float("nan")
+        )
 
     def mean(self, metric: str) -> float:
+        """Return the mean value of the metric over this run."""
         frame = self.series.get(metric)
-        return _scalar(frame["value"].mean()) if frame is not None and not frame.empty else float("nan")
+        return (
+            _scalar(frame["value"].mean())
+            if frame is not None and not frame.empty
+            else float("nan")
+        )
 
 
 def _k6_values(summary: dict[str, Any], name: str) -> dict[str, Any]:
@@ -73,7 +83,9 @@ def _series(snapshot: dict[str, Any], name: str) -> pd.DataFrame:
     start = datetime.fromisoformat(snapshot["start"])
     rows = [
         {
-            "elapsed": (datetime.fromisoformat(point["timestamp"]) - start).total_seconds(),
+            "elapsed": (
+                datetime.fromisoformat(point["timestamp"]) - start
+            ).total_seconds(),
             "value": float(point["value"]),
         }
         for point in entry["points"]
@@ -135,12 +147,15 @@ def _fmt(mean: float, half_range: float, digits: int = 1) -> str:
 
 
 def aggregate_table(cells: list[CellData], labels: dict[str, str]) -> pd.DataFrame:
+    """Return the per-build table, each number carried with its half-range."""
     rows = []
     for variant in labels:
         runs = [cell for cell in cells if cell.variant == variant]
         if not runs:
             continue
-        memory = [cell.peak("container_memory_bytes@control-plane") / _MIB for cell in runs]
+        memory = [
+            cell.peak("container_memory_bytes@control-plane") / _MIB for cell in runs
+        ]
         cpu = [cell.mean("container_cpu_cores@control-plane") for cell in runs]
         rows.append(
             {
@@ -150,7 +165,9 @@ def aggregate_table(cells: list[CellData], labels: dict[str, str]) -> pd.DataFra
                 "p50 (ms)": _fmt(*_spread([c.p50_ms for c in runs])),
                 "p95 (ms)": _fmt(*_spread([c.p95_ms for c in runs])),
                 "p99 (ms)": _fmt(*_spread([c.p99_ms for c in runs])),
-                "Shed (%)": _fmt(*_spread([c.failed_rate * 100 for c in runs]), digits=2),
+                "Shed (%)": _fmt(
+                    *_spread([c.failed_rate * 100 for c in runs]), digits=2
+                ),
                 "Control plane peak (MiB)": _fmt(*_spread(memory)),
                 "Control plane CPU (cores)": _fmt(*_spread(cpu), digits=2),
             }
@@ -158,7 +175,9 @@ def aggregate_table(cells: list[CellData], labels: dict[str, str]) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
-def _verdict(cells: list[CellData], labels: dict[str, str], metric: str, lower_is_better: bool) -> str:
+def _verdict(
+    cells: list[CellData], labels: dict[str, str], metric: str, lower_is_better: bool
+) -> str:
     """Say whether the best build is actually distinguishable from the next one.
 
     The comparison that matters is not between two means but between the gap and
@@ -188,18 +207,25 @@ def _verdict(cells: list[CellData], labels: dict[str, str], metric: str, lower_i
     overlaps = not (best[2] < runner_up[1] or runner_up[2] < best[1])
     if overlaps:
         return (
-            f"<p class='verdict warn'><strong>{labels[best[0]]}</strong> leads on this metric, "
-            f"but its runs overlap those of <strong>{labels[runner_up[0]]}</strong>: "
-            "three repetitions did not separate them.</p>"
+            f"<p class='verdict warn'><strong>{labels[best[0]]}</strong> leads "
+            f"on this metric, but its runs overlap those of "
+            f"<strong>{labels[runner_up[0]]}</strong>: three repetitions did not "
+            "separate them.</p>"
         )
     return (
         f"<p class='verdict'><strong>{labels[best[0]]}</strong> is ahead of "
-        f"<strong>{labels[runner_up[0]]}</strong> by more than either build's own spread.</p>"
+        f"<strong>{labels[runner_up[0]]}</strong> by more than either build's "
+        "own spread.</p>"
     )
 
 
 def _over_time(
-    cells: list[CellData], labels: dict[str, str], metric: str, title: str, y_title: str, scale: float = 1.0
+    cells: list[CellData],
+    labels: dict[str, str],
+    metric: str,
+    title: str,
+    y_title: str,
+    scale: float = 1.0,
 ) -> go.Figure:
     """One trace per build, every repetition drawn.
 
@@ -225,7 +251,10 @@ def _over_time(
                     showlegend=first,
                     line={"color": colour, "width": 1.6},
                     opacity=1.0 if first else 0.55,
-                    hovertemplate=f"{labels[variant]} run {cell.repetition}<br>%{{x:.0f}}s: %{{y:.1f}}<extra></extra>",
+                    hovertemplate=(
+                        f"{labels[variant]} run {cell.repetition}"
+                        "<br>%{x:.0f}s: %{y:.1f}<extra></extra>"
+                    ),
                 )
             )
             first = False
@@ -257,7 +286,11 @@ def _spread_chart(cells: list[CellData], labels: dict[str, str]) -> go.Figure:
                 y=[cell.rps for cell in runs],
                 mode="markers",
                 name=labels[variant],
-                marker={"size": 13, "color": _PALETTE[index % len(_PALETTE)], "opacity": 0.8},
+                marker={
+                    "size": 13,
+                    "color": _PALETTE[index % len(_PALETTE)],
+                    "opacity": 0.8,
+                },
                 text=[f"run {cell.repetition}" for cell in runs],
                 hovertemplate="%{text}<br>%{y:.0f} rps<extra></extra>",
             )
@@ -283,7 +316,9 @@ def _per_run_table(cells: list[CellData], labels: dict[str, str]) -> pd.DataFram
                 "rps": f"{cell.rps:.1f}",
                 "p95 (ms)": f"{cell.p95_ms:.1f}",
                 "Shed (%)": f"{cell.failed_rate * 100:.2f}",
-                "CP peak (MiB)": f"{cell.peak('container_memory_bytes@control-plane') / _MIB:.1f}",
+                "CP peak (MiB)": (
+                    f"{cell.peak('container_memory_bytes@control-plane') / _MIB:.1f}"
+                ),
             }
             for cell in cells
         ]
@@ -291,7 +326,8 @@ def _per_run_table(cells: list[CellData], labels: dict[str, str]) -> pd.DataFram
 
 
 _EXTRA_STYLE = """
-.verdict { margin: 0.4rem 0 1.4rem; padding: 0.7rem 1rem; border-left: 3px solid #059669;
+.verdict { margin: 0.4rem 0 1.4rem; padding: 0.7rem 1rem;
+           border-left: 3px solid #059669;
            background: rgba(5, 150, 105, 0.07); border-radius: 0 6px 6px 0; }
 .verdict.warn { border-left-color: #d97706; background: rgba(217, 119, 6, 0.08); }
 """
@@ -307,6 +343,7 @@ class WriteComparisonReport:
     output_path: Path | None = None
 
     def run(self) -> Path:
+        """Render every completed run in the matrix and return the page's path."""
         manifest_path = self.root / "comparison-manifest.json"
         if not manifest_path.is_file():
             raise FileNotFoundError(f"no comparison manifest under {self.root}")
@@ -352,6 +389,10 @@ class WriteComparisonReport:
             if missing
             else ""
         )
+        variants_html = "".join(
+            f"<li><strong>{e['label']}</strong> — {e['rationale']}</li>"
+            for e in manifest["variants"]
+        )
         html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>{self.title}</title>
@@ -367,7 +408,7 @@ Functions held fixed: {", ".join(manifest["functions"])}.</p>
 {body}
 {_table_html(_per_run_table(cells, labels), "Every run")}
 <h3>What each build is</h3>
-<ul>{"".join(f"<li><strong>{e['label']}</strong> — {e['rationale']}</li>" for e in manifest["variants"])}</ul>
+<ul>{variants_html}</ul>
 </body></html>
 """
         output = self.output_path or self.root / "comparison-report.html"

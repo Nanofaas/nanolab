@@ -1,9 +1,9 @@
 """Tests for tui_toolkit.chrome — render_screen_frame."""
+
 from __future__ import annotations
 
 import pytest
-from rich.console import Console
-from rich.console import Group
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.text import Text
 
@@ -73,7 +73,9 @@ def test_render_screen_frame_footer_hint_default_and_override():
     brand = AppBrand(default_footer_hint="Esc back")
     with bind_ui(UIContext(brand=brand)):
         default_panel = render_screen_frame(title="x", body=Text("y"))
-        custom_panel = render_screen_frame(title="x", body=Text("y"), footer_hint="Q quit")
+        custom_panel = render_screen_frame(
+            title="x", body=Text("y"), footer_hint="Q quit"
+        )
     assert "Esc back" in _render(default_panel)
     text2 = _render(custom_panel)
     assert "Q quit" in text2

@@ -126,11 +126,17 @@ In `packages/sonata-tasks/tests/test_release_composites.py`, aggiungere:
 def test_command_specs_composite_titles_each_step_from_the_spec_summary() -> None:
     executor = RecordingExecutor()
     commands = (
-        CommandTaskSpec(task_id="a", summary="First", argv=("echo", "one"), role="stack"),
-        CommandTaskSpec(task_id="b", summary="Second", argv=("echo", "two"), role="stack"),
+        CommandTaskSpec(
+            task_id="a", summary="First", argv=("echo", "one"), role="stack"
+        ),
+        CommandTaskSpec(
+            task_id="b", summary="Second", argv=("echo", "two"), role="stack"
+        ),
     )
 
-    composite = command_specs_composite(commands, executor=executor, title="Build AMD64 images")
+    composite = command_specs_composite(
+        commands, executor=executor, title="Build AMD64 images"
+    )
 
     assert composite.title == "Build AMD64 images"
     assert [step.title for step in composite.steps] == ["First", "Second"]
@@ -268,10 +274,15 @@ def test_amd64_build_commands_prepare_bake_and_build_natively(tmp_path: Path) ->
     # Il bake usa il builder passato.
     bake = commands[bake_index]
     assert bake.argv == (
-        "docker", "buildx", "bake",
-        "--builder", "release-amd64-9.9.9",
-        "--file", "/remote/docker-bake.json",
-        "--load", "docker-amd64",
+        "docker",
+        "buildx",
+        "bake",
+        "--builder",
+        "release-amd64-9.9.9",
+        "--file",
+        "/remote/docker-bake.json",
+        "--load",
+        "docker-amd64",
     )
     # Le celle native portano l'intero gradle_command, non un sottoinsieme.
     natives = [c for c in commands if c.task_id.startswith("release.images.native.")]
@@ -465,7 +476,9 @@ def test_amd64_build_phase_records_the_commands_it_will_run(release_request) -> 
 
     argvs = [argv for argv, _role, _remote_dir in phase.phase_inputs["commands"]]
 
-    natives = [a for a in argvs if a[0] == "./gradlew" and "-PimagePlatform=linux/amd64" in a]
+    natives = [
+        a for a in argvs if a[0] == "./gradlew" and "-PimagePlatform=linux/amd64" in a
+    ]
     assert natives, "no native AMD64 gradle build"
     assert all("-PcontrolPlaneModules=all" in argv for argv in natives)
     assert any(argv[:3] == ("docker", "buildx", "bake") for argv in argvs)
@@ -509,7 +522,7 @@ def build_inputs_resource(
 Il resto del corpo (righe 433-480) resta identico; aggiornare solo il `title` del `Resource`:
 
 ```python
-        title=f"Acquire {architecture.upper()} Bake and BuildKit inputs",
+title = (f"Acquire {architecture.upper()} Bake and BuildKit inputs",)
 ```
 
 Il nome del file buildkitd diventa per-architettura perché stack e arm-builder scrivono ora nella **stessa** `run_dir` locale: senza il suffisso si sovrascriverebbero a vicenda, e la `cleanup()` dell'uno cancellerebbe il file dell'altro.
@@ -558,7 +571,11 @@ def test_expected_images_accepts_daemon_local_digests() -> None:
     task = _phase_task(
         expected_images=("localhost:5000/nanofaas/server:v1-amd64",),
         work=lambda _inputs: (
-            Evidence("local-image-digest", "docker-daemon:localhost:5000/nanofaas/server:v1-amd64", digest),
+            Evidence(
+                "local-image-digest",
+                "docker-daemon:localhost:5000/nanofaas/server:v1-amd64",
+                digest,
+            ),
         ),
     )
 
@@ -651,7 +668,10 @@ Aggiornare gli import in cima: `command_specs_composite` e `registry_push_compos
 In `plans/release.py:799-847`, la riga che aggiunge `amd64_build` diventa:
 
 ```python
-wf.add(amd64_build, requires=(infrastructure.stack, sources.stack, amd64_inputs, amd64_builder))
+wf.add(
+    amd64_build,
+    requires=(infrastructure.stack, sources.stack, amd64_inputs, amd64_builder),
+)
 ```
 
 - [ ] **Step 8: Cancellare `amd64_build_composite`**
@@ -724,15 +744,26 @@ In `packages/nanolab/tests/release/test_tasks.py`:
 def test_run_image_steps_rejects_a_foreign_architecture() -> None:
     executor = _ScriptedExecutor(
         {
-            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "arm64",
-            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): "sha256:" + "a" * 64,
+            (
+                "docker",
+                "image",
+                "inspect",
+                "--format={{.Architecture}}",
+                "img:v1",
+            ): "arm64",
+            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): "sha256:"
+            + "a" * 64,
         }
     )
 
     with pytest.raises(RuntimeError, match="image architecture mismatch"):
         run_image_steps(
-            _NoopSteps(), _inputs(), executor, ("img:v1",),
-            registry=False, architecture="amd64",
+            _NoopSteps(),
+            _inputs(),
+            executor,
+            ("img:v1",),
+            registry=False,
+            architecture="amd64",
         )
 
 
@@ -740,14 +771,24 @@ def test_run_image_steps_accepts_the_expected_architecture() -> None:
     digest = "sha256:" + "b" * 64
     executor = _ScriptedExecutor(
         {
-            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "amd64",
+            (
+                "docker",
+                "image",
+                "inspect",
+                "--format={{.Architecture}}",
+                "img:v1",
+            ): "amd64",
             ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): digest,
         }
     )
 
     evidence = run_image_steps(
-        _NoopSteps(), _inputs(), executor, ("img:v1",),
-        registry=False, architecture="amd64",
+        _NoopSteps(),
+        _inputs(),
+        executor,
+        ("img:v1",),
+        registry=False,
+        architecture="amd64",
     )
 
     assert [item.digest for item in evidence] == [digest]
@@ -820,14 +861,16 @@ def _require_architecture(
 In `plans/release.py`, nella `work=` di `amd64_build_task` scritta dal Task 4, aggiungere il keyword:
 
 ```python
-        work=lambda inputs: run_image_steps(
-            amd64_steps,
-            inputs,
-            executor,
-            release_images,
-            registry=False,
-            architecture="amd64",
-        ),
+work = (
+    lambda inputs: run_image_steps(
+        amd64_steps,
+        inputs,
+        executor,
+        release_images,
+        registry=False,
+        architecture="amd64",
+    ),
+)
 ```
 
 `registry_push` resta senza `architecture`: le stesse immagini sono già state verificate qui, e sul ramo registry `skopeo inspect --format={{.Digest}}` non riporta l'architettura.
@@ -928,9 +971,11 @@ def run_source_steps(
 In `plans/release.py:321`, la `work=` di `source_test_task` diventa:
 
 ```python
-        work=lambda inputs: run_source_steps(
-            source_steps, inputs, source_archive=release_dir / "source.tar"
-        ),
+work = (
+    lambda inputs: run_source_steps(
+        source_steps, inputs, source_archive=release_dir / "source.tar"
+    ),
+)
 ```
 
 Verificare che `release_dir / "source.tar"` sia il path locale realmente prodotto da `build_release_source_resources` (`release/resources.py:352`); se il nome differisce, usare quello e non inventarlo.
@@ -982,22 +1027,35 @@ In `packages/sonata-tasks/tests/test_cosign.py`:
 ```python
 def test_sign_does_not_wait_for_confirmation() -> None:
     executor = RecordingExecutor()
-    _run(CosignTask(
-        operation="sign", image="img@sha256:aa", key_file="/secrets/cosign.key",
-        password_file="/secrets/pw", docker_config="/home/user/.docker",
-        executor=executor, role="stack",
-    ))
+    _run(
+        CosignTask(
+            operation="sign",
+            image="img@sha256:aa",
+            key_file="/secrets/cosign.key",
+            password_file="/secrets/pw",
+            docker_config="/home/user/.docker",
+            executor=executor,
+            role="stack",
+        )
+    )
     argv = executor.seen[0].argv
     assert argv[-4:] == ("sign", "--yes", "--key", "/key.cosign") or "--yes" in argv
 
 
 def test_attest_declares_the_custom_predicate_type() -> None:
     executor = RecordingExecutor()
-    _run(CosignTask(
-        operation="attest", image="img@sha256:aa", key_file="/secrets/cosign.key",
-        password_file="/secrets/pw", docker_config="/home/user/.docker",
-        predicate_file="/work/predicate.json", executor=executor, role="stack",
-    ))
+    _run(
+        CosignTask(
+            operation="attest",
+            image="img@sha256:aa",
+            key_file="/secrets/cosign.key",
+            password_file="/secrets/pw",
+            docker_config="/home/user/.docker",
+            predicate_file="/work/predicate.json",
+            executor=executor,
+            role="stack",
+        )
+    )
     argv = executor.seen[0].argv
     assert "--yes" in argv
     assert argv[argv.index("--type") + 1] == "custom"
@@ -1005,34 +1063,54 @@ def test_attest_declares_the_custom_predicate_type() -> None:
 
 def test_attach_sbom_declares_spdx() -> None:
     executor = RecordingExecutor()
-    _run(CosignTask(
-        operation="attach sbom", image="img@sha256:aa", key_file="/secrets/cosign.key",
-        password_file="/secrets/pw", docker_config="/home/user/.docker",
-        sbom_file="/work/sbom.spdx.json", executor=executor, role="stack",
-    ))
+    _run(
+        CosignTask(
+            operation="attach sbom",
+            image="img@sha256:aa",
+            key_file="/secrets/cosign.key",
+            password_file="/secrets/pw",
+            docker_config="/home/user/.docker",
+            sbom_file="/work/sbom.spdx.json",
+            executor=executor,
+            role="stack",
+        )
+    )
     argv = executor.seen[0].argv
     assert argv[argv.index("--type") + 1] == "spdx"
 
 
 def test_verify_attestation_declares_the_custom_predicate_type() -> None:
     executor = RecordingExecutor()
-    _run(CosignTask(
-        operation="verify-attestation", image="img@sha256:aa",
-        key_file="/secrets/cosign.key", password_file="/secrets/pw",
-        docker_config="/home/user/.docker", public_key_file="/work/cosign.pub",
-        executor=executor, role="stack",
-    ))
+    _run(
+        CosignTask(
+            operation="verify-attestation",
+            image="img@sha256:aa",
+            key_file="/secrets/cosign.key",
+            password_file="/secrets/pw",
+            docker_config="/home/user/.docker",
+            public_key_file="/work/cosign.pub",
+            executor=executor,
+            role="stack",
+        )
+    )
     argv = executor.seen[0].argv
     assert argv[argv.index("--type") + 1] == "custom"
 
 
 def test_public_key_writes_the_derived_key_to_a_file() -> None:
     executor = RecordingExecutor()
-    _run(CosignTask(
-        operation="public-key", image="", key_file="/secrets/cosign.key",
-        password_file="/secrets/pw", docker_config="/home/user/.docker",
-        output_file="/work/cosign.pub", executor=executor, role="stack",
-    ))
+    _run(
+        CosignTask(
+            operation="public-key",
+            image="",
+            key_file="/secrets/cosign.key",
+            password_file="/secrets/pw",
+            docker_config="/home/user/.docker",
+            output_file="/work/cosign.pub",
+            executor=executor,
+            role="stack",
+        )
+    )
     argv = executor.seen[0].argv
     assert "public-key" in argv
     assert "/work/cosign.pub" in " ".join(argv)
@@ -1096,7 +1174,7 @@ CosignOperation = Literal[
 ```
 
 ```python
-        output_file: str | None = None,
+output_file: str | None = (None,)
 ```
 
 `public-key` monta la chiave privata come `sign`/`attest`, quindi estendere la condizione a riga 75:
@@ -1306,7 +1384,10 @@ def attest_composite(
             title=title,
             steps=(
                 CommandTask(
-                    title="No images to attest", argv=("true",), executor=executor, role=role
+                    title="No images to attest",
+                    argv=("true",),
+                    executor=executor,
+                    role=role,
                 ),
             ),
         )
@@ -1427,7 +1508,9 @@ def test_attest_phase_records_one_signature_per_pinned_digest(release_request) -
     assert all(item.reference.count("@sha256:") == 1 for item in signatures), (
         "signing evidence must name digest-pinned references"
     )
-    assert any(item.kind == "file-digest" for item in evidence), "predicate evidence lost"
+    assert any(item.kind == "file-digest" for item in evidence), (
+        "predicate evidence lost"
+    )
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -1444,105 +1527,107 @@ Atteso: FAIL — nessuna evidenza `cosign-attestation`.
 In `plans/release.py`, sostituire le righe 712-754:
 
 ```python
-    predicate_file = release_dir / "predicate.json"
-    remote_predicate = f"{remote_root}/predicate.json"
-    remote_sboms = f"{remote_root}/sboms"
-    remote_public_key = f"{remote_sboms}/cosign.pub"
+predicate_file = release_dir / "predicate.json"
+remote_predicate = f"{remote_root}/predicate.json"
+remote_sboms = f"{remote_root}/sboms"
+remote_public_key = f"{remote_sboms}/cosign.pub"
 
-    def _pinned(images: Mapping[str, str]) -> tuple[str, ...]:
-        """Collapse tags and aliases onto the unique set of pinned digests.
 
-        Aliases point at the same digest as their native manifest, so signing
-        by reference would sign the same artifact several times.
-        """
-        pinned: dict[str, None] = {}
-        for reference, digest in sorted(images.items()):
-            pinned.setdefault(f"{reference.rsplit(':', 1)[0]}@{digest}", None)
-        return tuple(pinned)
+def _pinned(images: Mapping[str, str]) -> tuple[str, ...]:
+    """Collapse tags and aliases onto the unique set of pinned digests.
 
-    def attest_images(inputs: Any) -> tuple[Evidence, ...]:
-        if cosign is None:
-            raise ValueError("release Cosign credentials are required for attestation")
-        release_record()
-        images = all_published()
-        aggregate_evidence = verified_file_receipt(
-            aggregate.receipt, "aggregate", release_dir / "aggregate.json"
-        )
-        predicate_file.write_text(
-            release_attest.render_predicate(
-                release_attest.build_release_predicate(
-                    version=request.version,
-                    source_commit=identity.source_commit,
-                    azure_profile=request.settings.profile,
-                    benchmark_record_digest=aggregate_evidence.digest,
-                    image_digests=images,
-                )
-            ),
-            encoding="utf-8",
-        )
-        credentials = inputs.resource(cosign).value
-        if credentials.password_file is None:
-            raise ValueError("cosign attestation requires a staged password file")
+    Aliases point at the same digest as their native manifest, so signing
+    by reference would sign the same artifact several times.
+    """
+    pinned: dict[str, None] = {}
+    for reference, digest in sorted(images.items()):
+        pinned.setdefault(f"{reference.rsplit(':', 1)[0]}@{digest}", None)
+    return tuple(pinned)
 
-        # One-shot setup: the SBOM directory, the predicate, and the public half
-        # of the signing key -- `cosign verify` rejects the encrypted private
-        # key. Not per-image, so not part of the per-image composite.
-        # ponytail: re-runs on resume; three cheap calls against ~150 signed ones.
-        _run_steps(
-            Steps(
-                title="Stage attestation inputs",
-                steps=(
-                    CommandTask(
-                        title="Create remote SBOM directory",
-                        argv=("mkdir", "-p", remote_sboms),
-                        executor=executor,
-                        role="stack",
-                    ),
-                    FileTransferTask(
-                        provider=provider,
-                        request=stack_req,
-                        source=predicate_file,
-                        destination=remote_predicate,
-                        title="Transfer release predicate",
-                    ),
-                    CosignTask(
-                        operation="public-key",
-                        image="",
-                        key_file=credentials.key_file,
-                        password_file=str(credentials.password_file),
-                        docker_config=docker_credentials(inputs).docker_config,
-                        output_file=remote_public_key,
-                        executor=executor,
-                        role="stack",
-                    ),
+
+def attest_images(inputs: Any) -> tuple[Evidence, ...]:
+    if cosign is None:
+        raise ValueError("release Cosign credentials are required for attestation")
+    release_record()
+    images = all_published()
+    aggregate_evidence = verified_file_receipt(
+        aggregate.receipt, "aggregate", release_dir / "aggregate.json"
+    )
+    predicate_file.write_text(
+        release_attest.render_predicate(
+            release_attest.build_release_predicate(
+                version=request.version,
+                source_commit=identity.source_commit,
+                azure_profile=request.settings.profile,
+                benchmark_record_digest=aggregate_evidence.digest,
+                image_digests=images,
+            )
+        ),
+        encoding="utf-8",
+    )
+    credentials = inputs.resource(cosign).value
+    if credentials.password_file is None:
+        raise ValueError("cosign attestation requires a staged password file")
+
+    # One-shot setup: the SBOM directory, the predicate, and the public half
+    # of the signing key -- `cosign verify` rejects the encrypted private
+    # key. Not per-image, so not part of the per-image composite.
+    # ponytail: re-runs on resume; three cheap calls against ~150 signed ones.
+    _run_steps(
+        Steps(
+            title="Stage attestation inputs",
+            steps=(
+                CommandTask(
+                    title="Create remote SBOM directory",
+                    argv=("mkdir", "-p", remote_sboms),
+                    executor=executor,
+                    role="stack",
+                ),
+                FileTransferTask(
+                    provider=provider,
+                    request=stack_req,
+                    source=predicate_file,
+                    destination=remote_predicate,
+                    title="Transfer release predicate",
+                ),
+                CosignTask(
+                    operation="public-key",
+                    image="",
+                    key_file=credentials.key_file,
+                    password_file=str(credentials.password_file),
+                    docker_config=docker_credentials(inputs).docker_config,
+                    output_file=remote_public_key,
+                    executor=executor,
+                    role="stack",
                 ),
             ),
-            inputs,
-        )
+        ),
+        inputs,
+    )
 
-        pinned = _pinned(images)
-        _run_steps(
-            attest_composite(
-                pinned,
-                predicate_remote=remote_predicate,
-                sbom_dir_remote=remote_sboms,
-                public_key_remote=remote_public_key,
-                cosign_key=credentials.key_file,
-                password_file=str(credentials.password_file),
-                docker_config=docker_credentials(inputs).docker_config,
-                executor=executor,
-                role="stack",
-            ),
-            inputs,
-        )
+    pinned = _pinned(images)
+    _run_steps(
+        attest_composite(
+            pinned,
+            predicate_remote=remote_predicate,
+            sbom_dir_remote=remote_sboms,
+            public_key_remote=remote_public_key,
+            cosign_key=credentials.key_file,
+            password_file=str(credentials.password_file),
+            docker_config=docker_credentials(inputs).docker_config,
+            executor=executor,
+            role="stack",
+        ),
+        inputs,
+    )
 
-        return (
-            Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),
-            *(
-                Evidence("cosign-attestation", reference, reference.split("@", 1)[1])
-                for reference in pinned
-            ),
-        )
+    return (
+        Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),
+        *(
+            Evidence("cosign-attestation", reference, reference.split("@", 1)[1])
+            for reference in pinned
+        ),
+    )
 ```
 
 Aggiungere gli import: `Steps` da `sonata_engine`, `CommandTask` da `sonata_tasks.command`, `CosignTask` da `sonata_tasks.cosign`, `FileTransferTask` da `sonata_tasks.transfer`, `attest_composite` da `sonata_tasks.release_composites`, `_run_steps` da `nanolab.release.tasks` (esportarlo senza underscore come `run_steps` se il linter obietta), `Mapping` da `collections.abc`.

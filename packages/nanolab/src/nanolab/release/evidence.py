@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 import json
-from pathlib import Path
 import re
+from collections.abc import Callable, Mapping
+from pathlib import Path
 
 from sonata_engine import Evidence, Verifier
 
 from nanolab.release.build import _remote_image_digest
 from nanolab.release.model import ArtifactEvidence, digest_path
-
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 DigestReader = Callable[[str], str | None]
@@ -33,10 +32,13 @@ RECEIPT_KINDS = frozenset(
 
 
 def is_sha256_digest(value: str | None) -> bool:
+    """Return whether `value` is a lowercase sha256 digest string."""
     return isinstance(value, str) and _DIGEST.fullmatch(value) is not None
 
 
-def receipt_artifacts(path: Path, phase: str, expected_kind: str) -> tuple[ArtifactEvidence, ...]:
+def receipt_artifacts(
+    path: Path, phase: str, expected_kind: str
+) -> tuple[ArtifactEvidence, ...]:
     """Parse one release receipt with a single fail-closed schema.
 
     A phase may record more than one kind of claim -- `attest` records the
@@ -114,7 +116,11 @@ def signature_evidence_verifier(evidence: Evidence) -> bool:
     today it is staged inside the workflow run, after verifiers are built.
     """
     reference, _, pinned = evidence.reference.partition("@")
-    return bool(reference) and pinned == evidence.digest and is_sha256_digest(evidence.digest)
+    return (
+        bool(reference)
+        and pinned == evidence.digest
+        and is_sha256_digest(evidence.digest)
+    )
 
 
 def release_evidence_verifiers(
@@ -138,7 +144,9 @@ def release_evidence_verifiers(
         "file-digest": file_digest_verifier,
         "cosign-attestation": signature_evidence_verifier,
         "local-image-digest": image_digest_verifier(
-            lambda reference: remote(reference) if reference.startswith("docker-daemon:") else None
+            lambda reference: (
+                remote(reference) if reference.startswith("docker-daemon:") else None
+            )
         ),
         "local-registry-digest": image_digest_verifier(
             lambda reference: (
@@ -151,7 +159,8 @@ def release_evidence_verifiers(
         "ghcr-digest": image_digest_verifier(
             lambda reference: (
                 remote(reference, authfile=ghcr_authfile)
-                if ghcr_authfile is not None and reference.startswith("docker://ghcr.io/")
+                if ghcr_authfile is not None
+                and reference.startswith("docker://ghcr.io/")
                 else None
             )
         ),

@@ -1,9 +1,9 @@
 from pathlib import Path
 
 import pytest
-
-from nanolab.tasks.infra.ansible import AnsibleAdapter, RunPlaybook
 from sonata_tasks.shell import RecordingShell, ShellBackend, ShellExecutionResult
+
+from nanolab.tasks.infra.ansible import AnsibleAdapter, RunPlaybook, install_k6_task
 from nanolab.tasks.vm.models import VmRequest
 
 
@@ -39,7 +39,9 @@ def test_run_playbook_builds_ansible_command_and_runs_on_host() -> None:
 class _FailingShell(ShellBackend):
     """Minimal shell that always fails — pattern mirrors tests/infra/test_ansible.py."""
 
-    def run(self, command, *, cwd=None, env=None, dry_run=False) -> ShellExecutionResult:
+    def run(
+        self, command, *, cwd=None, env=None, dry_run=False
+    ) -> ShellExecutionResult:
         return ShellExecutionResult(command=command, return_code=2, stderr="boom")
 
 
@@ -78,9 +80,6 @@ def test_run_playbook_task_raises_on_nonzero_exit() -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         task.run()
-
-
-from nanolab.tasks.infra.ansible import install_k6_task
 
 
 def test_install_k6_task_factory_builds_runplaybook_with_connectivity() -> None:
@@ -125,11 +124,15 @@ def test_install_k6_task_factory_omits_port_when_none() -> None:
 class _AnsibleLikeFailingShell(ShellBackend):
     """Mimics ansible: real failure on stdout, benign WARNING on stderr."""
 
-    def run(self, command, *, cwd=None, env=None, dry_run=False) -> ShellExecutionResult:
+    def run(
+        self, command, *, cwd=None, env=None, dry_run=False
+    ) -> ShellExecutionResult:
         return ShellExecutionResult(
             command=command,
             return_code=2,
-            stdout="fatal: [10.0.0.5]: FAILED! => No package matching 'k6' is available",
+            stdout=(
+                "fatal: [10.0.0.5]: FAILED! => No package matching 'k6' is available"
+            ),
             stderr="[WARNING]: Module remote_tmp /root/.ansible/tmp did not exist",
         )
 
@@ -152,5 +155,6 @@ def test_run_playbook_error_surfaces_stdout_failure_not_just_stderr_warning() ->
         task.run()
 
     message = str(exc.value)
-    # The real ansible failure (on stdout) must be surfaced, not masked by the stderr warning.
+    # The real ansible failure (on stdout) must be surfaced, not masked by the
+    # stderr warning.
     assert "No package matching 'k6'" in message

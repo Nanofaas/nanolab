@@ -1,14 +1,14 @@
 # ruff: noqa: F401 - imports are fixtures re-exported to split test modules
 from __future__ import annotations
 
-from pathlib import Path
-from dataclasses import asdict, replace
 import hashlib
 import json
 import os
 import shlex
 import subprocess
 import tarfile
+from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -29,7 +29,6 @@ from nanolab.release.model import (
 )
 from nanolab.release.versioning import read_project_version
 
-
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
@@ -47,7 +46,7 @@ def _environment(tmp_path: Path) -> Path:
 
 
 def _settings() -> ReleaseSettings:
-    """The shipped release policy, read rather than restated.
+    """Read the shipped release policy rather than restating it.
 
     `test_metrics.test_release_configuration_owns_the_versioned_policy` pins the
     file itself, so reading it here keeps the fixture from drifting from it.
@@ -68,7 +67,7 @@ def _settings() -> ReleaseSettings:
 
 
 def _plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Amd64ReleasePlan:
-    """An `Amd64ReleasePlan` shaped like the one the Sonata DAG builds.
+    """Build an `Amd64ReleasePlan` shaped like the one the Sonata DAG builds.
 
     The guarded commit is faked so the phases that re-check it work against a
     checkout the test never has to keep clean.
@@ -135,7 +134,9 @@ class _ArchiveProvider:
         self.digest = digest
         self.actions: list[tuple[object, ...]] = []
 
-    def transfer_to(self, request: object, *, source: Path, destination: str) -> _TransferResult:
+    def transfer_to(
+        self, request: object, *, source: Path, destination: str
+    ) -> _TransferResult:
         self.actions.append(("transfer", request, source, destination))
         return _TransferResult()
 
@@ -150,7 +151,9 @@ class _ArchiveProvider:
     ) -> _TransferResult:
         self.actions.append(("exec", request, argv, env, remote_dir, dry_run))
         if argv[0] == "sha256sum":
-            return _TransferResult(stdout=f"{self.digest.removeprefix('sha256:')}  {argv[1]}\n")
+            return _TransferResult(
+                stdout=f"{self.digest.removeprefix('sha256:')}  {argv[1]}\n"
+            )
         return _TransferResult()
 
 
@@ -182,7 +185,11 @@ def _unwrap_bounded(argv: tuple[str, ...]) -> tuple[str, ...]:
     # _provider_exec(bounded=True) wraps bulk commands in a bounded-output
     # shell; recover the original argv so dispatch and event strings stay
     # stable.
-    if len(argv) == 3 and argv[:2] == ("sh", "-c") and "/tmp/release-cmd.log" in argv[2]:
+    if (
+        len(argv) == 3
+        and argv[:2] == ("sh", "-c")
+        and "/tmp/release-cmd.log" in argv[2]
+    ):
         inner = argv[2].split("{ ", 1)[1].rsplit(" ; }", 1)[0]
         return tuple(shlex.split(inner))
     return argv
@@ -214,7 +221,9 @@ class _ReleaseProvider(_ArchiveProvider):
             None,
         )
 
-    def transfer_to(self, request: object, *, source: Path, destination: str) -> _TransferResult:
+    def transfer_to(
+        self, request: object, *, source: Path, destination: str
+    ) -> _TransferResult:
         self.events.append(f"transfer:{source.name}")
         self.remote_digests[destination] = digest_path(source)
         return super().transfer_to(request, source=source, destination=destination)
@@ -264,7 +273,9 @@ class _ReleaseProvider(_ArchiveProvider):
             and "WATCHDOG_CMD=/nanofaas-arm64-smoke-missing-child" in argv
         ):
             return _TransferResult(
-                stderr="Failed to spawn runtime: No such file or directory (os error 2)",
+                stderr=(
+                    "Failed to spawn runtime: No such file or directory (os error 2)"
+                ),
                 return_code=1,
             )
         return _TransferResult()
@@ -308,7 +319,11 @@ class _ArmFailureProvider(_ReleaseProvider):
             and argv[3] == "--format={{.Architecture}}"
         ):
             return _TransferResult(stdout="amd64\n")
-        if self.failure == "push" and argv[:2] == ("docker", "push") and "-arm64" in argv[-1]:
+        if (
+            self.failure == "push"
+            and argv[:2] == ("docker", "push")
+            and "-arm64" in argv[-1]
+        ):
             return _TransferResult(stderr="arm push failed", return_code=1)
         if self.failure == "start" and argv[:3] == ("docker", "run", "--detach"):
             return _TransferResult(stderr="arm server failed", return_code=1)
@@ -319,7 +334,11 @@ class _ArmFailureProvider(_ReleaseProvider):
             return _TransferResult(stderr="arm health failed", return_code=1)
         if self.failure == "health-cleanup" and argv[:3] == ("docker", "rm", "--force"):
             return _TransferResult(stderr="cleanup failed", return_code=1)
-        if self.failure == "health-cleanup-raises" and argv[:3] == ("docker", "rm", "--force"):
+        if self.failure == "health-cleanup-raises" and argv[:3] == (
+            "docker",
+            "rm",
+            "--force",
+        ):
             raise RuntimeError("cleanup exploded")
         if (
             self.failure == "watchdog"
@@ -328,5 +347,3 @@ class _ArmFailureProvider(_ReleaseProvider):
         ):
             return _TransferResult(stderr="exec format error", return_code=1)
         return result
-
-

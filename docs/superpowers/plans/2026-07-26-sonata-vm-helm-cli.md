@@ -485,6 +485,7 @@ git commit -m "refactor: adopt Sonata task inputs"
 ```python
 Argv = tuple[str, ...] | Callable[[TaskInputs], tuple[str, ...]]
 
+
 @dataclass
 class CommandTask(Task[TaskResult]):
     argv: Argv

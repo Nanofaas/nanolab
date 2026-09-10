@@ -1,0 +1,126 @@
+# Pre-commit hooks for nanolab.
+#
+#   uv run pre-commit install          # enable on commit
+#   uv run pre-commit run --all-files  # run everything once
+#
+# Version policy: the ruff revision below MUST stay in sync with the `ruff`
+# pin in each package's pyproject.toml. A newer ruff in pre-commit than in the
+# dev environment makes the hook report violations that `uv run ruff check`
+# does not.
+#
+# No default_language_version is set on purpose: pinning it to a specific
+# python3.x makes pre-commit fail outright on a machine that does not have that
+# interpreter on PATH. The hooks that need the project's interpreter run through
+# `uv run --frozen` against the workspace venv, which pins Python itself in
+# .python-version.
+#
+# nanolab is a uv workspace of two packages, each with its own ruff, basedpyright,
+# bandit and import-linter configuration. Ruff resolves its config per file, so
+# one hook covers both trees; the rest are scoped per package.
+#
+# The workspace has to be installed with `uv sync --all-packages --all-groups`
+# before the basedpyright hooks can resolve either package.
+
+fail_fast: false
+
+repos:
+  # ---------------------------------------------------------------------------
+  # Ruff - lint + format
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+        name: ruff (format)
+
+  # ---------------------------------------------------------------------------
+  # Type checking, per package
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: basedpyright-nanolab
+        name: basedpyright (nanolab)
+        entry: uv run --frozen --all-packages --all-groups basedpyright --project packages/nanolab
+        language: system
+        pass_filenames: false
+        files: ^packages/nanolab/
+
+      - id: basedpyright-tui-toolkit
+        name: basedpyright (tui-toolkit)
+        entry: uv run --frozen --all-packages --all-groups basedpyright --project packages/tui-toolkit
+        language: system
+        pass_filenames: false
+        files: ^packages/tui-toolkit/
+
+      # The architectural contracts CI checks, run locally too.
+      - id: import-linter-nanolab
+        name: import-linter (nanolab)
+        entry: >-
+          uv run --frozen --all-packages --all-groups lint-imports
+          --config packages/nanolab/.importlinter --no-cache
+        language: system
+        pass_filenames: false
+        files: ^packages/nanolab/src/
+
+      - id: import-linter-tui-toolkit
+        name: import-linter (tui-toolkit)
+        entry: >-
+          uv run --frozen --all-packages --all-groups lint-imports
+          --config packages/tui-toolkit/.importlinter --no-cache
+        language: system
+        pass_filenames: false
+        files: ^packages/tui-toolkit/src/
+
+  # ---------------------------------------------------------------------------
+  # Security, per package
+  #
+  # This product drives VMs, containers and Ansible through external CLIs, so
+  # subprocess is its subject matter rather than a smell. B604 (shell=True) is
+  # deliberately NOT skipped: this codebase has real shell=True call sites and
+  # they are reviewed individually.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/PyCQA/bandit
+    rev: "1.9.4"
+    hooks:
+      # `id` must be the upstream hook id; `alias` is what lets the same hook
+      # run twice with different settings.
+      - id: bandit
+        alias: bandit-nanolab
+        name: bandit (nanolab)
+        args: ["-c", "packages/nanolab/pyproject.toml"]
+        additional_dependencies: ["bandit[toml]"]
+        files: ^packages/nanolab/src/
+
+      - id: bandit
+        alias: bandit-tui-toolkit
+        name: bandit (tui-toolkit)
+        args: ["-c", "packages/tui-toolkit/pyproject.toml"]
+        additional_dependencies: ["bandit[toml]"]
+        files: ^packages/tui-toolkit/src/
+
+  # ---------------------------------------------------------------------------
+  # Generic file hygiene
+  #
+  # `tests/golden/` is excluded from the two hooks that rewrite whitespace: those
+  # files are expected output compared byte for byte (see
+  # test_to_questionary_style_matches_legacy_byte_for_byte), so normalizing them
+  # does not tidy the repository, it breaks the tests. Golden files are data.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: end-of-file-fixer
+        exclude: (^\.nanofaas-source/|/tests/golden/)
+      - id: trailing-whitespace
+        exclude: (\.md$|^\.nanofaas-source/|/tests/golden/)
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: ^\.nanofaas-source/

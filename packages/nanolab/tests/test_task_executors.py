@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-
+from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
-from sonata_tasks.execution.models import CommandOptions
 
 
 @dataclass(frozen=True)
@@ -83,7 +82,9 @@ class _VmResult:
 
 class _RecordingVmRunner:
     def __init__(self) -> None:
-        self.commands: list[tuple[tuple[str, ...], dict[str, str], str | None, bool]] = []
+        self.commands: list[
+            tuple[tuple[str, ...], dict[str, str], str | None, bool]
+        ] = []
 
     def run_vm_command(
         self,

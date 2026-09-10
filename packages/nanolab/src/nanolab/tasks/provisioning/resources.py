@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from sonata_engine import Resource
-
 from sonata_tasks.vm import vm_resource
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
 from sonata_tasks.vm.ports import VmOrchestratorProtocol
+
 from nanolab.tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
 
 
@@ -21,15 +22,18 @@ class VerifiedLifecycle:
         lifecycle: VmLifecycleAdapter,
         after_ensure: Callable[[VmInfo], None],
     ) -> None:
+        """Wrap `lifecycle`, calling `after_ensure` with each ensured VM's info."""
         self._lifecycle = lifecycle
         self._after_ensure = after_ensure
 
     def ensure_running(self, config: VmConfig) -> VmInfo:
+        """Ensure the VM matches `config`, verify it, and return its info."""
         info = self._lifecycle.ensure_running(config)
         self._after_ensure(info)
         return info
 
     def destroy(self, info: VmInfo) -> None:
+        """Tear down the VM described by `info`."""
         self._lifecycle.destroy(info)
 
 
@@ -42,7 +46,7 @@ def provisioned_vm(
     requires: tuple[Resource[Any], ...] = (),
     external: bool = False,
 ) -> Resource[VmInfo]:
-    """A Sonata VM resource that ensures, verifies, and compensates the VM."""
+    """Build a Sonata VM resource that ensures, verifies, and compensates the VM."""
     config = VmConfig(
         name=request.name or request.host or title,
         cpus=request.cpus,

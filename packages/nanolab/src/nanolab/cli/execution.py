@@ -1,40 +1,46 @@
+"""Wire a scenario's tasks to the machines they run on.
+
+Builds the executor bindings the CLI hands to a workflow: the local shell, the
+VM command provider for remote environments, the port tunnels that expose a
+VM's control plane and Prometheus to the load generator, and the URL
+resolution that decides which of those addresses a load test should target.
+"""
+
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from dataclasses import replace
-from pathlib import Path
-from pathlib import PurePosixPath
 import shlex
 import socket
 import subprocess
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import replace
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 from multipass import MultipassClient
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from sonata_tasks.execution.bindings import CommandTaskExecutor, RoleBindings
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
-from nanolab.tasks.provisioning.providers import provider_for
+from sonata_tasks.shell import ShellBackend, SubprocessShell
 from sonata_tasks.tasks.executors import (
     HostCommandRunner,
     HostCommandTaskExecutor,
     VmCommandResult,
     VmCommandTaskExecutor,
 )
-from sonata_tasks.shell import ShellBackend, SubprocessShell
-from nanolab.tasks.vm.models import VmRequest, vm_remote_home
 from sonata_tasks.vm.multipass import resolve_connection_host
-from nanolab.tasks.vm.orchestrator import VmOrchestrator
-from nanolab.tasks.vm.ports import VmCommandProvider
-from nanolab.tasks.vm.runners import VmFileFetcher
 
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
 from nanolab.config.scenario import BackendName
+from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
+from nanolab.tasks.provisioning.providers import provider_for
+from nanolab.tasks.vm.models import VmRequest, vm_remote_home
+from nanolab.tasks.vm.orchestrator import VmOrchestrator
+from nanolab.tasks.vm.ports import VmCommandProvider
+from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.paths import default_tool_paths
-
 
 StackHostResolver = Callable[[RoleTarget], str]
 
@@ -69,7 +75,8 @@ class _RemoteProjectExecutor:
             relative = local.resolve().relative_to(self._local_root)
         except ValueError as error:
             raise ValueError(
-                f"remote command cwd {options.cwd} is outside project root {self._local_root}"
+                f"remote command cwd {options.cwd} is outside project root "
+                f"{self._local_root}"
             ) from error
         remote = self._remote_root.joinpath(*relative.parts).as_posix()
         translated = replace(
@@ -124,7 +131,9 @@ def _resolve_stack_host(
         )
     if target.host:
         return target.host
-    raise ValueError(f"{environment.provider} stack requires a host or explicit load-test URLs")
+    raise ValueError(
+        f"{environment.provider} stack requires a host or explicit load-test URLs"
+    )
 
 
 def _vm_provider_urls(
@@ -136,28 +145,33 @@ def _vm_provider_urls(
     prometheus_url: str | None,
 ) -> tuple[str, str]:
     request = vm_request_for_role(environment, "stack", loadtest=True)
+    # These are the VM's internal addresses, reached over an SSH tunnel rather
+    # than as public plaintext services; the trailing `# NOSONAR` on each marks
+    # that for SonarQube's S5332.
     if dry_run:
         if environment.provider == "azure":
             host = f"<azure-ip:{request.name}>"
-            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"  # NOSONAR (S5332): VM endpoint over SSH tunnel
+            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"  # NOSONAR
         else:
             host = f"<proxmox-guest-ip:{request.name}>"
-            discovered_prometheus = f"http://<proxmox-prometheus:{request.name}>"  # NOSONAR (S5332): VM endpoint over SSH tunnel
+            discovered_prometheus = (
+                f"http://<proxmox-prometheus:{request.name}>"  # NOSONAR
+            )
     else:
         provider = vm_provider or provider_for(
             request, default_tool_paths().nanofaas_root
         )
         if environment.provider == "azure":
             host = provider.connection_host(request)  # type: ignore[attr-defined]
-            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"  # NOSONAR (S5332): VM endpoint over SSH tunnel
+            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"  # NOSONAR
         else:
             host = provider.guest_host(request)  # type: ignore[attr-defined]
             metrics_host, metrics_port = provider.publish_port(  # type: ignore[attr-defined]
                 request, service="PROMETHEUS_HTTP", guest_port=PROMETHEUS_NODE_PORT
             )
-            discovered_prometheus = f"http://{metrics_host}:{metrics_port}"  # NOSONAR (S5332): VM endpoint over SSH tunnel
+            discovered_prometheus = f"http://{metrics_host}:{metrics_port}"  # NOSONAR
     return (
-        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
+        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR
         prometheus_url or discovered_prometheus,
     )
 
@@ -172,6 +186,13 @@ def resolve_loadtest_urls(
     host_resolver: StackHostResolver | None = None,
     vm_provider: object | None = None,
 ) -> tuple[str, str]:
+    """Return the control-plane and Prometheus URLs a load test should target.
+
+    An explicit pair wins outright. Otherwise the backend decides: a container
+    scenario uses the local loopback defaults, an Azure or Proxmox stack asks
+    its VM provider, and every other provider resolves the stack host from the
+    environment or the injected `host_resolver`.
+    """
     if control_plane_url is not None and prometheus_url is not None:
         return control_plane_url, prometheus_url
 
@@ -192,8 +213,10 @@ def resolve_loadtest_urls(
         environment, target, dry_run=dry_run, host_resolver=host_resolver
     )
     return (
-        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
-        prometheus_url or f"http://{host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
+        control_plane_url
+        or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): SSH tunnel
+        prometheus_url
+        or f"http://{host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): SSH tunnel
     )
 
 
@@ -255,7 +278,7 @@ _TUNNELLED_PROVIDERS = frozenset({"multipass", "azure"})
 
 
 def _tunnel_identity(environment: EnvironmentConfig) -> str | None:
-    """The private key for the tunnel, where the environment names a public one.
+    """Return the tunnel's private key, where the environment names a public one.
 
     Multipass installs the caller's default key and needs nothing here; Azure is
     given an explicit public key, and ssh wants the private half beside it.
@@ -295,7 +318,11 @@ def prometheus_over_ssh(
     themselves.
     """
     parts = urlsplit(url)
-    if not enabled or environment.provider not in _TUNNELLED_PROVIDERS or not parts.port:
+    if (
+        not enabled
+        or environment.provider not in _TUNNELLED_PROVIDERS
+        or not parts.port
+    ):
         yield url
         return
 
@@ -314,12 +341,16 @@ def prometheus_over_ssh(
             "ssh",
             "-N",
             *(("-i", key) if key else ()),
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
             # Without this ssh stays up after failing to bind, and the readiness
             # wait below would blame the timeout instead of the port.
-            "-o", "ExitOnForwardFailure=yes",
-            "-L", f"127.0.0.1:{local_port}:127.0.0.1:{parts.port}",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-L",
+            f"127.0.0.1:{local_port}:127.0.0.1:{parts.port}",
             f"{target.user}@{host}",
         ],
         stdout=subprocess.DEVNULL,
@@ -328,7 +359,7 @@ def prometheus_over_ssh(
     try:
         deadline = time.monotonic() + timeout_seconds
         _wait_for_tunnel(process, host, ready, local_port, deadline, timeout_seconds)
-        yield f"http://127.0.0.1:{local_port}"  # NOSONAR (S5332): local SSH tunnel loopback
+        yield f"http://127.0.0.1:{local_port}"  # NOSONAR (S5332): SSH tunnel loopback
     finally:
         _terminate_process(process)
 
@@ -363,7 +394,15 @@ class _RemoteRunner:
         if self._provider == "multipass":
             if not self._target.name:
                 raise ValueError("Multipass role requires an instance name")
-            outer = ["multipass", "exec", self._target.name, "--", "bash", "-lc", command]
+            outer = [
+                "multipass",
+                "exec",
+                self._target.name,
+                "--",
+                "bash",
+                "-lc",
+                command,
+            ]
         else:
             if not self._target.host:
                 raise ValueError(f"{self._provider} role requires a reachable SSH host")
@@ -378,19 +417,32 @@ class _RemoteRunner:
 
 
 class _RemoteFetcher:
-    def __init__(self, runner: HostCommandRunner, target: RoleTarget, provider: str) -> None:
+    def __init__(
+        self, runner: HostCommandRunner, target: RoleTarget, provider: str
+    ) -> None:
         self._runner = runner
         self._target = target
         self._provider = provider
 
     def fetch_from(self, remote: str, local: Path) -> None:
         if self._provider == "multipass":
-            argv = ["multipass", "transfer", f"{self._target.name}:{remote}", str(local)]
+            argv = [
+                "multipass",
+                "transfer",
+                f"{self._target.name}:{remote}",
+                str(local),
+            ]
         else:
-            argv = ["scp", f"{self._target.user}@{self._target.host}:{remote}", str(local)]
+            argv = [
+                "scp",
+                f"{self._target.user}@{self._target.host}:{remote}",
+                str(local),
+            ]
         result = self._runner.run(argv, cwd=None, env={}, dry_run=False)
         if result.return_code != 0:
-            raise RuntimeError(result.stderr or result.stdout or "remote file transfer failed")
+            raise RuntimeError(
+                result.stderr or result.stdout or "remote file transfer failed"
+            )
 
 
 class _ProviderRunner:
@@ -446,7 +498,9 @@ def _provider_for_stack(
             repo_root or default_tool_paths().nanofaas_root,
             # The injected runner stands in for the shell backend too: that
             # is how a test captures the commands a provider would run.
-            shell=cast(ShellBackend, command_runner),
+            # `shell=` is VmOrchestrator's ShellBackend argument, not the
+            # subprocess shell flag bandit's B604 looks for.
+            shell=cast(ShellBackend, command_runner),  # nosec B604
         )
     return vm_provider or provider_for(
         vm_request_for_role(environment, "stack", loadtest=True),
@@ -500,13 +554,23 @@ def _provider_bindings(
     loadgen = loadgen_result[0] if loadgen_result else None
     cloud_result = make("cloud") if "cloud" in environment.roles else None
     cloud = cloud_result[0] if cloud_result else None
-    arm_builder_result = make("arm-builder") if "arm-builder" in environment.roles else None
+    arm_builder_result = (
+        make("arm-builder") if "arm-builder" in environment.roles else None
+    )
     arm_builder = arm_builder_result[0] if arm_builder_result else None
     fetch_request = loadgen_result[1] if loadgen_result else stack_request
     executors = {"host": host, "stack": stack}
-    executors.update({name: executor for name, executor in {
-        "loadgen": loadgen, "cloud": cloud, "arm-builder": arm_builder,
-    }.items() if executor is not None})
+    executors.update(
+        {
+            name: executor
+            for name, executor in {
+                "loadgen": loadgen,
+                "cloud": cloud,
+                "arm-builder": arm_builder,
+            }.items()
+            if executor is not None
+        }
+    )
     return RoleBindings(executors), fetch_request
 
 
@@ -525,8 +589,10 @@ def _ssh_bindings(
         )
         executor = VmCommandTaskExecutor(
             _RemoteRunner(command_runner, target, environment.provider, default_env),
-            target_key=(f"{environment.provider}:{role}:{target.host}:"
-                        f"{target.user}:{target.remote_home}"),
+            target_key=(
+                f"{environment.provider}:{role}:{target.host}:"
+                f"{target.user}:{target.remote_home}"
+            ),
         )
         return _remote_project_executor(
             executor,
@@ -540,9 +606,17 @@ def _ssh_bindings(
     arm_builder = remote("arm-builder") if "arm-builder" in environment.roles else None
     fetch_target = environment.target("loadgen" if loadgen is not None else "stack")
     executors = {"host": host, "stack": stack}
-    executors.update({name: executor for name, executor in {
-        "loadgen": loadgen, "cloud": cloud, "arm-builder": arm_builder,
-    }.items() if executor is not None})
+    executors.update(
+        {
+            name: executor
+            for name, executor in {
+                "loadgen": loadgen,
+                "cloud": cloud,
+                "arm-builder": arm_builder,
+            }.items()
+            if executor is not None
+        }
+    )
     return RoleBindings(executors), fetch_target
 
 
@@ -553,6 +627,13 @@ def build_role_bindings(
     vm_provider: VmCommandProvider | None = None,
     repo_root: Path | None = None,
 ) -> tuple[RoleBindings, _RemoteFetcher | VmFileFetcher | None]:
+    """Bind every execution role to a task executor, for one environment.
+
+    Returns the bindings and the matching file fetcher, or `None` where the
+    roles run on this host. A local environment binds all roles to one host
+    executor; Multipass, Azure and Proxmox go through the VM provider; any
+    other provider binds over SSH and fetches through the same connection.
+    """
     command_runner = runner or SubprocessShell()
     host = HostCommandTaskExecutor(command_runner)
     if environment.provider == "local":
@@ -561,12 +642,16 @@ def build_role_bindings(
 
     if environment.provider in {"multipass", "azure", "proxmox"}:
         local_root = (repo_root or default_tool_paths().nanofaas_root).resolve()
-        provider = _provider_for_stack(environment, vm_provider, command_runner, local_root)
+        provider = _provider_for_stack(
+            environment, vm_provider, command_runner, local_root
+        )
         bindings, fetch_request = _provider_bindings(
             environment, provider, host, local_root
         )
         return bindings, VmFileFetcher(provider, fetch_request)
 
     local_root = (repo_root or default_tool_paths().nanofaas_root).resolve()
-    bindings, fetch_target = _ssh_bindings(environment, command_runner, host, local_root)
+    bindings, fetch_target = _ssh_bindings(
+        environment, command_runner, host, local_root
+    )
     return bindings, _RemoteFetcher(command_runner, fetch_target, environment.provider)

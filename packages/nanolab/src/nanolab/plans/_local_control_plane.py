@@ -34,13 +34,17 @@ def jar_path(repo_root: Path) -> Path:
 
 
 def argv(repo_root: Path, *, admin_runtime_config: bool = False) -> tuple[str, ...]:
-    """The control-plane command line.
+    """Return the control-plane command line.
 
     `admin_runtime_config` turns on `/v1/admin/runtime-config`, which the `cli`
     workflow needs to exercise `nanofaas control-plane config`. Off by default:
     it is an unauthenticated admin API, and no other workflow reads it.
     """
-    admin = ("--nanofaas.admin.runtime-config.enabled=true",) if admin_runtime_config else ()
+    admin = (
+        ("--nanofaas.admin.runtime-config.enabled=true",)
+        if admin_runtime_config
+        else ()
+    )
     return (
         "java",
         "-jar",
@@ -56,11 +60,15 @@ def argv(repo_root: Path, *, admin_runtime_config: bool = False) -> tuple[str, .
 
 
 def ready() -> bool:
-    """The health probe deliberately targets the management port: the actuator
-    never lives on the API port, which is what made the old `cli` preflight
-    impossible to satisfy."""
+    """Return whether the local control plane answers its health probe.
+
+    The probe deliberately targets the management port: the actuator never
+    lives on the API port, which is what made the old `cli` preflight
+    impossible to satisfy.
+    """
     try:
-        with urllib.request.urlopen(HEALTH_URL, timeout=1) as response:
+        # HEALTH_URL is this module's own constant: a literal 127.0.0.1 http URL.
+        with urllib.request.urlopen(HEALTH_URL, timeout=1) as response:  # nosec B310
             return response.status == 200
     except OSError:
         return False

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import pytest
 from sonata_engine import TaskInputs
+
+from nanolab.plans.release_metrics import AggregateBenchmarks, EvaluateRegressionGate
 from nanolab.release.metrics import (
     PerformanceAggregate,
     PerformanceProfile,
     RegressionPolicy,
 )
-
-from nanolab.plans.release_metrics import AggregateBenchmarks, EvaluateRegressionGate
-
 
 _PROFILE = PerformanceProfile(
     name="nanofaas-simple",
@@ -52,12 +52,14 @@ _BASELINE_AGGREGATE = PerformanceAggregate(
 
 
 def _summary(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """A minimal summary dict suitable for aggregate_runs()."""
+    """Build a minimal summary dict suitable for aggregate_runs()."""
     base: dict[str, Any] = {
         "k6": {
             "http_reqs": {"values": {"rate": 500.0}},
             "http_req_failed": {"values": {"rate": 0.0}},
-            "http_req_duration": {"values": {"p(50)": 10.0, "p(95)": 20.0, "p(99)": 50.0}},
+            "http_req_duration": {
+                "values": {"p(50)": 10.0, "p(95)": 20.0, "p(99)": 50.0}
+            },
         },
         "prometheus": {
             "function_queue_wait_count": {"delta": 10},
@@ -320,7 +322,8 @@ def test_evaluate_regression_gate_passes_on_acceptable_regression() -> None:
             "peakReplicas": 3.0,
         },
     )
-    # 500 -> 480 is 4% throughput loss (under 10%), 20 -> 21 is 5% p95 increase (under 20%)
+    # 500 -> 480 is 4% throughput loss (under 10%), 20 -> 21 is a 5% p95
+    # increase (under 20%).
     task = EvaluateRegressionGate(
         aggregate=aggregate,
         baseline=_BASELINE_AGGREGATE,

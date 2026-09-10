@@ -2,13 +2,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.vm.models import VmRequest
 
 import nanolab.cli.execution as execution
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
-from sonata_tasks.tasks.models import CommandTaskSpec
-from sonata_tasks.execution.models import CommandOptions
-from sonata_tasks.vm.models import VmRequest
 
 
 @dataclass
@@ -46,11 +46,15 @@ class RecordingVmProvider:
         self.exec_calls.append((request, tuple(argv), env, remote_dir, dry_run))
         return _Result()
 
-    def transfer_from(self, request: VmRequest, *, source: str, destination: Path) -> _Result:
+    def transfer_from(
+        self, request: VmRequest, *, source: str, destination: Path
+    ) -> _Result:
         self.fetch_calls.append((request, source, destination))
         return _Result()
 
-    def transfer_to(self, request: VmRequest, *, source: Path, destination: str) -> _Result:
+    def transfer_to(
+        self, request: VmRequest, *, source: Path, destination: str
+    ) -> _Result:
         del request, source, destination
         return _Result()
 
@@ -71,7 +75,9 @@ def test_external_stack_uses_ssh_in_remote_repository() -> None:
     environment = EnvironmentConfig.model_validate(
         {
             "provider": "external",
-            "roles": {"stack": {"host": "vm.example", "user": "alice", "home": "/srv/alice"}},
+            "roles": {
+                "stack": {"host": "vm.example", "user": "alice", "home": "/srv/alice"}
+            },
         }
     )
 
@@ -87,7 +93,8 @@ def test_external_stack_uses_ssh_in_remote_repository() -> None:
 
     assert runner.calls[0][0][:4] == ["ssh", "-o", "BatchMode=yes", "alice@vm.example"]
     assert (
-        "cd /srv/alice/nanofaas && env KUBECONFIG=/srv/alice/.kube/config ansible-playbook site.yml"
+        "cd /srv/alice/nanofaas && env KUBECONFIG=/srv/alice/.kube/config "
+        "ansible-playbook site.yml"
     ) in runner.calls[0][0][-1]
 
 
@@ -98,7 +105,9 @@ def test_external_stack_maps_local_project_cwd_to_remote_subdirectory(tmp_path) 
     environment = EnvironmentConfig.model_validate(
         {
             "provider": "external",
-            "roles": {"stack": {"host": "vm.example", "user": "alice", "home": "/srv/alice"}},
+            "roles": {
+                "stack": {"host": "vm.example", "user": "alice", "home": "/srv/alice"}
+            },
         }
     )
 
@@ -181,10 +190,12 @@ def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
 
     bindings, _ = build_role_bindings(environment, runner=runner)
     bindings.executor_for("stack").run(
-        CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"), role="stack")
+        CommandTaskSpec(
+            task_id="check", summary="check", argv=("kubectl", "version"), role="stack"
+        )
     )
 
-    request, argv, env, cwd, dry_run = provider.exec_calls[0]
+    request, argv, env, cwd, _dry_run = provider.exec_calls[0]
     assert request.lifecycle == "multipass"
     assert request.name == "nanofaas-stack"
     assert argv == ("kubectl", "version")
@@ -194,9 +205,11 @@ def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
 
 
 def test_a_role_without_defaults_sends_no_environment(monkeypatch) -> None:
-    """Roles that carry no defaults hand the provider None, not an empty map:
-    the providers treat the two the same, and only one of them says 'nothing to
-    export' to a reader."""
+    """Send no environment when a role declares no defaults.
+
+    Such roles hand the provider None, not an empty map: the providers treat the
+    two the same, and only one of them says 'nothing to export' to a reader.
+    """
     runner = RecordingRunner()
     provider = RecordingVmProvider()
     monkeypatch.setattr(
@@ -205,13 +218,18 @@ def test_a_role_without_defaults_sends_no_environment(monkeypatch) -> None:
     environment = EnvironmentConfig.model_validate(
         {
             "provider": "multipass",
-            "roles": {"stack": {"name": "nanofaas-stack"}, "loadgen": {"name": "nanofaas-load"}},
+            "roles": {
+                "stack": {"name": "nanofaas-stack"},
+                "loadgen": {"name": "nanofaas-load"},
+            },
         }
     )
 
     bindings, _ = build_role_bindings(environment, runner=runner)
     bindings.executor_for("loadgen").run(
-        CommandTaskSpec(task_id="k6", summary="k6", argv=("k6", "version"), role="loadgen")
+        CommandTaskSpec(
+            task_id="k6", summary="k6", argv=("k6", "version"), role="loadgen"
+        )
     )
 
     _, _, env, _, _ = provider.exec_calls[0]
@@ -235,10 +253,15 @@ def test_remote_stack_exports_its_kubeconfig() -> None:
 
     bindings, _ = build_role_bindings(environment, runner=runner)
     bindings.executor_for("stack").run(
-        CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "get", "nodes"))
+        CommandTaskSpec(
+            task_id="check", summary="check", argv=("kubectl", "get", "nodes")
+        )
     )
 
-    assert "env KUBECONFIG=/etc/nanofaas/kubeconfig kubectl get nodes" in runner.calls[0][0][-1]
+    assert (
+        "env KUBECONFIG=/etc/nanofaas/kubeconfig kubectl get nodes"
+        in runner.calls[0][0][-1]
+    )
 
 
 def test_distinct_external_loadgen_gets_distinct_executor_and_fetcher() -> None:
@@ -277,10 +300,12 @@ def test_multipass_three_role_environment_binds_cloud_like_stack(monkeypatch) ->
     bindings, _ = build_role_bindings(environment, runner=runner)
 
     bindings.executor_for("cloud").run(
-        CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"), role="cloud")
+        CommandTaskSpec(
+            task_id="check", summary="check", argv=("kubectl", "version"), role="cloud"
+        )
     )
 
-    request, argv, env, cwd, dry_run = provider.exec_calls[0]
+    request, argv, env, cwd, _dry_run = provider.exec_calls[0]
     assert request.name == "nanofaas-cloud"
     assert argv == ("kubectl", "version")
     assert env == {"KUBECONFIG": "/home/ubuntu/.kube/config"}
@@ -316,7 +341,9 @@ def test_explicit_loadtest_urls_do_not_resolve_stack_address() -> None:
         environment,
         control_plane_url="https://control.example",
         prometheus_url="https://metrics.example",
-        host_resolver=lambda _: (_ for _ in ()).throw(AssertionError("must not resolve")),
+        host_resolver=lambda _: (_ for _ in ()).throw(
+            AssertionError("must not resolve")
+        ),
     )
 
     assert urls == ("https://control.example", "https://metrics.example")
@@ -350,12 +377,14 @@ def test_azure_role_uses_provider_native_execution_and_fetch(tmp_path: Path) -> 
         environment, runner=runner, vm_provider=provider, repo_root=tmp_path
     )
     bindings.executor_for("stack").run(
-        CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "get", "nodes"))
+        CommandTaskSpec(
+            task_id="check", summary="check", argv=("kubectl", "get", "nodes")
+        )
     )
     assert fetcher is not None
     fetcher.fetch_from("/tmp/result.json", tmp_path / "result.json")
 
-    request, argv, env, cwd, dry_run = provider.exec_calls[0]
+    request, argv, env, cwd, _dry_run = provider.exec_calls[0]
     assert request.lifecycle == "azure"
     assert argv == ("kubectl", "get", "nodes")
     assert env == {"KUBECONFIG": "/home/azureuser/.kube/config"}
@@ -364,7 +393,9 @@ def test_azure_role_uses_provider_native_execution_and_fetch(tmp_path: Path) -> 
     assert runner.calls == []
 
 
-def test_proxmox_role_uses_provider_native_execution(monkeypatch, tmp_path: Path) -> None:
+def test_proxmox_role_uses_provider_native_execution(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("PROXMOX_PASSWORD", "secret")
     provider = RecordingVmProvider()
     environment = EnvironmentConfig.model_validate(
@@ -375,7 +406,9 @@ def test_proxmox_role_uses_provider_native_execution(monkeypatch, tmp_path: Path
         }
     )
 
-    bindings, _ = build_role_bindings(environment, vm_provider=provider, repo_root=tmp_path)
+    bindings, _ = build_role_bindings(
+        environment, vm_provider=provider, repo_root=tmp_path
+    )
     bindings.executor_for("stack").run(
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"))
     )

@@ -2,29 +2,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import asdict
 import json
 import os
-from pathlib import Path
 import shutil
 import stat
+from collections.abc import Callable, Mapping
+from dataclasses import asdict
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from sonata_engine import Evidence
 
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.images.plan import NATIVE_RELEASE_PROFILE
+from nanolab.release.build import _registry_digest_map, _write_json
 from nanolab.release.evidence import receipt_artifacts as _receipt_artifacts
 from nanolab.release.metrics import (
-    aggregate_runs,
     PerformanceAggregate,
     PerformanceProfile,
     RegressionPolicy,
+    aggregate_runs,
     evaluate_regression,
     newest_comparable_record,
 )
-from nanolab.release.build import _registry_digest_map, _write_json
 from nanolab.release.model import Amd64ReleasePlan, ArtifactEvidence, digest_path
 from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
 
@@ -48,13 +48,17 @@ def _native_image(plan: ReleasePlanLike, target_name: str) -> str:
 
 def _function_target_name(function_key: str) -> str:
     function = resolve_function_definition(function_key)
-    prefix = {"exec": "bash", "java-lite": "java-lite"}.get(function.runtime, function.runtime)
+    prefix = {"exec": "bash", "java-lite": "java-lite"}.get(
+        function.runtime, function.runtime
+    )
     return f"{prefix}-{function.family}"
 
 
 def _performance_profile(plan: ReleasePlanLike) -> PerformanceProfile:
     azure = plan.environment.azure
-    assert azure is not None
+    # Narrowing only: validate_release_environment rejects a non-azure or
+    # azure-less environment before any release plan is built.
+    assert azure is not None  # nosec B101
     return PerformanceProfile(
         name=plan.settings.profile,
         provider="azure",
@@ -108,7 +112,9 @@ def _aggregate_from_payload(payload: Mapping[str, Any]) -> PerformanceAggregate:
     if not isinstance(profile, Mapping) or not isinstance(metrics, Mapping):
         raise ValueError("aggregate evidence is invalid")
     return PerformanceAggregate(
-        profile=PerformanceProfile(**{str(key): str(value) for key, value in profile.items()}),
+        profile=PerformanceProfile(
+            **{str(key): str(value) for key, value in profile.items()}
+        ),
         run_count=int(payload["run_count"]),
         metrics={str(key): float(value) for key, value in metrics.items()},
     )
@@ -151,15 +157,21 @@ def run_sonata_benchmark(
     """Run one isolated load test against the digest-pinned release matrix."""
     digests = _registry_digest_map(
         plan.image_plan,
-        _receipt_artifacts(registry_receipt, "local-registry-push", "local-registry-digest"),
+        _receipt_artifacts(
+            registry_receipt, "local-registry-push", "local-registry-digest"
+        ),
     )
     if index < 1:
         raise ValueError("benchmark index must be positive")
     run_dir = _clean_local_run_dir(Path(plan.run_dir), index)
     summary = run_dir / "summary.json"
-    role = plan.environment.target("loadgen" if "loadgen" in plan.environment.roles else "stack")
+    role = plan.environment.target(
+        "loadgen" if "loadgen" in plan.environment.roles else "stack"
+    )
     home = role.remote_home
-    remote_run_dir = Path(home) / "nanofaas-release" / plan.version / "benchmarks" / f"run-{index}"
+    remote_run_dir = (
+        Path(home) / "nanofaas-release" / plan.version / "benchmarks" / f"run-{index}"
+    )
     # `repo_root` is the staged source on the stack VM (a path that only exists
     # remotely); the loadtest plan resolves function definitions from `repo_root`
     # locally, so it must point at the nanoFaaS checkout instead. `remote_repo_root`
@@ -238,6 +250,12 @@ def run_sonata_aggregate(
     plan: ReleasePlanLike,
     benchmark_receipts: tuple[Path, ...],
 ) -> Evidence:
+    """Aggregate every benchmark summary into one median record.
+
+    Each receipt must still describe the `summary.json` it names and that file
+    must be unchanged, so a resume cannot aggregate over a swapped summary.
+    Writes `aggregate.json` into the run directory and returns its evidence.
+    """
     summaries = []
     for index, receipt in enumerate(benchmark_receipts, 1):
         expected = plan.run_dir / f"run-{index}" / "summary.json"
@@ -248,13 +266,21 @@ def run_sonata_aggregate(
             raise RuntimeError(f"benchmark-{index} evidence changed")
         summaries.append(_read_json_file(expected))
     aggregate = aggregate_runs(_performance_profile(plan), tuple(summaries))
-    return _file_evidence(_write_json(plan.run_dir / "aggregate.json", asdict(aggregate)))
+    return _file_evidence(
+        _write_json(plan.run_dir / "aggregate.json", asdict(aggregate))
+    )
 
 
 def run_sonata_regression_gate(
     plan: ReleasePlanLike,
     aggregate_receipt: Path | None = None,
 ) -> Evidence:
+    """Evaluate the regression gate against the newest comparable baseline.
+
+    Writes `regression-decision.json` into the run directory and returns its
+    evidence, but raises when the decision fails so publication cannot proceed
+    on a regressed release.
+    """
     aggregate_path = plan.run_dir / "aggregate.json"
     if aggregate_receipt is not None:
         artifacts = _receipt_artifacts(aggregate_receipt, "aggregate", "file-digest")
@@ -269,7 +295,8 @@ def run_sonata_regression_gate(
         tuple(
             item
             for item in _release_records(plan.performance_root / "releases")
-            if str(item.get("version")).removeprefix("v") != plan.version.removeprefix("v")
+            if str(item.get("version")).removeprefix("v")
+            != plan.version.removeprefix("v")
         ),
         aggregate.profile,
     )
@@ -285,5 +312,7 @@ def run_sonata_regression_gate(
         _write_json(plan.run_dir / "regression-decision.json", asdict(decision))
     )
     if not decision.passed:
-        raise RuntimeError("release regression gate failed: " + "; ".join(decision.failures))
+        raise RuntimeError(
+            "release regression gate failed: " + "; ".join(decision.failures)
+        )
     return evidence

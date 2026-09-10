@@ -28,7 +28,11 @@ def test_resolve_variants_rejects_unknown_keys() -> None:
 
 
 def test_jvm_variant_builds_the_boot_jar_before_the_image() -> None:
-    """The JVM Dockerfile copies a jar; without the gradle step it packages a stale one."""
+    """Compile the boot jar before building the JVM image.
+
+    The JVM Dockerfile copies a jar, so without the gradle step it would package
+    a stale one.
+    """
     ops = build_operations(_variant("jvm"), registry=REGISTRY, modules=MODULES)
 
     assert [op.operation_id for op in ops] == [
@@ -41,7 +45,9 @@ def test_jvm_variant_builds_the_boot_jar_before_the_image() -> None:
 
 def test_native_variants_pass_their_flags_through_the_environment() -> None:
     os_ops = build_operations(_variant("native-os"), registry=REGISTRY, modules=MODULES)
-    g1_ops = build_operations(_variant("native-o3-g1"), registry=REGISTRY, modules=MODULES)
+    g1_ops = build_operations(
+        _variant("native-o3-g1"), registry=REGISTRY, modules=MODULES
+    )
 
     assert os_ops[0].argv[:2] == ("./scripts/native-java-image.sh", "control-plane")
     assert os_ops[0].env["NATIVE_OPTIMIZATION"] == "s"
@@ -51,14 +57,15 @@ def test_native_variants_pass_their_flags_through_the_environment() -> None:
 
 
 def test_every_variant_compiles_the_same_module_set() -> None:
-    """A variant built with different modules would compare two platforms, not two builds."""
+    """Compile the same module set in every variant.
+
+    A variant built with a different module set would compare two platforms, not
+    two builds.
+    """
     for variant in VARIANTS:
         ops = build_operations(variant, registry=REGISTRY, modules=MODULES)
         selectors = [
-            arg
-            for op in ops
-            for arg in (*op.argv, *op.env.values())
-            if MODULES in arg
+            arg for op in ops for arg in (*op.argv, *op.env.values()) if MODULES in arg
         ]
         assert selectors, f"{variant.key} does not pin the module set"
 
@@ -71,7 +78,7 @@ def test_every_variant_runs_on_the_vm() -> None:
 
 
 def test_a_tuned_jvm_variant_is_built_as_a_jvm_image_not_a_native_one() -> None:
-    """key == "jvm" would send every tuned JVM down the native-image path."""
+    """Key == "jvm" would send every tuned JVM down the native-image path."""
     ops = build_operations(_variant("jvm-c2"), registry=REGISTRY, modules="all")
     build = next(op for op in ops if op.operation_id.endswith(".image"))
 
@@ -89,9 +96,11 @@ def test_the_baseline_jvm_build_line_is_left_exactly_as_it_was() -> None:
 
 
 def test_every_variant_carries_its_key_into_the_build() -> None:
-    """Without this, a built image's /modules/build-metadata cannot say which
-    comparison variant produced it: the key has to travel with the build
-    itself, not be reconstructed later from the image tag.
+    """Carry each variant's key into its own build.
+
+    Otherwise a built image's /modules/build-metadata cannot say which comparison
+    variant produced it: the key has to travel with the build itself, not be
+    reconstructed later from the image tag.
     """
     for variant in VARIANTS:
         ops = build_operations(variant, registry=REGISTRY, modules=MODULES)
@@ -109,8 +118,11 @@ def test_jvm_variants_pass_build_type_and_optimization() -> None:
 
 
 def test_jvm_c1_only_variants_report_c1_optimization() -> None:
-    """jvm and jvm-g1 both omit TieredStopAtLevel's absence-of-flag reversal:
-    only the two variants without the C1-only flag get full tiering."""
+    """Report c1 optimization for the JVM variants that omit C1-only flags.
+
+    jvm and jvm-g1 both omit TieredStopAtLevel's absence-of-flag reversal: only
+    the two variants without the C1-only flag get full tiering.
+    """
     for key in ("jvm", "jvm-g1"):
         ops = build_operations(_variant(key), registry=REGISTRY, modules=MODULES)
         boot_jar = next(op for op in ops if op.operation_id.endswith(".boot_jar"))
@@ -123,9 +135,11 @@ def test_native_variants_pass_the_variant_key_through_the_environment() -> None:
 
 
 def test_loop_count_variants_set_the_event_loop_system_property() -> None:
-    """A build-arg without ioWorkerCount would produce the default-loop-count
-    image under a loop-count-variant tag - the whole point of the cell lost
-    silently."""
+    """Set the event-loop system property in every loop-count variant.
+
+    A build-arg without ioWorkerCount would produce the default-loop-count image
+    under a loop-count-variant tag - the whole point of the cell lost silently.
+    """
     for key in ("jvm-loop1", "jvm-c2-loop1"):
         ops = build_operations(_variant(key), registry=REGISTRY, modules=MODULES)
         build = next(op for op in ops if op.operation_id.endswith(".image"))
@@ -135,13 +149,20 @@ def test_loop_count_variants_set_the_event_loop_system_property() -> None:
 
 
 def test_loop_count_variants_pair_with_their_baseline_jit_setting() -> None:
-    """jvm-loop1 isolates the loop-count axis by holding jvm's C1/serial
-    setting fixed; jvm-c2-loop1 does the same against jvm-c2's C2/serial. Get
-    either backwards and the 2x2 in Esperimento B compares the wrong cells."""
+    """Pair each loop-count variant with its baseline JIT setting.
+
+    jvm-loop1 isolates the loop-count axis by holding jvm's C1/serial setting
+    fixed; jvm-c2-loop1 does the same against jvm-c2's C2/serial. Get either
+    backwards and the 2x2 in Esperimento B compares the wrong cells.
+    """
     loop1 = build_operations(_variant("jvm-loop1"), registry=REGISTRY, modules=MODULES)
-    c2_loop1 = build_operations(_variant("jvm-c2-loop1"), registry=REGISTRY, modules=MODULES)
+    c2_loop1 = build_operations(
+        _variant("jvm-c2-loop1"), registry=REGISTRY, modules=MODULES
+    )
     loop1_boot_jar = next(op for op in loop1 if op.operation_id.endswith(".boot_jar"))
-    c2_loop1_boot_jar = next(op for op in c2_loop1 if op.operation_id.endswith(".boot_jar"))
+    c2_loop1_boot_jar = next(
+        op for op in c2_loop1 if op.operation_id.endswith(".boot_jar")
+    )
 
     assert "-PnanofaasBuildOptimization=c1" in loop1_boot_jar.argv
     assert "-PnanofaasBuildOptimization=c2" in c2_loop1_boot_jar.argv

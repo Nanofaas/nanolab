@@ -4,8 +4,8 @@ import inspect
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -16,7 +16,6 @@ from nanolab.release.versioning import (
     read_project_version,
     verify_version_consistency,
 )
-
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 CURATED_FILES = (
@@ -30,10 +29,16 @@ CURATED_FILES = (
     Path("sdks/python/uv.lock"),
     Path("functions/python/roman-numeral/uv.lock"),
     Path("tools/fn-init/src/fn_init/main.py"),
-    Path("clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands/RootCommandTest.java"),
+    Path(
+        "clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands/RootCommandTest.java"
+    ),
 )
 LOCKFILE_COMMANDS = (
-    (("cargo", "check"), Path("runtimes/watchdog"), Path("runtimes/watchdog/Cargo.lock")),
+    (
+        ("cargo", "check"),
+        Path("runtimes/watchdog"),
+        Path("runtimes/watchdog/Cargo.lock"),
+    ),
     (("uv", "lock"), Path("sdks/python"), Path("sdks/python/uv.lock")),
     (
         ("uv", "lock"),
@@ -41,7 +46,6 @@ LOCKFILE_COMMANDS = (
         Path("functions/python/roman-numeral/uv.lock"),
     ),
 )
-
 
 
 def _bump_minor(version: str) -> str:
@@ -62,6 +66,7 @@ NEXT_VERSION = _bump_minor(CURRENT_VERSION)
 NEXT_PATCH_VERSION = _bump_patch(CURRENT_VERSION)
 # Safe forever: project versions only ever increase, so a fixed older one stays older.
 OLDER_VERSION = "0.16.9"
+
 
 @pytest.fixture
 def source_tree(tmp_path: Path) -> Path:
@@ -109,7 +114,7 @@ def test_normalize_version_returns_plain_and_image_tag() -> None:
     assert normalize_version("0.18.0") == ("0.18.0", "v0.18.0")
 
 
-@pytest.mark.parametrize("value", ("", "v0.18", "0.18.0-rc1", "v0.18.0.1", "v01.18.0"))
+@pytest.mark.parametrize("value", ["", "v0.18", "0.18.0-rc1", "v0.18.0.1", "v01.18.0"])
 def test_normalize_version_rejects_invalid_versions(value: str) -> None:
     with pytest.raises(ValueError, match="version"):
         normalize_version(value)
@@ -123,7 +128,9 @@ def test_verify_version_consistency_returns_current_version(source_tree: Path) -
     assert verify_version_consistency(source_tree) == CURRENT_VERSION
 
 
-def test_verify_version_consistency_rejects_mismatched_source_tree(source_tree: Path) -> None:
+def test_verify_version_consistency_rejects_mismatched_source_tree(
+    source_tree: Path,
+) -> None:
     chart = source_tree / "deploy/helm/nanofaas/Chart.yaml"
     chart.write_text(
         chart.read_text(encoding="utf-8").replace(
@@ -132,7 +139,7 @@ def test_verify_version_consistency_rejects_mismatched_source_tree(source_tree: 
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="Chart.yaml"):
+    with pytest.raises(ValueError, match=r"Chart\.yaml"):
         verify_version_consistency(source_tree)
 
 
@@ -148,10 +155,14 @@ def test_prepare_version_updates_each_curated_location_without_reformatting(
     install_lockfile_runner(monkeypatch, source_tree, [])
     changed = prepare_version(source_tree, f"v{NEXT_VERSION}")
 
-    assert changed == tuple(source_tree / relative_path for relative_path in CURATED_FILES)
+    assert changed == tuple(
+        source_tree / relative_path for relative_path in CURATED_FILES
+    )
     for relative_path, original in before.items():
         updated = (source_tree / relative_path).read_text(encoding="utf-8")
-        assert updated == versioning._version_pattern(CURRENT_VERSION).sub(NEXT_VERSION, original)
+        assert updated == versioning._version_pattern(CURRENT_VERSION).sub(
+            NEXT_VERSION, original
+        )
     assert verify_version_consistency(source_tree) == NEXT_VERSION
 
 
@@ -167,8 +178,12 @@ def test_prepare_version_ignores_dependency_pins_that_start_with_the_new_version
     """
     lockfile = source_tree / "runtimes" / "watchdog" / "Cargo.lock"
     # A pin the target version is a strict prefix of, whatever the target is today.
-    colliding_pin = f'\n[[package]]\nname = "colliding-dep"\nversion = "{NEXT_PATCH_VERSION}4"\n'
-    lockfile.write_text(lockfile.read_text(encoding="utf-8") + colliding_pin, encoding="utf-8")
+    colliding_pin = (
+        f'\n[[package]]\nname = "colliding-dep"\nversion = "{NEXT_PATCH_VERSION}4"\n'
+    )
+    lockfile.write_text(
+        lockfile.read_text(encoding="utf-8") + colliding_pin, encoding="utf-8"
+    )
 
     def bump_lockfiles(_command: tuple[str, ...], cwd: Path) -> None:
         for _, relative_cwd, relative_lockfile in LOCKFILE_COMMANDS:
@@ -292,17 +307,21 @@ def test_prepare_version_rejects_scope_changes_when_final_consistency_check_fail
 
 
 def test_prepare_version_exposes_only_the_required_public_parameters() -> None:
-    assert tuple(inspect.signature(prepare_version).parameters) == ("repo_root", "requested")
+    assert tuple(inspect.signature(prepare_version).parameters) == (
+        "repo_root",
+        "requested",
+    )
 
 
 @pytest.mark.parametrize(
-    "requested", (CURRENT_VERSION, f"v{CURRENT_VERSION}", OLDER_VERSION, "not-a-version")
+    "requested",
+    [CURRENT_VERSION, f"v{CURRENT_VERSION}", OLDER_VERSION, "not-a-version"],
 )
 def test_prepare_version_rejects_invalid_or_nonincrementing_versions(
     source_tree: Path,
     requested: str,
 ) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"invalid version|must be newer"):
         prepare_version(source_tree, requested)
 
 
@@ -311,14 +330,18 @@ def test_prepare_version_rejects_unexpected_replacement_count_without_writing(
 ) -> None:
     values = source_tree / "deploy/helm/nanofaas/values.yaml"
     original = values.read_text(encoding="utf-8")
-    values.write_text(original + f"\n# stale image: v{CURRENT_VERSION}\n", encoding="utf-8")
+    values.write_text(
+        original + f"\n# stale image: v{CURRENT_VERSION}\n", encoding="utf-8"
+    )
     before = {
-        relative_path: (source_tree / relative_path).read_bytes() for relative_path in CURATED_FILES
+        relative_path: (source_tree / relative_path).read_bytes()
+        for relative_path in CURATED_FILES
     }
 
     with pytest.raises(ValueError, match="replacement count"):
         prepare_version(source_tree, NEXT_VERSION)
 
     assert {
-        relative_path: (source_tree / relative_path).read_bytes() for relative_path in CURATED_FILES
+        relative_path: (source_tree / relative_path).read_bytes()
+        for relative_path in CURATED_FILES
     } == before

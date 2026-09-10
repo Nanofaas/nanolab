@@ -1,15 +1,19 @@
-from typer.testing import CliRunner
 import json
 import subprocess
-from pathlib import Path
-from dataclasses import dataclass
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from sonata_engine import Selection, Task, TaskInputs, TaskOutcome
 from sonata_engine import Workflow as SonataWorkflow
+from typer.testing import CliRunner
+
+import nanolab.cli.product as product_module
+from nanolab.app.main import app
+from nanolab.workspace.provenance import git_provenance
 
 # These tests pass repo-relative paths (scenarios-v2/..., environments/...) to the
 # CLI, so they must run from the project root regardless of pytest's cwd.
@@ -19,10 +23,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture(autouse=True)
 def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)
-
-from nanolab.app.main import app
-from nanolab.workspace.provenance import git_provenance
-import nanolab.cli.product as product_module
 
 
 @dataclass
@@ -35,11 +35,12 @@ class _Task:
 
 
 def _sonata_workflow(*, fails: str | None = None) -> SonataWorkflow:
-    """A real one-task Sonata workflow, for scenarios the CLI now runs on Sonata.
+    """Build a real one-task Sonata workflow for the CLI scenarios.
 
     A real workflow rather than a fake: the CLI calls compile() and run(select=)
     on these, and a stand-in that only grew those two methods would prove less
-    than the engine itself does."""
+    than the engine itself does.
+    """
 
     class _One(Task[None]):
         title = "Test task"
@@ -66,7 +67,17 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
 
     assert result.exit_code == 0
     commands = {command.name for command in app.registered_commands}
-    assert commands == {"run", "plan", "list", "workflow", "workflows", "inspect", "doctor", "tui", "compare"}
+    assert commands == {
+        "run",
+        "plan",
+        "list",
+        "workflow",
+        "workflows",
+        "inspect",
+        "doctor",
+        "tui",
+        "compare",
+    }
 
 
 def test_list_does_not_require_nanofaas_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,7 +109,8 @@ def test_workflow_lists_scenarios_in_a_formatted_table() -> None:
 
 
 def test_workflows_discovers_added_and_removed_scenarios(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scenarios = tmp_path / "scenarios-v2"
     scenarios.mkdir()
@@ -144,7 +156,12 @@ def test_doctor_uses_shared_diagnostics(monkeypatch) -> None:
 def test_plan_builds_shared_validate_workflow() -> None:
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/deployment-lifecycle-k8s.yaml", "--environment", "environments/local.yaml"],
+        [
+            "plan",
+            "scenarios-v2/deployment-lifecycle-k8s.yaml",
+            "--environment",
+            "environments/local.yaml",
+        ],
     )
 
     assert result.exit_code == 0
@@ -178,7 +195,9 @@ def test_run_container_loadtest_requires_k6_before_building_the_workflow(
         lambda required=(): ["k6"] if required == ("k6",) else [],
     )
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/autoscaling-cycle-container.yaml"])
+    result = CliRunner().invoke(
+        app, ["run", "scenarios-v2/autoscaling-cycle-container.yaml"]
+    )
 
     assert result.exit_code != 0
     assert "requires k6 on the host" in result.output
@@ -362,7 +381,9 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     def _legacy_provision_must_not_run(*args, **kwargs):
         raise AssertionError("legacy provision_environment must not run for cli/k8s")
 
-    monkeypatch.setattr(product_module, "provision_environment", _legacy_provision_must_not_run)
+    monkeypatch.setattr(
+        product_module, "provision_environment", _legacy_provision_must_not_run
+    )
 
     result = CliRunner().invoke(
         app,
@@ -418,7 +439,9 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr(
         "nanolab.cli.product._workflow",
         lambda *args, **kwargs: (
-            actions.append(f"build:{kwargs['control_plane_url']}:{kwargs['prometheus_url']}")
+            actions.append(
+                f"build:{kwargs['control_plane_url']}:{kwargs['prometheus_url']}"
+            )
             or workflow
         ),
     )
@@ -439,13 +462,15 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr(workflow, "run", lambda **_kwargs: actions.append("run"))
     monkeypatch.setattr(
         "nanolab.cli.product.git_provenance",
-        lambda *args: actions.append("provenance")
-        or {
-            "git_commit": "abc",
-            "git_dirty": False,
-            "git_diff_sha256": "digest",
-            "git_status": [],
-        },
+        lambda *args: (
+            actions.append("provenance")
+            or {
+                "git_commit": "abc",
+                "git_dirty": False,
+                "git_diff_sha256": "digest",
+                "git_status": [],
+            }
+        ),
     )
 
     result = CliRunner().invoke(
@@ -481,11 +506,15 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
     assert metadata["tasks"] == []
 
 
-def test_git_provenance_fingerprints_tracked_and_untracked_content(tmp_path: Path) -> None:
+def test_git_provenance_fingerprints_tracked_and_untracked_content(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(("git", "init", "-q"), cwd=repo, check=True)
-    subprocess.run(("git", "config", "user.email", "test@example.com"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "config", "user.email", "test@example.com"), cwd=repo, check=True
+    )
     subprocess.run(("git", "config", "user.name", "Test"), cwd=repo, check=True)
     tracked = repo / "tracked.txt"
     tracked.write_text("base", encoding="utf-8")
@@ -554,7 +583,12 @@ def test_inspect_renders_validated_configuration() -> None:
 def test_plan_can_select_one_task() -> None:
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/deployment-lifecycle-k8s.yaml", "--only", "invoke-word-stats-java"],
+        [
+            "plan",
+            "scenarios-v2/deployment-lifecycle-k8s.yaml",
+            "--only",
+            "invoke-word-stats-java",
+        ],
     )
 
     assert result.exit_code == 0
@@ -565,13 +599,19 @@ def test_plan_can_select_one_task() -> None:
 def test_plan_accepts_external_ssh_environment(tmp_path: Path) -> None:
     environment = tmp_path / "external.yaml"
     environment.write_text(
-        "provider: external\nroles:\n  stack:\n    host: vm.example\n    user: ubuntu\n",
+        "provider: external\nroles:\n  stack:\n"
+        "    host: vm.example\n    user: ubuntu\n",
         encoding="utf-8",
     )
 
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/deployment-lifecycle-k8s.yaml", "--environment", str(environment)],
+        [
+            "plan",
+            "scenarios-v2/deployment-lifecycle-k8s.yaml",
+            "--environment",
+            str(environment),
+        ],
     )
 
     assert result.exit_code == 0
@@ -580,7 +620,9 @@ def test_plan_accepts_external_ssh_environment(tmp_path: Path) -> None:
 
 def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
     scenario = tmp_path / "autoscaling-cycle-k8s.yaml"
-    scenario.write_text("workflow: loadtest\nfunctions:\n  - word-stats-java\n", encoding="utf-8")
+    scenario.write_text(
+        "workflow: loadtest\nfunctions:\n  - word-stats-java\n", encoding="utf-8"
+    )
 
     result = CliRunner().invoke(app, ["plan", str(scenario)])
 
@@ -592,7 +634,9 @@ def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
 
 
 def test_plan_renders_the_compiled_cli_workflow() -> None:
-    result = CliRunner().invoke(app, ["plan", "scenarios-v2/cli-contract-container.yaml"])
+    result = CliRunner().invoke(
+        app, ["plan", "scenarios-v2/cli-contract-container.yaml"]
+    )
 
     assert result.exit_code == 0, result.output
     assert "001.build-nanofaas-cli" in result.stdout
@@ -602,7 +646,12 @@ def test_plan_renders_the_compiled_cli_workflow() -> None:
 def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/cli-contract-container.yaml", "--only", "list-functions"],
+        [
+            "plan",
+            "scenarios-v2/cli-contract-container.yaml",
+            "--only",
+            "list-functions",
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -641,7 +690,12 @@ def test_run_passes_the_requested_selection_to_sonata(
 def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/cli-contract-container.yaml", "--only", "cli.function.list"],
+        [
+            "plan",
+            "scenarios-v2/cli-contract-container.yaml",
+            "--only",
+            "cli.function.list",
+        ],
     )
 
     assert result.exit_code != 0

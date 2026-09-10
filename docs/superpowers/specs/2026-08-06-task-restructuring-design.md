@@ -168,6 +168,7 @@ class CommandTask(Task[TaskResult]):
     def _fingerprint_payload(self) -> object:
         return self.argv if not callable(self.argv) else _qualname(self.argv)
 
+
 class FnTask(Task[T]):
     def _fingerprint_payload(self) -> object:
         return _qualname(self.fn)
@@ -231,6 +232,7 @@ acquisisce `_fingerprint_payload` (§3.1).
 @dataclass
 class FnTask(Task[T]):
     """Un task il cui corpo è una callable, con l'upstream come ingresso."""
+
     title: str
     fn: Callable[[TaskInputs], T]
 
@@ -246,7 +248,9 @@ volta sola** nel tipo:
 
 ```python
 class WriteReportTask(FnTask[LoadtestOutcome]):
-    def __init__(self, *, report: WriteK6Report, title: str = "Write the report") -> None:
+    def __init__(
+        self, *, report: WriteK6Report, title: str = "Write the report"
+    ) -> None:
         super().__init__(
             title=title,
             fn=lambda i: replace(load_outcome(i, title), report=report.run()),
@@ -264,11 +268,11 @@ reale, non un doppione.
 class PhaseTask(ReusableTask):
     phase: str
     run_dir: Path
-    scope: Mapping[str, Any]            # era `identity`: cosa distingue l'esecuzione
-    inputs: Mapping[str, Any]           # cosa entra nel reuse_key
+    scope: Mapping[str, Any]  # era `identity`: cosa distingue l'esecuzione
+    inputs: Mapping[str, Any]  # cosa entra nel reuse_key
     work: Callable[[TaskInputs], Iterable[Evidence]]
     prerequisites: tuple[Path, ...] = ()
-    verify: Callable[[tuple[Evidence, ...]], None] | None = None   # era expected_images
+    verify: Callable[[tuple[Evidence, ...]], None] | None = None  # era expected_images
     title: str = ""
 ```
 
@@ -382,14 +386,19 @@ Unità di riuso a livello di *sequenza*, tutte già esistenti e invariate:
 def build_X_plan(config, bindings, *, repo_root) -> Workflow:
     executor = RoleBoundCommandTaskExecutor(bindings)
     wf = Workflow(workflow_id="X")
-    vm = vm_resource(...)                                   # risorse
+    vm = vm_resource(...)  # risorse
     platform = add_platform(wf, request, executor=executor, requires=(vm,))
     wf.add(
-        Steps(title="...", steps=(
-            GradleTask("build", executor=executor, role="stack"),
-            DockerBuildTask(image=..., executor=executor, role="stack", timeout_seconds=600),
-            WriteReportTask(report=report_adapter),
-        )),
+        Steps(
+            title="...",
+            steps=(
+                GradleTask("build", executor=executor, role="stack"),
+                DockerBuildTask(
+                    image=..., executor=executor, role="stack", timeout_seconds=600
+                ),
+                WriteReportTask(report=report_adapter),
+            ),
+        ),
         requires=(*platform.resources, *platform.functions),
     )
     return wf
@@ -415,11 +424,12 @@ amd64 = phase(
     "amd64-build",
     run_dir=release_dir,
     scope=identity.as_entry(),
-    inputs=phase_inputs_from(amd64_commands),          # derivazione unica
+    inputs=phase_inputs_from(amd64_commands),  # derivazione unica
     prerequisites=(source_tests.receipt,),
     verify=image_matrix(release_images),
-    work=lambda i: run_image_steps(amd64_steps, i, executor, release_images,
-                                   registry=False, architecture="amd64"),
+    work=lambda i: run_image_steps(
+        amd64_steps, i, executor, release_images, registry=False, architecture="amd64"
+    ),
 )
 ```
 

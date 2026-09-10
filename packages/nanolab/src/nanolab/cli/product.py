@@ -1,11 +1,19 @@
+"""The product commands: run a scenario, plan it, and read the local catalogue.
+
+Ties the scenario and environment configs to the plan builder and the Sonata
+workflow runner. `run` provisions, executes and reports; `plan` renders the
+compiled workflow without touching a machine; `list`, `workflow` and `inspect`
+read the local scenario catalogue, and `doctor` checks the host's tools.
+"""
+
 from __future__ import annotations
 
 import json
-from contextlib import ExitStack, nullcontext
-from datetime import UTC, datetime
-from pathlib import Path
 import subprocess
 import tempfile
+from contextlib import ExitStack, nullcontext, suppress
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import typer
@@ -23,12 +31,8 @@ from sonata_engine import (
 from sonata_engine import Workflow as SonataWorkflow
 from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink
-from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
-from nanolab.tasks.provisioning.providers import provider_for
-from nanolab.tasks.telegram import telegram_observer_from_environment
 
 from nanolab.cli import diagnostics
-from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.cli.execution import (
     build_role_bindings,
     prometheus_over_ssh,
@@ -37,13 +41,13 @@ from nanolab.cli.execution import (
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
 from nanolab.cli.vm_provider import vm_request_for_role
-from nanolab.plans.offload import build_offload_plan
-from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
+from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
-from nanolab.plans.runtime_comparison import (
-    build_runtime_comparison_plan,
-    is_runtime_comparison,
+from nanolab.plans.offload import build_offload_plan
+from nanolab.plans.offload_loadtest import (
+    build_offload_loadtest_plan,
+    format_offload_summary,
 )
 from nanolab.plans.release import (
     ReleaseRequest,
@@ -52,18 +56,24 @@ from nanolab.plans.release import (
     release_journal_config,
     release_verifiers,
 )
-from nanolab.release.resources import build_release_resources
-from nanolab.release.tasks import versioned_release_run_dir
-from nanolab.release.versioning import normalize_version
+from nanolab.plans.runtime_comparison import (
+    build_runtime_comparison_plan,
+    is_runtime_comparison,
+)
+from nanolab.plans.validate import build_validate_plan
 from nanolab.release.environment import (
     ReleaseRunInProgressError,
     release_lock_path,
     release_run_lock,
 )
-from nanolab.plans.validate import build_validate_plan
+from nanolab.release.resources import build_release_resources
+from nanolab.release.tasks import versioned_release_run_dir
+from nanolab.release.versioning import normalize_version
+from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
+from nanolab.tasks.provisioning.providers import provider_for
+from nanolab.tasks.telegram import telegram_observer_from_environment
 from nanolab.workspace.paths import ToolPaths, default_tool_paths, discover_tool_root
 from nanolab.workspace.provenance import git_provenance
-
 
 _JOURNAL_FILENAME = "sonata.jsonl"
 _LOCAL_PROMETHEUS_URL = "http://127.0.0.1:9090"
@@ -99,14 +109,20 @@ def _workflow_catalog(
         if not isinstance(data, dict) or not isinstance(data.get("workflow"), str):
             continue
         workflow = data["workflow"]
-        environments = ("local",) if data.get("backend") == "container" else _ENVIRONMENT_PROVIDERS
+        environments = (
+            ("local",) if data.get("backend") == "container" else _ENVIRONMENT_PROVIDERS
+        )
         if workflow == "release":
             environments = ("azure",)
         workflows.setdefault(workflow, set()).update(environments)
         scenarios.setdefault(workflow, []).append(path.name)
     return {
         workflow: (
-            tuple(provider for provider in _ENVIRONMENT_PROVIDERS if provider in environments),
+            tuple(
+                provider
+                for provider in _ENVIRONMENT_PROVIDERS
+                if provider in environments
+            ),
             tuple(sorted(scenarios[workflow])),
         )
         for workflow, environments in sorted(workflows.items())
@@ -125,7 +141,11 @@ def _print_offload_summary(run_dir: Path) -> None:
     report = json.loads(path.read_text(encoding="utf-8"))
     numbers = report.get("numbers")
     if isinstance(numbers, dict):
-        typer.echo(format_offload_summary({key: float(value) for key, value in numbers.items()}))
+        typer.echo(
+            format_offload_summary(
+                {key: float(value) for key, value in numbers.items()}
+            )
+        )
 
 
 def _workflow(
@@ -207,7 +227,9 @@ def _teardown_release(
         raise typer.BadParameter("--teardown requires a release scenario")
     paths = default_tool_paths()
     version = normalize_version(scenario_config.release.version)[0]
-    release_dir = versioned_release_run_dir(run_dir or paths.runs_dir / "release", version)
+    release_dir = versioned_release_run_dir(
+        run_dir or paths.runs_dir / "release", version
+    )
     journal_paths = [release_dir / _JOURNAL_FILENAME]
     journal_paths.extend(
         path / _JOURNAL_FILENAME
@@ -219,9 +241,15 @@ def _teardown_release(
         typer.echo(f"nothing to tear down: no release journal at {journal_paths[0]}")
         return
 
-    provider = provider_for(vm_request_for_role(environment_config, "stack"), paths.tool_root)
-    resources = build_release_resources(environment_config, paths.nanofaas_root, provider)
-    by_title = {resource.title: resource for resource in (*resources.vms, resources.endpoints)}
+    provider = provider_for(
+        vm_request_for_role(environment_config, "stack"), paths.tool_root
+    )
+    resources = build_release_resources(
+        environment_config, paths.nanofaas_root, provider
+    )
+    by_title = {
+        resource.title: resource for resource in (*resources.vms, resources.endpoints)
+    }
     unknown: list[UnknownRetainedResourceError] = []
     released: list[str] = []
     with release_run_lock(release_lock_path(environment_config)):
@@ -261,7 +289,9 @@ def _supersede_release_run(release_dir: Path) -> Path | None:
     attempt = 1
     while superseded.exists():
         attempt += 1
-        superseded = release_dir.with_name(f"{release_dir.name}.superseded-{stamp}-{attempt}")
+        superseded = release_dir.with_name(
+            f"{release_dir.name}.superseded-{stamp}-{attempt}"
+        )
     release_dir.rename(superseded)
     return superseded
 
@@ -293,7 +323,9 @@ def _release_request(
         )
     except (ValueError, subprocess.CalledProcessError) as error:
         raise typer.BadParameter(str(error)) from None
-    return request, provider_for(vm_request_for_role(request.environment, "stack"), request.repo_root)
+    return request, provider_for(
+        vm_request_for_role(request.environment, "stack"), request.repo_root
+    )
 
 
 def _require_cli_endpoint(
@@ -307,7 +339,9 @@ def _require_cli_endpoint(
         and environment.provider == "local"
         and control_plane_url is None
     ):
-        raise typer.BadParameter("--control-plane-url is required for a k8s cli scenario")
+        raise typer.BadParameter(
+            "--control-plane-url is required for a k8s cli scenario"
+        )
 
 
 def _validate_cli_container_options(
@@ -324,7 +358,9 @@ def _validate_cli_container_options(
         raise typer.BadParameter("--keep is not supported for a cli container scenario")
 
 
-def _require_local_loadtest_tools(scenario: ScenarioConfig, environment: EnvironmentConfig) -> None:
+def _require_local_loadtest_tools(
+    scenario: ScenarioConfig, environment: EnvironmentConfig
+) -> None:
     if scenario.workflow != "loadtest" or scenario.backend != "container":
         return
     if environment.provider != "local":
@@ -336,8 +372,6 @@ def _require_local_loadtest_tools(scenario: ScenarioConfig, environment: Environ
 def _render_compiled(compiled: CompiledWorkflow) -> None:
     for compiled_task in compiled.tasks:
         typer.echo(f"{compiled_task.task_id}  {compiled_task.task.title}")
-
-
 
 
 def _write_run_metadata(
@@ -371,10 +405,14 @@ def _write_run_metadata(
         },
         "tasks": sink.records,
     }
-    (run_dir / "run-metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    (run_dir / "run-metadata.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
 
 
-def _default_run_dir(run_dir: Path | None, workflow: str, runs_dir: Path) -> Path | None:
+def _default_run_dir(
+    run_dir: Path | None, workflow: str, runs_dir: Path
+) -> Path | None:
     if run_dir is None and workflow in ("loadtest", "offload-loadtest"):
         return runs_dir / "latest"
     return run_dir
@@ -485,9 +523,7 @@ def _provisioning_context(
     if (
         scenario_config.workflow != "release"
         and environment_config.provider != "local"
-        and not (
-            scenario_config.workflow == "cli" and scenario_config.backend == "k8s"
-        )
+        and not (scenario_config.workflow == "cli" and scenario_config.backend == "k8s")
     ):
         return provision_environment(
             scenario_config,
@@ -660,7 +696,8 @@ def _write_failure_metadata(
     provenance: dict[str, object],
 ) -> None:
     if effective_run_dir is not None:
-        try:
+        # Best effort: a metadata write that fails must not mask the run's error.
+        with suppress(OSError):
             _write_run_metadata(
                 effective_run_dir,
                 status="failed",
@@ -673,8 +710,6 @@ def _write_failure_metadata(
                 sink=sink,
                 provenance=provenance,
             )
-        except OSError:
-            pass
 
 
 def _write_success_metadata(
@@ -703,11 +738,22 @@ def _write_success_metadata(
         )
 
 
-def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nested typer commands own their teardown/error lifecycle
+def install_product_commands(
+    app: typer.Typer,
+) -> None:  # NOSONAR (S3776): nested typer commands own their teardown/error lifecycle
+    """Register the product commands on `app`.
+
+    Those are `run`, `plan`, `list`, `workflow`, `inspect` and `doctor`.
+    """
+
     @app.command("run")
+    # Typer's documented parameter API takes the spec as the default; ruff flags
+    # only the Path parameters, and nothing mutable is shared between calls.
     def run_command(
-        scenario: Path = typer.Argument(..., exists=True),
-        environment: Path | None = typer.Option(None, "--environment", exists=True),
+        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
+        environment: Path | None = typer.Option(  # noqa: B008
+            None, "--environment", exists=True
+        ),
         keep: bool = typer.Option(False, "--keep"),
         teardown: bool = typer.Option(
             False,
@@ -735,7 +781,7 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
         ),
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
-        run_dir: Path | None = typer.Option(
+        run_dir: Path | None = typer.Option(  # noqa: B008
             None,
             "--run-dir",
             help=(
@@ -743,7 +789,9 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
                 "writes each run under releases/<version>/."
             ),
         ),
-        release_config: Path | None = typer.Option(None, "--release-config", exists=True),
+        release_config: Path | None = typer.Option(  # noqa: B008
+            None, "--release-config", exists=True
+        ),
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
@@ -773,7 +821,9 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
         _require_local_loadtest_tools(scenario_config, environment_config)
         _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         paths = default_tool_paths()
-        effective_run_dir = _default_run_dir(run_dir, scenario_config.workflow, paths.runs_dir)
+        effective_run_dir = _default_run_dir(
+            run_dir, scenario_config.workflow, paths.runs_dir
+        )
         # The extracted tree is throwaway, but the `finally` below only closes
         # it once the whole release run finishes, so it is held (~15 MB) for
         # the run's entire duration, not just through workflow compilation.
@@ -860,9 +910,12 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
             lifetime.close()
 
     @app.command("plan")
+    # See run_command: typer's parameter API, no shared mutable default.
     def plan_command(
-        scenario: Path = typer.Argument(..., exists=True),
-        environment: Path | None = typer.Option(None, "--environment", exists=True),
+        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
+        environment: Path | None = typer.Option(  # noqa: B008
+            None, "--environment", exists=True
+        ),
         only: str | None = typer.Option(
             None,
             "--only",
@@ -883,7 +936,7 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
         ),
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
-        run_dir: Path | None = typer.Option(
+        run_dir: Path | None = typer.Option(  # noqa: B008
             None,
             "--run-dir",
             help=(
@@ -891,7 +944,9 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
                 "writes each run under releases/<version>/."
             ),
         ),
-        release_config: Path | None = typer.Option(None, "--release-config", exists=True),
+        release_config: Path | None = typer.Option(  # noqa: B008
+            None, "--release-config", exists=True
+        ),
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
@@ -908,7 +963,10 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
         if scenario_config.workflow == "release":
             with tempfile.TemporaryDirectory(prefix="nanofaas-plan-") as source_tree:
                 request, provider = _release_request(
-                    scenario, environment, release_config, run_dir,
+                    scenario,
+                    environment,
+                    release_config,
+                    run_dir,
                     executable=False,
                     source_tree=Path(source_tree),
                 )
@@ -953,12 +1011,17 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
         table.add_column("Workflow", style="cyan", no_wrap=True)
         table.add_column("Environments", no_wrap=True)
         table.add_column("Scenarios", no_wrap=True)
-        for workflow, (environments, scenarios) in _workflow_catalog(scenarios_dir).items():
+        for workflow, (environments, scenarios) in _workflow_catalog(
+            scenarios_dir
+        ).items():
             table.add_row(workflow, ", ".join(environments), "\n".join(scenarios))
         Console(width=240).print(table)
 
     @app.command("inspect")
-    def inspect_command(scenario: Path = typer.Argument(..., exists=True)) -> None:
+    # See run_command: typer's parameter API, no shared mutable default.
+    def inspect_command(
+        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
+    ) -> None:
         typer.echo(json.dumps(_scenario(scenario).model_dump(by_alias=True), indent=2))
 
     @app.command("doctor")

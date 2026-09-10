@@ -15,36 +15,30 @@ from typing import Any, cast
 import yaml
 from sonata_engine import JournalConfig, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
-from nanolab.tasks.provisioning.providers import provider_for
-from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
+from sonata_tasks.registry_tunnel import registry_tunnel_resource
 
 from nanolab.cli.execution import build_role_bindings
+from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.plans.release_phases import (
     build_amd64_phase,
     build_arm64_phase,
     build_attestation_phase,
     build_benchmark_phase,
     build_publication_phase,
-    build_regression_phase,
     build_registry_push_phase,
+    build_regression_phase,
     build_source_test_phase,
 )
-from nanolab.cli.vm_provider import vm_request_for_role
-from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
-from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release import arm as release_arm
+from nanolab.release import publish as release_publish
+from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release.build import extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
-from nanolab.release import publish as release_publish
-from nanolab.release.resources import (
-    build_inputs_resource,
-    build_release_resources,
-    release_execution_guard,
-)
 from nanolab.release.model import (
     CredentialFiles,
     ReleaseIdentity,
@@ -52,11 +46,17 @@ from nanolab.release.model import (
     digest_path,
     git_state,
 )
+from nanolab.release.resources import (
+    build_inputs_resource,
+    build_release_resources,
+    release_execution_guard,
+)
 from nanolab.release.tasks import (
     ReleasePhaseTask,
     versioned_release_run_dir,
 )
 from nanolab.release.versioning import normalize_version, verify_version_consistency
+from nanolab.tasks.provisioning.providers import provider_for
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -99,7 +99,9 @@ def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verif
 def release_journal_config(request: ReleaseRequest) -> JournalConfig:
     """Use one Sonata journal per prepared release version."""
     return JournalConfig(
-        versioned_release_run_dir(request.run_dir, normalize_version(request.version)[0])
+        versioned_release_run_dir(
+            request.run_dir, normalize_version(request.version)[0]
+        )
         / "sonata.jsonl"
     )
 
@@ -140,7 +142,9 @@ def build_release_request(
         15.0,
         0.30,
     ):
-        raise ValueError("release scenario does not match the canonical Azure performance policy")
+        raise ValueError(
+            "release scenario does not match the canonical Azure performance policy"
+        )
     benchmark_scenario = scenario_file.parent / release.benchmark_scenario
     if not benchmark_scenario.is_file():
         raise ValueError("release benchmark scenario must be a file")
@@ -158,14 +162,20 @@ def build_release_request(
         credential_config = _read_yaml(Path(release_config_path).expanduser().resolve())
         try:
             credentials = CredentialFiles(
-                ghcr_token=Path(str(credential_config["ghcr_token_file"])).expanduser().absolute(),
-                cosign_key=Path(str(credential_config["cosign_key_file"])).expanduser().absolute(),
-                cosign_password=Path(
-                    str(credential_config["cosign_password_file"])
-                ).expanduser().absolute(),
+                ghcr_token=Path(str(credential_config["ghcr_token_file"]))
+                .expanduser()
+                .absolute(),
+                cosign_key=Path(str(credential_config["cosign_key_file"]))
+                .expanduser()
+                .absolute(),
+                cosign_password=Path(str(credential_config["cosign_password_file"]))
+                .expanduser()
+                .absolute(),
             )
         except KeyError as error:
-            raise ValueError("release credential configuration is incomplete") from error
+            raise ValueError(
+                "release credential configuration is incomplete"
+            ) from error
         credentials.validate(repo_root=tool_root).validate(repo_root=source_root)
     elif executable:
         raise ValueError("release credential config is required for execution")
@@ -238,7 +248,9 @@ def build_release_workflow(
     identity = request.identity
     _, expected_image_tag = normalize_version(request.version)
     if request.image_plan.version != expected_image_tag:
-        raise ValueError("release image plan version does not match the requested project version")
+        raise ValueError(
+            "release image plan version does not match the requested project version"
+        )
 
     if provider is None:
         provider = provider_for(vm_request_for_role(env, "stack"), request.repo_root)
@@ -246,9 +258,13 @@ def build_release_workflow(
         env, nanofaas, provider, requires=(execution_guard,)
     )
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
-    _ = vm_request_for_role(env, "loadgen", loadtest=True)  # captured by build_role_bindings
+    _ = vm_request_for_role(
+        env, "loadgen", loadtest=True
+    )  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
-    bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=nanofaas)
+    bindings, fetcher = build_role_bindings(
+        env, vm_provider=provider, repo_root=nanofaas
+    )
     executor = RoleBoundCommandTaskExecutor(bindings)
     remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
     source_dir = f"{remote_root}/source"
@@ -318,12 +334,17 @@ def build_release_workflow(
     # --- Phases 4-6: Benchmarks ---
     benchmark_scenario = _read_yaml(request.settings.scenario)
     benchmark_config = ScenarioConfig.model_validate(benchmark_scenario)
-    benchmark_plan = cast(ReleaseRequest, replace(
-        request,
-        repo_root=Path(source_dir),
-        scenario=benchmark_config,
-        run_dir=versioned_release_run_dir(request.run_dir, identity.prepared_version),
-    ))
+    benchmark_plan = cast(
+        ReleaseRequest,
+        replace(
+            request,
+            repo_root=Path(source_dir),
+            scenario=benchmark_config,
+            run_dir=versioned_release_run_dir(
+                request.run_dir, identity.prepared_version
+            ),
+        ),
+    )
     benchmark_runs: tuple[ReleasePhaseTask, ...] = build_benchmark_phase(
         identity=identity,
         run_dir=request.run_dir,
@@ -338,12 +359,14 @@ def build_release_workflow(
     )
 
     # --- Phases 7-8: Aggregate and Regression Gate ---
-    regression_tasks: tuple[ReleasePhaseTask, ReleasePhaseTask] = build_regression_phase(
-        identity=identity,
-        run_dir=request.run_dir,
-        benchmark_plan=benchmark_plan,
-        runs=request.settings.benchmark_runs,
-        benchmark_runs=benchmark_runs,
+    regression_tasks: tuple[ReleasePhaseTask, ReleasePhaseTask] = (
+        build_regression_phase(
+            identity=identity,
+            run_dir=request.run_dir,
+            benchmark_plan=benchmark_plan,
+            runs=request.settings.benchmark_runs,
+            benchmark_runs=benchmark_runs,
+        )
     )
     aggregate, reg_gate = regression_tasks
 
@@ -428,21 +451,23 @@ def build_release_workflow(
     all_published = publication.all_published
     docker_credentials = publication.docker_credentials
 
-    attestation_tasks: tuple[ReleasePhaseTask, ReleasePhaseTask] = build_attestation_phase(
-        request=request,
-        identity=identity,
-        release_dir=release_dir,
-        remote_root=remote_root,
-        provider=provider,
-        stack_request=stack_req,
-        executor=executor,
-        benchmark_plan=benchmark_plan,
-        aggregate=aggregate,
-        cosign=cosign,
-        pub_plan=pub_plan,
-        publication_receipts=publication_receipts,
-        all_published=all_published,
-        docker_credentials=docker_credentials,
+    attestation_tasks: tuple[ReleasePhaseTask, ReleasePhaseTask] = (
+        build_attestation_phase(
+            request=request,
+            identity=identity,
+            release_dir=release_dir,
+            remote_root=remote_root,
+            provider=provider,
+            stack_request=stack_req,
+            executor=executor,
+            benchmark_plan=benchmark_plan,
+            aggregate=aggregate,
+            cosign=cosign,
+            pub_plan=pub_plan,
+            publication_receipts=publication_receipts,
+            all_published=all_published,
+            docker_credentials=docker_credentials,
+        )
     )
     attest, finalize = attestation_tasks
 

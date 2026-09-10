@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
+from collections.abc import Iterator
 from contextlib import contextmanager
 from io import StringIO
 from pathlib import Path
-from typing import Iterator
 
+import pytest
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
-import pytest
 from rich.console import Console
-
-from nanolab.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME
-from nanolab.tui.workflow import WorkflowDashboard
 from tui_toolkit.context import UIContext, bind_ui
 from tui_toolkit.pickers import Choice, _build_select_application
 
+from nanolab.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME
+from nanolab.tui.workflow import WorkflowDashboard
 
 LOGO_SENTINEL = "███╗   ██╗"
 SCREEN_COLUMNS = 120
@@ -79,7 +78,9 @@ def capture_picker(*, title: str, breadcrumb: str) -> str:
         screen = app.renderer.last_rendered_screen
         assert screen is not None
         return "\n".join(
-            "".join(screen.data_buffer[row][column].char for column in range(SCREEN_COLUMNS)).rstrip()
+            "".join(
+                screen.data_buffer[row][column].char for column in range(SCREEN_COLUMNS)
+            ).rstrip()
             for row in range(screen.height)
         )
 
@@ -108,8 +109,11 @@ def capture_picker_sequence(*, full_screen: bool = True) -> RecordingOutput:
                 app.full_screen = full_screen
                 app.renderer.full_screen = full_screen
                 output.observe(app)
+
                 def submit_after_first_paint() -> None:
-                    asyncio.get_running_loop().call_later(0.01, pipe_input.send_text, "\r")
+                    asyncio.get_running_loop().call_later(
+                        0.01, pipe_input.send_text, "\r"
+                    )
 
                 app.run(pre_run=submit_after_first_paint)
     return output
@@ -137,7 +141,11 @@ def capture_dashboard(*, title: str = "Workflow") -> str:
 
 
 def logo_row(capture: str) -> int:
-    return next(index for index, line in enumerate(capture.splitlines()) if LOGO_SENTINEL in line)
+    return next(
+        index
+        for index, line in enumerate(capture.splitlines())
+        if LOGO_SENTINEL in line
+    )
 
 
 def logo_line_count(capture: str) -> int:
@@ -155,7 +163,10 @@ def assert_clean_navigation(session: RecordingOutput) -> None:
     assert len(session.frames) == 4
     assert all(logo_line_count(frame) == 1 for frame in session.frames)
     assert all(frame.count(NANOFAAS_BRAND.ascii_logo) == 1 for frame in session.frames)
-    assert all(header in frame for header, frame in zip(expected_headers, session.frames, strict=True))
+    assert all(
+        header in frame
+        for header, frame in zip(expected_headers, session.frames, strict=True)
+    )
     assert "Validation" not in session.frames[2]
     assert "Validation" not in session.frames[3]
     assert "Load Testing" not in session.frames[0]
@@ -187,7 +198,9 @@ def test_menu_navigation_never_concatenates_previous_logo_chrome() -> None:
     assert_clean_navigation(session)
 
 
-def test_navigation_harness_rejects_navigation_without_full_screen_replacement() -> None:
+def test_navigation_harness_rejects_navigation_without_full_screen_replacement() -> (
+    None
+):
     session = capture_picker_sequence(full_screen=False)
 
     with pytest.raises(AssertionError):
@@ -207,7 +220,10 @@ def test_controlplane_does_not_use_the_standalone_toolkit_header() -> None:
     for source_file in source_root.rglob("*.py"):
         tree = ast.parse(source_file.read_text(), filename=str(source_file))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "tui_toolkit.workflow":
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "tui_toolkit.workflow"
+            ):
                 assert all(alias.name != "header" for alias in node.names), source_file
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 assert not (

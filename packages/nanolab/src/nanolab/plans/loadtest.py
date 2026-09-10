@@ -1,4 +1,11 @@
-from sonata_tasks.execution.models import CommandOptions
+"""Compile a load-test scenario into a Sonata workflow.
+
+Both backends are served from here: the k6 script and stage shape the profile
+asks for, the Prometheus queries the loaded modules can answer, the report and
+gate tasks, and — when the scenario asks — the autoscaling and concurrency
+watchers that turn a run into a trajectory rather than a single number.
+"""
+
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -7,65 +14,74 @@ from typing import Any, cast
 
 from sonata_engine import Steps, Task, Workflow
 from sonata_tasks.command import CommandTask
-from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
-from sonata_tasks.registry import docker_registry_resource
-from nanolab.tasks.loadtest.report import ReportPhase, WriteConcurrencyReport
-from nanolab.tasks.loadtest.resources import (
-    DockerEngineProbe,
-    ResourceWatcher,
-    ResourceWatcherGroup,
+from sonata_tasks.execution.bindings import (
+    CommandTaskExecutor,
+    RoleBindings,
+    RoleBoundCommandTaskExecutor,
 )
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.registry import docker_registry_resource
+from sonata_tasks.tasks.models import CommandTaskSpec
+
+from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
+from nanolab.metrics.catalogue import queries_for
+from nanolab.plans.diagnostics import collect_control_plane_log
+from nanolab.plans.functions import (
+    resolve_function,
+    resolve_function_definition,
+    sonata_function,
+)
+from nanolab.tasks.components.bootstrap import remote_project_dir
+from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
+from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.tasks.execution import ExecutionRole
+from nanolab.tasks.k6 import K6Task
 from nanolab.tasks.loadtest import (
-    SideCommandTask,
-    ReportCoTenancyTask,
-    VerifyConcurrencyTask,
     CapturePrometheusTask,
     EvaluateGateTask,
     FetchResultsTask,
+    ReportCoTenancyTask,
     RunK6Task,
+    SideCommandTask,
     VerifyAutoscalingTask,
+    VerifyConcurrencyTask,
     WriteConcurrencyReportTask,
     WriteReportTask,
     WriteSummaryTask,
     build_loadtest_workflow,
     loadtest_composite,
 )
-from nanolab.tasks.platform import Backend, Build, PlatformRequest
-from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
-from nanolab.tasks.components.bootstrap import remote_project_dir
-from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
-from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from nanolab.tasks.execution import ExecutionRole
-from nanolab.tasks.k6 import K6Task
+from nanolab.tasks.loadtest.autoscaling import (
+    HttpReplicaProbe,
+    ReplicaProbe,
+    ReplicaStatusProbe,
+    ReplicaWatcher,
+    VerifyAutoscalingReplicas,
+    VerifyInitialAutoscalingReplicas,
+)
 from nanolab.tasks.loadtest.concurrency import (
     ConcurrencyWatcher,
     ConcurrencyWatcherGroup,
     ScrapeConcurrencyProbe,
 )
-from nanolab.tasks.loadtest.autoscaling import (
-    HttpReplicaProbe,
-    ReplicaProbe,
-    ReplicaWatcher,
-    ReplicaStatusProbe,
-    VerifyInitialAutoscalingReplicas,
-    VerifyAutoscalingReplicas,
-)
 from nanolab.tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from nanolab.tasks.loadtest.report import ReportPhase, WriteConcurrencyReport
+from nanolab.tasks.loadtest.resources import (
+    DockerEngineProbe,
+    ResourceWatcher,
+    ResourceWatcherGroup,
+)
 from nanolab.tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from sonata_tasks.tasks.models import CommandTaskSpec
-
-from nanolab.config.environment import EnvironmentConfig
-from nanolab.cli.vm_provider import vm_request_for_role
-from nanolab.metrics.catalogue import queries_for
-from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
-from nanolab.plans.functions import resolve_function, resolve_function_definition, sonata_function
-from nanolab.plans.diagnostics import collect_control_plane_log
+from nanolab.tasks.platform import Backend, Build, PlatformRequest
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -82,7 +98,7 @@ def _default_prometheus_queries(
     heap_metrics_required: bool = True,
     container_functions: tuple[str, ...] | None = None,
 ) -> tuple[PrometheusQuery, ...]:
-    """What this run can meaningfully be asked, given the modules it loaded.
+    """Return the metrics this run can meaningfully be asked about.
 
     The list used to be written out here, flat, with no idea which modules were
     compiled in. It asked `async-queue` for a depth that reads 0 under
@@ -127,7 +143,9 @@ class _RoleRunner:
         )
 
 
-def _validate_loadtest(config: ScenarioConfig, environment: EnvironmentConfig) -> Backend:
+def _validate_loadtest(
+    config: ScenarioConfig, environment: EnvironmentConfig
+) -> Backend:
     if config.workflow != "loadtest":
         raise ValueError("load-test plan requires a loadtest scenario")
     backend: Backend = config.backend or "k8s"
@@ -138,16 +156,19 @@ def _validate_loadtest(config: ScenarioConfig, environment: EnvironmentConfig) -
     # from the environment role (provision-k3s.yml), not from the scenario. Paired
     # wrongly the run reaches the function registration and dies there on a 500
     # retried eleven times, with the real cause only in the control-plane log.
-    if backend == "k8s" and config.hpa_scale_to_zero:
-        if not environment.target("stack").hpa_scale_to_zero:
-            raise ValueError(
-                "scenario asks for hpaScaleToZero but the environment's stack role "
-                "does not: the cluster is provisioned without "
-                "feature-gates=HPAScaleToZero=true and the API server will refuse "
-                "an HPA with minReplicas 0. Use an environment that sets "
-                "hpaScaleToZero on its stack role, such as "
-                "environments/multipass-hpa-scale-to-zero.yaml"
-            )
+    if (
+        backend == "k8s"
+        and config.hpa_scale_to_zero
+        and not environment.target("stack").hpa_scale_to_zero
+    ):
+        raise ValueError(
+            "scenario asks for hpaScaleToZero but the environment's stack role "
+            "does not: the cluster is provisioned without "
+            "feature-gates=HPAScaleToZero=true and the API server will refuse "
+            "an HPA with minReplicas 0. Use an environment that sets "
+            "hpaScaleToZero on its stack role, such as "
+            "environments/multipass-hpa-scale-to-zero.yaml"
+        )
     return backend
 
 
@@ -216,14 +237,16 @@ _OPEN_LOOP_PEAK_RPS = 1_800
 # still settle near one. The ceiling stays above that, or the governor would be
 # clamped rather than converging.
 _CONCURRENCY_FUNCTION_CPUS = 4
-_CONCURRENCY_FUNCTION_RESOURCES: dict[str, object] = {
+_CONCURRENCY_FUNCTION_RESOURCES: dict[str, dict[str, float]] = {
     "requests": {"cpu": _CONCURRENCY_FUNCTION_CPUS / 2, "memoryMiB": 256},
     "limits": {"cpu": float(_CONCURRENCY_FUNCTION_CPUS), "memoryMiB": 512},
 }
 
 
-def payload_corpus_path(config: ScenarioConfig, root: Path, function: str) -> Path | None:
-    """The corpus the generator should send, or None to keep its built-in text.
+def payload_corpus_path(
+    config: ScenarioConfig, root: Path, function: str
+) -> Path | None:
+    """Return the corpus to send, or None to keep the generator's built-in text.
 
     The corpora live in the nanoFaaS checkout, one per FAMILY rather than per
     function: `word-stats-java` and `word-stats-java-lite` replay the same bytes, so
@@ -237,18 +260,28 @@ def payload_corpus_path(config: ScenarioConfig, root: Path, function: str) -> Pa
     if config.payload_profile is None:
         return None
     family = resolve_function_definition(function).family
-    corpus = root / "functions" / "test-data" / family / f"performance-{config.payload_profile}.json"
+    corpus = (
+        root
+        / "functions"
+        / "test-data"
+        / family
+        / f"performance-{config.payload_profile}.json"
+    )
     if not corpus.is_file():
         raise FileNotFoundError(
-            f"payloadProfile {config.payload_profile!r} needs {corpus}, which does not exist"
+            f"payloadProfile {config.payload_profile!r} needs {corpus}, "
+            "which does not exist"
         )
     return corpus
 
 
-def _concurrency_function_resources(config: ScenarioConfig, function: str) -> dict[str, object]:
-    """The cap for one function: what the scenario declared, else the default above.
+def _concurrency_function_resources(
+    config: ScenarioConfig, function: str
+) -> dict[str, dict[str, float]]:
+    """Return the resource cap one function runs under concurrency control.
 
-    The default used to be applied unconditionally, so a scenario that declared
+    That is what the scenario declared for it, else the default above. The
+    default used to be applied unconditionally, so a scenario that declared
     `resources` for a function under concurrency control had them silently discarded
     — while the schema validates those very keys against the selected functions, which
     reads as a promise that they apply.
@@ -262,8 +295,7 @@ def _concurrency_function_resources(config: ScenarioConfig, function: str) -> di
     if declared is None:
         return _CONCURRENCY_FUNCTION_RESOURCES
     resolved = {
-        key: dict(value)  # type: ignore[arg-type]
-        for key, value in _CONCURRENCY_FUNCTION_RESOURCES.items()
+        key: dict(value) for key, value in _CONCURRENCY_FUNCTION_RESOURCES.items()
     }
     for section in ("requests", "limits"):
         quantity = getattr(declared, section, None)
@@ -277,9 +309,10 @@ def _concurrency_function_resources(config: ScenarioConfig, function: str) -> di
 
 
 def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | None:
-    """Fixed replicas, adaptive per-replica concurrency.
+    """Return the scaling config for a run with concurrency control.
 
-    `NONE` rather than `INTERNAL` so nothing moves the replica count even if an
+    Fixed replicas, adaptive per-replica concurrency: `NONE` rather than
+    `INTERNAL` so nothing moves the replica count even if an
     autoscaler were present: with one replica pinned, every change in
     `function_effective_concurrency` is the governor's doing.
     """
@@ -293,14 +326,16 @@ def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | No
     }
 
 
-# The SLO the BUDGETED run is held to. Set from the measured uncontended service time of the
-# functions in the catalogue — around 1ms warm — with room for the queueing that concurrency
-# legitimately buys, so the target is reachable but not free.
+# The SLO the BUDGETED run is held to. Set from the measured uncontended service
+# time of the functions in the catalogue — around 1ms warm — with room for the
+# queueing that concurrency legitimately buys, so the target is reachable but not
+# free.
 _TARGET_LATENCY_MS = 10
 
-# What a caller is promised, end to end. Larger than the service-time SLO on purpose: the queue is
-# where a concurrency limit puts the wait it saves, so the two numbers cannot be equal without
-# either forbidding queueing altogether or lying about one of them.
+# What a caller is promised, end to end. Larger than the service-time SLO on
+# purpose: the queue is where a concurrency limit puts the wait it saves, so the
+# two numbers cannot be equal without either forbidding queueing altogether or
+# lying about one of them.
 _END_TO_END_P95_BUDGET_MS = 50
 
 # What the budget above assumes: the generator's built-in ~20-word inputs, whose
@@ -319,7 +354,11 @@ _PAYLOAD_P95_BUDGET_MS: dict[str, int] = {"small": 60, "medium": 120, "large": 6
 
 
 def end_to_end_p95_budget_ms(config: ScenarioConfig) -> int:
-    """The p95 the load generator holds the run to, for the work it is sending."""
+    """Return the p95 the load generator holds this run to, by payload profile.
+
+    A heavier corpus puts more work in every request, so the budget is restated
+    per profile rather than held at one number.
+    """
     if config.payload_profile is None:
         return _END_TO_END_P95_BUDGET_MS
     return _PAYLOAD_P95_BUDGET_MS[config.payload_profile]
@@ -327,10 +366,11 @@ def end_to_end_p95_budget_ms(config: ScenarioConfig) -> int:
 
 def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
     if config.concurrency_mode == "SOJOURN":
-        # Held to the SAME promise the load generator checks. For this mode `targetLatencyMs` is
-        # end-to-end rather than service time, so reusing the service-time SLO would hold the
-        # controller to a number it can never reach — the wait alone was measured at four times it
-        # — and it would search continuously instead of ever resting.
+        # Held to the SAME promise the load generator checks. For this mode
+        # `targetLatencyMs` is end-to-end rather than service time, so reusing the
+        # service-time SLO would hold the controller to a number it can never
+        # reach — the wait alone was measured at four times it — and it would
+        # search continuously instead of ever resting.
         return {
             "mode": "SOJOURN",
             "minTargetInFlightPerPod": 1,
@@ -338,8 +378,8 @@ def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
             "targetLatencyMs": _END_TO_END_P95_BUDGET_MS,
         }
     if config.concurrency_mode == "BUDGETED":
-        # No per-replica target and no gradient thresholds: this controller is told what the
-        # function must deliver, not how its limit should step.
+        # No per-replica target and no gradient thresholds: this controller is
+        # told what the function must deliver, not how its limit should step.
         return {
             "mode": "BUDGETED",
             "minTargetInFlightPerPod": 1,
@@ -396,7 +436,7 @@ def _resolve_functions(
     prebuilt_control_plane_image: str | None,
     prebuilt_function_images: Mapping[str, str] | None,
     concurrency: int = 4,
-    resources_for: Callable[[str], dict[str, object]] | None = None,
+    resources_for: Callable[[str], dict[str, dict[str, float]]] | None = None,
     function_concurrency: int | None = None,
     function_queue_size: int | None = None,
 ) -> tuple[tuple[Any, ...], bool]:
@@ -550,14 +590,16 @@ def _resolve_script_and_summary(
 def _control_plane_resources(
     config: ScenarioConfig,
 ) -> dict[str, dict[str, float | int | str]] | None:
-    """The control plane's own limits, if the scenario declared any.
+    """Return the resource limits declared for the control plane itself.
 
     Reuses the `resources` map rather than adding a field beside it: a scenario
     that already says what a function may use should say it the same way for the
     process serving that function.
     """
     spec = config.resources.get(CONTROL_PLANE_RESOURCES)
-    return spec.model_dump(by_alias=True, exclude_none=True) if spec is not None else None
+    return (
+        spec.model_dump(by_alias=True, exclude_none=True) if spec is not None else None
+    )
 
 
 def _build_platform_request(
@@ -617,7 +659,7 @@ def _build_platform_request(
 
 
 def compose_control_plane_modules(additional_modules: tuple[str, ...]) -> str:
-    """The module set compiled into the control-plane image on the container path.
+    """Return the module set compiled into the container control-plane image.
 
     This is a build arg, not a runtime toggle, so it decides what the image
     contains rather than what it enables. The deployment provider is always
@@ -625,11 +667,11 @@ def compose_control_plane_modules(additional_modules: tuple[str, ...]) -> str:
     falling back to a valid autoscaling set for scenarios that ask for nothing.
     """
     selected = additional_modules or ("autoscaler", "async-queue")
-    return ",".join(("container-deployment-provider",) + tuple(selected))
+    return ",".join(("container-deployment-provider", *tuple(selected)))
 
 
 def shared_cpuset(config: ScenarioConfig) -> str:
-    """The cores every function container is pinned to, or "" to leave them unpinned.
+    """Return the cores every function container is pinned to, or "" if unpinned.
 
     Only the co-tenancy run asks for this, and it is the whole point of that run.
     Without it each function gets its own `--cpus` quota, so on an eleven-core
@@ -647,7 +689,7 @@ def shared_cpuset(config: ScenarioConfig) -> str:
 
 
 def concurrency_budget(config: ScenarioConfig) -> str:
-    """The platform-wide BUDGETED allowance, or "" to leave the default alone.
+    """Return the platform-wide BUDGETED allowance, or "" for the default.
 
     It has to sit in a window with a floor and a ceiling, and the first run of
     this profile missed the floor.
@@ -688,7 +730,9 @@ def _build_platform_requires(
 ) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
-        registry = docker_registry_resource(executor=executor, role="host", container=REGISTRY_CONTAINER_NAME)
+        registry = docker_registry_resource(
+            executor=executor, role="host", container=REGISTRY_CONTAINER_NAME
+        )
         env = {
             "NANOFAAS_CONTROL_PLANE_MODULES": compose_control_plane_modules(
                 additional_modules
@@ -724,7 +768,7 @@ def _build_platform_requires(
 def k6_environment(
     config: ScenarioConfig, control_plane_url: str, function_name: str
 ) -> dict[str, str]:
-    """What the load generator is told, including how much concurrency to offer.
+    """Return what the load generator is told, including its concurrency.
 
     Measured, not assumed: with the script's default 50ms think time, a 180s
     phase at 25 VUs held a mean of 1.0 requests in flight against a limit of 8.
@@ -736,21 +780,23 @@ def k6_environment(
     env = {"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": function_name}
     if config.concurrency_control:
         env["K6_THINK_SECONDS"] = "0"
-        # The SLO as a caller would state it: a percentile of end-to-end latency, not a mean of
-        # service time. The controller works from the mean of what the function itself took, which
-        # is the right input for a control loop and the wrong thing to promise anyone — a run
-        # measured a mean inside its 10ms target while the tail reached 24ms.
+        # The SLO as a caller would state it: a percentile of end-to-end
+        # latency, not a mean of service time. The controller works from the mean
+        # of what the function itself took, which is the right input for a
+        # control loop and the wrong thing to promise anyone — a run measured a
+        # mean inside its 10ms target while the tail reached 24ms.
         env["K6_MAX_P95_MS"] = str(end_to_end_p95_budget_ms(config))
     if config.load_profile == "saturation":
-        # Shedding load is what this profile is for. Holding it to the ordinary failure budget
-        # would mark every saturation run red for doing its job.
+        # Shedding load is what this profile is for. Holding it to the ordinary
+        # failure budget would mark every saturation run red for doing its job.
         env["K6_MAX_FAILED_RATE"] = "0.99"
         env.pop("K6_MAX_P95_MS", None)
     if config.load_profile == "openloop":
-        # Arrivals scheduled by the clock, so the peak is a RATE rather than a number of
-        # requests held open. Set from the measured saturation point — about 1,400 served
-        # per second per function on these cores — so the peak genuinely exceeds capacity
-        # and the queue has to grow, which is the condition the closed loop could not create.
+        # Arrivals scheduled by the clock, so the peak is a RATE rather than a
+        # number of requests held open. Set from the measured saturation point —
+        # about 1,400 served per second per function on these cores — so the peak
+        # genuinely exceeds capacity and the queue has to grow, which is the
+        # condition the closed loop could not create.
         env["K6_PEAK_RPS"] = str(_OPEN_LOOP_PEAK_RPS)
         env.pop("K6_MAX_P95_MS", None)
     if config.load_profile == "burst":
@@ -798,13 +844,13 @@ def burst_peak_vus(config: ScenarioConfig) -> int:
 
 
 def neighbour_name(config: ScenarioConfig) -> str:
-    """The function that comes and goes while the first one holds steady."""
+    """Return the function that comes and goes while the first one holds steady."""
     return config.functions[1]
 
 
 def _build_run_k6(
     *,
-    executor: RoleBoundCommandTaskExecutor,
+    executor: CommandTaskExecutor,
     load_role: ExecutionRole,
     control_plane_url: str,
     script_path: Path,
@@ -850,7 +896,11 @@ def _build_run_k6(
     )
 
 
-def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:  # NOSONAR (S8495): stage count depends on the selected profile
+def _default_stages(
+    config: ScenarioConfig,
+) -> tuple[
+    tuple[str, int], ...
+]:  # NOSONAR (S8495): stage count depends on the selected profile
     if is_co_tenancy(config):
         # None: the phases live in the script, and a --stage flag would override
         # the scenarios that stagger them.
@@ -858,11 +908,12 @@ def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:  # N
     if config.autoscaling:
         return (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
     if config.concurrency_control and config.load_profile == "saturation":
-        # Deliberately past what the queue can absorb. With no think time each VU holds one
-        # request, so 200 VUs offer 200 concurrent against a limit in the single digits and a
-        # queue of 100: the surplus has nowhere to go and is rejected, which is the only way to
-        # compare controllers on the requests they shed. The light phases either side keep the
-        # baseline honest and show whether the controller recovers.
+        # Deliberately past what the queue can absorb. With no think time each VU
+        # holds one request, so 200 VUs offer 200 concurrent against a limit in
+        # the single digits and a queue of 100: the surplus has nowhere to go and
+        # is rejected, which is the only way to compare controllers on the
+        # requests they shed. The light phases either side keep the baseline
+        # honest and show whether the controller recovers.
         return (("45s", 10), ("15s", 200), ("180s", 200), ("60s", 10))
     if config.concurrency_control:
         # Light, then heavy, then light again. The governor raises the limit
@@ -1067,7 +1118,10 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
             ),
             WriteReportTask(
                 report=WriteK6Report(
-                    task_id="", title="Write the report", data_dir=run_dir, output_dir=run_dir
+                    task_id="",
+                    title="Write the report",
+                    data_dir=run_dir,
+                    output_dir=run_dir,
                 )
             ),
             WriteSummaryTask(
@@ -1098,7 +1152,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
 
 
 def _sampler(config: ScenarioConfig, run_dir: Path, inner: Any) -> Any:
-    """Wraps whatever samples the run so container memory and CPU are sampled too.
+    """Wrap the run's sampler so container memory and CPU get sampled too.
 
     Only for concurrency runs, which are the ones whose report has somewhere to
     put it. Wrapped rather than added as a second slot because `RunK6Task` has
@@ -1115,7 +1169,7 @@ def _sampler(config: ScenarioConfig, run_dir: Path, inner: Any) -> Any:
 
 
 def burst_report_phases() -> tuple[ReportPhase, ...]:
-    """The windows the burst script is built around, named for what each asks.
+    """Return the burst script's windows, named for what each one asks.
 
     Kept beside the plan that chooses the script rather than inside the report,
     which should not have to know the shape of a particular k6 file.
@@ -1136,7 +1190,11 @@ def _build_concurrency_report(
     mode = config.concurrency_mode
     budget = concurrency_budget(config)
     cores = shared_cpuset(config)
-    conditions = [f"mode {mode}", f"ceiling {_CONCURRENCY_CEILING}", f"queue {_CONCURRENCY_QUEUE_SIZE}"]
+    conditions = [
+        f"mode {mode}",
+        f"ceiling {_CONCURRENCY_CEILING}",
+        f"queue {_CONCURRENCY_QUEUE_SIZE}",
+    ]
     if budget:
         conditions.append(f"shared budget {budget}")
     if cores:
@@ -1187,15 +1245,16 @@ def _build_park_at_zero_command(
             # plane's own. Either way the run asserts it starts at its floor.
             f"deadline=$((SECONDS + {_HPA_METRIC_WAIT_SECONDS})); "
             "while [ $SECONDS -lt $deadline ]; do "
-            f"[ \"$(sudo kubectl -n {request.namespace} get "
+            f'[ "$(sudo kubectl -n {request.namespace} get '
             f"deploy/fn-{target.name} -o jsonpath='{{.spec.replicas}}' "
-            "2>/dev/null)\" = 0 ] && exit 0; "
+            '2>/dev/null)" = 0 ] && exit 0; '
             "sleep 5; done; "
             "echo 'function never parked at zero:'; "
             f"sudo kubectl -n {request.namespace} get "
             f"deploy/fn-{target.name} || true; "
             + (
-                f"sudo kubectl -n {request.namespace} describe hpa fn-{target.name} || true; "
+                f"sudo kubectl -n {request.namespace} describe hpa "
+                f"fn-{target.name} || true; "
                 if hpa
                 else f"sudo kubectl -n {request.namespace} logs "
                 "deploy/nanofaas-control-plane --tail=100 2>&1 | grep -i scal || true; "
@@ -1270,17 +1329,22 @@ def _build_preflight(
                         # count, and keep the loop out of `set -e`'s reach.
                         f"deadline=$((SECONDS + {_HPA_METRIC_WAIT_SECONDS})); "
                         "while [ $SECONDS -lt $deadline ]; do "
-                        f"sudo kubectl get --raw {hpa_metric_path!r} >/dev/null 2>&1 && exit 0; "
+                        f"sudo kubectl get --raw {hpa_metric_path!r} "
+                        ">/dev/null 2>&1 && exit 0; "
                         "sleep 2; done; "
-                        f"echo 'HPA external metric unavailable after {_HPA_METRIC_WAIT_SECONDS}s:'; "
-                        f"sudo kubectl get hpa fn-{target.name} -n {request.namespace} || true; "
+                        "echo 'HPA external metric unavailable after "
+                        f"{_HPA_METRIC_WAIT_SECONDS}s:'; "
+                        f"sudo kubectl get hpa fn-{target.name} "
+                        f"-n {request.namespace} || true; "
                         f"sudo kubectl -n {request.namespace} logs "
                         "deploy/nanofaas-hpa-metrics-adapter --tail=200 2>&1 "
                         "| grep -v healthz | tail -10 || true; "
                         f"sudo kubectl get --raw {control_plane_metrics_path!r} "
                         "| grep '^function_' || true; "
-                        f"sudo kubectl -n {request.namespace} exec deploy/nanofaas-prometheus -- "
-                        "wget -qO- 'http://localhost:9090/api/v1/query?query=function_dispatch_total' "
+                        f"sudo kubectl -n {request.namespace} exec "
+                        "deploy/nanofaas-prometheus -- "
+                        "wget -qO- 'http://localhost:9090/api/v1/query"
+                        "?query=function_dispatch_total' "
                         "|| true; "
                         f"sudo kubectl get --raw {hpa_metric_path!r} || true; exit 1",
                     ),
@@ -1302,7 +1366,7 @@ def _build_preflight(
 
 
 def build_loadtest_plan(
-    config: ScenarioConfig,  # NOSONAR (S107): keyword-only inputs mix config, environment and optional overrides
+    config: ScenarioConfig,  # NOSONAR (S107): keyword-only inputs mix config and env
     environment: EnvironmentConfig,
     bindings: RoleBindings,
     *,

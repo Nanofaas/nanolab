@@ -11,11 +11,10 @@ import pytest
 from nanolab.images.bake import render_bake, render_bake_json
 from nanolab.images.plan import build_image_plan
 
-
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 
 
-def _plan():  # noqa: ANN202
+def _plan():
     return build_image_plan(
         NANOFAAS_ROOT,
         "v0.18.0",
@@ -59,7 +58,9 @@ def test_bake_targets_have_unique_names_tags_and_single_platforms() -> None:
     assert len(tags) == len(set(tags))
     assert all(len(target["tags"]) == 1 for target in targets.values())
     assert all(len(target["platforms"]) == 1 for target in targets.values())
-    assert all("context" in target and "dockerfile" in target for target in targets.values())
+    assert all(
+        "context" in target and "dockerfile" in target for target in targets.values()
+    )
 
 
 def test_bake_rendering_uses_repo_relative_context_and_dockerfile() -> None:
@@ -70,9 +71,7 @@ def test_bake_rendering_uses_repo_relative_context_and_dockerfile() -> None:
         "dockerfile": "Dockerfile",
         "platforms": ["linux/amd64"],
         "args": {"JVM_TUNING": "-XX:+UseG1GC"},
-        "tags": [
-            "registry.test:5000/nanofaas/java-word-stats:v0.18.0-amd64-jvm"
-        ],
+        "tags": ["registry.test:5000/nanofaas/java-word-stats:v0.18.0-amd64-jvm"],
     }
     assert document["target"]["go-word-stats-arm64-default"]["context"] == "."
     assert (
@@ -89,22 +88,20 @@ def test_bake_selector_filters_targets_and_groups() -> None:
         "watchdog-arm64-default",
     ]
     assert document["group"] == {
-        "default": {
-            "targets": ["watchdog-amd64-default", "watchdog-arm64-default"]
-        },
+        "default": {"targets": ["watchdog-amd64-default", "watchdog-arm64-default"]},
         "docker-amd64": {"targets": ["watchdog-amd64-default"]},
         "docker-arm64": {"targets": ["watchdog-arm64-default"]},
-        "docker-all": {
-            "targets": ["watchdog-amd64-default", "watchdog-arm64-default"]
-        },
+        "docker-all": {"targets": ["watchdog-amd64-default", "watchdog-arm64-default"]},
     }
 
 
 def test_bake_selector_rejects_flavor_filter_with_no_matching_cells() -> None:
-    """Java targets always have Bake cells now, so the guard needs a target that
-    is real but whose flavors never include the requested one: watchdog only
-    ever builds the "default" flavor, so filtering it to "native" selects
-    nothing, and the guard in `render_bake` must still catch that.
+    """Reject a flavor filter that matches no Bake cell.
+
+    Java targets always have Bake cells now, so the guard needs a target that is
+    real but whose flavors never include the requested one: watchdog only ever
+    builds the "default" flavor, so filtering it to "native" selects nothing, and
+    the guard in `render_bake` must still catch that.
     """
     with pytest.raises(ValueError, match="selector has no Bake cells: watchdog"):
         render_bake(_plan(), selectors=("watchdog",), flavors=("native",))
@@ -149,7 +146,9 @@ def test_native_cells_render_with_root_context_and_build_args() -> None:
     assert target["dockerfile"] == "deploy/native-java/Dockerfile"
     assert target["args"] == {
         "NATIVE_TASK": ":control-plane:nativeCompile",
-        "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
+        "NATIVE_BINARY": (
+            "platform/control-plane/build/native/nativeCompile/control-plane"
+        ),
         "GRADLE_ARGS": (
             "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1 "
             "-PnanofaasBuildType=native -PnanofaasBuildVariant=native-o3-g1 "

@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 from sonata_engine import Steps, TaskInputs, Workflow
 from sonata_engine.errors import NoUpstreamValueError
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
-from nanolab.tasks.loadtest.models import K6RunResult
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from sonata_tasks.command import CommandTask
 from nanolab.tasks.loadtest import LoadtestOutcome
+from nanolab.tasks.loadtest.models import K6RunResult
 from nanolab.tasks.offload_loadtest import (
     EvaluateConservationTask,
     OffloadLoadtestRequest,
@@ -51,15 +51,20 @@ class FakeEvaluator:
 def test_it_evaluates_once_the_load_has_run() -> None:
     evaluator = FakeEvaluator()
 
-    outcome = EvaluateConservationTask(evaluate=evaluator).run(_inputs(_outcome())).value
+    outcome = (
+        EvaluateConservationTask(evaluate=evaluator).run(_inputs(_outcome())).value
+    )
 
     assert evaluator.calls == ["run"]
     assert outcome is not None and outcome.k6.passed
 
 
 def test_a_divergence_fails_the_run_carrying_every_failure() -> None:
-    """The evaluator collects them all rather than stopping at the first, which
-    is the difference between "the numbers disagree" and knowing which ones."""
+    """Fail the run carrying every divergence the evaluator collected.
+
+    The evaluator collects them all rather than stopping at the first, which
+    is the difference between "the numbers disagree" and knowing which ones.
+    """
     evaluator = FakeEvaluator(
         error=RuntimeError(
             "offload conservation check failed: "
@@ -69,7 +74,7 @@ def test_a_divergence_fails_the_run_carrying_every_failure() -> None:
         )
     )
 
-    with pytest.raises(RuntimeError, match="diverges from.*beyond tolerance 5"):
+    with pytest.raises(RuntimeError, match=r"diverges from.*beyond tolerance 5"):
         EvaluateConservationTask(evaluate=evaluator).run(_inputs(_outcome()))
 
 
@@ -85,7 +90,9 @@ def test_it_refuses_to_reconcile_a_run_that_did_not_happen() -> None:
 
 def test_it_refuses_an_upstream_that_is_not_a_load_run() -> None:
     with pytest.raises(RuntimeError, match="expected the load run's outcome"):
-        EvaluateConservationTask(evaluate=FakeEvaluator()).run(_inputs("something else"))
+        EvaluateConservationTask(evaluate=FakeEvaluator()).run(
+            _inputs("something else")
+        )
 
 
 @dataclass
@@ -97,7 +104,9 @@ class ScriptedExecutor:
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        stdout = (
+            "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        )
         return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
 
@@ -148,8 +157,11 @@ def _workflow(executor: ScriptedExecutor) -> Workflow:
 
 
 def test_both_platforms_are_named_so_a_reader_can_tell_them_apart() -> None:
-    """Without a label the plan shows "Check kubectl is usable" twice and says
-    nothing about which cluster it means."""
+    """Name both platforms so a reader can tell them apart.
+
+    Without a label the plan shows "Check kubectl is usable" twice and says
+    nothing about which cluster it means.
+    """
     ids = [task.task_id for task in _workflow(ScriptedExecutor()).compile().tasks]
 
     assert ids[0] == "001.check-kubectl-is-usable-on-the-cloud"
@@ -167,8 +179,11 @@ def test_the_cloud_comes_up_before_the_edge_that_offloads_to_it() -> None:
 
 
 def test_the_load_holds_every_registration_on_both_sides() -> None:
-    """A failed load test still deregisters what it registered, on both
-    clusters: the releases come after it, in reverse."""
+    """Hold every registration until the load has run, on both clusters.
+
+    A failed load test still deregisters what it registered, on both
+    clusters: the releases come after it, in reverse.
+    """
     ids = [task.task_id for task in _workflow(ScriptedExecutor()).compile().tasks]
 
     assert ids[ids.index("020.run-the-offload-load-test") + 1 :] == [
@@ -181,15 +196,21 @@ def test_the_load_holds_every_registration_on_both_sides() -> None:
 
 
 def test_the_control_function_registers_with_offload_disabled() -> None:
-    """It is the control: if it were offloaded too, the conservation check could
-    not tell offloaded traffic from ordinary traffic."""
+    """Register the control function with offload disabled.
+
+    It is the control: if it were offloaded too, the conservation check could
+    not tell offloaded traffic from ordinary traffic.
+    """
     assert CONTROL.manifest().body()["offload"] == {"enabled": False}
     assert "offload" not in OFFLOADABLE.manifest().body()
 
 
 def test_two_platforms_on_one_role_is_refused() -> None:
-    """They are two clusters. Sharing a role would run both on one machine and
-    the offload hop would not leave it."""
+    """Refuse two platforms that share a role.
+
+    They are two clusters. Sharing a role would run both on one machine and
+    the offload hop would not leave it.
+    """
     same = PlatformRequest(backend="k8s", functions=(OFFLOADABLE,), label="cloud")
 
     with pytest.raises(ValueError, match="different roles"):
@@ -197,13 +218,20 @@ def test_two_platforms_on_one_role_is_refused() -> None:
 
 
 def test_every_step_of_both_platforms_says_which_one_it_is() -> None:
-    """The image build and push were the two that did not, so a plan showed
+    """Say which platform every step of both platforms belongs to.
+
+    The image build and push were the two that did not, so a plan showed
     "Build image …control-plane:e2e" twice with nothing to tell them apart —
-    while the Gradle build right above it did say which side."""
+    while the Gradle build right above it did say which side.
+    """
     ids = [task.task_id for task in _workflow(ScriptedExecutor()).compile().tasks]
     platform_ids = [unit for unit in ids if "run-the-offload-load-test" not in unit]
 
     assert all(
         unit.endswith("-on-the-cloud") or unit.endswith("-on-the-edge")
         for unit in platform_ids
-    ), [unit for unit in platform_ids if not unit.endswith(("-on-the-cloud", "-on-the-edge"))]
+    ), [
+        unit
+        for unit in platform_ids
+        if not unit.endswith(("-on-the-cloud", "-on-the-edge"))
+    ]

@@ -1,8 +1,8 @@
 import pytest
-
-from nanolab.tui.event_aggregator import WorkflowEventAggregator
 from sonata_engine.workflow.event_builders import build_log_event, build_task_event
 from sonata_engine.workflow.models import WorkflowState
+
+from nanolab.tui.event_aggregator import WorkflowEventAggregator
 
 
 def test_event_aggregator_maps_task_started_event_to_running_step() -> None:
@@ -67,7 +67,8 @@ def test_event_aggregator_routes_started_and_log_events_through_same_task_row() 
     assert any("docker building layer cached" in line for line in snapshot.logs)
 
 
-def test_event_aggregator_reuses_planned_placeholder_when_log_arrives_before_task_running() -> None:
+def test_event_aggregator_reuses_planned_placeholder_when_log_arrives_before_task_running(  # noqa: E501 - the test name cannot be wrapped
+) -> None:
     bridge = WorkflowEventAggregator(planned_steps=["Build core images"])
 
     bridge.handle_event(
@@ -93,7 +94,9 @@ def test_event_aggregator_reuses_planned_placeholder_when_log_arrives_before_tas
 
 
 def test_event_aggregator_routes_label_only_events_to_matching_planned_steps() -> None:
-    bridge = WorkflowEventAggregator(planned_steps=["preflight", "bootstrap", "load_k6"])
+    bridge = WorkflowEventAggregator(
+        planned_steps=["preflight", "bootstrap", "load_k6"]
+    )
 
     preflight = bridge.upsert_phase("preflight")
     bridge.mark_phase_running(preflight)
@@ -107,11 +110,20 @@ def test_event_aggregator_routes_label_only_events_to_matching_planned_steps() -
     bridge.mark_phase_running(load_k6)
 
     snapshot = bridge.snapshot()
-    assert [phase.label for phase in snapshot.phases] == ["preflight", "bootstrap", "load_k6"]
-    assert [phase.status for phase in snapshot.phases] == ["success", "success", "running"]
+    assert [phase.label for phase in snapshot.phases] == [
+        "preflight",
+        "bootstrap",
+        "load_k6",
+    ]
+    assert [phase.status for phase in snapshot.phases] == [
+        "success",
+        "success",
+        "running",
+    ]
 
 
-def test_event_aggregator_does_not_mark_lower_planned_step_success_when_higher_step_starts() -> None:
+def test_event_aggregator_does_not_mark_lower_planned_step_success_when_higher_step_starts(  # noqa: E501 - the test name cannot be wrapped
+) -> None:
     bridge = WorkflowEventAggregator(
         planned_steps=[
             "Ensure VM is running",
@@ -364,9 +376,7 @@ def test_log_buffer_prefixes_stderr_and_trims_oldest_lines() -> None:
     bridge = WorkflowEventAggregator(log_limit=2)
 
     bridge.handle_event(build_log_event(flow_id="flow", line="first"))
-    bridge.handle_event(
-        build_log_event(flow_id="flow", line="second", stream="stderr")
-    )
+    bridge.handle_event(build_log_event(flow_id="flow", line="second", stream="stderr"))
     bridge.handle_event(build_log_event(flow_id="flow", line="third"))
 
     assert bridge.snapshot().logs == ["stderr │ second", "third"]

@@ -1,10 +1,12 @@
+"""Tests for shell_backend.py.
+
+Covers ShellExecutionResult, SubprocessShell, RecordingShell and ScriptedShell.
 """
-Tests for shell_backend.py — ShellExecutionResult, SubprocessShell, RecordingShell, ScriptedShell.
-"""
+
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sonata_tasks.shell import (
@@ -14,10 +16,10 @@ from sonata_tasks.shell import (
     SubprocessShell,
 )
 
-
 # ---------------------------------------------------------------------------
 # ShellExecutionResult
 # ---------------------------------------------------------------------------
+
 
 def test_shell_execution_result_ok_on_zero_return_code() -> None:
     r = ShellExecutionResult(command=["echo", "hi"], return_code=0)
@@ -39,6 +41,7 @@ def test_shell_execution_result_dry_run_defaults_to_false() -> None:
 # SubprocessShell
 # ---------------------------------------------------------------------------
 
+
 def test_subprocess_shell_dry_run_returns_zero_without_executing() -> None:
     shell = SubprocessShell()
     result = shell.run(["rm", "-rf", "/"], dry_run=True)
@@ -48,7 +51,9 @@ def test_subprocess_shell_dry_run_returns_zero_without_executing() -> None:
 
 def test_subprocess_shell_dry_run_does_not_call_subprocess(monkeypatch) -> None:
     calls = []
-    monkeypatch.setattr("subprocess.run", lambda *a, **kw: calls.append(a) or MagicMock(returncode=0))
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **kw: calls.append(a) or MagicMock(returncode=0)
+    )
     shell = SubprocessShell()
     shell.run(["echo", "hello"], dry_run=True)
     assert calls == []
@@ -92,7 +97,9 @@ def test_subprocess_shell_passes_cwd_to_subprocess(tmp_path: Path) -> None:
 
 def test_subprocess_shell_streams_output_to_listener() -> None:
     streamed: list[tuple[str, str]] = []
-    shell = SubprocessShell(output_listener=lambda stream, line: streamed.append((stream, line)))
+    shell = SubprocessShell(
+        output_listener=lambda stream, line: streamed.append((stream, line))
+    )
 
     result = shell.run(
         [
@@ -110,6 +117,7 @@ def test_subprocess_shell_streams_output_to_listener() -> None:
 # ---------------------------------------------------------------------------
 # RecordingShell
 # ---------------------------------------------------------------------------
+
 
 def test_recording_shell_records_commands() -> None:
     shell = RecordingShell()
@@ -140,6 +148,7 @@ def test_recording_shell_carries_env_in_result() -> None:
 # ---------------------------------------------------------------------------
 # ScriptedShell
 # ---------------------------------------------------------------------------
+
 
 def test_scripted_shell_returns_configured_stdout() -> None:
     shell = ScriptedShell(stdout_map={("echo", "hi"): "hi\n"})

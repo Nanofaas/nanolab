@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanolab.tasks.vm.models import VmRequest
-from nanolab.tasks.vm.ports import VmCommandProvider
 from nanolab.tasks.vm.orchestrator import VmOrchestrator
+from nanolab.tasks.vm.ports import VmCommandProvider
 
 
 def provider_for(request: VmRequest, repo_root: Path) -> VmCommandProvider:

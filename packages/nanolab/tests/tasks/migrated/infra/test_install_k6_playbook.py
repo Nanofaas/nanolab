@@ -4,7 +4,9 @@ from nanolab.tasks.infra.ansible import bundled_ansible_root
 
 
 def _playbook_text() -> str:
-    return (bundled_ansible_root() / "playbooks" / "install-k6.yml").read_text(encoding="utf-8")
+    return (bundled_ansible_root() / "playbooks" / "install-k6.yml").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_install_k6_uses_github_binary_not_arm64_broken_apt() -> None:
@@ -25,4 +27,7 @@ def test_install_k6_uses_github_binary_not_arm64_broken_apt() -> None:
 
 
 def test_install_k6_prepares_ansible_remote_tmp() -> None:
-    assert "Ensure Ansible remote_tmp directory has correct permissions" in _playbook_text()
+    assert (
+        "Ensure Ansible remote_tmp directory has correct permissions"
+        in _playbook_text()
+    )

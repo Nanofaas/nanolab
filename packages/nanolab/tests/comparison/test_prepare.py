@@ -20,13 +20,25 @@ JAVA = ResolvedFunction(
     image=f"{REGISTRY}/nanofaas/word-stats-java:e2e",
     build_argv=("./gradlew", ":functions:java:word-stats:bootJar"),
     payload="{}",
-    image_build_argv=("docker", "build", "-t", f"{REGISTRY}/nanofaas/word-stats-java:e2e", "."),
+    image_build_argv=(
+        "docker",
+        "build",
+        "-t",
+        f"{REGISTRY}/nanofaas/word-stats-java:e2e",
+        ".",
+    ),
 )
 JS = ResolvedFunction(
     key="word-stats-javascript",
     name="word-stats-javascript",
     image=f"{REGISTRY}/nanofaas/word-stats-javascript:e2e",
-    build_argv=("docker", "build", "-t", f"{REGISTRY}/nanofaas/word-stats-javascript:e2e", "."),
+    build_argv=(
+        "docker",
+        "build",
+        "-t",
+        f"{REGISTRY}/nanofaas/word-stats-javascript:e2e",
+        ".",
+    ),
     payload="{}",
 )
 
@@ -42,7 +54,11 @@ def test_a_function_with_an_artifact_step_builds_it_before_the_image() -> None:
 
 
 def test_a_function_without_one_goes_straight_to_the_image() -> None:
-    """JavaScript has no compile step; emitting an empty one would run the docker build twice."""
+    """Send a function straight to the image when it has no compile step.
+
+    JavaScript has no compile step; emitting an empty one would run the docker
+    build twice.
+    """
     ops = function_build_operations([JS])
 
     assert [op.operation_id for op in ops] == [
@@ -53,7 +69,11 @@ def test_a_function_without_one_goes_straight_to_the_image() -> None:
 
 
 def test_functions_are_built_before_the_native_images() -> None:
-    """Learning the checkout does not compile after 40 minutes of native-image work is bad."""
+    """Build the fast function images before the slow native ones.
+
+    Learning the checkout does not compile after 40 minutes of native-image
+    work is bad.
+    """
     ops = prepare_operations(
         functions=[JAVA, JS],
         variants=resolve_variants(("native-o3",)),
@@ -78,8 +98,11 @@ def test_everything_prepared_runs_on_the_vm() -> None:
 
 
 def test_pinned_images_are_keyed_by_catalogue_key() -> None:
-    """`_resolve_with_prebuilt_images` looks up `key`; a map keyed by `name`
-    reports every entry it holds as missing."""
+    """Pin images by catalogue key, not by display name.
+
+    `_resolve_with_prebuilt_images` looks up `key`; a map keyed by `name`
+    reports every entry it holds as missing.
+    """
     assert pinned_function_images([JAVA, JS]) == {
         "word-stats-java": JAVA.image,
         "word-stats-javascript": JS.image,
@@ -118,7 +141,7 @@ def test_the_budget_is_absent_when_not_asked_for() -> None:
 
 
 def test_the_jvm_variant_ignores_a_native_budget() -> None:
-    """javac is not native-image; passing it the flag would only confuse a reader."""
+    """Javac is not native-image; passing it the flag would only confuse a reader."""
     ops = prepare_operations(
         functions=[],
         variants=resolve_variants(("jvm",)),
@@ -167,11 +190,13 @@ class _RecordingExecutor:
     def binding_key(self, role: str) -> str:
         return f"test-recording:{role}"
 
-    def run(self, spec, dry_run: bool = False):  # noqa: ANN001 - structural stand-in
+    def run(self, spec, dry_run: bool = False):
         from sonata_tasks.tasks.models import TaskResult
 
         self.seen.append(tuple(spec.argv))
-        return TaskResult(task_id="", status="passed", return_code=0, stdout="", stderr="")
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout="", stderr=""
+        )
 
 
 def test_prepare_is_a_workflow_of_the_operations_in_order() -> None:
@@ -195,7 +220,7 @@ def test_prepare_is_a_workflow_of_the_operations_in_order() -> None:
 
 
 def test_every_prepare_task_targets_the_vm_role() -> None:
-    """A build that ran on the host would produce an image for the wrong architecture."""
+    """A build on the host would produce an image for the wrong architecture."""
     from nanolab.comparison.prepare import prepare_workflow
 
     ops = prepare_operations(
@@ -204,7 +229,9 @@ def test_every_prepare_task_targets_the_vm_role() -> None:
         registry=REGISTRY,
         modules=MODULES,
     )
-    for compiled in prepare_workflow(ops, executor=_RecordingExecutor()).compile().tasks:
+    for compiled in (
+        prepare_workflow(ops, executor=_RecordingExecutor()).compile().tasks
+    ):
         assert getattr(compiled.task, "role", None) == "stack"
 
 

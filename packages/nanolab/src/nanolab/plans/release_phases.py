@@ -7,25 +7,23 @@ re-read. The phases were already there in the comments; this gives them names.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sonata_engine import Evidence, Resource, Steps
 from sonata_tasks.command import CommandTask
 from sonata_tasks.cosign import CosignTask
-from nanolab.tasks.release_composites import (
-    attest_composite,
-    command_specs_composite,
-    registry_push_composite,
-)
-from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
+from sonata_tasks.transfer import FileTransferTask
 
 from nanolab.images.plan import ImagePlan
 from nanolab.plans import loadtest as loadtest_plan
+from nanolab.release import attest as release_attest
+from nanolab.release import build as release_build
+from nanolab.release import publish as release_publish
 from nanolab.release.benchmark import (
     _aggregate_from_payload,
     performance_profile,
@@ -34,49 +32,54 @@ from nanolab.release.benchmark import (
     run_sonata_benchmark,
     run_sonata_regression_gate,
 )
-from nanolab.release.model import digest_path
 from nanolab.release.build import amd64_build_commands, source_test_commands
-from nanolab.release import attest as release_attest
-from nanolab.release import build as release_build
-from nanolab.release import publish as release_publish
 from nanolab.release.metrics import build_release_record
-from nanolab.release.model import Amd64ReleasePlan, BuilderConfiguration, ReleaseIdentity
+from nanolab.release.model import (
+    Amd64ReleasePlan,
+    BuilderConfiguration,
+    ReleaseIdentity,
+    digest_path,
+)
+from nanolab.tasks.release_composites import (
+    attest_composite,
+    command_specs_composite,
+    registry_push_composite,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from nanolab.plans.release import ReleaseRequest
 from nanolab.release.resources import (
     ReleaseResources,
-    cosign_credentials_resource,
-    ghcr_credentials_resource,
     ReleaseSourceResources,
     build_release_source_resources,
+    cosign_credentials_resource,
+    ghcr_credentials_resource,
 )
 from nanolab.release.tasks import (
     ReleasePhaseTask,
     aggregate_benchmarks_task,
     amd64_build_task,
-    attest_task,
     arm64_build_task,
     arm64_smoke_task,
+    attest_task,
     benchmark_task,
-    regression_gate_task,
     exact_receipt_artifacts,
     finalize_task,
-    require_attestation_predicate,
     publish_aliases_task,
     publish_architectures_task,
     publish_manifests_task,
     registry_artifacts_from_receipt,
     registry_evidence,
-    require_release_barriers,
-    run_steps,
-    verified_file_receipt,
     registry_push_task,
+    regression_gate_task,
+    require_attestation_predicate,
+    require_release_barriers,
     run_image_steps,
     run_source_steps,
+    run_steps,
     source_test_task,
+    verified_file_receipt,
 )
-
 
 _AGGREGATE_FILENAME = "aggregate.json"
 
@@ -230,32 +233,31 @@ def build_benchmark_phase(
     endpoints: Any,
 ) -> tuple[ReleasePhaseTask, ...]:
     """Run the loadtest benchmark the configured number of times."""
-    benchmark_runs = []
-    for i in range(1, runs + 1):
-        benchmark_runs.append(
-            benchmark_task(
-                index=i,
-                identity=identity,
-                run_dir=run_dir,
-                phase_inputs={
-                    "run": i,
-                    "scenario": digest_path(scenario),
-                    "images": release_images,
-                },
-                prerequisites=(registry_push.receipt,),
-                work=lambda inputs, index=i: (
-                    run_sonata_benchmark(
-                        benchmark_plan,
-                        index,
-                        loadtest_plan.build_loadtest_plan,
-                        bindings,
-                        fetcher,
-                        inputs.resource(endpoints),
-                        registry_push.receipt,
-                    ),
+    benchmark_runs = [
+        benchmark_task(
+            index=i,
+            identity=identity,
+            run_dir=run_dir,
+            phase_inputs={
+                "run": i,
+                "scenario": digest_path(scenario),
+                "images": release_images,
+            },
+            prerequisites=(registry_push.receipt,),
+            work=lambda inputs, index=i: (
+                run_sonata_benchmark(
+                    benchmark_plan,
+                    index,
+                    loadtest_plan.build_loadtest_plan,
+                    bindings,
+                    fetcher,
+                    inputs.resource(endpoints),
+                    registry_push.receipt,
                 ),
-            )
+            ),
         )
+        for i in range(1, runs + 1)
+    ]
     return tuple(benchmark_runs)
 
 
@@ -387,7 +389,7 @@ class PublicationPhase(NamedTuple):
 
 
 def build_publication_phase(
-    *,  # NOSONAR (S107): keyword-only inputs mix request, identity and prior-phase results
+    *,  # NOSONAR (S107): keyword-only inputs mix request, identity and prior phases
     request: ReleaseRequest,
     identity: ReleaseIdentity,
     release_dir: Path,
@@ -433,8 +435,12 @@ def build_publication_phase(
             raise ValueError("release credential config is required for publication")
         return inputs.resource(ghcr).value
 
-    architecture_references = tuple(f"docker://{copy.destination}" for copy in pub_plan.copies)
-    manifest_references = tuple(f"docker://{item.reference}" for item in pub_plan.manifests)
+    architecture_references = tuple(
+        f"docker://{copy.destination}" for copy in pub_plan.copies
+    )
+    manifest_references = tuple(
+        f"docker://{item.reference}" for item in pub_plan.manifests
+    )
     alias_references = tuple(f"docker://{item.reference}" for item in pub_plan.aliases)
 
     def published(
@@ -459,9 +465,7 @@ def build_publication_phase(
                 "publish-manifests",
                 manifest_references,
             ),
-            **published(
-                publish_aliases.receipt, "publish-aliases", alias_references
-            ),
+            **published(publish_aliases.receipt, "publish-aliases", alias_references),
         }
 
     def ghcr_evidence(artifacts: tuple[Any, ...]) -> tuple[Evidence, ...]:
@@ -567,7 +571,7 @@ def build_publication_phase(
 
 
 def build_attestation_phase(
-    *,  # NOSONAR (S107): keyword-only inputs mix request, identity and prior-phase results
+    *,  # NOSONAR (S107): keyword-only inputs mix request, identity and prior phases
     request: ReleaseRequest,
     identity: ReleaseIdentity,
     release_dir: Path,
@@ -584,6 +588,7 @@ def build_attestation_phase(
     docker_credentials: Callable[[Any], Any],
 ) -> tuple[ReleasePhaseTask, ReleasePhaseTask]:
     """Sign and attest the published digests, then write the release record."""
+
     def release_record() -> dict[str, Any]:
         aggregate_file = release_dir / _AGGREGATE_FILENAME
         verified_file_receipt(aggregate.receipt, "aggregate", aggregate_file)
@@ -591,7 +596,9 @@ def build_attestation_phase(
             version=request.version,
             source_commit=identity.source_commit,
             image_digests=all_published(),
-            aggregate=_aggregate_from_payload(json.loads(aggregate_file.read_text(encoding="utf-8"))),
+            aggregate=_aggregate_from_payload(
+                json.loads(aggregate_file.read_text(encoding="utf-8"))
+            ),
             policy=regression_policy(benchmark_plan),
         )
 
@@ -717,9 +724,17 @@ def build_attestation_phase(
     attest = attest_task(
         identity=identity,
         run_dir=request.run_dir,
-        phase_inputs={"images": tuple(sorted(published_image.destination for published_image in pub_plan.copies))},
-        prerequisites=tuple(receipt for receipt, _phase in publication_receipts)
-        + (aggregate.receipt,),
+        phase_inputs={
+            "images": tuple(
+                sorted(
+                    published_image.destination for published_image in pub_plan.copies
+                )
+            )
+        },
+        prerequisites=(
+            *tuple(receipt for receipt, _phase in publication_receipts),
+            aggregate.receipt,
+        ),
         work=attest_images,
     )
 
@@ -734,22 +749,27 @@ def build_attestation_phase(
             benchmark_record_digest=aggregate_evidence.digest,
             image_digests=all_published(),
         )
-        require_attestation_predicate(attest.receipt, predicate_file, expected_predicate)
+        require_attestation_predicate(
+            attest.receipt, predicate_file, expected_predicate
+        )
         artifacts = release_attest.finalize_release(
             record=release_record(),
             performance_root=request.performance_root,
         )
         return tuple(
-            Evidence("file-digest", artifact.reference, artifact.digest) for artifact in artifacts
+            Evidence("file-digest", artifact.reference, artifact.digest)
+            for artifact in artifacts
         )
 
     finalize = finalize_task(
         identity=identity,
         run_dir=request.run_dir,
         phase_inputs={"performanceRoot": request.performance_root},
-        prerequisites=(attest.receipt,) + tuple(
-            receipt for receipt, _phase in publication_receipts
-        ) + (aggregate.receipt,),
+        prerequisites=(
+            attest.receipt,
+            *tuple(receipt for receipt, _phase in publication_receipts),
+            aggregate.receipt,
+        ),
         work=finalize_documentation,
     )
     return attest, finalize

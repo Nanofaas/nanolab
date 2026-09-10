@@ -4,7 +4,10 @@ from pathlib import Path
 
 from nanolab.tasks.components import bootstrap as bs
 from nanolab.tasks.components.context import ScenarioExecutionContext
-from nanolab.tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from nanolab.tasks.components.operations import (
+    RemoteCommandOperation,
+    ScenarioOperation,
+)
 from nanolab.tasks.vm.models import VmLifecycle, VmRequest
 
 
@@ -102,8 +105,8 @@ def test_retarget_bootstrap_repo_sync_uses_endpoint_port_and_key() -> None:
     argv = list(retargeted.argv)
     assert argv[0] == "rsync"
     assert (
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 42022 -i /keys/id_ed25519"
-        in argv
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+        "-p 42022 -i /keys/id_ed25519" in argv
     )
     assert argv[-1] == "ubuntu@pve.example:/home/ubuntu/nanofaas/"
 

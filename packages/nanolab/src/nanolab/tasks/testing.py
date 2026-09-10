@@ -17,18 +17,32 @@ INVOCATION_SUCCESS = '{"status":"success","output":{"words":2}}'
 
 
 def passed(stdout: str = "", *, return_code: int = 0, stderr: str = "") -> TaskResult:
+    """Build a passed TaskResult carrying the given streams and exit code."""
     return TaskResult(
-        task_id="", status="passed", return_code=return_code, stdout=stdout, stderr=stderr
+        task_id="",
+        status="passed",
+        return_code=return_code,
+        stdout=stdout,
+        stderr=stderr,
     )
 
 
 CLI_RESPONSES: tuple[tuple[str, TaskResult], ...] = (
     ("fn apply --replace", passed('{"name":"word-stats-java","queueSize":21}')),
-    ('"queueSize":21', passed(return_code=1, stderr="Error: ... rerun with --replace ...")),
+    (
+        '"queueSize":21',
+        passed(return_code=1, stderr="Error: ... rerun with --replace ..."),
+    ),
     ("fn update", passed('{"concurrency":3,"timeoutMs":9000,"maxRetries":1}')),
     ("fn replicas set", passed('{"function":"word-stats-java","replicas":2}')),
-    ("fn replicas get", passed('{"name":"word-stats-java","desiredReplicas":2,"readyReplicas":2}')),
-    ("control-plane info", passed('{"capabilities":{"functionUpdate":true,"replicas":true}}')),
+    (
+        "fn replicas get",
+        passed('{"name":"word-stats-java","desiredReplicas":2,"readyReplicas":2}'),
+    ),
+    (
+        "control-plane info",
+        passed('{"capabilities":{"functionUpdate":true,"replicas":true}}'),
+    ),
     ("control-plane contract", passed("openapi: 3.1.0\npaths:\n  /v1/functions: {}\n")),
     (
         '"rateMaxPerSecond":-1',
@@ -42,12 +56,17 @@ CLI_RESPONSES: tuple[tuple[str, TaskResult], ...] = (
             '"namespaces":{"control-plane":{"rateMaxPerSecond":999999}}}}'
         ),
     ),
-    ("config get", passed('{"revision":0,"namespaces":{"control-plane":{"rateMaxPerSecond":1000000}}}')),
+    (
+        "config get",
+        passed(
+            '{"revision":0,"namespaces":{"control-plane":{"rateMaxPerSecond":1000000}}}'
+        ),
+    ),
 )
 
 
 def cli_response(argv: tuple[str, ...]) -> TaskResult:
-    """What a compliant control plane answers this command, or a plain success."""
+    """Return what a compliant control plane answers `argv`, or a plain success."""
     joined = " ".join(argv)
     for fragment, result in CLI_RESPONSES:
         if fragment in joined:
@@ -68,6 +87,7 @@ CLI_RUNTIME_CONFIG_STEPS = (
 
 
 def cli_function_steps(name: str) -> tuple[str, ...]:
+    """Return the titles of the per-function CLI steps for `name`."""
     return (
         f"Invoke {name}",
         f"Update {name}",

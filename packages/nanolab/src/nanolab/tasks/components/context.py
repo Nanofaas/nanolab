@@ -1,3 +1,5 @@
+"""Neutral views and context objects that scenario components are written against."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -29,7 +31,9 @@ class ResolvedScenarioView(Protocol):
     # invariant, so a scenario holding its own function type — which is every
     # real one — could not satisfy the protocol it was written against.
     @property
-    def functions(self) -> Sequence[ResolvedFunctionView]: ...
+    def functions(self) -> Sequence[ResolvedFunctionView]:
+        """Return the scenario's resolved functions."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)

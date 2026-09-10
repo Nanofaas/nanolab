@@ -25,7 +25,9 @@ def test_file_digest_verifier_fails_closed(tmp_path: Path) -> None:
 
 def test_image_digest_verifier_fails_closed() -> None:
     digest = "sha256:" + "a" * 64
-    evidence = Evidence("local-registry-digest", "docker://localhost:5000/image:v1", digest)
+    evidence = Evidence(
+        "local-registry-digest", "docker://localhost:5000/image:v1", digest
+    )
 
     assert image_digest_verifier(lambda _reference: digest)(evidence)
     assert not image_digest_verifier(lambda _reference: "sha256:" + "c" * 64)(evidence)
@@ -48,7 +50,9 @@ def test_signature_verifier_accepts_only_self_consistent_pinned_references() -> 
     digest = "sha256:" + "a" * 64
     reference = f"ghcr.io/nanofaas/gateway@{digest}"
 
-    assert signature_evidence_verifier(Evidence("cosign-attestation", reference, digest))
+    assert signature_evidence_verifier(
+        Evidence("cosign-attestation", reference, digest)
+    )
     # a tag, not a digest: cosign would sign whatever it points at today
     assert not signature_evidence_verifier(
         Evidence("cosign-attestation", "ghcr.io/nanofaas/gateway:v1", digest)
@@ -71,7 +75,9 @@ def test_authenticated_ghcr_verifier_uses_authfile_without_exposing_token(
 
     monkeypatch.setattr("nanolab.release.evidence._remote_image_digest", inspect)
     token = "fixture-ghcr-token-must-not-leak"
-    verifiers = release_evidence_verifiers(object(), object(), ghcr_authfile="/staged/auth.json")
+    verifiers = release_evidence_verifiers(
+        object(), object(), ghcr_authfile="/staged/auth.json"
+    )
     evidence = Evidence("ghcr-digest", "docker://ghcr.io/nanofaas/image:v1", digest)
     assert verifiers["ghcr-digest"](evidence)
     assert seen == [(evidence.reference, "/staged/auth.json")]

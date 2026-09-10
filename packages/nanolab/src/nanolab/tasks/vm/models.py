@@ -1,17 +1,22 @@
+"""VM request models, extending the shared request with nanolab's own fields."""
+
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 from sonata_tasks.vm.models import (
     VmConfig,
     VmInfo,
     VmLifecycle,
-    VmRequest as SharedVmRequest,
     vm_remote_home,
+)
+from sonata_tasks.vm.models import (
+    VmRequest as SharedVmRequest,
 )
 
 
 class NanolabVmRequest(SharedVmRequest):
+    """A shared VM request plus the flag that skips rendering a zero-replica HPA."""
+
     hpa_scale_to_zero: bool = False
 
 
@@ -31,12 +36,26 @@ class _VmEnvSettings(BaseSettings):
 
 
 def vm_request_from_env() -> NanolabVmRequest:
+    """Build a VM request from the `E2E_VM_*` and size variables in the environment."""
     settings = _VmEnvSettings()
-    return NanolabVmRequest(lifecycle=settings.e2e_vm_lifecycle, name=settings.vm_name,
-                            host=settings.e2e_vm_host, user=settings.e2e_vm_user,
-                            home=settings.e2e_vm_home, cpus=settings.cpus,
-                            memory=settings.memory, disk=settings.disk)
+    return NanolabVmRequest(
+        lifecycle=settings.e2e_vm_lifecycle,
+        name=settings.vm_name,
+        host=settings.e2e_vm_host,
+        user=settings.e2e_vm_user,
+        home=settings.e2e_vm_home,
+        cpus=settings.cpus,
+        memory=settings.memory,
+        disk=settings.disk,
+    )
 
 
-__all__ = ["NanolabVmRequest", "VmConfig", "VmInfo", "VmLifecycle", "VmRequest",
-           "vm_remote_home", "vm_request_from_env"]
+__all__ = [
+    "NanolabVmRequest",
+    "VmConfig",
+    "VmInfo",
+    "VmLifecycle",
+    "VmRequest",
+    "vm_remote_home",
+    "vm_request_from_env",
+]

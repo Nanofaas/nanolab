@@ -87,7 +87,9 @@ def test_azure_release_stack_does_not_render_wildcard_nodeport_rules() -> None:
     assert request.azure_open_ports is None
 
 
-def test_proxmox_request_reads_secret_from_named_environment_variable(monkeypatch) -> None:
+def test_proxmox_request_reads_secret_from_named_environment_variable(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("NANOFAAS_PVE_PASSWORD", "secret")
     environment = EnvironmentConfig.model_validate(
         {
@@ -127,4 +129,6 @@ def test_proxmox_loadgen_has_distinct_default_name(monkeypatch) -> None:
     )
 
     assert vm_request_for_role(environment, "stack").name == "nanofaas-proxmox"
-    assert vm_request_for_role(environment, "loadgen").name == "nanofaas-proxmox-loadgen"
+    assert (
+        vm_request_for_role(environment, "loadgen").name == "nanofaas-proxmox-loadgen"
+    )

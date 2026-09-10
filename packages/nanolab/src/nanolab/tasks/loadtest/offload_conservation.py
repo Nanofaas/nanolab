@@ -13,6 +13,8 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class ConservationReport:
+    """The verdict of the reconciliation and the counters behind it."""
+
     passed: bool
     failures: tuple[str, ...]
     numbers: dict[str, float]
@@ -69,6 +71,13 @@ def evaluate_conservation(
     control: str,
     tolerance: int = 5,
 ) -> ConservationReport:
+    """Reconcile the k6 counters against the edge and cloud metric texts.
+
+    Checks that the offloadable function's requests, the edge's offload counter
+    and the cloud's successes agree, that the control function is never
+    offloaded, and that no offload or retry failed. Every divergence is collected
+    into the report rather than raised on the first, so one run names them all.
+    """
     failures: list[str] = []
     numbers: dict[str, float] = {}
 
@@ -79,7 +88,8 @@ def evaluate_conservation(
     def check_close(a_label: str, a: float, b_label: str, b: float) -> None:
         if abs(a - b) > tolerance:
             failures.append(
-                f"{a_label} ({a}) diverges from {b_label} ({b}) beyond tolerance {tolerance}"
+                f"{a_label} ({a}) diverges from {b_label} ({b}) "
+                f"beyond tolerance {tolerance}"
             )
 
     # 1. k6 requests for the offloadable function vs edge function_success_total.
@@ -89,7 +99,9 @@ def evaluate_conservation(
     )
     edge_success_offloadable = record(
         "edge_function_success_offloadable",
-        _sum_metric(edge_metrics, f'function_success_total{{function="{offloadable}"}}'),
+        _sum_metric(
+            edge_metrics, f'function_success_total{{function="{offloadable}"}}'
+        ),
     )
     check_close(
         "k6 requests for offloadable",
@@ -98,7 +110,7 @@ def evaluate_conservation(
         edge_success_offloadable,
     )
 
-    # 2. k6 offloaded_requests vs edge nanofaas_offload_total (depth+est_wait) vs cloud success.
+    # 2. k6 offloaded_requests vs the edge's nanofaas_offload_total vs cloud success.
     k6_offloaded = record(
         "k6_offloaded_requests",
         _k6_counter_value(k6_summary, "offloaded_requests", {"function": offloadable}),
@@ -111,7 +123,9 @@ def evaluate_conservation(
     )
     cloud_success_offloadable = record(
         "cloud_function_success_offloadable",
-        _sum_metric(cloud_metrics, f'function_success_total{{function="{offloadable}"}}'),
+        _sum_metric(
+            cloud_metrics, f'function_success_total{{function="{offloadable}"}}'
+        ),
     )
     check_close(
         "k6 offloaded_requests",
@@ -142,14 +156,25 @@ def evaluate_conservation(
             f"is {edge_offload_control}, expected 0"
         )
     if control in cloud_metrics:
-        failures.append(f"cloud metrics mention the control function {control}; it must never run there")
+        failures.append(
+            f"cloud metrics mention the control function {control}; "
+            "it must never run there"
+        )
 
     # 4. no offload failures, no retries, on the edge.
     if "nanofaas_offload_failure_total" in edge_metrics:
-        failures.append("edge exposes nanofaas_offload_failure_total; offload calls must never fail")
+        failures.append(
+            "edge exposes nanofaas_offload_failure_total; offload calls must never fail"
+        )
     for function in (offloadable, control):
-        retries = _sum_metric(edge_metrics, f'function_retry_total{{function="{function}"}}')
+        retries = _sum_metric(
+            edge_metrics, f'function_retry_total{{function="{function}"}}'
+        )
         if retries > tolerance:
-            failures.append(f"edge function_retry_total for {function} is {retries}, expected 0")
+            failures.append(
+                f"edge function_retry_total for {function} is {retries}, expected 0"
+            )
 
-    return ConservationReport(passed=not failures, failures=tuple(failures), numbers=numbers)
+    return ConservationReport(
+        passed=not failures, failures=tuple(failures), numbers=numbers
+    )

@@ -60,13 +60,15 @@ per image cell. Example:
 
 ```python
 def _registry_push(plan: ImagePlan, executor, role) -> Steps:
-    return Steps(*[
-        Steps(
-            DockerPushTask(image=cell.image, executor=executor, role=role),
-            SkopeoInspectTask(image=cell.image, executor=executor, role=role),
-        )
-        for cell in plan.cells
-    ])
+    return Steps(
+        *[
+            Steps(
+                DockerPushTask(image=cell.image, executor=executor, role=role),
+                SkopeoInspectTask(image=cell.image, executor=executor, role=role),
+            )
+            for cell in plan.cells
+        ]
+    )
 ```
 
 ## Reuse

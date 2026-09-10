@@ -32,7 +32,8 @@ def _checkout_with_function(tmp_path: Path, *, with_payloads: bool) -> Path:
         payloads = function_dir / "payloads"
         payloads.mkdir()
         (payloads / "happy-path.json").write_text(
-            '{"description":"d","input":{"text":"a b","topN":1},"expected":{"wordCount":2}}',
+            '{"description":"d","input":{"text":"a b","topN":1},'
+            '"expected":{"wordCount":2}}',
             encoding="utf-8",
         )
         (payloads / "missing-input.json").write_text(
@@ -62,7 +63,8 @@ def test_sonata_function_carries_the_name_and_image_across() -> None:
 
 def test_resolve_function_payloads_reads_the_function_directory(tmp_path: Path) -> None:
     result = resolve_function_payloads(
-        "word-stats-java", source_root=_checkout_with_function(tmp_path, with_payloads=True)
+        "word-stats-java",
+        source_root=_checkout_with_function(tmp_path, with_payloads=True),
     )
 
     assert [payload.name for payload in result] == ["happy-path", "missing-input"]
@@ -74,7 +76,8 @@ def test_resolve_function_payloads_returns_nothing_without_a_payload_directory(
     tmp_path: Path,
 ) -> None:
     result = resolve_function_payloads(
-        "word-stats-java", source_root=_checkout_with_function(tmp_path, with_payloads=False)
+        "word-stats-java",
+        source_root=_checkout_with_function(tmp_path, with_payloads=False),
     )
 
     assert result == ()

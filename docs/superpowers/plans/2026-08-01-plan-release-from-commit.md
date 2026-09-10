@@ -204,11 +204,13 @@ In `packages/nanolab/src/nanolab/images/plan.py`, inside `_all_targets`, change
 the single call:
 
 ```python
-        *(
-            _function_target(repo_root, function)
-            for function in list_functions(repo_root)
-            if function.example_dir is not None
-        ),
+(
+    *(
+        _function_target(repo_root, function)
+        for function in list_functions(repo_root)
+        if function.example_dir is not None
+    ),
+)
 ```
 
 - [ ] **Step 4: Run the test and verify it passes**
@@ -260,7 +262,9 @@ def test_extract_commit_tree_ignores_worktree_only_paths(tmp_path: Path) -> None
 
     repo = tmp_path / "repo"
     (repo / "functions/python/solo").mkdir(parents=True)
-    (repo / "functions/python/solo/function.yaml").write_text("name: solo\n", encoding="utf-8")
+    (repo / "functions/python/solo/function.yaml").write_text(
+        "name: solo\n", encoding="utf-8"
+    )
     (repo / ".gitignore").write_text("build/\n", encoding="utf-8")
     for argv in (
         ("git", "init", "-q"),
@@ -269,7 +273,11 @@ def test_extract_commit_tree_ignores_worktree_only_paths(tmp_path: Path) -> None
     ):
         subprocess.run(argv, cwd=repo, check=True)
     commit = subprocess.run(
-        ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
+        ("git", "rev-parse", "HEAD"),
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     # Leftovers of the shape that broke the release: gitignored, so the tree stays clean.
     (repo / "functions/java/figlet/build").mkdir(parents=True)
@@ -435,7 +443,7 @@ from nanolab.release.build import extract_commit_tree
 6. Pass it into the returned request, next to `performance_root=...`:
 
 ```python
-        source_tree=planning_root,
+source_tree = (planning_root,)
 ```
 
 - [ ] **Step 8: Run the test and verify it passes**
@@ -512,7 +520,9 @@ def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> 
         trees.append(Path(kwargs["source_tree"]))
         return original(**kwargs)
 
-    release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
+    release_cli_harness.monkeypatch.setattr(
+        product_module, "build_release_request", record
+    )
 
     result = release_cli_harness.invoke("--provision")
 
@@ -555,7 +565,7 @@ def _release_request(
 and pass it through to `build_release_request`, next to `executable=executable`:
 
 ```python
-            source_tree=source_tree,
+source_tree = (source_tree,)
 ```
 
 - [ ] **Step 4: Own the lifetime in `run_command`**
@@ -567,21 +577,24 @@ Replace the release preflight block so the temporary tree is created before the
 request and released when the command ends:
 
 ```python
-        release_request: ReleaseRequest | None = None
-        release_provider: object | None = None
-        release_journal = None
-        # The extracted tree is throwaway and only has to outlive workflow
-        # compilation; the ExitStack closes it on every exit path.
-        lifetime = ExitStack()
-        if release:
-            source_tree = Path(
-                lifetime.enter_context(tempfile.TemporaryDirectory(prefix="nanofaas-release-"))
-            )
-            release_request, release_provider = _release_request(
-                scenario, environment, release_config, run_dir,
-                executable=True,
-                source_tree=source_tree,
-            )
+release_request: ReleaseRequest | None = None
+release_provider: object | None = None
+release_journal = None
+# The extracted tree is throwaway and only has to outlive workflow
+# compilation; the ExitStack closes it on every exit path.
+lifetime = ExitStack()
+if release:
+    source_tree = Path(
+        lifetime.enter_context(tempfile.TemporaryDirectory(prefix="nanofaas-release-"))
+    )
+    release_request, release_provider = _release_request(
+        scenario,
+        environment,
+        release_config,
+        run_dir,
+        executable=True,
+        source_tree=source_tree,
+    )
 ```
 
 Then add a `finally` clause to the existing `try` that wraps the workflow run —
@@ -598,19 +611,22 @@ clauses already exist:
 In the release branch of `plan_command`, replace the `_release_request` call:
 
 ```python
-        if scenario_config.workflow == "release":
-            with tempfile.TemporaryDirectory(prefix="nanofaas-plan-") as source_tree:
-                request, provider = _release_request(
-                    scenario, environment, release_config, run_dir,
-                    executable=False,
-                    source_tree=Path(source_tree),
-                )
-                sonata_workflow = build_release_workflow(request, provider=provider)
-                compiled = sonata_workflow.compile(
-                    select=Selection(only=only, start=start, until=until)
-                )
-            _render_compiled(compiled)
-            return
+if scenario_config.workflow == "release":
+    with tempfile.TemporaryDirectory(prefix="nanofaas-plan-") as source_tree:
+        request, provider = _release_request(
+            scenario,
+            environment,
+            release_config,
+            run_dir,
+            executable=False,
+            source_tree=Path(source_tree),
+        )
+        sonata_workflow = build_release_workflow(request, provider=provider)
+        compiled = sonata_workflow.compile(
+            select=Selection(only=only, start=start, until=until)
+        )
+    _render_compiled(compiled)
+    return
 ```
 
 Leave the existing non-release path below untouched.

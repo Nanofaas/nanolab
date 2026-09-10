@@ -99,7 +99,9 @@ def test_every_demo_function_declares_a_resolvable_default_payload() -> None:
     families = {"word-stats", "json-transform", "roman-numeral"}
     runtimes = {"java", "java-lite", "go", "python", "javascript", "exec"}
     payloads_root = Path(__file__).resolve().parents[1] / "scenarios" / "payloads"
-    functions = [function for function in list_functions() if function.family in families]
+    functions = [
+        function for function in list_functions() if function.family in families
+    ]
 
     assert {(function.family, function.runtime) for function in functions} == {
         (family, runtime) for family in families for runtime in runtimes
@@ -118,7 +120,10 @@ def test_every_demo_function_declares_a_resolvable_default_payload() -> None:
 def test_demo_java_preset_contains_only_java_functions() -> None:
     preset = resolve_function_preset("demo-java")
     assert {function.runtime for function in preset.functions} == {"java"}
-    assert {function.family for function in preset.functions} == {"word-stats", "json-transform"}
+    assert {function.family for function in preset.functions} == {
+        "word-stats",
+        "json-transform",
+    }
 
 
 def test_demo_javascript_preset_contains_only_javascript_functions() -> None:

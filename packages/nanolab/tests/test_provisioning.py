@@ -55,7 +55,9 @@ class RecordingOrchestrator:
     def ssh_private_key_path(self, request):
         return Path("/keys/provider")
 
-    def restrict_inbound_sources(self, request, *, ports, source_cidrs, priority_base=1010):
+    def restrict_inbound_sources(
+        self, request, *, ports, source_cidrs, priority_base=1010
+    ):
         self.restrictions.append((request.name, ports, source_cidrs))
 
 
@@ -77,7 +79,9 @@ def test_multipass_k8s_provisioning_composes_lifecycle_and_bootstrap_tasks(
     orchestrator = RecordingOrchestrator()
 
     with provision_environment(
-        ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
+        ScenarioConfig(
+            workflow="validate", backend="k8s", functions=["word-stats-java"]
+        ),
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
@@ -105,7 +109,8 @@ def test_external_provisioning_without_factory_falls_back_to_orchestrator(
     # Patched where the fallback now lives: choosing the orchestrator for an
     # `external` lifecycle is sonata's decision, not nanolab's translation.
     monkeypatch.setattr(
-        "nanolab.tasks.provisioning.providers.VmOrchestrator", lambda _repo_root: orchestrator
+        "nanolab.tasks.provisioning.providers.VmOrchestrator",
+        lambda _repo_root: orchestrator,
     )
 
     with provision_environment(
@@ -193,7 +198,9 @@ def test_offload_loadtest_syncs_repository_to_cloud(tmp_path: Path) -> None:
     )
 
 
-def test_arm_builder_role_is_ensured_torn_down_and_base_provisioned(tmp_path: Path) -> None:
+def test_arm_builder_role_is_ensured_torn_down_and_base_provisioned(
+    tmp_path: Path,
+) -> None:
     orchestrator = RecordingOrchestrator()
 
     with provision_environment(
@@ -258,7 +265,9 @@ def test_post_ensure_verifier_runs_before_each_vm_bootstrap(tmp_path: Path) -> N
         ("verify", ("stack", "multipass", "stack"))
     )
     first_command = next(
-        index for index, event in enumerate(orchestrator.events) if event[0] == "command"
+        index
+        for index, event in enumerate(orchestrator.events)
+        if event[0] == "command"
     )
     loadgen_ensure = orchestrator.events.index(("ensure", ("multipass", "loadgen")))
     loadgen_verify = orchestrator.events.index(
@@ -277,8 +286,9 @@ def test_second_pre_bootstrap_verifier_failure_cleans_up_without_commands(
         if role == "loadgen":
             raise RuntimeError("final ingress verification failed")
 
-    with pytest.raises(RuntimeError, match="final ingress verification failed"):
-        with provision_environment(
+    with (
+        pytest.raises(RuntimeError, match="final ingress verification failed"),
+        provision_environment(
             ScenarioConfig(workflow="loadtest", functions=["word-stats-java"]),
             EnvironmentConfig.model_validate(
                 {
@@ -292,8 +302,9 @@ def test_second_pre_bootstrap_verifier_failure_cleans_up_without_commands(
             repo_root=tmp_path,
             orchestrator_factory=lambda _: orchestrator,
             post_ensure_verifier=verify,
-        ):
-            pass
+        ),
+    ):
+        pass
 
     assert _commands(orchestrator) == []
     assert [value for kind, value in orchestrator.events if kind == "ensure"] == [
@@ -310,16 +321,20 @@ def test_provisioning_stops_on_first_failed_bootstrap_task(tmp_path: Path) -> No
     orchestrator = RecordingOrchestrator()
     orchestrator.shell.fail_playbook = "provision-k3s.yml"
 
-    with pytest.raises(RuntimeError, match="provision-k3s.yml failed"):
-        with provision_environment(
-            ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
+    with (
+        pytest.raises(RuntimeError, match=r"provision-k3s.yml failed"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="validate", backend="k8s", functions=["word-stats-java"]
+            ),
             EnvironmentConfig.model_validate(
                 {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
             ),
             repo_root=tmp_path,
             orchestrator_factory=lambda _: orchestrator,
-        ):
-            pass
+        ),
+    ):
+        pass
 
     assert _playbooks(orchestrator) == ["provision-base.yml", "provision-k3s.yml"]
     assert not any(command[0] == "rsync" for command in _commands(orchestrator))
@@ -330,16 +345,20 @@ def test_provisioning_stops_when_vm_lifecycle_preflight_fails(tmp_path: Path) ->
     orchestrator = RecordingOrchestrator()
     orchestrator.ensure_result = _Result(return_code=255, stderr="SSH unavailable")
 
-    with pytest.raises(RuntimeError, match="SSH unavailable"):
-        with provision_environment(
-            ScenarioConfig(workflow="cli", backend="k8s", functions=["word-stats-java"]),
+    with (
+        pytest.raises(RuntimeError, match="SSH unavailable"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="cli", backend="k8s", functions=["word-stats-java"]
+            ),
             EnvironmentConfig.model_validate(
                 {"provider": "external", "roles": {"stack": {"host": "vm.example"}}}
             ),
             repo_root=tmp_path,
             orchestrator_factory=lambda _: orchestrator,
-        ):
-            pass
+        ),
+    ):
+        pass
 
     assert _commands(orchestrator) == []
 
@@ -348,21 +367,27 @@ def test_managed_vm_preflight_failure_still_triggers_teardown(tmp_path: Path) ->
     orchestrator = RecordingOrchestrator()
     orchestrator.ensure_result = _Result(return_code=255, stderr="SSH unavailable")
 
-    with pytest.raises(RuntimeError, match="SSH unavailable"):
-        with provision_environment(
-            ScenarioConfig(workflow="cli", backend="k8s", functions=["word-stats-java"]),
+    with (
+        pytest.raises(RuntimeError, match="SSH unavailable"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="cli", backend="k8s", functions=["word-stats-java"]
+            ),
             EnvironmentConfig.model_validate(
                 {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
             ),
             repo_root=tmp_path,
             orchestrator_factory=lambda _: orchestrator,
-        ):
-            pass
+        ),
+    ):
+        pass
 
     assert orchestrator.events[-1] == ("teardown", "stack")
 
 
-def test_azure_provisioning_uses_public_endpoint_and_provider_key(tmp_path: Path) -> None:
+def test_azure_provisioning_uses_public_endpoint_and_provider_key(
+    tmp_path: Path,
+) -> None:
     orchestrator = RecordingOrchestrator()
 
     with provision_environment(
@@ -384,7 +409,10 @@ def test_azure_provisioning_uses_public_endpoint_and_provider_key(tmp_path: Path
     ansible = commands[0]
     assert ansible[ansible.index("-i") + 1] == "nanofaas-azure.internal,"
     assert ansible[ansible.index("--private-key") + 1] == "/keys/provider"
-    assert commands[-1][-1] == "azureuser@nanofaas-azure.internal:/home/azureuser/nanofaas/"
+    assert (
+        commands[-1][-1]
+        == "azureuser@nanofaas-azure.internal:/home/azureuser/nanofaas/"
+    )
     assert orchestrator.events[-1] == ("teardown", "nanofaas-azure")
 
 
@@ -414,7 +442,9 @@ def test_azure_provisioning_restricts_nodeports_to_the_operator(tmp_path: Path) 
     ]
 
 
-def test_proxmox_provisioning_retargets_bootstrap_to_ssh_nat(monkeypatch, tmp_path: Path) -> None:
+def test_proxmox_provisioning_retargets_bootstrap_to_ssh_nat(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("PROXMOX_PASSWORD", "secret")
     orchestrator = RecordingOrchestrator()
 
@@ -462,15 +492,19 @@ def test_keep_preserves_managed_vm(tmp_path: Path) -> None:
 def test_workflow_failure_still_destroys_managed_vm(tmp_path: Path) -> None:
     orchestrator = RecordingOrchestrator()
 
-    with pytest.raises(RuntimeError, match="workflow failed"):
-        with provision_environment(
-            ScenarioConfig(workflow="cli", backend="k8s", functions=["word-stats-java"]),
+    with (
+        pytest.raises(RuntimeError, match="workflow failed"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="cli", backend="k8s", functions=["word-stats-java"]
+            ),
             EnvironmentConfig.model_validate(
                 {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
             ),
             repo_root=tmp_path,
             orchestrator_factory=lambda _: orchestrator,
-        ):
-            raise RuntimeError("workflow failed")
+        ),
+    ):
+        raise RuntimeError("workflow failed")
 
     assert orchestrator.events[-1] == ("teardown", "stack")

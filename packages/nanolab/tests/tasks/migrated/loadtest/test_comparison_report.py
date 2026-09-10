@@ -43,7 +43,9 @@ def _snapshot(memory_mib: list[float]) -> dict:
     }
 
 
-def _matrix(root: Path, data: dict[str, list[tuple[float, float, list[float]]]]) -> None:
+def _matrix(
+    root: Path, data: dict[str, list[tuple[float, float, list[float]]]]
+) -> None:
     root.mkdir(parents=True, exist_ok=True)
     (root / "comparison-manifest.json").write_text(
         json.dumps(
@@ -52,7 +54,13 @@ def _matrix(root: Path, data: dict[str, list[tuple[float, float, list[float]]]])
                 "functions": ["word-stats-java", "word-stats-javascript"],
                 "order": [],
                 "variants": [
-                    {"key": key, "label": key.upper(), "rationale": "because", "build_env": {}, "image": "i"}
+                    {
+                        "key": key,
+                        "label": key.upper(),
+                        "rationale": "because",
+                        "build_env": {},
+                        "image": "i",
+                    }
                     for key in data
                 ],
             }
@@ -63,14 +71,16 @@ def _matrix(root: Path, data: dict[str, list[tuple[float, float, list[float]]]])
         for index, (rate, p95, memory) in enumerate(runs, start=1):
             cell = root / variant / f"run-{index}"
             (cell / "metrics").mkdir(parents=True, exist_ok=True)
-            (cell / "k6-summary.json").write_text(json.dumps(_k6(rate, p95)), encoding="utf-8")
+            (cell / "k6-summary.json").write_text(
+                json.dumps(_k6(rate, p95)), encoding="utf-8"
+            )
             (cell / "metrics" / "prometheus-snapshot.json").write_text(
                 json.dumps(_snapshot(memory)), encoding="utf-8"
             )
 
 
 def test_spread_reports_half_range_not_standard_deviation() -> None:
-    """Three samples do not make a standard deviation; the half-range says what it is."""
+    """Check three samples report a half-range, not a standard deviation."""
     mean, half = _spread([10.0, 20.0, 30.0])
 
     assert mean == 20.0
@@ -109,9 +119,13 @@ def test_a_gap_inside_the_spread_is_reported_as_undecided(tmp_path: Path) -> Non
             "native": [(420.0, 100.0, [40.0]), (520.0, 100.0, [40.0])],
         },
     )
-    cells = [c for v in ("jvm", "native") for r in (1, 2) if (c := read_cell(tmp_path, v, r))]
+    cells = [
+        c for v in ("jvm", "native") for r in (1, 2) if (c := read_cell(tmp_path, v, r))
+    ]
 
-    verdict = _verdict(cells, {"jvm": "JVM", "native": "NATIVE"}, "rps", lower_is_better=False)
+    verdict = _verdict(
+        cells, {"jvm": "JVM", "native": "NATIVE"}, "rps", lower_is_better=False
+    )
 
     assert "did not separate them" in verdict
 
@@ -124,9 +138,13 @@ def test_a_gap_beyond_the_spread_is_reported_as_a_result(tmp_path: Path) -> None
             "native": [(900.0, 100.0, [40.0]), (910.0, 100.0, [40.0])],
         },
     )
-    cells = [c for v in ("jvm", "native") for r in (1, 2) if (c := read_cell(tmp_path, v, r))]
+    cells = [
+        c for v in ("jvm", "native") for r in (1, 2) if (c := read_cell(tmp_path, v, r))
+    ]
 
-    verdict = _verdict(cells, {"jvm": "JVM", "native": "NATIVE"}, "rps", lower_is_better=False)
+    verdict = _verdict(
+        cells, {"jvm": "JVM", "native": "NATIVE"}, "rps", lower_is_better=False
+    )
 
     assert "more than either build's own spread" in verdict
     assert "NATIVE" in verdict
@@ -141,9 +159,13 @@ def test_lower_is_better_flips_the_ranking(tmp_path: Path) -> None:
             "native": [(400.0, 20.0, [40.0]), (400.0, 25.0, [40.0])],
         },
     )
-    cells = [c for v in ("jvm", "native") for r in (1, 2) if (c := read_cell(tmp_path, v, r))]
+    cells = [
+        c for v in ("jvm", "native") for r in (1, 2) if (c := read_cell(tmp_path, v, r))
+    ]
 
-    assert "NATIVE" in _verdict(cells, {"jvm": "JVM", "native": "NATIVE"}, "p95_ms", True)
+    assert "NATIVE" in _verdict(
+        cells, {"jvm": "JVM", "native": "NATIVE"}, "p95_ms", True
+    )
 
 
 def test_aggregate_carries_every_headline_with_its_spread(tmp_path: Path) -> None:
@@ -156,7 +178,9 @@ def test_aggregate_carries_every_headline_with_its_spread(tmp_path: Path) -> Non
     assert table.loc[0, "Control plane peak (MiB)"] == "600.0 ± 100.0"
 
 
-def test_a_run_without_container_metrics_reads_as_missing_not_zero(tmp_path: Path) -> None:
+def test_a_run_without_container_metrics_reads_as_missing_not_zero(
+    tmp_path: Path,
+) -> None:
     """Zero would claim the control plane used no memory; it means nobody asked."""
     _matrix(tmp_path, {"jvm": [(400.0, 100.0, [500.0])]})
     (tmp_path / "jvm" / "run-1" / "metrics" / "prometheus-snapshot.json").write_text(
@@ -165,7 +189,9 @@ def test_a_run_without_container_metrics_reads_as_missing_not_zero(tmp_path: Pat
     )
     cells = [c for r in (1,) if (c := read_cell(tmp_path, "jvm", r))]
 
-    assert aggregate_table(cells, {"jvm": "JVM"}).loc[0, "Control plane peak (MiB)"] == "—"
+    assert (
+        aggregate_table(cells, {"jvm": "JVM"}).loc[0, "Control plane peak (MiB)"] == "—"
+    )
 
 
 def test_the_page_is_self_contained(tmp_path: Path) -> None:
@@ -181,7 +207,7 @@ def test_the_page_is_self_contained(tmp_path: Path) -> None:
     output = WriteComparisonReport(task_id="", title="Comparison", root=tmp_path).run()
     html = output.read_text(encoding="utf-8")
 
-    assert "<script src=\"http" not in html
+    assert '<script src="http' not in html
     assert "JVM" in html and "NATIVE" in html
 
 
@@ -203,9 +229,13 @@ def test_a_single_run_per_build_yields_no_verdict(tmp_path: Path) -> None:
             "native": [(900.0, 20.0, [40.0])],
         },
     )
-    cells = [c for v in ("jvm", "native") for r in (1,) if (c := read_cell(tmp_path, v, r))]
+    cells = [
+        c for v in ("jvm", "native") for r in (1,) if (c := read_cell(tmp_path, v, r))
+    ]
 
-    verdict = _verdict(cells, {"jvm": "JVM", "native": "NATIVE"}, "rps", lower_is_better=False)
+    verdict = _verdict(
+        cells, {"jvm": "JVM", "native": "NATIVE"}, "rps", lower_is_better=False
+    )
 
     assert "single run" in verdict
     assert "own spread" not in verdict

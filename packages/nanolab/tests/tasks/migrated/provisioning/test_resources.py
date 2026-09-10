@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from nanolab.tasks.provisioning.resources import VerifiedLifecycle, provisioned_vm
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
-from nanolab.tasks.vm.models import VmConfig, VmInfo, VmRequest
 from sonata_tasks.vm.models import VmRequest as SharedVmRequest
+
+from nanolab.tasks.provisioning.resources import VerifiedLifecycle, provisioned_vm
+from nanolab.tasks.vm.models import VmConfig, VmInfo, VmRequest
 
 
 @dataclass
@@ -33,7 +34,12 @@ class FakeProvider:
 
     def teardown(self, request: SharedVmRequest) -> _Result:
         self.destroyed.append(
-            VmInfo(name=request.name or "x", host="10.0.0.5", user="ubuntu", home="/home/ubuntu")
+            VmInfo(
+                name=request.name or "x",
+                host="10.0.0.5",
+                user="ubuntu",
+                home="/home/ubuntu",
+            )
         )
         return _Result(return_code=0)
 

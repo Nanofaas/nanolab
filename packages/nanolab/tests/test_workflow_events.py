@@ -56,7 +56,9 @@ def test_build_task_event_supports_parent_task_identity() -> None:
     assert event.parent_task_id == "tests.run_k3s_curl_checks"
 
 
-def test_build_task_event_leaves_root_level_parentless_without_parent_identity() -> None:
+def test_build_task_event_leaves_root_level_parentless_without_parent_identity() -> (
+    None
+):
     event = build_task_event(
         kind="task.started",
         flow_id="e2e.k8s_vm",

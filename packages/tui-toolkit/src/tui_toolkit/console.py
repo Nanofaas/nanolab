@@ -1,4 +1,5 @@
 """Rich Console singleton with a content-width cap."""
+
 from __future__ import annotations
 
 from rich.console import Console

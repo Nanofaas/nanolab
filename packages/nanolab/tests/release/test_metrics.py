@@ -19,7 +19,6 @@ from nanolab.release.metrics import (
     render_release_record,
 )
 
-
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 PROFILE = PerformanceProfile(
     name="azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
@@ -83,18 +82,24 @@ def test_aggregate_runs_uses_per_metric_median() -> None:
 
 
 def _summary_without_heap_pools(value: float) -> dict[str, object]:
-    """What the snapshot writes for a series that returned nothing: a point count
-    and no statistics. It is what a G1 control plane produces for the heap."""
+    """Build the snapshot summary for a series that returned nothing.
+
+    It carries a point count and no statistics, which is what a G1 control plane
+    produces for the heap.
+    """
     summary = cast(dict[str, Any], _summary(value))
     summary["prometheus"]["jvm_heap_used_bytes"] = {"points": 0}
     return summary
 
 
 def test_a_build_with_no_heap_pools_reports_every_other_metric() -> None:
-    """v0.20.0 ran three clean benchmarks and then failed the aggregate with "max
+    """Assert a build with no heap pools still reports every other metric.
+
+    v0.20.0 ran three clean benchmarks and then failed the aggregate with "max
     must be a finite nonnegative number": its G1 control plane publishes no heap
     series, so there was no peak to read. The absence is a reading, not a zero -
-    a zero would record a control plane that used no memory at all."""
+    a zero would record a control plane that used no memory at all.
+    """
     aggregate = aggregate_runs(
         PROFILE,
         (
@@ -111,9 +116,12 @@ def test_a_build_with_no_heap_pools_reports_every_other_metric() -> None:
 
 
 def test_the_container_working_set_is_recorded_for_builds_with_no_heap_gauge() -> None:
-    """cAdvisor prices every build on the same terms, so a G1 release still
-    records what the control plane cost - and the resident set, not the heap, is
-    what decides whether a build fits on a node."""
+    """Assert the container working set is recorded when no heap gauge exists.
+
+    CAdvisor prices every build on the same terms, so a G1 release still records
+    what the control plane cost - and the resident set, not the heap, is what
+    decides whether a build fits on a node.
+    """
     summaries = []
     for value in (30, 10, 20):
         summary = _summary_without_heap_pools(value)
@@ -131,8 +139,11 @@ def test_the_container_working_set_is_recorded_for_builds_with_no_heap_gauge() -
 
 
 def test_a_heap_series_that_has_points_is_still_held_to_the_strict_rules() -> None:
-    """Only an empty series is excused. One that reported points and then carries
-    no usable maximum is the broken evidence it looks like."""
+    """Assert a heap series with points is still held to the strict rules.
+
+    Only an empty series is excused. One that reported points and then carries
+    no usable maximum is the broken evidence it looks like.
+    """
     summary = cast(dict[str, Any], _summary(20))
     summary["prometheus"]["jvm_heap_used_bytes"] = {"points": 12}
 
@@ -141,13 +152,16 @@ def test_a_heap_series_that_has_points_is_still_held_to_the_strict_rules() -> No
 
 
 def test_runs_that_disagree_on_their_metrics_are_not_quietly_averaged() -> None:
-    """Same build and same profile: one run publishing a heap peak and another not
-    is an anomaly to stop on, and it used to surface as a bare KeyError."""
+    """Assert runs that disagree on their metrics are not quietly averaged.
+
+    Same build and same profile: one run publishing a heap peak and another not
+    is an anomaly to stop on, and it used to surface as a bare KeyError.
+    """
     with pytest.raises(ValueError, match="different metrics"):
         aggregate_runs(PROFILE, (_summary(20), _summary_without_heap_pools(20)))
 
 
-@pytest.mark.parametrize("invalid", (float("nan"), float("inf"), float("-inf"), -1.0))
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf"), -1.0])
 def test_aggregate_runs_rejects_invalid_source_numbers(invalid: float) -> None:
     summary = cast(dict[str, Any], _summary(20))
     summary["k6"]["http_reqs"]["values"]["rate"] = invalid
@@ -160,7 +174,7 @@ def test_aggregate_runs_rejects_error_rate_above_one() -> None:
     summary = cast(dict[str, Any], _summary(20))
     summary["k6"]["http_req_failed"]["values"]["rate"] = 1.01
 
-    with pytest.raises(ValueError, match="errorRate.*between 0 and 1"):
+    with pytest.raises(ValueError, match=r"errorRate.*between 0 and 1"):
         aggregate_runs(PROFILE, (summary,) * 3)
 
 
@@ -176,16 +190,18 @@ def test_aggregate_runs_preserves_zero_queue_wait() -> None:
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    (
+    [
         ("provider", "multipass"),
         ("stack_vm", "Standard_D4s_v5"),
         ("loadgen_vm", "Standard_D4s_v5"),
         ("architecture", "arm64"),
         ("flavor", "jvm"),
         ("scenario", "scenarios-v2/other.yaml"),
-    ),
+    ],
 )
-def test_regression_comparison_rejects_different_profiles(field: str, value: str) -> None:
+def test_regression_comparison_rejects_different_profiles(
+    field: str, value: str
+) -> None:
     current = aggregate_runs(PROFILE, (_summary(20),) * 3)
     baseline = replace(current, profile=replace(PROFILE, **{field: value}))
 
@@ -215,8 +231,8 @@ def test_first_passing_release_establishes_baseline() -> None:
     assert result.failures == ()
 
 
-@pytest.mark.parametrize("evidence", ("current", "baseline"))
-@pytest.mark.parametrize("invalid", (float("nan"), float("inf"), float("-inf"), -1.0))
+@pytest.mark.parametrize("evidence", ["current", "baseline"])
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf"), -1.0])
 def test_regression_rejects_invalid_current_and_baseline_evidence(
     evidence: str,
     invalid: float,
@@ -226,9 +242,13 @@ def test_regression_rejects_invalid_current_and_baseline_evidence(
         valid,
         metrics={**valid.metrics, "throughputRps": invalid},
     )
-    current, baseline = (malformed, valid) if evidence == "current" else (valid, malformed)
+    current, baseline = (
+        (malformed, valid) if evidence == "current" else (valid, malformed)
+    )
 
-    with pytest.raises(ValueError, match=f"{evidence}.*throughputRps.*finite nonnegative"):
+    with pytest.raises(
+        ValueError, match=f"{evidence}.*throughputRps.*finite nonnegative"
+    ):
         evaluate_regression(
             current,
             baseline,
@@ -238,11 +258,13 @@ def test_regression_rejects_invalid_current_and_baseline_evidence(
         )
 
 
-@pytest.mark.parametrize("evidence", ("current", "baseline"))
+@pytest.mark.parametrize("evidence", ["current", "baseline"])
 def test_regression_rejects_out_of_domain_error_rate_evidence(evidence: str) -> None:
     valid = aggregate_runs(PROFILE, (_summary(20),) * 3)
     malformed = replace(valid, metrics={**valid.metrics, "errorRate": 1.01})
-    current, baseline = (malformed, valid) if evidence == "current" else (valid, malformed)
+    current, baseline = (
+        (malformed, valid) if evidence == "current" else (valid, malformed)
+    )
 
     with pytest.raises(ValueError, match=f"{evidence}.*errorRate.*between 0 and 1"):
         evaluate_regression(
@@ -256,7 +278,7 @@ def test_regression_rejects_out_of_domain_error_rate_evidence(evidence: str) -> 
 
 def test_regression_preserves_valid_zero_evidence() -> None:
     aggregate = aggregate_runs(PROFILE, (_summary(20),) * 3)
-    zero = replace(aggregate, metrics={name: 0.0 for name in aggregate.metrics})
+    zero = replace(aggregate, metrics=dict.fromkeys(aggregate.metrics, 0.0))
 
     result = evaluate_regression(
         zero,
@@ -279,7 +301,7 @@ def test_regression_evaluation_requires_explicit_gate_evidence() -> None:
 
 @pytest.mark.parametrize(
     ("k6_passed", "autoscaling_passed", "message"),
-    ((False, True, "k6"), (True, False, "autoscaling")),
+    [(False, True, "k6"), (True, False, "autoscaling")],
 )
 def test_initial_baseline_requires_existing_gates(
     k6_passed: bool,
@@ -352,7 +374,9 @@ def test_release_configuration_owns_the_versioned_policy() -> None:
     }
 
 
-def test_record_and_history_rendering_are_deterministic_and_pure(tmp_path: Path) -> None:
+def test_record_and_history_rendering_are_deterministic_and_pure(
+    tmp_path: Path,
+) -> None:
     aggregate = aggregate_runs(PROFILE, (_summary(30), _summary(10), _summary(20)))
     record = build_release_record(
         version="v0.18.0",
@@ -380,7 +404,9 @@ def test_record_and_history_rendering_are_deterministic_and_pure(tmp_path: Path)
 def test_newest_comparable_record_ignores_other_performance_series() -> None:
     aggregate = aggregate_runs(PROFILE, (_summary(20),) * 3)
 
-    def record(version: str, profile: PerformanceProfile = PROFILE) -> dict[str, object]:
+    def record(
+        version: str, profile: PerformanceProfile = PROFILE
+    ) -> dict[str, object]:
         selected = replace(aggregate, profile=profile)
         return build_release_record(
             version=version,
@@ -399,4 +425,6 @@ def test_newest_comparable_record_ignores_other_performance_series() -> None:
     newest = newest_comparable_record(records, PROFILE)
     assert newest is not None
     assert newest["version"] == "v0.18.0"
-    assert newest_comparable_record(records, replace(PROFILE, provider="proxmox")) is None
+    assert (
+        newest_comparable_record(records, replace(PROFILE, provider="proxmox")) is None
+    )

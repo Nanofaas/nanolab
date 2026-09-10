@@ -1,6 +1,6 @@
-from __future__ import annotations
+"""Recovery checks: prove a control-plane restart leaves the functions alone."""
 
-from sonata_tasks.execution.models import CommandOptions
+from __future__ import annotations
 
 import json
 from collections.abc import Callable
@@ -11,8 +11,11 @@ from typing import Any
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
-from nanolab.tasks.compose import DockerComposeProject, WaitForDockerCompose
 from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.tasks.models import TaskResult
+
+from nanolab.tasks.compose import DockerComposeProject, WaitForDockerCompose
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.http_function import (
     Endpoint,
@@ -22,7 +25,6 @@ from nanolab.tasks.http_function import (
     HttpFunctionSetReplicasTask,
 )
 from nanolab.tasks.kubectl import KubectlTask
-from sonata_tasks.tasks.models import TaskResult
 
 
 def _result(outcome: TaskOutcome[TaskResult], title: str) -> TaskResult:
@@ -46,11 +48,12 @@ class ManagedContainerIdsTask(Task[tuple[str, ...]]):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Wrap the `docker ps` that lists this function's managed containers."""
         self.title = f"Capture managed containers for {name}"
         self._name = name
         self._command = CommandTask(
-                            title=self.title,
-                            argv=(
+            title=self.title,
+            argv=(
                 "docker",
                 "ps",
                 "-q",
@@ -59,16 +62,18 @@ class ManagedContainerIdsTask(Task[tuple[str, ...]]):
                 "--filter",
                 f"label=io.nanofaas.function={name}",
             ),
-                            executor=executor,
-                            role=role,
-                            options=CommandOptions(cwd=cwd),
-                        )
+            executor=executor,
+            role=role,
+            options=CommandOptions(cwd=cwd),
+        )
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[tuple[str, ...]]:
+        """Return the two container ids the function's replicas are running as."""
         ids = _container_ids(_result(self._command.run(inputs), self.title).stdout)
         if len(ids) != 2:
             raise RuntimeError(
-                f"{self._name}: expected exactly 2 running managed containers, got {len(ids)}"
+                f"{self._name}: expected exactly 2 running managed containers, "
+                f"got {len(ids)}"
             )
         return TaskOutcome(value=ids)
 
@@ -84,6 +89,7 @@ class RemoveManagedContainersTask(Task[None]):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Record the function names whose leftover containers should go."""
         self.title = "Clear interrupted managed containers"
         self._names = names
         self._executor = executor
@@ -91,11 +97,12 @@ class RemoveManagedContainersTask(Task[None]):
         self._cwd = cwd
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Remove every managed container the named functions left behind."""
         ids: list[str] = []
         for name in self._names:
             listed = CommandTask(
-                         title=self.title,
-                         argv=(
+                title=self.title,
+                argv=(
                     "docker",
                     "ps",
                     "-aq",
@@ -104,19 +111,19 @@ class RemoveManagedContainersTask(Task[None]):
                     "--filter",
                     f"label=io.nanofaas.function={name}",
                 ),
-                         executor=self._executor,
-                         role=self._role,
-                         options=CommandOptions(cwd=self._cwd),
-                     )
+                executor=self._executor,
+                role=self._role,
+                options=CommandOptions(cwd=self._cwd),
+            )
             ids.extend(_container_ids(_result(listed.run(inputs), self.title).stdout))
         if ids:
             _ = CommandTask(
-                    title=self.title,
-                    argv=("docker", "rm", "-f", *ids),
-                    executor=self._executor,
-                    role=self._role,
-                    options=CommandOptions(cwd=self._cwd),
-                ).run(inputs)
+                title=self.title,
+                argv=("docker", "rm", "-f", *ids),
+                executor=self._executor,
+                role=self._role,
+                options=CommandOptions(cwd=self._cwd),
+            ).run(inputs)
         return TaskOutcome(value=None)
 
 
@@ -128,6 +135,7 @@ def managed_container_cleanup_resource(
     cwd: Path | None = None,
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[None]:
+    """Wrap the cleanup task as a resource, so the compiler places it."""
     cleanup = RemoveManagedContainersTask(names, executor=executor, role=role, cwd=cwd)
     return compensated_resource(
         title=cleanup.title,
@@ -151,6 +159,7 @@ class ContainerPersistentRecoveryTask(Task[None]):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Record the function, its compose project and the endpoint to probe."""
         self.title = f"Recover {name} after control-plane restart"
         self._name = name
         self._payload = payload
@@ -161,6 +170,7 @@ class ContainerPersistentRecoveryTask(Task[None]):
         self._cwd = cwd
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Restart the compose control plane and check the function survived it."""
         _ = HttpFunctionSetReplicasTask(
             self._name,
             replicas=2,
@@ -177,12 +187,16 @@ class ContainerPersistentRecoveryTask(Task[None]):
             role=self._role,
             cwd=self._cwd,
         ).run(inputs)
-        before = ManagedContainerIdsTask(
-            self._name, executor=self._executor, role=self._role, cwd=self._cwd
-        ).run(inputs).value
+        before = (
+            ManagedContainerIdsTask(
+                self._name, executor=self._executor, role=self._role, cwd=self._cwd
+            )
+            .run(inputs)
+            .value
+        )
         _ = CommandTask(
-                title="Restart Docker Compose control plane",
-                argv=(
+            title="Restart Docker Compose control plane",
+            argv=(
                 "docker",
                 "compose",
                 "-f",
@@ -192,10 +206,10 @@ class ContainerPersistentRecoveryTask(Task[None]):
                 "restart",
                 "control-plane",
             ),
-                executor=self._executor,
-                role=self._role,
-                options=CommandOptions(env=self._project.env, cwd=self._cwd),
-            ).run(inputs)
+            executor=self._executor,
+            role=self._role,
+            options=CommandOptions(env=self._project.env, cwd=self._cwd),
+        ).run(inputs)
         _ = WaitForDockerCompose(
             self._project,
             executor=self._executor,
@@ -218,12 +232,17 @@ class ContainerPersistentRecoveryTask(Task[None]):
             role=self._role,
             cwd=self._cwd,
         ).run(inputs)
-        after = ManagedContainerIdsTask(
-            self._name, executor=self._executor, role=self._role, cwd=self._cwd
-        ).run(inputs).value
+        after = (
+            ManagedContainerIdsTask(
+                self._name, executor=self._executor, role=self._role, cwd=self._cwd
+            )
+            .run(inputs)
+            .value
+        )
         if after != before:
             raise RuntimeError(
-                f"{self._name}: managed container IDs changed from {before!r} to {after!r}"
+                f"{self._name}: managed container IDs changed from "
+                f"{before!r} to {after!r}"
             )
         _ = HttpFunctionInvokeTask(
             self._name,
@@ -308,6 +327,7 @@ class KubernetesPersistentRecoveryTask(Task[None]):
         sleep_fn: Callable[[float], None] = sleep,
         cwd: Path | None = None,
     ) -> None:
+        """Record the function, its namespace, endpoint and polling budget."""
         self.title = f"Recover {name} after Kubernetes control-plane restart"
         self._name = name
         self._payload = payload
@@ -341,59 +361,113 @@ class KubernetesPersistentRecoveryTask(Task[None]):
         return _control_plane_pod(result.stdout)
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Restart the control-plane pod and check the function's resources stayed."""
         _ = HttpFunctionSetReplicasTask(
-            self._name, replicas=2, endpoint=self._endpoint, executor=self._executor,
-            role=self._role, cwd=self._cwd,
+            self._name,
+            replicas=2,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
         ).run(inputs)
         _ = HttpFunctionReplicaStatusTask(
-            self._name, replicas=2, endpoint=self._endpoint, executor=self._executor,
-            role=self._role, cwd=self._cwd,
+            self._name,
+            replicas=2,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
         ).run(inputs)
         deployment = f"deployment/fn-{self._name}"
         service = f"service/fn-{self._name}"
         before = (
-            _uid(deployment, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
-            _uid(service, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
+            _uid(
+                deployment,
+                namespace=self._namespace,
+                executor=self._executor,
+                role=self._role,
+                cwd=self._cwd,
+                inputs=inputs,
+            ),
+            _uid(
+                service,
+                namespace=self._namespace,
+                executor=self._executor,
+                role=self._role,
+                cwd=self._cwd,
+                inputs=inputs,
+            ),
         )
         pod_name, pod_uid, ready = self._pod(inputs)
         if not ready:
             raise RuntimeError("control-plane pod is not Ready before restart")
         _ = KubectlTask(
-                "delete",
-                "pod",
-                pod_name,
-                "--wait=true",
-                executor=self._executor,
-                role=self._role,
-                namespace=self._namespace,
-                title="Restart Kubernetes control plane",
-                options=CommandOptions(cwd=self._cwd),
-            ).run(inputs)
+            "delete",
+            "pod",
+            pod_name,
+            "--wait=true",
+            executor=self._executor,
+            role=self._role,
+            namespace=self._namespace,
+            title="Restart Kubernetes control plane",
+            options=CommandOptions(cwd=self._cwd),
+        ).run(inputs)
         deadline = self._clock() + self._timeout_seconds
         while True:
             replacement_name, replacement_uid, replacement_ready = self._pod(inputs)
             if replacement_uid != pod_uid and replacement_ready:
                 break
             if self._clock() >= deadline:
-                raise RuntimeError("replacement control-plane pod did not become Ready in time")
+                raise RuntimeError(
+                    "replacement control-plane pod did not become Ready in time"
+                )
             self._sleep(self._poll_seconds)
         _ = replacement_name
         _ = HttpFunctionBackendTask(
-            self._name, backend="k8s", endpoint=self._endpoint, executor=self._executor,
-            role=self._role, cwd=self._cwd,
+            self._name,
+            backend="k8s",
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
         ).run(inputs)
         _ = HttpFunctionReplicaStatusTask(
-            self._name, replicas=2, endpoint=self._endpoint, executor=self._executor,
-            role=self._role, cwd=self._cwd,
+            self._name,
+            replicas=2,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
         ).run(inputs)
         after = (
-            _uid(deployment, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
-            _uid(service, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
+            _uid(
+                deployment,
+                namespace=self._namespace,
+                executor=self._executor,
+                role=self._role,
+                cwd=self._cwd,
+                inputs=inputs,
+            ),
+            _uid(
+                service,
+                namespace=self._namespace,
+                executor=self._executor,
+                role=self._role,
+                cwd=self._cwd,
+                inputs=inputs,
+            ),
         )
         if after != before:
-            raise RuntimeError(f"{self._name}: function resource UIDs changed from {before!r} to {after!r}")
+            raise RuntimeError(
+                f"{self._name}: function resource UIDs changed from "
+                f"{before!r} to {after!r}"
+            )
         _ = HttpFunctionInvokeTask(
-            self._name, payload=self._payload, endpoint=self._endpoint, executor=self._executor,
-            role=self._role, cwd=self._cwd,
+            self._name,
+            payload=self._payload,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
         ).run(inputs)
         return TaskOutcome(value=None)

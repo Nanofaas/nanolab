@@ -1,3 +1,10 @@
+"""The `release` command group: prepare a version for the guarded release.
+
+`release prepare` requires a clean checkout, writes the requested version into
+the tool's version files, and prints the paths it touched so they can be
+committed before the release workflow runs.
+"""
+
 from __future__ import annotations
 
 import typer
@@ -12,6 +19,7 @@ def _bad_parameter(error: Exception) -> typer.BadParameter:
 
 
 def install_release_commands(app: typer.Typer) -> None:
+    """Register the `release` command group and its `prepare` command on `app`."""
     release = typer.Typer(help="Prepare a version for the guarded Azure image release.")
 
     @release.command("prepare")
@@ -26,6 +34,8 @@ def install_release_commands(app: typer.Typer) -> None:
             raise _bad_parameter(error) from error
         for path in updated:
             typer.echo(path.relative_to(paths.nanofaas_root))
-        typer.echo("Commit the prepared version changes before running the release workflow.")
+        typer.echo(
+            "Commit the prepared version changes before running the release workflow."
+        )
 
     app.add_typer(release, name="release")

@@ -6,22 +6,22 @@ from pathlib import Path
 from typing import Any
 
 from sonata_engine import Resource, Workflow
-from nanolab.tasks.offload import (
-    OffloadFunction,
-    OffloadWorkflowRequest,
-    build_offload_workflow,
-)
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.registry import docker_registry_resource
+
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans.functions import resolve_function
 from nanolab.tasks.deployment import (
     LOCAL_CONTROL_PLANE_API_PORT,
     LOCAL_CONTROL_PLANE_MANAGEMENT_PORT,
     REGISTRY_CONTAINER_NAME,
 )
-from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from sonata_tasks.registry import docker_registry_resource
-
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.functions import resolve_function
+from nanolab.tasks.offload import (
+    OffloadFunction,
+    OffloadWorkflowRequest,
+    build_offload_workflow,
+)
 
 JAR_PATH = "platform/control-plane/build/libs/app.jar"
 
@@ -40,7 +40,10 @@ def _health_probe(management_url: str) -> Callable[[], bool]:
 
     def ready() -> bool:
         try:
-            with urllib.request.urlopen(health_url, timeout=1) as response:
+            # `management_url` reaches here only from this module's
+            # EDGE_MANAGEMENT/CLOUD_MANAGEMENT constants, both literal
+            # 127.0.0.1 http URLs, so no scheme is caller-chosen.
+            with urllib.request.urlopen(health_url, timeout=1) as response:  # nosec B310
                 return response.status == 200
         except OSError:
             return False
@@ -49,7 +52,7 @@ def _health_probe(management_url: str) -> Callable[[], bool]:
 
 
 def _cloud_argv(repo_root: Path) -> tuple[str, ...]:
-    """The instance that actually runs the function, on the container backend."""
+    """Return the argv for the cloud instance, which runs the function itself."""
     return (
         "java",
         "-jar",
@@ -64,7 +67,7 @@ def _cloud_argv(repo_root: Path) -> tuple[str, ...]:
 
 
 def _edge_argv(repo_root: Path) -> tuple[str, ...]:
-    """The instance that holds no implementation and proxies to the cloud."""
+    """Return the argv for the edge instance, which proxies to the cloud."""
     return (
         "java",
         "-jar",
@@ -127,7 +130,9 @@ def build_offload_plan(
         edge_management=EDGE_MANAGEMENT,
     )
     registry = docker_registry_resource(
-        executor=RoleBoundCommandTaskExecutor(bindings), role="host", container=REGISTRY_CONTAINER_NAME
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        role="host",
+        container=REGISTRY_CONTAINER_NAME,
     )
     return build_offload_workflow(
         request,
@@ -136,7 +141,9 @@ def build_offload_plan(
         cloud=_plane(
             "Acquire cloud control plane", _cloud_argv(root), CLOUD_MANAGEMENT, root
         ),
-        edge=_plane("Acquire edge control plane", _edge_argv(root), EDGE_MANAGEMENT, root),
+        edge=_plane(
+            "Acquire edge control plane", _edge_argv(root), EDGE_MANAGEMENT, root
+        ),
         push_function_images=True,
         push_requires=(registry,),
         function_requires=(registry,),

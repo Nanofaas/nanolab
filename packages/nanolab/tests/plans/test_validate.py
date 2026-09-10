@@ -3,20 +3,17 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.functions.catalog import list_functions
-from nanolab.plans.functions import resolve_function, sonata_function
-from nanolab.plans.validate import build_validate_plan
 from sonata_engine import Workflow
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.functions.catalog import list_functions
+from nanolab.plans.functions import resolve_function, sonata_function
+from nanolab.plans.validate import build_validate_plan
 
-DEPLOYMENT_PAYLOAD = (
-    '{"spec":{"template":{"spec":{"containers":[{"resources":{}}]}}}}'
-)
+DEPLOYMENT_PAYLOAD = '{"spec":{"template":{"spec":{"containers":[{"resources":{}}]}}}}'
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 HANDLER_ENVELOPE_FUNCTIONS = (
     "json-transform-exec",
@@ -54,8 +51,11 @@ EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS = {"figlet-exec", "figlet-java", "mlimage-py
 
 @dataclass
 class RecordingExecutor:
-    """Answers enough for a whole k8s run: an address for the Service, a
-    Deployment payload for the inspection, success for everything else."""
+    """Answer enough for a whole k8s run.
+
+    It gives an address for the Service, a Deployment payload for the
+    inspection, and success for everything else.
+    """
 
     seen: list[CommandTaskSpec] = field(default_factory=list)
 
@@ -100,12 +100,12 @@ def _plan(backend: str, **config: object) -> Workflow:
                 **config,
             }
         ),
-        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
     )
 
 
 def _argv(plan: Workflow, fragment: str) -> tuple[str, ...]:
-    """The argv of the one compiled task whose title contains `fragment`."""
+    """Return the argv of the compiled task whose title contains `fragment`."""
     matches = [
         task.task.argv  # pyright: ignore[reportAttributeAccessIssue]
         for task in plan.compile().tasks
@@ -119,8 +119,10 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
     host = RecordingExecutor()
     stack = RecordingExecutor()
     plan = build_validate_plan(
-        ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
-        RoleBindings({'host': host, 'stack': stack}),
+        ScenarioConfig(
+            workflow="validate", backend="k8s", functions=["word-stats-java"]
+        ),
+        RoleBindings({"host": host, "stack": stack}),
     )
 
     # The workflow itself validates deploy, invoke and resource propagation.
@@ -128,7 +130,9 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
     assert host.seen == []
 
 
-def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises() -> None:
+def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises() -> (
+    None
+):
     build = _argv(_plan("k8s"), "Build control plane")
 
     assert "-PcontrolPlaneModules=k8s-deployment-provider,sync-queue" in build
@@ -137,8 +141,10 @@ def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises
 def test_kubernetes_validation_runs_the_queue_burst_with_k6() -> None:
     stack = RecordingExecutor()
     plan = build_validate_plan(
-        ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
-        RoleBindings({'host': RecordingExecutor(), 'stack': stack}),
+        ScenarioConfig(
+            workflow="validate", backend="k8s", functions=["word-stats-java"]
+        ),
+        RoleBindings({"host": RecordingExecutor(), "stack": stack}),
     )
 
     plan.run()
@@ -152,8 +158,10 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     host = RecordingExecutor()
     stack = RecordingExecutor()
     build_validate_plan(
-        ScenarioConfig(workflow="validate", backend="container", functions=["word-stats-java"]),
-        RoleBindings({'host': host, 'stack': stack}),
+        ScenarioConfig(
+            workflow="validate", backend="container", functions=["word-stats-java"]
+        ),
+        RoleBindings({"host": host, "stack": stack}),
     )
 
     assert stack.seen == []
@@ -176,7 +184,7 @@ def test_persistent_recovery_k8s_plan_restarts_only_the_control_plane() -> None:
     assert "Recover word-stats-java after Kubernetes control-plane restart" in titles
 
 
-def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_function() -> None:
+def test_handler_envelope_validation_adds_a_contract_task_per_function() -> None:
     plan = build_validate_plan(
         ScenarioConfig.model_validate(
             {
@@ -186,7 +194,7 @@ def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_funct
                 "handler_envelope": True,
             }
         ),
-        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
     )
 
     titles = [task.task.title for task in plan.compile().tasks]
@@ -206,22 +214,28 @@ def test_handler_envelope_validation_requires_every_contract_function() -> None:
                     "workflow": "validate",
                     "backend": "container",
                     "functions": [
-                        key for key in HANDLER_ENVELOPE_FUNCTIONS if key != "qr-code-java"
+                        key
+                        for key in HANDLER_ENVELOPE_FUNCTIONS
+                        if key != "qr-code-java"
                     ],
                     "handler_envelope": True,
                 }
             ),
-            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
+            RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
         )
 
 
-def test_handler_envelope_container_scenario_runs_every_deterministic_function() -> None:
+def test_handler_envelope_container_scenario_runs_every_deterministic_function() -> (
+    None
+):
     config = ScenarioConfig.model_validate(
-        yaml.safe_load((NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text())
+        yaml.safe_load(
+            (NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text()
+        )
     )
     plan = build_validate_plan(
         config,
-        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
     )
 
     assert config.backend == "container"
@@ -244,7 +258,9 @@ def test_handler_envelope_container_excludes_only_nondeterministic_catalog_funct
     nanofaas_root: Path,
 ) -> None:
     config = ScenarioConfig.model_validate(
-        yaml.safe_load((NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text())
+        yaml.safe_load(
+            (NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text()
+        )
     )
 
     example_keys = {
@@ -253,7 +269,7 @@ def test_handler_envelope_container_excludes_only_nondeterministic_catalog_funct
         if function.example_dir is not None
     }
 
-    assert EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS <= example_keys
+    assert example_keys >= EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
     assert set(config.functions) == example_keys - EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
 
 
@@ -267,7 +283,8 @@ def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> N
         }
     )
     plan = build_validate_plan(
-        config, RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()})
+        config,
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
     )
 
     probe = _argv(plan, "Verify handler-envelope HTTP envelope")
@@ -282,10 +299,24 @@ def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> N
     assert roman[-2] == '{"input":{}}'
     assert transform[-2] == '{"input":{}}'
     plain = _argv(plan, "Verify word-stats-java HTTP envelope")
-    assert plain[-2] == sonata_function(resolve_function(config, "word-stats-java")).payload
-    for key in ("handler-envelope-exec", "handler-envelope-go", "handler-envelope-java", "handler-envelope-javascript", "handler-envelope-python"):
-        probe = _argv(plan, f"Verify {resolve_function(config, key).name} HTTP envelope")
-        assert probe[-2] == '{"input":{"message":"body-sentinel"},"headers":{"x-e2e-token":"forged"}}'
+    assert (
+        plain[-2]
+        == sonata_function(resolve_function(config, "word-stats-java")).payload
+    )
+    for key in (
+        "handler-envelope-exec",
+        "handler-envelope-go",
+        "handler-envelope-java",
+        "handler-envelope-javascript",
+        "handler-envelope-python",
+    ):
+        probe = _argv(
+            plan, f"Verify {resolve_function(config, key).name} HTTP envelope"
+        )
+        assert (
+            probe[-2] == '{"input":{"message":"body-sentinel"},'
+            '"headers":{"x-e2e-token":"forged"}}'
+        )
         assert "X-E2E-Token: header-sentinel" in probe
     binary = _argv(plan, "Verify binary-envelope-java HTTP envelope")
     assert binary[-2] == '{"input":{}}'
@@ -311,7 +342,8 @@ def test_plain_and_header_probe_contracts_reject_unexpected_api_markers(
         }
     )
     plan = build_validate_plan(
-        config, RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()})
+        config,
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
     )
     tasks = {task.task.title: task.task for task in plan.compile().tasks}
     responses = {
@@ -355,7 +387,9 @@ def test_validate_plan_builds_java_lite_with_its_native_dockerfile() -> None:
     assert image_build[-2:] == ("functions/java/word-stats-lite/Dockerfile", ".")
 
 
-def test_container_validation_builds_and_deploys_the_control_plane_with_compose() -> None:
+def test_container_validation_builds_and_deploys_the_control_plane_with_compose() -> (
+    None
+):
     ids = [task.task_id for task in _plan("container").compile().tasks]
 
     assert ids == [
@@ -387,7 +421,7 @@ def test_container_validation_owns_an_isolated_compose_project(
             backend="container",
             functions=["word-stats-java"],
         ),
-        RoleBindings({'host': host, 'stack': RecordingExecutor()}),
+        RoleBindings({"host": host, "stack": RecordingExecutor()}),
     )
 
     plan.run()
@@ -433,14 +467,17 @@ def test_async_load_enables_async_modules_on_the_compose_control_plane(
                 "async_load": True,
             }
         ),
-        RoleBindings({'host': host, 'stack': RecordingExecutor()}),
+        RoleBindings({"host": host, "stack": RecordingExecutor()}),
         repo_root=checkout,
     )
 
     plan.run()
 
     compose = next(spec for spec in host.seen if spec.argv[:2] == ("docker", "compose"))
-    assert compose.options.env["NANOFAAS_CONTROL_PLANE_MODULES"] == "container-deployment-provider,async-queue"
+    assert (
+        compose.options.env["NANOFAAS_CONTROL_PLANE_MODULES"]
+        == "container-deployment-provider,async-queue"
+    )
 
 
 def test_async_load_builds_an_async_check_for_every_payload_file(
@@ -459,7 +496,8 @@ def test_async_load_builds_an_async_check_for_every_payload_file(
     payloads = function_dir / "payloads"
     payloads.mkdir()
     (payloads / "happy-path.json").write_text(
-        '{"description":"d","input":{"text":"a b","topN":1},"expected":{"wordCount":2}}',
+        '{"description":"d","input":{"text":"a b","topN":1},'
+        '"expected":{"wordCount":2}}',
         encoding="utf-8",
     )
     (payloads / "missing-input.json").write_text(
@@ -476,7 +514,7 @@ def test_async_load_builds_an_async_check_for_every_payload_file(
                 "async_load": True,
             }
         ),
-        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
         repo_root=checkout,
     )
 
@@ -502,7 +540,9 @@ def test_async_container_scenario_selects_every_json_output_function() -> None:
 
 
 def test_validate_plan_resolves_build_from_the_function_catalog() -> None:
-    artifact_build = _argv(_plan("container"), "Build application artifact: word-stats-java")
+    artifact_build = _argv(
+        _plan("container"), "Build application artifact: word-stats-java"
+    )
     image_build = _argv(_plan("container"), "Build image word-stats-java")
 
     assert artifact_build[:2] == ("./gradlew", ":functions:java:word-stats:bootJar")
@@ -510,8 +550,11 @@ def test_validate_plan_resolves_build_from_the_function_catalog() -> None:
 
 
 def test_validate_plan_propagates_resource_requests_and_limits() -> None:
-    """Read off the manifest rather than a compiled task: the register command
-    lives inside the function resource's acquire, which is where it belongs."""
+    """Assert the resource requests and limits from the manifest.
+
+    Read off the manifest rather than a compiled task: the register command
+    lives inside the function resource's acquire, which is where it belongs.
+    """
     config = ScenarioConfig.model_validate(
         {
             "workflow": "validate",
@@ -526,7 +569,9 @@ def test_validate_plan_propagates_resource_requests_and_limits() -> None:
         }
     )
 
-    body = sonata_function(resolve_function(config, "word-stats-java")).manifest().json()
+    body = (
+        sonata_function(resolve_function(config, "word-stats-java")).manifest().json()
+    )
 
     assert '"memoryMiB":128' in body
     assert '"memoryMiB":512' in body
@@ -549,7 +594,7 @@ def test_validate_plan_reads_payload_from_the_nanolab_package(
             backend="container",
             functions=["word-stats-java"],
         ),
-        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
         repo_root=nanofaas_root,
         tool_root=tool_root,
     )
@@ -577,28 +622,39 @@ def test_validate_plan_resolves_function_manifest_from_its_repo_root(
         )
     monkeypatch.setenv("NANOFAAS_ROOT", str(checkout_b))
 
-    config = ScenarioConfig(workflow="validate", backend="container", functions=["word-stats-java"])
+    config = ScenarioConfig(
+        workflow="validate", backend="container", functions=["word-stats-java"]
+    )
     plan = build_validate_plan(
         config,
-        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
+        RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
         repo_root=checkout_a,
     )
-    manifest = sonata_function(
-        resolve_function(config, "word-stats-java", source_root=checkout_a)
-    ).manifest().json()
+    manifest = (
+        sonata_function(
+            resolve_function(config, "word-stats-java", source_root=checkout_a)
+        )
+        .manifest()
+        .json()
+    )
 
     assert _argv(plan, "Invoke from-checkout-a")
     assert '"name":"from-checkout-a"' in manifest
     assert '"image":"registry.example/from-a"' in manifest
 
 
-def test_a_kubernetes_run_installs_the_chart_and_registers_against_the_resolved_address() -> None:
-    """Run it: the install and the register only exist inside the resources'
-    acquires, so nothing about them is visible in the compiled unit list."""
+def test_kubernetes_run_installs_the_chart_and_registers_the_service_address() -> None:
+    """Run the whole plan, not just its compiled unit list.
+
+    The install and the register only exist inside the resources' acquires, so
+    nothing about them is visible in the compiled unit list.
+    """
     stack = RecordingExecutor()
     plan = build_validate_plan(
-        ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
-        RoleBindings({'host': RecordingExecutor(), 'stack': stack}),
+        ScenarioConfig(
+            workflow="validate", backend="k8s", functions=["word-stats-java"]
+        ),
+        RoleBindings({"host": RecordingExecutor(), "stack": stack}),
     )
 
     plan.run()

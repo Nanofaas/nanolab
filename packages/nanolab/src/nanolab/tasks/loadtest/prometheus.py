@@ -1,6 +1,8 @@
+"""Prometheus queries used by the load-test report."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sonata_tasks.prometheus import (
     HttpPrometheusClient,
@@ -10,6 +12,7 @@ from sonata_tasks.prometheus import (
 
 
 def sum_series_by_timestamp(series: tuple[PrometheusSeries, ...]) -> dict[float, float]:
+    """Add the samples of `series` that share a timestamp into one map."""
     merged: dict[float, float] = {}
     for item in series:
         for sample in item.samples:
@@ -18,20 +21,33 @@ def sum_series_by_timestamp(series: tuple[PrometheusSeries, ...]) -> dict[float,
 
 
 def _client(base_url: str, timeout_seconds: float = 20) -> HttpPrometheusClient:
-    return HttpPrometheusClient(base_url, timeout_seconds=timeout_seconds,
-                                retry_policy=PrometheusRetryPolicy(
-                                    attempts=3, backoff_seconds=2))
+    return HttpPrometheusClient(
+        base_url,
+        timeout_seconds=timeout_seconds,
+        retry_policy=PrometheusRetryPolicy(attempts=3, backoff_seconds=2),
+    )
 
 
 def query_prometheus_server_time(base_url: str, timeout_seconds: float = 20) -> float:
+    """Return Prometheus's current clock as epoch seconds."""
     return _client(base_url, timeout_seconds).server_time()
 
 
-def query_prometheus_range_series(base_url: str, metric_name: str, start: datetime,
-                                  end: datetime, step_seconds: int = 2
-                                  ) -> list[dict[str, float | str]]:
+def query_prometheus_range_series(
+    base_url: str,
+    metric_name: str,
+    start: datetime,
+    end: datetime,
+    step_seconds: int = 2,
+) -> list[dict[str, float | str]]:
+    """Return `metric_name` samples over the range as sorted timestamp/value dicts."""
     merged = sum_series_by_timestamp(
         _client(base_url).query_range(metric_name, start, end, step_seconds)
     )
-    return [{"timestamp": datetime.fromtimestamp(timestamp, timezone.utc).isoformat(),
-             "value": float(merged[timestamp])} for timestamp in sorted(merged)]
+    return [
+        {
+            "timestamp": datetime.fromtimestamp(timestamp, UTC).isoformat(),
+            "value": float(merged[timestamp]),
+        }
+        for timestamp in sorted(merged)
+    ]

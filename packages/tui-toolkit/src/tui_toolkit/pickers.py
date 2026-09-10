@@ -6,6 +6,7 @@ from the active UIContext.
 
 Non-TTY environments fall back to plain questionary prompts.
 """
+
 from __future__ import annotations
 
 import sys
@@ -20,7 +21,8 @@ from prompt_toolkit.layout import Dimension, Layout
 from prompt_toolkit.layout.containers import HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.widgets import CheckboxList, Frame
-from questionary.prompts.common import Choice as _QChoice, InquirerControl
+from questionary.prompts.common import Choice as _QChoice
+from questionary.prompts.common import InquirerControl
 
 from tui_toolkit.console import get_content_width
 from tui_toolkit.context import get_ui
@@ -29,6 +31,13 @@ from tui_toolkit.theme import to_questionary_style
 
 @dataclass(frozen=True, slots=True)
 class Choice:
+    """A picker entry: the row title, its returned value and panel description.
+
+    ``select``/``multiselect`` accept these alongside raw strings and
+    questionary choices; the description is shown in the side panel of the
+    full-screen picker.
+    """
+
     title: str
     value: str
     description: str = ""
@@ -48,7 +57,9 @@ _EMPTY_CHOICES_ERROR = "choices must not be empty"
 
 def _normalize_choice(choice: Any) -> Any:
     if isinstance(choice, Choice):
-        return questionary.Choice(choice.title, choice.value, description=choice.description)
+        return questionary.Choice(
+            choice.title, choice.value, description=choice.description
+        )
     if isinstance(choice, questionary.Separator):
         return choice
     if isinstance(choice, _QChoice):
@@ -91,7 +102,9 @@ def _description_fragments(control: InquirerControl) -> list[tuple[str, str]]:
     return [(_TEXT_STYLE, getattr(current, "description", "") or "")]
 
 
-def _checkbox_description_fragments(checkbox_list: CheckboxList, choices: list[Any]) -> list[tuple[str, str]]:
+def _checkbox_description_fragments(
+    checkbox_list: CheckboxList, choices: list[Any]
+) -> list[tuple[str, str]]:
     selected_index = getattr(checkbox_list, "_selected_index", 0)
     current = choices[selected_index]
     description = getattr(current, "description", "") or ""
@@ -99,11 +112,16 @@ def _checkbox_description_fragments(checkbox_list: CheckboxList, choices: list[A
     return [
         (_TEXT_STYLE, description),
         ("", "\n\n"),
-        ("class:instruction", f"Space toggle | Enter confirm | Selected: {selected_count}"),
+        (
+            "class:instruction",
+            f"Space toggle | Enter confirm | Selected: {selected_count}",
+        ),
     ]
 
 
-def _build_header_block(*, message: str, screen_title: str, screen_breadcrumb: str) -> HSplit:
+def _build_header_block(
+    *, message: str, screen_title: str, screen_breadcrumb: str
+) -> HSplit:
     brand = get_ui().brand
     ascii_logo = brand.ascii_logo
     wordmark = brand.wordmark
@@ -111,25 +129,37 @@ def _build_header_block(*, message: str, screen_title: str, screen_breadcrumb: s
 
     children: list[Window] = []
     if ascii_logo:
-        children.append(Window(
-            height=logo_lines,
-            content=FormattedTextControl(lambda: [("class:brand", ascii_logo)]),
-        ))
-    children.append(Window(
-        height=1,
-        content=FormattedTextControl(lambda: [
-            ("class:brand", wordmark),
-            (_TEXT_STYLE, f"  {screen_title}" if wordmark else screen_title),
-        ]),
-    ))
-    children.append(Window(
-        height=1,
-        content=FormattedTextControl(lambda: [("class:breadcrumb", screen_breadcrumb)]),
-    ))
-    children.append(Window(
-        height=1,
-        content=FormattedTextControl(lambda: _select_prompt_fragments(message)),
-    ))
+        children.append(
+            Window(
+                height=logo_lines,
+                content=FormattedTextControl(lambda: [("class:brand", ascii_logo)]),
+            )
+        )
+    children.append(
+        Window(
+            height=1,
+            content=FormattedTextControl(
+                lambda: [
+                    ("class:brand", wordmark),
+                    (_TEXT_STYLE, f"  {screen_title}" if wordmark else screen_title),
+                ]
+            ),
+        )
+    )
+    children.append(
+        Window(
+            height=1,
+            content=FormattedTextControl(
+                lambda: [("class:breadcrumb", screen_breadcrumb)]
+            ),
+        )
+    )
+    children.append(
+        Window(
+            height=1,
+            content=FormattedTextControl(lambda: _select_prompt_fragments(message)),
+        )
+    )
     return HSplit(children)
 
 
@@ -148,12 +178,18 @@ def _build_select_application(
     style = to_questionary_style(get_ui().theme)
     normalized = _normalize_choices(choices)
     screen_title = title or _screen_title(message)
-    screen_breadcrumb = breadcrumb or _screen_breadcrumb(screen_title, brand.default_breadcrumb)
+    screen_breadcrumb = breadcrumb or _screen_breadcrumb(
+        screen_title, brand.default_breadcrumb
+    )
     screen_footer = footer_hint or brand.default_footer_hint
 
     control = InquirerControl(
-        normalized, default=default, initial_choice=default,
-        use_indicator=False, show_selected=False, show_description=False,
+        normalized,
+        default=default,
+        initial_choice=default,
+        use_indicator=False,
+        show_selected=False,
+        show_description=False,
         use_arrow_keys=True,
     )
 
@@ -199,31 +235,44 @@ def _build_select_application(
         """Swallow unbound keys so they do not reach prompt_toolkit's defaults."""
 
     header_block = _build_header_block(
-        message=message, screen_title=screen_title, screen_breadcrumb=screen_breadcrumb,
+        message=message,
+        screen_title=screen_title,
+        screen_breadcrumb=screen_breadcrumb,
     )
     selector = Window(
-        content=control, dont_extend_height=True,
+        content=control,
+        dont_extend_height=True,
         width=Dimension(weight=_PANEL_WEIGHT, min=_SELECTOR_MIN_WIDTH),
     )
     description = Frame(
         Window(
             content=FormattedTextControl(lambda: _description_fragments(control)),
-            wrap_lines=True, dont_extend_height=False,
+            wrap_lines=True,
+            dont_extend_height=False,
         ),
         title="Description",
         width=Dimension(weight=_PANEL_WEIGHT, min=_DESCRIPTION_MIN_WIDTH),
     )
     body = VSplit(
         [selector, description],
-        padding=2, width=Dimension(preferred=get_content_width()),
+        padding=2,
+        width=Dimension(preferred=get_content_width()),
     )
 
     return Application(
         layout=Layout(
-            HSplit([
-                header_block, body,
-                Window(height=1, content=FormattedTextControl(lambda: [("class:footer", screen_footer)])),
-            ]),
+            HSplit(
+                [
+                    header_block,
+                    body,
+                    Window(
+                        height=1,
+                        content=FormattedTextControl(
+                            lambda: [("class:footer", screen_footer)]
+                        ),
+                    ),
+                ]
+            ),
             focused_element=selector,
         ),
         key_bindings=bindings,
@@ -253,8 +302,12 @@ def _build_multiselect_application(
         raise ValueError(_EMPTY_CHOICES_ERROR)
 
     screen_title = title or _screen_title(message)
-    screen_breadcrumb = breadcrumb or _screen_breadcrumb(screen_title, brand.default_breadcrumb)
-    screen_footer = footer_hint or "Space toggle | Enter confirm | Esc cancel | Ctrl+C exit"
+    screen_breadcrumb = breadcrumb or _screen_breadcrumb(
+        screen_title, brand.default_breadcrumb
+    )
+    screen_footer = (
+        footer_hint or "Space toggle | Enter confirm | Esc cancel | Ctrl+C exit"
+    )
 
     checkbox_list = CheckboxList(
         values=[(c.value, c.title) for c in normalized],
@@ -269,7 +322,9 @@ def _build_multiselect_application(
     def _toggle() -> None:
         cv = checkbox_list.values[checkbox_list._selected_index][0]
         if cv in checkbox_list.current_values:
-            checkbox_list.current_values = [v for v in checkbox_list.current_values if v != cv]
+            checkbox_list.current_values = [
+                v for v in checkbox_list.current_values if v != cv
+            ]
             return
         checkbox_list.current_values = [*checkbox_list.current_values, cv]
 
@@ -297,35 +352,52 @@ def _build_multiselect_application(
 
     @bindings.add(Keys.ControlM, eager=True)
     def _accept(event):
-        ordered = [v for v, _ in checkbox_list.values if v in checkbox_list.current_values]
+        ordered = [
+            v for v, _ in checkbox_list.values if v in checkbox_list.current_values
+        ]
         event.app.exit(result=ordered)
 
     header_block = _build_header_block(
-        message=message, screen_title=screen_title, screen_breadcrumb=screen_breadcrumb,
+        message=message,
+        screen_title=screen_title,
+        screen_breadcrumb=screen_breadcrumb,
     )
     selector = Frame(
-        checkbox_list, title="Select",
+        checkbox_list,
+        title="Select",
         width=Dimension(weight=_PANEL_WEIGHT, min=_SELECTOR_MIN_WIDTH),
     )
     description = Frame(
         Window(
-            content=FormattedTextControl(lambda: _checkbox_description_fragments(checkbox_list, normalized)),
-            wrap_lines=True, dont_extend_height=False,
+            content=FormattedTextControl(
+                lambda: _checkbox_description_fragments(checkbox_list, normalized)
+            ),
+            wrap_lines=True,
+            dont_extend_height=False,
         ),
         title="Description",
         width=Dimension(weight=_PANEL_WEIGHT, min=_DESCRIPTION_MIN_WIDTH),
     )
     body = VSplit(
         [selector, description],
-        padding=2, width=Dimension(preferred=get_content_width()),
+        padding=2,
+        width=Dimension(preferred=get_content_width()),
     )
 
     return Application(
         layout=Layout(
-            HSplit([
-                header_block, body,
-                Window(height=1, content=FormattedTextControl(lambda: [("class:footer", screen_footer)])),
-            ]),
+            HSplit(
+                [
+                    header_block,
+                    body,
+                    Window(
+                        height=1,
+                        content=FormattedTextControl(
+                            lambda: [("class:footer", screen_footer)]
+                        ),
+                    ),
+                ]
+            ),
             focused_element=checkbox_list,
         ),
         key_bindings=bindings,
@@ -371,14 +443,23 @@ def select(
     style = to_questionary_style(get_ui().theme)
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        return _ask(lambda: questionary.select(
-            message, choices=_normalize_choices(choices), default=default,
-            style=style, show_description=True,
-        ).ask())
+        return _ask(
+            lambda: questionary.select(
+                message,
+                choices=_normalize_choices(choices),
+                default=default,
+                style=style,
+                show_description=True,
+            ).ask()
+        )
 
     app = _build_select_application(
-        message, choices,
-        default=default, title=title, breadcrumb=breadcrumb, footer_hint=footer_hint,
+        message,
+        choices,
+        default=default,
+        title=title,
+        breadcrumb=breadcrumb,
+        footer_hint=footer_hint,
     )
     result = app.run()
     if result is _ESCAPE_RESULT:
@@ -406,16 +487,25 @@ def multiselect(
     style = to_questionary_style(get_ui().theme)
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        # Questionary accepts multiple defaults at runtime but types this argument as one string.
+        # Questionary accepts multiple defaults at runtime but types this
+        # argument as one string.
         checkbox = cast(Any, questionary.checkbox)
-        return _ask(lambda: checkbox(
-            message, choices=_normalize_choices(choices),
-            default=default_values, style=style,
-        ).ask())
+        return _ask(
+            lambda: checkbox(
+                message,
+                choices=_normalize_choices(choices),
+                default=default_values,
+                style=style,
+            ).ask()
+        )
 
     app = _build_multiselect_application(
-        message, choices,
-        default_values=default_values, title=title, breadcrumb=breadcrumb, footer_hint=footer_hint,
+        message,
+        choices,
+        default_values=default_values,
+        title=title,
+        breadcrumb=breadcrumb,
+        footer_hint=footer_hint,
     )
     result = app.run()
     if result is None:

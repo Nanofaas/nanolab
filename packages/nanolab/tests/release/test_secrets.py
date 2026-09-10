@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import importlib
+import stat
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
-import stat
 from tempfile import mkdtemp
-import traceback
-
 from typing import Any
 
 import pytest
 from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 
-from nanolab.release.secrets import _run, validate_secret_file
 from nanolab.release.resources import ghcr_credentials_resource
+from nanolab.release.secrets import _run, validate_secret_file
 
 
 @dataclass
@@ -74,7 +73,7 @@ class _Provider:
         return _Result()
 
 
-class _BodyFailure(RuntimeError):
+class _BodyFailureError(RuntimeError):
     pass
 
 
@@ -87,18 +86,22 @@ def test_remote_credential_command_does_not_translate_programming_errors() -> No
         _run(BrokenProvider(), object(), ("true",))
 
 
-def test_credential_lifecycle_cleans_then_propagates_programming_errors(tmp_path: Path) -> None:
+def test_credential_lifecycle_cleans_then_propagates_programming_errors(
+    tmp_path: Path,
+) -> None:
     token = tmp_path / "ghcr-token"
     token.write_text("token", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider()
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(ValueError, match="bad workflow contract"):
-        with module.stage_ghcr_credentials(
+    with (
+        pytest.raises(ValueError, match="bad workflow contract"),
+        module.stage_ghcr_credentials(
             provider, object(), username="release-user", token_file=token
-        ):
-            raise ValueError("bad workflow contract")
+        ),
+    ):
+        raise ValueError("bad workflow contract")
 
     assert provider.exec_calls[-1][0][:3] == ("rm", "-rf", "--")
 
@@ -149,7 +152,7 @@ def test_ghcr_resource_releases_staged_credentials(tmp_path: Path) -> None:
     assert "fixture-ghcr-token-must-not-leak" not in repr(lease)
 
 
-@pytest.mark.parametrize("failure", (RuntimeError("failed"), KeyboardInterrupt()))
+@pytest.mark.parametrize("failure", [RuntimeError("failed"), KeyboardInterrupt()])
 def test_credential_resource_cleans_on_failure_interrupt_and_keep(
     tmp_path: Path, failure: BaseException
 ) -> None:
@@ -244,7 +247,9 @@ def test_validate_secret_file_rejects_symlink(tmp_path: Path) -> None:
         validate_secret_file(link)
 
 
-def test_validate_secret_file_rejects_group_or_world_permissions(tmp_path: Path) -> None:
+def test_validate_secret_file_rejects_group_or_world_permissions(
+    tmp_path: Path,
+) -> None:
     secret = tmp_path / "token"
     secret.write_text("fixture-token", encoding="utf-8")
     secret.chmod(0o640)
@@ -298,14 +303,16 @@ def test_staging_rejects_secret_replaced_by_symlink(
 
     monkeypatch.setattr(module, "validate_secret_file", replace_after_validation)
 
-    with pytest.raises(ValueError, match="regular file"):
-        with module.stage_ghcr_credentials(
+    with (
+        pytest.raises(ValueError, match="regular file"),
+        module.stage_ghcr_credentials(
             provider,
             object(),
             username="release-user",
             token_file=secret,
-        ):
-            pytest.fail("credentials must not be yielded")
+        ),
+    ):
+        pytest.fail("credentials must not be yielded")
 
     assert provider.exec_calls == []
     assert provider.transfer_calls == []
@@ -319,7 +326,9 @@ def test_validate_secret_file_rejects_empty_file(tmp_path: Path) -> None:
         validate_secret_file(secret)
 
 
-def test_stage_ghcr_credentials_logs_in_from_file_and_cleans_metadata(tmp_path: Path) -> None:
+def test_stage_ghcr_credentials_logs_in_from_file_and_cleans_metadata(
+    tmp_path: Path,
+) -> None:
     secret_value = "fixture-ghcr-token-must-not-leak"
     token = tmp_path / "ghcr-token"
     token.write_text(secret_value, encoding="utf-8")
@@ -351,7 +360,9 @@ def test_stage_ghcr_credentials_logs_in_from_file_and_cleans_metadata(tmp_path: 
     )
     rendered = repr((provider.exec_calls, provider.transfer_calls, credentials))
     assert secret_value not in rendered
-    login_call = next(call for call in provider.exec_calls if call[0][:2] == ("sh", "-c"))
+    login_call = next(
+        call for call in provider.exec_calls if call[0][:2] == ("sh", "-c")
+    )
     assert "--password-stdin" in login_call[0][2]
     assert login_call[1] == {
         "DOCKER_CONFIG": "/tmp/nanofaas-release-credentials.ABC123/docker"
@@ -365,14 +376,16 @@ def test_stage_ghcr_credentials_cleans_after_transfer_failure(tmp_path: Path) ->
     provider = _Provider(fail_transfer=True)
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(RuntimeError) as error:
-        with module.stage_ghcr_credentials(
+    with (
+        pytest.raises(RuntimeError) as error,
+        module.stage_ghcr_credentials(
             provider,
             object(),
             username="release-user",
             token_file=token,
-        ):
-            pytest.fail("credentials must not be yielded")
+        ),
+    ):
+        pytest.fail("credentials must not be yielded")
 
     staged_source = provider.transfer_calls[0][0]
     assert not staged_source.exists()
@@ -393,14 +406,16 @@ def test_stage_ghcr_credentials_cleans_after_auth_failure(tmp_path: Path) -> Non
     provider = _Provider(fail_login=True)
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(RuntimeError) as error:
-        with module.stage_ghcr_credentials(
+    with (
+        pytest.raises(RuntimeError) as error,
+        module.stage_ghcr_credentials(
             provider,
             object(),
             username="release-user",
             token_file=token,
-        ):
-            pytest.fail("credentials must not be yielded")
+        ),
+    ):
+        pytest.fail("credentials must not be yielded")
 
     staged_source = provider.transfer_calls[0][0]
     assert not staged_source.exists()
@@ -414,21 +429,25 @@ def test_stage_ghcr_credentials_cleans_after_auth_failure(tmp_path: Path) -> Non
     assert "fixture-ghcr-token-must-not-leak" not in str(error.value)
 
 
-def test_stage_ghcr_credentials_cleans_if_remote_hardening_fails(tmp_path: Path) -> None:
+def test_stage_ghcr_credentials_cleans_if_remote_hardening_fails(
+    tmp_path: Path,
+) -> None:
     token = tmp_path / "ghcr-token"
     token.write_text("fixture-secret-must-not-leak", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider(fail_directory_chmod=True)
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(RuntimeError) as error:
-        with module.stage_ghcr_credentials(
+    with (
+        pytest.raises(RuntimeError) as error,
+        module.stage_ghcr_credentials(
             provider,
             object(),
             username="release-user",
             token_file=token,
-        ):
-            pytest.fail("credentials must not be yielded")
+        ),
+    ):
+        pytest.fail("credentials must not be yielded")
 
     assert provider.exec_calls[-1][0] == (
         "rm",
@@ -439,28 +458,34 @@ def test_stage_ghcr_credentials_cleans_if_remote_hardening_fails(tmp_path: Path)
     assert "fixture-secret-must-not-leak" not in str(error.value)
 
 
-def test_stage_ghcr_credentials_reports_cleanup_failure_without_leaking(tmp_path: Path) -> None:
+def test_stage_ghcr_credentials_reports_cleanup_failure_without_leaking(
+    tmp_path: Path,
+) -> None:
     token = tmp_path / "ghcr-token"
     token.write_text("fixture-secret-must-not-leak", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider(fail_login=True, fail_cleanup=True)
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(RuntimeError, match="cleanup") as error:
-        with module.stage_ghcr_credentials(
+    with (
+        pytest.raises(RuntimeError, match="cleanup") as error,
+        module.stage_ghcr_credentials(
             provider,
             object(),
             username="release-user",
             token_file=token,
-        ):
-            pytest.fail("credentials must not be yielded")
+        ),
+    ):
+        pytest.fail("credentials must not be yielded")
 
     staged_source = provider.transfer_calls[0][0]
     assert not staged_source.exists()
     assert "fixture-secret-must-not-leak" not in str(error.value)
 
 
-def test_cleanup_failure_preserves_sanitized_context_body_failure(tmp_path: Path) -> None:
+def test_cleanup_failure_preserves_sanitized_context_body_failure(
+    tmp_path: Path,
+) -> None:
     secret_value = "fixture-secret-must-not-leak"
     token = tmp_path / "ghcr-token"
     token.write_text(secret_value, encoding="utf-8")
@@ -468,23 +493,25 @@ def test_cleanup_failure_preserves_sanitized_context_body_failure(tmp_path: Path
     provider = _Provider(fail_cleanup=True)
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(module.ReleaseCredentialCleanupError) as error:
-        with module.stage_ghcr_credentials(
+    with (
+        pytest.raises(module.ReleaseCredentialCleanupError) as error,
+        module.stage_ghcr_credentials(
             provider,
             object(),
             username="release-user",
             token_file=token,
-        ):
-            staged_source = provider.transfer_calls[0][0]
-            raise _BodyFailure(f"publication failed with {secret_value}")
+        ),
+    ):
+        raise _BodyFailureError(f"publication failed with {secret_value}")
 
-    assert error.value.operation_type == "_BodyFailure"
+    staged_source = provider.transfer_calls[0][0]
+    assert error.value.operation_type == "_BodyFailureError"
     assert "cleanup failed" in str(error.value)
     assert secret_value not in str(error.value)
     assert error.value.__cause__ is None
     assert error.value.__suppress_context__ is True
     rendered_error = "".join(traceback.format_exception(error.value))
-    assert "_BodyFailure" in rendered_error
+    assert "_BodyFailureError" in rendered_error
     assert secret_value not in rendered_error
     assert not staged_source.exists()
     assert not staged_source.parent.exists()
@@ -497,17 +524,24 @@ def test_stage_ghcr_credentials_cleans_when_context_body_fails(tmp_path: Path) -
     provider = _Provider()
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(_BodyFailure, match="publication failed"):
-        with module.stage_ghcr_credentials(
+    # The raises block also pins the staged file down while the body runs, so it
+    # is deliberately more than the single statement PT012 asks for.
+    with (  # noqa: PT012
+        pytest.raises(_BodyFailureError, match="publication failed"),
+        module.stage_ghcr_credentials(
             provider,
             object(),
             username="release-user",
             token_file=token,
-        ):
-            staged_source = provider.transfer_calls[0][0]
-            assert staged_source.exists()
-            raise _BodyFailure("publication failed")
+        ),
+    ):
+        staged_source = provider.transfer_calls[0][0]
+        assert staged_source.exists()
+        raise _BodyFailureError("publication failed")
 
+    # Taken from the provider rather than carried out of the body: the body
+    # always raises, so leaving the block is the only way past it.
+    staged_source = provider.transfer_calls[0][0]
     assert not staged_source.exists()
     assert not staged_source.parent.exists()
     assert provider.exec_calls[-1][0] == (
@@ -561,8 +595,12 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
         return str(directory)
 
     monkeypatch.setattr(module, "mkdtemp", create_private_directory, raising=False)
-    monkeypatch.setattr(Path, "read_text", lambda *args, **kwargs: pytest.fail("read_text"))
-    monkeypatch.setattr(Path, "read_bytes", lambda *args, **kwargs: pytest.fail("read_bytes"))
+    monkeypatch.setattr(
+        Path, "read_text", lambda *args, **kwargs: pytest.fail("read_text")
+    )
+    monkeypatch.setattr(
+        Path, "read_bytes", lambda *args, **kwargs: pytest.fail("read_bytes")
+    )
 
     with module.stage_cosign_credentials(
         provider,
@@ -580,7 +618,9 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
         assert all(source.exists() for source in staged_sources)
         assert local_directories == [staged_sources[0].parent]
         assert stat.S_IMODE(local_directories[0].stat().st_mode) == 0o700
-        assert all(stat.S_IMODE(source.stat().st_mode) == 0o600 for source in staged_sources)
+        assert all(
+            stat.S_IMODE(source.stat().st_mode) == 0o600 for source in staged_sources
+        )
 
     assert all(not source.exists() for source in staged_sources)
     assert all(not source.parent.exists() for source in staged_sources)
@@ -589,7 +629,9 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
     assert password_value not in rendered_plan
 
 
-def test_stage_cosign_credentials_cleans_when_context_body_fails(tmp_path: Path) -> None:
+def test_stage_cosign_credentials_cleans_when_context_body_fails(
+    tmp_path: Path,
+) -> None:
     key = tmp_path / "cosign.key"
     password = tmp_path / "cosign.password"
     key.write_text("fixture-cosign-key-must-not-leak", encoding="utf-8")
@@ -599,17 +641,24 @@ def test_stage_cosign_credentials_cleans_when_context_body_fails(tmp_path: Path)
     provider = _Provider()
     module = importlib.import_module("nanolab.release.secrets")
 
-    with pytest.raises(_BodyFailure, match="signing failed"):
-        with module.stage_cosign_credentials(
+    # The raises block also pins every staged file down while the body runs, so
+    # it is deliberately more than the single statement PT012 asks for.
+    with (  # noqa: PT012
+        pytest.raises(_BodyFailureError, match="signing failed"),
+        module.stage_cosign_credentials(
             provider,
             object(),
             key_file=key,
             password_file=password,
-        ):
-            staged_sources = [source for source, _ in provider.transfer_calls]
-            assert all(source.exists() for source in staged_sources)
-            raise _BodyFailure("signing failed")
+        ),
+    ):
+        staged_sources = [source for source, _ in provider.transfer_calls]
+        assert all(source.exists() for source in staged_sources)
+        raise _BodyFailureError("signing failed")
 
+    # Taken from the provider rather than carried out of the body: the body
+    # always raises, so leaving the block is the only way past it.
+    staged_sources = [source for source, _ in provider.transfer_calls]
     assert all(not source.exists() for source in staged_sources)
     assert all(not source.parent.exists() for source in staged_sources)
     assert provider.exec_calls[-1][0] == (

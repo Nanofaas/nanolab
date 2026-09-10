@@ -1,11 +1,13 @@
+"""Helm values and the operation that deploys the control plane with them."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
 
 from nanolab.tasks.components.context import ScenarioExecutionContext
-from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.components.images import control_image
+from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE
 from nanolab.tasks.loadtest.two_vm import (
     LOADTEST_SCENARIOS,
@@ -22,7 +24,7 @@ def _image_parts(image: str) -> tuple[str, str]:
     return repository, tag
 
 
-def control_plane_helm_values(  # NOSONAR (S3776): Helm's flat key map needs explicit conditional values
+def control_plane_helm_values(  # NOSONAR (S3776): the flat key map needs conditionals
     *,
     namespace: str,
     control_plane_image: str,
@@ -32,10 +34,19 @@ def control_plane_helm_values(  # NOSONAR (S3776): Helm's flat key map needs exp
     sync_queue_max_depth: int | None = None,
     container_metrics: bool = False,
     admin_runtime_config: bool = False,
-    control_plane_resources: Mapping[str, Mapping[str, float | int | str]] | None = None,
+    control_plane_resources: Mapping[str, Mapping[str, float | int | str]]
+    | None = None,
 ) -> dict[str, str]:
+    """Turn a scenario's control-plane settings into the chart's `--set` values.
+
+    `None` and `False` mean "leave the chart default alone", so only the keys
+    the scenario actually asked about end up in the returned map.
+    """
     repository, tag = _image_parts(control_plane_image)
-    callback_url = f"http://control-plane.{namespace}.svc.cluster.local:8080/v1/internal/executions"  # NOSONAR (S5332): in-cluster service DNS
+    callback_url = (
+        f"http://control-plane.{namespace}"  # NOSONAR (S5332): in-cluster service DNS
+        ".svc.cluster.local:8080/v1/internal/executions"
+    )
     values = {
         "namespace.create": "false",
         "namespace.name": namespace,
@@ -86,8 +97,12 @@ def control_plane_helm_values(  # NOSONAR (S3776): Helm's flat key map needs exp
         values[f"controlPlane.extraEnv[{index}].value"] = value
     if expose_node_port:
         values["controlPlane.service.type"] = "NodePort"
-        values["controlPlane.service.nodePorts.http"] = str(TWO_VM_CONTROL_PLANE_HTTP_NODE_PORT)
-        values["controlPlane.service.nodePorts.actuator"] = str(TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT)
+        values["controlPlane.service.nodePorts.http"] = str(
+            TWO_VM_CONTROL_PLANE_HTTP_NODE_PORT
+        )
+        values["controlPlane.service.nodePorts.actuator"] = str(
+            TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT
+        )
         values["prometheus.create"] = "true"
         values["prometheus.service.type"] = "NodePort"
         values["prometheus.service.nodePort"] = str(TWO_VM_PROMETHEUS_NODE_PORT)
@@ -104,7 +119,9 @@ def control_plane_helm_values(  # NOSONAR (S3776): Helm's flat key map needs exp
         for section, quantities in control_plane_resources.items():
             for name, value in (quantities or {}).items():
                 if name == "cpu":
-                    rendered = f"{value:g}" if isinstance(value, (int, float)) else str(value)
+                    rendered = (
+                        f"{value:g}" if isinstance(value, (int, float)) else str(value)
+                    )
                 elif name in ("memoryMiB", "memory_mib"):
                     name, rendered = "memory", f"{int(value)}Mi"
                 else:
@@ -160,7 +177,10 @@ def helm_set_args(values: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(args)
 
 
-def plan_deploy_control_plane(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
+def plan_deploy_control_plane(
+    context: ScenarioExecutionContext,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Plan the `helm upgrade --install` that deploys the control plane."""
     namespace = _effective_namespace(context)
     loadtest = context.scenario_name in LOADTEST_SCENARIOS
     values = control_plane_helm_values(

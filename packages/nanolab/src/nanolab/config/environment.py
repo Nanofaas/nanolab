@@ -1,3 +1,10 @@
+"""Where a run executes: the provider, its machines and their settings.
+
+`EnvironmentConfig` is the parsed environment file. Besides the provider it
+carries one `RoleTarget` per execution role and whichever provider block the
+selected provider needs, and it validates that the two agree.
+"""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -9,6 +16,13 @@ ExecutionRole = Literal["host", "stack", "loadgen", "cloud", "arm-builder"]
 
 
 class RoleTarget(BaseModel):
+    """One machine a role runs on, and how to reach it.
+
+    Every field has a default, so a role only states what differs from the
+    local case; the provider validator decides which fields an environment is
+    actually required to set.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
@@ -33,6 +47,13 @@ class RoleTarget(BaseModel):
 
 
 class AzureEnvironment(BaseModel):
+    """The Azure resources an azure-provider run provisions its machines from.
+
+    The image URNs and VM sizes are per-role, because the release phases build
+    one arm64 image on a native Ampere VM while the run itself happens on the
+    amd64 pair.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     resource_group: str
@@ -48,6 +69,8 @@ class AzureEnvironment(BaseModel):
 
 
 class ProxmoxEnvironment(BaseModel):
+    """How to reach one Proxmox node, and which template to clone VMs from."""
+
     model_config = ConfigDict(extra="forbid")
 
     host: str
@@ -59,6 +82,13 @@ class ProxmoxEnvironment(BaseModel):
 
 
 class EnvironmentConfig(BaseModel):
+    """A parsed environment file: the provider, its roles and its settings.
+
+    The validator runs at construction, so an instance that exists is one whose
+    provider has everything it needs to provision: a named stack for multipass
+    and external, and the matching `azure` or `proxmox` block otherwise.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     provider: ProviderName
@@ -67,7 +97,12 @@ class EnvironmentConfig(BaseModel):
     proxmox: ProxmoxEnvironment | None = None
 
     @model_validator(mode="after")
-    def validate_provider(self) -> "EnvironmentConfig":
+    def validate_provider(self) -> EnvironmentConfig:
+        """Reject an environment whose provider is missing what it needs.
+
+        An after-validator, so it returns the instance unchanged once every
+        requirement of the selected provider is satisfied.
+        """
         if self.provider == "multipass":
             stack = self.roles.get("stack")
             if stack is None or not stack.name:
@@ -86,6 +121,13 @@ class EnvironmentConfig(BaseModel):
         return self
 
     def target(self, role: ExecutionRole) -> RoleTarget:
+        """Return the machine a role runs on, following the fallback chain.
+
+        An unset role inherits rather than erroring: stack, cloud and
+        arm-builder resolve to the host target, and loadgen falls back to the
+        stack. With no host entry either, the returned `RoleTarget` carries the
+        model defaults.
+        """
         if role == "host":
             return self.roles.get("host", RoleTarget())
         if role == "stack":

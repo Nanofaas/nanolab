@@ -2,31 +2,39 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import re
 import shutil
 import stat
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 from tempfile import mkdtemp
 
-
-# The remote shell atomically creates this directory with `mktemp -d`.
-_REMOTE_TEMPLATE = "/tmp/nanofaas-release-credentials.XXXXXX"  # NOSONAR (S5443)
+# The remote shell atomically creates this directory with `mktemp -d`, so the
+# /tmp paths below are the remote host's, not local temp files: B108's premise
+# does not hold. The nosecs are for bandit, the NOSONARs for Sonar.
+_REMOTE_TEMPLATE = "/tmp/nanofaas-release-credentials.XXXXXX"  # nosec B108  # NOSONAR (S5443)
 # This accepts only the private directory returned by that `mktemp -d` invocation.
-_REMOTE_DIRECTORY = re.compile(r"/tmp/nanofaas-release-credentials\.[A-Za-z0-9]+")  # NOSONAR (S5443)
-_SECRET_REGULAR_FILE = "release secret must be a regular file"
+_REMOTE_DIRECTORY = re.compile(
+    r"/tmp/nanofaas-release-credentials\.[A-Za-z0-9]+"  # nosec B108
+)  # NOSONAR (S5443)
+# Bandit reads the name as a credential; the value is an error message.
+_SECRET_REGULAR_FILE = "release secret must be a regular file"  # nosec B105
 
 
 @dataclass(frozen=True)
 class RemoteDockerCredentials:
+    """The remote `DOCKER_CONFIG` directory holding a staged login."""
+
     docker_config: str
 
 
 @dataclass(frozen=True)
 class RemoteCosignCredentials:
+    """Remote paths of the staged cosign key and optional password file."""
+
     key_file: str
     password_file: str | None
 
@@ -35,11 +43,17 @@ class ReleaseCredentialCleanupError(RuntimeError):
     """A cleanup failure with safe information about the interrupted operation."""
 
     def __init__(self, operation_type: str) -> None:
+        """Record which operation failed to clean up its staged credentials."""
         self.operation_type = operation_type
         super().__init__(f"release credential cleanup failed after {operation_type}")
 
 
 def validate_secret_file(path: Path) -> Path:
+    """Return `path` once it is confirmed to be a private, non-empty regular file.
+
+    Rejects anything that is not owned by the current user, is readable by
+    group or world, or is empty.
+    """
     if not isinstance(path, Path):
         raise TypeError("release secret must be provided as a file path")
     try:
@@ -56,7 +70,9 @@ def _validate_secret_metadata(metadata: os.stat_result) -> None:
     if metadata.st_uid != os.getuid():
         raise PermissionError("release secret must be owned by the current user")
     if metadata.st_mode & 0o077:
-        raise PermissionError("release secret permissions must deny group and world access")
+        raise PermissionError(
+            "release secret permissions must deny group and world access"
+        )
     if not metadata.st_mode & stat.S_IRUSR:
         raise PermissionError("release secret must be owner-readable")
     if metadata.st_size == 0:
@@ -80,7 +96,9 @@ def _copy_secret_file(source: Path, destination: Path) -> None:
         if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
             raise ValueError("release secret changed while being staged")
         _validate_secret_metadata(opened)
-        destination_fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        destination_fd = os.open(
+            destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
         with os.fdopen(destination_fd, "wb") as destination_stream:
             shutil.copyfileobj(source_stream, destination_stream)
     destination.chmod(0o600)
@@ -157,7 +175,9 @@ def _stage_remote_files(
         result = _run(provider, request, ("mktemp", "-d", _REMOTE_TEMPLATE))
         remote_dir = str(getattr(result, "stdout", "")).strip()
         if _REMOTE_DIRECTORY.fullmatch(remote_dir) is None:
-            raise RuntimeError("remote credential directory creation returned an invalid path")
+            raise RuntimeError(
+                "remote credential directory creation returned an invalid path"
+            )
 
         operation_error: BaseException | None = None
         cleanup_failed = False
@@ -170,7 +190,9 @@ def _stage_remote_files(
                 _run(provider, request, ("chmod", "600", destination))
                 remote_files[name] = destination
             yield remote_dir, remote_files
-        except BaseException as error:  # NOSONAR (S5754): cleanup must run across the yield boundary
+        except (
+            BaseException
+        ) as error:  # NOSONAR (S5754): cleanup must run across the yield boundary
             operation_error = error
             try:
                 _run(provider, request, ("rm", "-rf", "--", remote_dir))

@@ -21,4 +21,3 @@
 3. Add the minimal script by adapting nanoFaaS `scripts/sonar.sh` to one Python project, `nanolab-python`.
 4. Run the focused test and shell syntax check.
 5. Run `scripts/sonar.sh --rm`, wait for Compute Engine completion, and record the reported findings.
-

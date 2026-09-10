@@ -1,13 +1,15 @@
+"""Rich-rendered workflow dashboard, its engine sink, and the terminal key listener."""
+
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 import os
 import select
 import sys
-from threading import Event, Thread
 import time
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from threading import Event, Thread
 from typing import Any
 
 from rich.console import Group, RenderableType
@@ -15,28 +17,37 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
-
-from nanolab.tui.event_aggregator import WorkflowEventAggregator
-from nanolab.tui.models import TuiPhaseSnapshot, TuiWorkflowSnapshot
 from sonata_engine.workflow.events import WorkflowEvent
 from sonata_engine.workflow.models import WorkflowState
 from tui_toolkit import render_screen_frame
 
+from nanolab.tui.event_aggregator import WorkflowEventAggregator
+from nanolab.tui.models import TuiPhaseSnapshot, TuiWorkflowSnapshot
 
 _DIM_BORDER = "cyan dim"
 
 
 @dataclass
 class WorkflowStepState:
+    """One step as the dashboard renders it, with its nested sub-steps."""
+
     label: str
     state: WorkflowState = "pending"
     detail: str = ""
     started_at: float | None = None
     finished_at: float | None = None
-    children: list["WorkflowStepState"] = field(default_factory=list)
+    children: list[WorkflowStepState] = field(default_factory=list)
 
 
 class WorkflowDashboard:
+    """Track a running workflow and render it as a Rich screen.
+
+    The dashboard owns no state of its own: every mutator delegates to a
+    ``WorkflowEventAggregator`` and then copies its snapshot back into
+    ``steps``/``log_lines``, so the renderable data is always a plain,
+    serialisable view of what the aggregator holds.
+    """
+
     def __init__(
         self,
         *,
@@ -48,6 +59,7 @@ class WorkflowDashboard:
         log_limit: int = 200,
         aggregator: WorkflowEventAggregator | None = None,
     ) -> None:
+        """Configure the screen and adopt ``aggregator`` or build one from the steps."""
         self.title = title
         self.breadcrumb = breadcrumb
         self.footer_hint = footer_hint
@@ -63,30 +75,43 @@ class WorkflowDashboard:
         self.sync_from_snapshot(self._aggregator.snapshot())
 
     def append_log(self, message: str) -> None:
+        """Add ``message`` to the log tail and refresh the rendered state."""
         self._aggregator.append_log(message)
         self._sync()
 
     def toggle_logs(self) -> None:
+        """Show or hide the log pane and refresh the rendered state."""
         self._aggregator.toggle_logs()
         self._sync()
 
     def mark_step_running(self, step_index: int) -> None:
+        """Mark the 1-based step at ``step_index`` as running."""
         self._aggregator.mark_phase_running(step_index)
         self._sync()
 
     def mark_step_success(self, step_index: int) -> None:
+        """Mark the step at ``step_index`` as succeeded."""
         self._aggregator.mark_phase_success(step_index)
         self._sync()
 
     def mark_step_failed(self, step_index: int, detail: str = "") -> None:
+        """Mark the step at ``step_index`` as failed, with an optional detail."""
         self._aggregator.mark_phase_failed(step_index, detail=detail)
         self._sync()
 
     def mark_step_cancelled(self, step_index: int, detail: str = "") -> None:
+        """Mark the step at ``step_index`` as cancelled, with an optional detail."""
         self._aggregator.mark_phase_cancelled(step_index, detail=detail)
         self._sync()
 
-    def upsert_step(self, label: str, *, activate: bool = False, detail: str = "") -> int:
+    def upsert_step(
+        self, label: str, *, activate: bool = False, detail: str = ""
+    ) -> int:
+        """Create or update the step labelled ``label`` and return its 1-based index.
+
+        ``activate`` marks the step running straight away; ``detail`` sets the
+        secondary text shown beside the label.
+        """
         index = self._aggregator.upsert_phase(label, detail=detail, activate=activate)
         self._sync()
         return index
@@ -97,10 +122,12 @@ class WorkflowDashboard:
         state: WorkflowState = "success",
         detail: str = "",
     ) -> None:
+        """Resolve every still-running step to ``state`` and repaint."""
         self._aggregator.complete_running_phases(status=state, detail=detail)
         self._sync()
 
     def apply_event(self, event: WorkflowEvent) -> None:
+        """Fold one engine event into the dashboard and refresh the rendered state."""
         self._aggregator.handle_event(event)
         self._sync()
 
@@ -108,6 +135,8 @@ class WorkflowDashboard:
         self.sync_from_snapshot(self._aggregator.snapshot())
 
     def sync_from_snapshot(self, snapshot: TuiWorkflowSnapshot) -> None:
+        """Replace ``steps``, ``log_lines`` and ``show_logs`` from ``snapshot``."""
+
         def convert_phase(phase: TuiPhaseSnapshot) -> WorkflowStepState:
             return WorkflowStepState(
                 label=phase.label,
@@ -142,7 +171,9 @@ class WorkflowDashboard:
             "failed": "[red]✗[/]",
         }.get(state, "[dim]○[/]")
 
-    def _format_step_label(self, step: WorkflowStepState, *, index: int | None = None) -> str:
+    def _format_step_label(
+        self, step: WorkflowStepState, *, index: int | None = None
+    ) -> str:
         prefix = f"{index}. " if index is not None else ""
         detail = f" [dim]{step.detail}[/]" if step.detail else ""
         return f"{self._step_icon(step.state)} {prefix}[bold]{step.label}[/]{detail}"
@@ -176,14 +207,27 @@ class WorkflowDashboard:
         return self._nested_node_count(nested_roots) + 2 if nested_roots else 0
 
     def _log_panel_height(self) -> int:
-        return self._summary_panel_height() + self._phases_panel_height() + self._nested_panel_height()
+        return (
+            self._summary_panel_height()
+            + self._phases_panel_height()
+            + self._nested_panel_height()
+        )
 
     def _error_detail_panel(self) -> Panel | None:
         if not self.error_detail:
             return None
-        return Panel(Text(self.error_detail.strip()), title="[red]Error Detail[/]", border_style="red")
+        return Panel(
+            Text(self.error_detail.strip()),
+            title="[red]Error Detail[/]",
+            border_style="red",
+        )
 
     def render(self) -> RenderableType:
+        """Build the full screen frame: summary and phases left, log pane right.
+
+        The log pane is omitted while ``show_logs`` is false, and the header and
+        footer come from ``title``/``breadcrumb``/``footer_hint``.
+        """
         summary_panel = Panel(
             Text("\n".join(self.summary_lines) or "No scenario details.", style="cyan"),
             title="Summary",
@@ -206,7 +250,9 @@ class WorkflowDashboard:
         nested_panel = self._nested_detail_panel()
         error_panel = self._error_detail_panel()
         left_pane: list[RenderableType] = [summary_panel, phases_panel]
-        left_pane.extend(panel for panel in (nested_panel, error_panel) if panel is not None)
+        left_pane.extend(
+            panel for panel in (nested_panel, error_panel) if panel is not None
+        )
 
         if not self.show_logs:
             body: RenderableType = Group(*left_pane)
@@ -237,21 +283,34 @@ class WorkflowDashboard:
 
 
 class TuiWorkflowSink:
+    """Engine-facing sink that feeds a dashboard and asks it to repaint.
+
+    ``refresh`` is called after every mutation so a live display picks the change
+    up immediately.
+    """
+
     def __init__(
         self,
         aggregator: WorkflowEventAggregator,
         *,
         refresh: Callable[[], None] | None = None,
     ) -> None:
+        """Wrap ``aggregator``, defaulting ``refresh`` to a no-op."""
         self._aggregator = aggregator
         self._refresh = refresh or (lambda: None)
 
     def emit(self, event: WorkflowEvent) -> None:
+        """Fold one engine event into the aggregator and repaint."""
         self._aggregator.handle_event(event)
         self._refresh()
 
     @contextmanager
     def status(self, label: str) -> Generator[None, None, None]:
+        """Log ``label`` as pending around the block, then done or failed.
+
+        A ``[wait-failed]`` line is logged and the exception re-raised if the
+        block raises; otherwise ``[wait-done]`` is logged.
+        """
         self._aggregator.append_log(f"[wait] {label}")
         self._refresh()
         try:
@@ -266,6 +325,13 @@ class TuiWorkflowSink:
 
 
 class WorkflowKeyListener:
+    """Read single keypresses from a terminal and drive the dashboard with them.
+
+    ``l`` toggles the log pane. The listener's only other job is acknowledgement:
+    while ``wait_for_acknowledgment`` is pending, the next key of any kind
+    releases the caller so a finished run can hold its dashboard on screen.
+    """
+
     def __init__(
         self,
         dashboard: WorkflowDashboard,
@@ -273,6 +339,7 @@ class WorkflowKeyListener:
         *,
         input_stream: Any = None,
     ) -> None:
+        """Bind to ``dashboard``, repainting through ``refresh``; defaults to stdin."""
         self._dashboard = dashboard
         self._refresh = refresh
         self._input_stream = sys.stdin if input_stream is None else input_stream
@@ -286,12 +353,13 @@ class WorkflowKeyListener:
 
     @property
     def input_is_tty(self) -> bool:
+        """Whether the input stream is a terminal that can deliver raw keypresses."""
         return bool(
-            hasattr(self._input_stream, "isatty")
-            and self._input_stream.isatty()
+            hasattr(self._input_stream, "isatty") and self._input_stream.isatty()
         )
 
     def handle_key(self, key: str) -> None:
+        """Act on one keypress: acknowledge a pending wait, or toggle logs on ``l``."""
         if self._waiting_for_acknowledgment.is_set():
             self._acknowledged.set()
         elif key.lower() == "l":
@@ -299,10 +367,16 @@ class WorkflowKeyListener:
             self._refresh()
 
     def wait_for_acknowledgment(self) -> None:
+        """Block until the next keypress arrives, giving up after 60 seconds."""
         self._waiting_for_acknowledgment.set()
         self._acknowledged.wait(timeout=60)
 
     def start(self) -> None:
+        """Put the terminal in cbreak mode and read keys on a daemon thread.
+
+        Does nothing when the input stream is not a TTY or the ``termios``/``tty``
+        modules are unavailable.
+        """
         if not self.input_is_tty:
             return
         try:
@@ -329,10 +403,15 @@ class WorkflowKeyListener:
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop the reader thread and restore the terminal's original attributes."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=0.3)
-        if self._termios is not None and self._fd is not None and self._original_attrs is not None:
+        if (
+            self._termios is not None
+            and self._fd is not None
+            and self._original_attrs is not None
+        ):
             self._termios.tcsetattr(
                 self._fd,
                 self._termios.TCSADRAIN,
@@ -340,4 +419,9 @@ class WorkflowKeyListener:
             )
 
 
-__all__ = ["TuiWorkflowSink", "WorkflowDashboard", "WorkflowKeyListener", "WorkflowStepState"]
+__all__ = [
+    "TuiWorkflowSink",
+    "WorkflowDashboard",
+    "WorkflowKeyListener",
+    "WorkflowStepState",
+]

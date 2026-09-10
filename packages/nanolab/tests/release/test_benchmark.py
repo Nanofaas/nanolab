@@ -1,23 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import asdict, replace
 import json
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
-from nanolab.release.metrics import build_release_record
-from nanolab.release.model import digest_path
-
-from ._release_support import _plan, _summary
+from sonata_engine import Workflow
 
 from nanolab.release import benchmark as release_benchmark
-from nanolab.release.resources import ReleaseEndpoints
 from nanolab.release import tasks as release_tasks
+from nanolab.release.metrics import build_release_record
+from nanolab.release.model import digest_path
+from nanolab.release.resources import ReleaseEndpoints
 from nanolab.release.tasks import source_test_task
-from sonata_engine import Workflow
+
+from ._release_support import _plan, _summary
 
 
 def _registry_receipt(plan) -> Path:
@@ -100,9 +99,11 @@ def test_sonata_benchmarks_use_isolated_dirs_and_exact_registry_digests(
         "run-2",
         "run-3",
     ]
-    assert all("@sha256:" in str(call["prebuilt_control_plane_image"]) for call in calls)
+    assert all(
+        "@sha256:" in str(call["prebuilt_control_plane_image"]) for call in calls
+    )
     assert all(call["control_plane_url"] == "http://stack:30080" for call in calls)
-    assert all(getattr(call["prometheus_client"], "_url") == "http://stack:30090" for call in calls)
+    assert all(call["prometheus_client"]._url == "http://stack:30090" for call in calls)
     assert all(
         all("@sha256:" in image for image in call["prebuilt_function_images"].values())
         for call in calls
@@ -320,9 +321,7 @@ def test_sonata_regression_gate_writes_failure_and_blocks_publication(
         identity=plan.identity,
         run_dir=plan.run_dir,
         phase_inputs={"policy": asdict(release_benchmark._regression_policy(plan))},
-        work=lambda _inputs: (
-            release_benchmark.run_sonata_regression_gate(plan),
-        ),
+        work=lambda _inputs: (release_benchmark.run_sonata_regression_gate(plan),),
     )
     arm = source_test_task(
         identity=plan.identity,
@@ -342,18 +341,26 @@ def test_sonata_regression_gate_writes_failure_and_blocks_publication(
     assert "p95 increase" in message
     assert "error rate" in message
     assert reached == []
-    assert json.loads(
-        plan.run_dir.joinpath("regression-decision.json").read_text(encoding="utf-8")
-    )["passed"] is False
+    assert (
+        json.loads(
+            plan.run_dir.joinpath("regression-decision.json").read_text(
+                encoding="utf-8"
+            )
+        )["passed"]
+        is False
+    )
 
 
 def test_release_does_not_require_jvm_heap_metrics_its_g1_build_cannot_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """v0.20.0 ran the whole benchmark and then failed on the thresholds with
+    """Assert a G1 release build does not require the JVM heap metric.
+
+    v0.20.0 ran the whole benchmark and then failed on the thresholds with
     "jvm_heap_used_bytes returned no data". It was the truth: a release builds the
     control plane with G1 on Oracle GraalVM, and SubstrateVM registers no heap
-    MemoryPoolMXBean under G1, so the series does not exist."""
+    MemoryPoolMXBean under G1, so the series does not exist.
+    """
     plan = _plan(tmp_path, monkeypatch)
     receipt = _registry_receipt(plan)
     calls: list[dict[str, Any]] = []
@@ -386,8 +393,11 @@ def test_release_does_not_require_jvm_heap_metrics_its_g1_build_cannot_publish(
 
 
 def test_jvm_metrics_requirement_follows_the_collector_the_release_builds() -> None:
-    """Derived, not hardcoded: a release that leaves G1 has to start requiring the
-    metric again without anyone remembering this file."""
+    """Assert the requirement is derived from the collector, not hardcoded.
+
+    A release that leaves G1 has to start requiring the metric again without
+    anyone remembering this file.
+    """
     from nanolab.images.plan import NATIVE_RELEASE_PROFILE
 
     assert NATIVE_RELEASE_PROFILE.build_env.get("NATIVE_GC") == "G1"
@@ -397,9 +407,12 @@ def test_jvm_metrics_requirement_follows_the_collector_the_release_builds() -> N
 def test_the_release_collects_container_metrics_for_its_memory_reading(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The heap gauge its G1 build cannot publish left the release with no memory
+    """Assert the release collects container metrics for its memory reading.
+
+    The heap gauge its G1 build cannot publish left the release with no memory
     reading at all. cAdvisor is the replacement, and it takes both halves: the
-    chart scrape has to be on, and the snapshot only records queries it is given."""
+    chart scrape has to be on, and the snapshot only records queries it is given.
+    """
     plan = _plan(tmp_path, monkeypatch)
     receipt = _registry_receipt(plan)
     calls: list[dict[str, Any]] = []

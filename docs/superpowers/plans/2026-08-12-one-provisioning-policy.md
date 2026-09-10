@@ -116,9 +116,7 @@ def test_capabilities_run_in_table_order_not_argument_order(tmp_path: Path) -> N
 def test_local_registry_ensures_the_container_then_points_k3s_at_it(
     tmp_path: Path,
 ) -> None:
-    operations = bootstrap_operations(
-        _context(tmp_path), [VmCapability.LOCAL_REGISTRY]
-    )
+    operations = bootstrap_operations(_context(tmp_path), [VmCapability.LOCAL_REGISTRY])
 
     assert [operation.operation_id for operation in operations] == [
         "registry.ensure_container",
@@ -353,10 +351,10 @@ def test_release_bootstrap_gives_each_role_its_current_steps(
     def record(provider, operations, *, role):
         recorded.append((role, tuple(op.operation_id for op in operations)))
 
-    monkeypatch.setattr(
-        "nanolab.release.resources.run_bootstrap_operations", record
+    monkeypatch.setattr("nanolab.release.resources.run_bootstrap_operations", record)
+    request = VmRequest(
+        lifecycle="external", name="vm", host="vm.example", user="ubuntu"
     )
-    request = VmRequest(lifecycle="external", name="vm", host="vm.example", user="ubuntu")
     info = VmInfo(name="vm", host="vm.example", user="ubuntu", home="/home/ubuntu")
 
     for role in ("stack", "loadgen", "arm-builder"):
@@ -646,17 +644,19 @@ Stack (currently lines 130-144) — the `retarget(...)` wrapper and the
 `triples.append` stay; only the operations argument changes:
 
 ```python
-            retarget(
-                stack_context,
-                bootstrap_operations(
-                    stack_context,
-                    _stack_capabilities(
-                        scenario,
-                        dedicated_loadgen=dedicated_loadgen,
-                        include_repo_sync=scenario.workflow != "release",
-                    ),
-                ),
+(
+    retarget(
+        stack_context,
+        bootstrap_operations(
+            stack_context,
+            _stack_capabilities(
+                scenario,
+                dedicated_loadgen=dedicated_loadgen,
+                include_repo_sync=scenario.workflow != "release",
             ),
+        ),
+    ),
+)
 ```
 
 Loadgen (currently 146-168):
@@ -681,19 +681,21 @@ Cloud (currently 170-186) — same shape as stack, with
 `dedicated_loadgen=True` and the default `include_repo_sync`:
 
 ```python
-                retarget(
-                    cloud_context,
-                    bootstrap_operations(
-                        cloud_context,
-                        _stack_capabilities(scenario, dedicated_loadgen=True),
-                    ),
-                ),
+(
+    retarget(
+        cloud_context,
+        bootstrap_operations(
+            cloud_context,
+            _stack_capabilities(scenario, dedicated_loadgen=True),
+        ),
+    ),
+)
 ```
 
 arm-builder (currently 188-197):
 
 ```python
-                bootstrap_operations(arm_context, (VmCapability.BASE,)),
+(bootstrap_operations(arm_context, (VmCapability.BASE,)),)
 ```
 
 - [ ] **Step 5: Fix the imports**

@@ -106,6 +106,7 @@ class CommandOptions:
     expected_exit_codes: frozenset[int] = frozenset({0})
     timeout_seconds: float | None = None
 
+
 @dataclass(frozen=True, slots=True)
 class CommandTaskSpec:
     task_id: str

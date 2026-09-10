@@ -3,6 +3,7 @@
 This is the single source of truth for the visual identity. Every widget
 in tui-toolkit reads from the active UIContext set up by setup_ui().
 """
+
 from __future__ import annotations
 
 from tui_toolkit import AppBrand, Theme, UIContext, init_ui

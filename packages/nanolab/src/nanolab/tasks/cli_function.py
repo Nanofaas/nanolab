@@ -1,6 +1,6 @@
-from __future__ import annotations
+"""Register, update and invoke functions through the nanofaas CLI."""
 
-from sonata_tasks.execution.models import CommandOptions
+from __future__ import annotations
 
 import json
 import shlex
@@ -8,14 +8,15 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from sonata_tasks.execution.bindings import CommandTaskExecutor
-from nanolab.tasks.execution import ExecutionRole
-
 from sonata_tasks.command import CommandTask
 from sonata_tasks.core.fingerprint import fingerprint_digest
+from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.tasks.models import TaskResult
+
+from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.invocation import verify_invocation
 from nanolab.tasks.manifest import FunctionManifest
-from sonata_tasks.tasks.models import TaskResult
 
 # Stands in for the temp file the script creates on the target. Chosen so
 # `shlex.quote` leaves it alone: it is always its own word, never a substring of
@@ -48,15 +49,23 @@ def _script_with_file(content: str, *commands: tuple[str, ...]) -> str:
 
 
 def _apply_script(manifest: FunctionManifest, cli_argv: tuple[str, ...]) -> str:
-    return _script_with_file(manifest.json(), (*cli_argv, "fn", "apply", "--file", FILE))
+    return _script_with_file(
+        manifest.json(), (*cli_argv, "fn", "apply", "--file", FILE)
+    )
 
 
 def _json_stdout(result: TaskResult) -> dict[str, Any]:
-    """The JSON object a CLI command printed, or a failure that says what came instead."""
+    """Parse a CLI command's stdout as the JSON object it should have printed.
+
+    A command that answered with anything else is a contract break, so the raw
+    prefix of what it did print is quoted back in the error.
+    """
     try:
         payload = json.loads(result.stdout)
     except ValueError as error:
-        raise RuntimeError(f"CLI output was not JSON: {result.stdout[:200]!r}") from error
+        raise RuntimeError(
+            f"CLI output was not JSON: {result.stdout[:200]!r}"
+        ) from error
     if not isinstance(payload, dict):
         raise RuntimeError(f"CLI output was not a JSON object: {result.stdout[:200]!r}")
     return payload
@@ -83,6 +92,11 @@ class CliFunctionApplyTask(CommandTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Build the `fn apply` command that registers `manifest`.
+
+        `cli_argv` is the invocation prefix, so this task never has to know how
+        the CLI is addressed.
+        """
         super().__init__(
             title=f"Apply {manifest.name}",
             argv=("bash", "-lc", _apply_script(manifest, cli_argv)),
@@ -108,6 +122,7 @@ class CliFunctionDeleteTask(CommandTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Build the `fn delete` command that removes `name`."""
         super().__init__(
             title=f"Delete {name}",
             argv=(*cli_argv, "fn", "delete", name),
@@ -134,6 +149,7 @@ class CliFunctionInvokeTask(CommandTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Build the `fn invoke` command, checking the response on the way back."""
         super().__init__(
             title=f"Invoke {name}",
             argv=(*cli_argv, "invoke", name, "--data", payload),
@@ -165,16 +181,22 @@ def control_plane_contract_tasks(
     def verify_info(result: TaskResult) -> None:
         capabilities = _json_stdout(result).get("capabilities")
         if not isinstance(capabilities, dict):
-            raise RuntimeError(f"control-plane info carried no capabilities: {result.stdout[:200]!r}")
+            raise RuntimeError(
+                f"control-plane info carried no capabilities: {result.stdout[:200]!r}"
+            )
         missing = [
-            name for name in ("functionUpdate", "replicas") if capabilities.get(name) is not True
+            name
+            for name in ("functionUpdate", "replicas")
+            if capabilities.get(name) is not True
         ]
         if missing:
             raise RuntimeError(f"control plane does not advertise {', '.join(missing)}")
 
     def verify_contract(result: TaskResult) -> None:
         if "openapi:" not in result.stdout or "/v1/functions" not in result.stdout:
-            raise RuntimeError(f"contract is not an OpenAPI document: {result.stdout[:200]!r}")
+            raise RuntimeError(
+                f"contract is not an OpenAPI document: {result.stdout[:200]!r}"
+            )
 
     return (
         CommandTask(
@@ -221,8 +243,8 @@ def function_update_task(
             _expect(details, field, expected)
 
     return CommandTask(
-               title=f"Update {name}",
-               argv=(
+        title=f"Update {name}",
+        argv=(
             "bash",
             "-lc",
             _script_with_file(
@@ -231,14 +253,14 @@ def function_update_task(
                 (*cli_argv, "fn", "get", name),
             ),
         ),
-               executor=executor,
-               role=role,
-               options=CommandOptions(cwd=cwd),
-               semantic_key=_semantic_key(
-                   "nanolab.cli-function.update:v2", name=name, patch=patch
-               ),
-               verify=verify,
-           )
+        executor=executor,
+        role=role,
+        options=CommandOptions(cwd=cwd),
+        semantic_key=_semantic_key(
+            "nanolab.cli-function.update:v2", name=name, patch=patch
+        ),
+        verify=verify,
+    )
 
 
 def function_replicas_tasks(
@@ -319,8 +341,8 @@ def function_replace_tasks(
     def verify_refusal(result: TaskResult) -> None:
         if "--replace" not in result.stderr:
             raise RuntimeError(
-                "apply of a changed immutable field failed without asking for --replace: "
-                f"{(result.stderr or result.stdout)[:200]!r}"
+                "apply of a changed immutable field failed without asking "
+                f"for --replace: {(result.stderr or result.stdout)[:200]!r}"
             )
 
     def verify_replaced(result: TaskResult) -> None:
@@ -372,7 +394,9 @@ def runtime_config_tasks(
     def verify_snapshot(result: TaskResult) -> None:
         snapshot = _json_stdout(result)
         if not isinstance(snapshot.get("revision"), int):
-            raise RuntimeError(f"runtime config carried no revision: {result.stdout[:200]!r}")
+            raise RuntimeError(
+                f"runtime config carried no revision: {result.stdout[:200]!r}"
+            )
         if namespace not in (snapshot.get("namespaces") or {}):
             raise RuntimeError(f"runtime config has no '{namespace}' namespace")
 
@@ -382,12 +406,16 @@ def runtime_config_tasks(
     def verify_rejected(result: TaskResult) -> None:
         if "is invalid" not in result.stderr:
             raise RuntimeError(
-                f"invalid runtime config was not reported as invalid: {(result.stderr or result.stdout)[:200]!r}"
+                "invalid runtime config was not reported as invalid: "
+                f"{(result.stderr or result.stdout)[:200]!r}"
             )
 
     def verify_patched(result: TaskResult) -> None:
         applied = (
-            _json_stdout(result).get("effectiveConfig", {}).get("namespaces", {}).get(namespace, {})
+            _json_stdout(result)
+            .get("effectiveConfig", {})
+            .get("namespaces", {})
+            .get(namespace, {})
         )
         for field, expected in patch.items():
             _expect(applied, field, expected)
@@ -400,30 +428,34 @@ def runtime_config_tasks(
         exit_codes: frozenset[int] = frozenset({0}),
     ) -> CommandTask:
         argv = (
-            ("bash", "-lc", _script_with_file(
-                json.dumps(content, separators=(",", ":")),
-                (*prefix, *arguments, "--file", FILE),
-            ))
+            (
+                "bash",
+                "-lc",
+                _script_with_file(
+                    json.dumps(content, separators=(",", ":")),
+                    (*prefix, *arguments, "--file", FILE),
+                ),
+            )
             if content is not None
             else (*prefix, *arguments)
         )
         return CommandTask(
-                   title=title,
-                   argv=argv,
-                   executor=executor,
-                   role=role,
-                   options=CommandOptions(cwd=cwd, expected_exit_codes=exit_codes),
-                   semantic_key=_semantic_key(
-                       "nanolab.cli-function.runtime-config:v2",
-                       title=title,
-                       namespace=namespace,
-                       content=content,
-                       patch=patch,
-                       invalid_patch=invalid_patch,
-                       exit_codes=exit_codes,
-                   ),
-                   verify=verify,
-               )
+            title=title,
+            argv=argv,
+            executor=executor,
+            role=role,
+            options=CommandOptions(cwd=cwd, expected_exit_codes=exit_codes),
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.runtime-config:v2",
+                title=title,
+                namespace=namespace,
+                content=content,
+                patch=patch,
+                invalid_patch=invalid_patch,
+                exit_codes=exit_codes,
+            ),
+            verify=verify,
+        )
 
     return (
         config_task("Runtime config snapshot", "get", verify=verify_snapshot),

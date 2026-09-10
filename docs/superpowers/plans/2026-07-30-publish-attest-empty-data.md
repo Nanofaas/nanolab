@@ -28,10 +28,14 @@ In `packages/sonata-tasks/tests/test_release_composites.py`, add:
 ```python
 def test_publish_architectures_skips_when_no_source_digests(self) -> None:
     executor = RecordingExecutor()
-    plan = _FakePublishPlan(copies=(
-        _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
-    ))
-    composite = publish_architectures_composite(plan, executor, "host", {}, "/auth.json")
+    plan = _FakePublishPlan(
+        copies=(
+            _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
+        )
+    )
+    composite = publish_architectures_composite(
+        plan, executor, "host", {}, "/auth.json"
+    )
     workflow = Workflow("publish-arch")
     workflow.add(composite)
     workflow.run()
@@ -94,9 +98,14 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ```python
 def test_publish_manifests_skips_when_no_arch_digests(self) -> None:
     executor = RecordingExecutor()
-    plan = _FakePublishPlan(manifests=(
-        _FakeManifest(reference="ghcr.io/ctrl:v1", sources=("ghcr.io/ctrl:v1-amd64", "ghcr.io/ctrl:v1-arm64")),
-    ))
+    plan = _FakePublishPlan(
+        manifests=(
+            _FakeManifest(
+                reference="ghcr.io/ctrl:v1",
+                sources=("ghcr.io/ctrl:v1-amd64", "ghcr.io/ctrl:v1-arm64"),
+            ),
+        )
+    )
     composite = publish_manifests_composite(plan, executor, "host", {}, "/docker")
     workflow = Workflow("publish-manifest")
     workflow.add(composite)
@@ -123,9 +132,9 @@ But if aliases exist and digests are empty, the `_pin_with_digest` call will rai
 ```python
 def test_publish_aliases_skips_when_no_manifest_digests(self) -> None:
     executor = RecordingExecutor()
-    plan = _FakePublishPlan(aliases=(
-        _FakeAlias(reference="ghcr.io/ctrl:latest", source="ghcr.io/ctrl:v1"),
-    ))
+    plan = _FakePublishPlan(
+        aliases=(_FakeAlias(reference="ghcr.io/ctrl:latest", source="ghcr.io/ctrl:v1"),)
+    )
     composite = publish_aliases_composite(plan, executor, "host", {}, "/docker")
     workflow = Workflow("publish-alias")
     workflow.add(composite)

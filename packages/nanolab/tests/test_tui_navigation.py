@@ -7,7 +7,6 @@ import pytest
 
 from nanolab.tui.app import NanofaasTUI
 
-
 EXPECTED_SCENARIOS = {
     ("validation", "container"): "deployment-lifecycle-container.yaml",
     ("validation", "kubernetes"): "deployment-lifecycle-k8s.yaml",
@@ -131,9 +130,7 @@ def test_each_submenu_opts_escape_into_back_navigation(section: str) -> None:
 def test_navigation_does_not_restore_old_aliases() -> None:
     old_aliases = {"building", "environment", "catalog", "vm", "registry", "e2e"}
     values = {
-        choice.value
-        for menu in NanofaasTUI.SECTION_MENUS.values()
-        for choice in menu
+        choice.value for menu in NanofaasTUI.SECTION_MENUS.values() for choice in menu
     } | {choice.value for choice in NanofaasTUI.MAIN_MENU}
 
     assert NanofaasTUI.SCENARIO_FILES == EXPECTED_SCENARIOS

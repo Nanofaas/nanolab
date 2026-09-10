@@ -9,8 +9,11 @@ from nanolab.tasks.deployment import (
 
 
 def test_the_lab_deployment_constants_have_their_documented_values() -> None:
-    """Pinned deliberately: these are the values the scenarios, the Helm values
-    and the CI assertions all assume, and a silent change would move them apart."""
+    """Pin the lab deployment constants to their documented values.
+
+    These are the values the scenarios, the Helm values and the CI assertions
+    all assume, and a silent change would move them apart.
+    """
     assert DEFAULT_NAMESPACE == "nanofaas-e2e"
     assert LOCAL_REGISTRY == "127.0.0.1:5000"
     assert CONTROL_PLANE_NODE_PORT == 30080

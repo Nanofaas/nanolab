@@ -35,4 +35,9 @@ def test_quality_gate_runs_every_check_from_member_root(monkeypatch) -> None:
 def test_quality_gate_uses_explicit_member_import_linter_config() -> None:
     import_linter_check = dict(quality.CHECKS)["import-linter"]
 
-    assert import_linter_check == ["lint-imports", "--config", ".importlinter", "--no-cache"]
+    assert import_linter_check == [
+        "lint-imports",
+        "--config",
+        ".importlinter",
+        "--no-cache",
+    ]

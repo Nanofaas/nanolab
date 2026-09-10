@@ -9,7 +9,7 @@ matrix — is computed separately, by scanning the local working checkout:
 ```python
 # nanolab/functions/catalog.py
 def _load_functions():
-    paths = default_tool_paths()                       # reads NANOFAAS_ROOT
+    paths = default_tool_paths()  # reads NANOFAAS_ROOT
     _discover_example_functions(paths.nanofaas_root / "functions", ...)
 ```
 
@@ -82,7 +82,9 @@ matrix, the publication plan.
 
 ```python
 def list_functions(root: Path | None = None) -> list[FunctionDefinition]: ...
-def resolve_function_definition(key: str, root: Path | None = None) -> FunctionDefinition: ...
+def resolve_function_definition(
+    key: str, root: Path | None = None
+) -> FunctionDefinition: ...
 ```
 
 `None` keeps today's behaviour (the `NANOFAAS_ROOT` global), so `plans/validate.py`

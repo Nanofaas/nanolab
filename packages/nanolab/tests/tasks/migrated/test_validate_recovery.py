@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from importlib import import_module
-import json
 from pathlib import Path
 
 import pytest
 from sonata_engine import TaskInputs
-from nanolab.tasks.compose import DockerComposeProject
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+
+from nanolab.tasks.compose import DockerComposeProject
 
 
 @dataclass
@@ -54,7 +55,9 @@ def test_managed_container_ids_require_exactly_two_running_instances() -> None:
 def test_managed_container_ids_reject_an_unexpected_count(ids: str) -> None:
     module = _recovery_module()
 
-    with pytest.raises(RuntimeError, match="expected exactly 2 running managed containers"):
+    with pytest.raises(
+        RuntimeError, match="expected exactly 2 running managed containers"
+    ):
         _ = module.ManagedContainerIdsTask(
             "word-stats-java", executor=SequencedExecutor(responses=[ids]), role="host"
         ).run(TaskInputs.empty())
@@ -101,10 +104,19 @@ def test_container_recovery_restarts_only_the_control_plane_and_keeps_ids() -> N
         role="host",
     ).run(TaskInputs.empty())
 
-    assert ("docker", "compose", "-f", "deploy/compose/compose.yaml", "-p", "nanofaas-recovery", "restart", "control-plane") in [
-        task.argv for task in executor.seen
-    ]
-    assert [task.argv for task in executor.seen if task.argv[:2] == ("docker", "ps")] == [
+    assert (
+        "docker",
+        "compose",
+        "-f",
+        "deploy/compose/compose.yaml",
+        "-p",
+        "nanofaas-recovery",
+        "restart",
+        "control-plane",
+    ) in [task.argv for task in executor.seen]
+    assert [
+        task.argv for task in executor.seen if task.argv[:2] == ("docker", "ps")
+    ] == [
         executor.seen[2].argv,
         executor.seen[7].argv,
     ]

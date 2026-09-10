@@ -24,15 +24,15 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from sonata_engine import Workflow
-from nanolab.tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.execution.bindings import RoleBindings
-from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import resolve_variants
 from nanolab.plans.functions import resolve_function
 from nanolab.plans.loadtest import build_loadtest_plan
+from nanolab.tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 SCRIPT_NAME = "runtime-comparison.js"
 
@@ -44,7 +44,13 @@ MIXED_SCRIPT_NAME = "mixed-workload.js"
 
 
 def script_for(config: ScenarioConfig) -> str:
+    """Return the k6 script that drives this profile's load.
+
+    The `mixed` profile reuses the comparison wiring with a different
+    generator, so it is the one profile that does not run `SCRIPT_NAME`.
+    """
     return MIXED_SCRIPT_NAME if config.load_profile == "mixed" else SCRIPT_NAME
+
 
 # The module set every variant is compiled with, and therefore the set the run
 # can be asked about. Written out rather than derived from `_additional_modules`:
@@ -71,11 +77,12 @@ NO_STAGES: tuple[tuple[str, int], ...] = ()
 
 
 def is_runtime_comparison(config: ScenarioConfig) -> bool:
+    """Return whether the scenario's load profile is one this module plans."""
     return config.load_profile in ("comparison", "mixed")
 
 
 def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
-    """What the generator is told beyond the shared load-test environment.
+    """Return what the generator is told beyond the shared load-test environment.
 
     The pair is named explicitly because `k6_environment` only volunteers a
     neighbour for co-tenancy runs, and co-tenancy is defined by the presence of a
@@ -94,7 +101,7 @@ def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
 
 
 def _variant_image(config: ScenarioConfig) -> str | None:
-    """The image for the build this run measures, taken from the VM-local registry.
+    """Return the image this run measures, taken from the VM-local registry.
 
     Passing it as `prebuilt_control_plane_image` is what makes the comparison
     honest rather than merely convenient: `platform.py` skips its own build
@@ -113,7 +120,7 @@ def pinned_functions(
     repo_root: Path | None,
     tool_root: Path | None,
 ) -> dict[str, str]:
-    """The function images a cell uses, named exactly as the prepare phase built them.
+    """Return the function images a cell uses, as the prepare phase named them.
 
     Resolved rather than invented: these are the same tags `platform.py` would
     have produced for itself. Declaring them as prebuilt changes nothing about
@@ -153,7 +160,9 @@ def build_runtime_comparison_plan(
 ) -> Workflow:
     """Compile one variant's run of the comparison into a Sonata workflow."""
     if not is_runtime_comparison(config):
-        raise ValueError("runtime-comparison plan requires loadProfile: comparison or mixed")
+        raise ValueError(
+            "runtime-comparison plan requires loadProfile: comparison or mixed"
+        )
     image = prebuilt_control_plane_image or _variant_image(config)
     if image is None:
         raise ValueError(

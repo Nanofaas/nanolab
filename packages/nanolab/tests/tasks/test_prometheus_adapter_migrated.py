@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sonata_tasks.prometheus import PrometheusSample, PrometheusSeries
 
 from nanolab.tasks.loadtest import prometheus
-from sonata_tasks.prometheus import PrometheusSample, PrometheusSeries
 
 
 def test_query_range_series_raises_on_http_error() -> None:
     with patch.object(prometheus, "_client") as client_factory:
-        client_factory.return_value.query_range.side_effect = RuntimeError("connection refused")
+        client_factory.return_value.query_range.side_effect = RuntimeError(
+            "connection refused"
+        )
         with pytest.raises(RuntimeError, match="connection refused"):
             prometheus.query_prometheus_range_series(
                 "http://localhost:9090",
                 "http_requests_total",
-                datetime(2026, 1, 1, tzinfo=timezone.utc),
-                datetime(2026, 1, 1, 1, tzinfo=timezone.utc),
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 1, 1, tzinfo=UTC),
             )
 
 
@@ -26,7 +28,10 @@ def test_query_range_series_returns_parsed_points() -> None:
     mock_client.query_range.return_value = (
         PrometheusSeries(
             {"__name__": "http_requests_total"},
-            (PrometheusSample(1704067200.0, 42.0), PrometheusSample(1704067260.0, 43.0)),
+            (
+                PrometheusSample(1704067200.0, 42.0),
+                PrometheusSample(1704067260.0, 43.0),
+            ),
         ),
     )
 
@@ -34,8 +39,8 @@ def test_query_range_series_returns_parsed_points() -> None:
         result = prometheus.query_prometheus_range_series(
             "http://localhost:9090",
             "http_requests_total",
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
-            datetime(2026, 1, 1, 1, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 1, 1, tzinfo=UTC),
         )
 
     assert isinstance(result, list)

@@ -1,11 +1,13 @@
 """Tests for tui_toolkit.context — UIContext + init_ui / get_ui / bind_ui."""
+
 from __future__ import annotations
 
-from unittest.mock import patch
 import os
+from unittest.mock import patch
 
 import pytest
-from tui_toolkit.brand import AppBrand, DEFAULT_BRAND
+
+from tui_toolkit.brand import DEFAULT_BRAND, AppBrand
 from tui_toolkit.context import UIContext, bind_ui, get_ui, init_ui
 from tui_toolkit.theme import DEFAULT_THEME, Theme
 
@@ -14,6 +16,7 @@ from tui_toolkit.theme import DEFAULT_THEME, Theme
 def _reset_ui_singleton():
     """Each test starts from the bare default — init_ui mutates module state."""
     import tui_toolkit.context as ctx_mod
+
     saved_shared = ctx_mod._ctx_shared
     yield
     ctx_mod._ctx_shared = saved_shared

@@ -58,7 +58,9 @@ def working_set_bytes(stats: dict[str, Any]) -> float:
     usage = float(memory.get("usage") or 0.0)
     detail = memory.get("stats") or {}
     # cgroup v2 calls it inactive_file; v1 called it total_inactive_file.
-    inactive = float(detail.get("inactive_file") or detail.get("total_inactive_file") or 0.0)
+    inactive = float(
+        detail.get("inactive_file") or detail.get("total_inactive_file") or 0.0
+    )
     return max(0.0, usage - inactive)
 
 
@@ -77,15 +79,22 @@ def cpu_percent(stats: dict[str, Any]) -> float:
     previous_system = previous.get("system_cpu_usage")
     # Checked one at a time: a tuple membership test does not narrow, and the
     # first reading of a container legitimately has no predecessor.
-    if usage is None or previous_usage is None or system is None or previous_system is None:
+    if (
+        usage is None
+        or previous_usage is None
+        or system is None
+        or previous_system is None
+    ):
         return 0.0
     delta = float(usage) - float(previous_usage)
     system_delta = float(system) - float(previous_system)
     if delta <= 0 or system_delta <= 0:
         return 0.0
-    cores = cpu.get("online_cpus") or len(
-        (cpu.get("cpu_usage") or {}).get("percpu_usage") or []
-    ) or 1
+    cores = (
+        cpu.get("online_cpus")
+        or len((cpu.get("cpu_usage") or {}).get("percpu_usage") or [])
+        or 1
+    )
     return delta / system_delta * float(cores) * 100.0
 
 
@@ -100,11 +109,12 @@ class DockerEngineProbe:
     def _client(self) -> httpx.Client:
         return httpx.Client(
             transport=httpx.HTTPTransport(uds=self.socket_path),
-            base_url="http://docker",  # NOSONAR (S5332): Unix-domain socket, no network transport
+            base_url="http://docker",  # NOSONAR (S5332): Unix socket, no network
             timeout=self.timeout_seconds,
         )
 
     def container_names(self) -> list[str]:
+        """Return the sorted names of containers carrying the configured prefix."""
         with self._client() as client:
             response = client.get("/containers/json")
             response.raise_for_status()
@@ -117,11 +127,18 @@ class DockerEngineProbe:
             return sorted(names)
 
     def read(self, elapsed: float) -> list[ResourceSample]:
+        """Sample every matching container, stamping each with `elapsed` seconds.
+
+        Containers the Engine fails to answer for are skipped; a failed request
+        overall is re-raised as a RuntimeError naming the Engine error.
+        """
         try:
             with self._client() as client:
                 samples = []
                 for name in self.container_names():
-                    response = client.get(f"/containers/{name}/stats", params={"stream": "false"})
+                    response = client.get(
+                        f"/containers/{name}/stats", params={"stream": "false"}
+                    )
                     if response.status_code != 200:
                         continue
                     stats = response.json()
@@ -150,7 +167,10 @@ class ResourceWatcher:
     service time is derived from.
     """
 
-    def __init__(self, probe: DockerEngineProbe, poll_interval_seconds: float = 5.0) -> None:
+    def __init__(
+        self, probe: DockerEngineProbe, poll_interval_seconds: float = 5.0
+    ) -> None:
+        """Remember the probe and the interval between background samples."""
         self._probe = probe
         self._poll_interval = poll_interval_seconds
         self._stop = threading.Event()
@@ -161,17 +181,22 @@ class ResourceWatcher:
 
     @property
     def samples(self) -> tuple[ResourceSample, ...]:
+        """Return the samples collected so far, in the order they were taken."""
         return tuple(self._samples)
 
     def start(self) -> None:
+        """Start the daemon thread that samples until `stop` is called."""
         if self._thread is not None:
             raise RuntimeError("ResourceWatcher already started")
         self._stop.clear()
         self._started_at = time.monotonic()
-        self._thread = threading.Thread(target=self._loop, name="resource-watcher", daemon=True)
+        self._thread = threading.Thread(
+            target=self._loop, name="resource-watcher", daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
+        """Signal the thread and wait briefly for it to finish."""
         if self._thread is None:
             return
         self._stop.set()
@@ -193,6 +218,7 @@ class ResourceWatcher:
             self.errors.append(str(exc))
 
     def write_series(self, path: Path) -> None:
+        """Write the collected samples and any sampling errors to `path` as JSON."""
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "errors": list(self.errors),
@@ -212,20 +238,24 @@ class ResourceWatcher:
 
 @dataclass
 class ResourceWatcherGroup:
-    """Adapts the resource watcher to the start/stop bracket `RunK6Task` drives,
-    writing its series as soon as the load stops so a later failure cannot lose
-    it."""
+    """Adapt the resource watcher to the start/stop bracket `RunK6Task` drives.
+
+    The series is written as soon as the load stops, so a later failure cannot
+    lose it.
+    """
 
     watcher: ResourceWatcher
     series_path: Path
     inner: Any = field(default=None)
 
     def start(self) -> None:
+        """Start the watcher, then the wrapped bracket when one was given."""
         self.watcher.start()
         if self.inner is not None:
             self.inner.start()
 
     def stop(self) -> None:
+        """Stop the wrapped bracket first, then the watcher, and write its series."""
         if self.inner is not None:
             self.inner.stop()
         self.watcher.stop()

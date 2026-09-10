@@ -19,26 +19,27 @@ Imports from companion tasks
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sonata_engine import Evidence, ReusableTask, Steps, Task, TaskInputs, TaskOutcome
-from sonata_tasks.execution.bindings import CommandTaskExecutor
-from nanolab.tasks.execution import ExecutionRole
 from sonata_tasks.command import CommandTask
 from sonata_tasks.composites import command_specs_composite
 from sonata_tasks.cosign import COSIGN_IMAGE, CosignTask
 from sonata_tasks.docker import DockerPushTask
+from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.skopeo import SkopeoInspectTask
 from sonata_tasks.syft import SYFT_IMAGE, SyftTask
 
+from nanolab.tasks.execution import ExecutionRole
+
 __all__ = [
+    "attest_composite",
     "command_specs_composite",
     "registry_push_composite",
-    "attest_composite",
 ]
 
 
@@ -79,6 +80,7 @@ def registry_push_composite(
         Set False for plain-HTTP registries (e.g. localhost:5000).
     title :
         Optional override.
+
     """
     cell_steps = tuple(
         Steps(
@@ -139,7 +141,9 @@ class _AttestImageTask(ReusableTask):
         self._steps = steps
         self._signed = signed
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-        self._reuse_key = f"attest:{image}:sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"
+        self._reuse_key = (
+            f"attest:{image}:sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"
+        )
         # The reuse key rides in the title because a step's journal identity is
         # its slug, and this composite is built inside a release phase at run
         # time -- so it never reaches `CompiledWorkflow.fingerprint`, the only
@@ -155,7 +159,9 @@ class _AttestImageTask(ReusableTask):
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
         self._group.run(inputs)
-        evidence = Evidence("cosign-attestation", self._image, self._image.split("@", 1)[1])
+        evidence = Evidence(
+            "cosign-attestation", self._image, self._image.split("@", 1)[1]
+        )
         self._signed.append(evidence)
         return TaskOutcome(evidence=(evidence,))
 
@@ -207,7 +213,10 @@ def attest_composite(
             title=title,
             steps=(
                 CommandTask(
-                    title="No images to attest", argv=("true",), executor=executor, role=role
+                    title="No images to attest",
+                    argv=("true",),
+                    executor=executor,
+                    role=role,
                 ),
             ),
         )
@@ -216,7 +225,9 @@ def attest_composite(
     cell_steps: list[Any] = []
     for image in images:
         if "@" not in image:
-            raise ValueError(f"attestation needs a digest-pinned reference, got {image!r}")
+            raise ValueError(
+                f"attestation needs a digest-pinned reference, got {image!r}"
+            )
         sbom_path = f"{sbom_dir_remote}/{_artifact_slug(image)}.spdx.json"
         operations: tuple[Task[Any], ...] = (
             SyftTask(

@@ -2,14 +2,31 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from sonata_engine import Resource, TaskInputs
-from nanolab.tasks.provisioning.resources import provisioned_vm
 from sonata_tasks.compensation import best_effort
+
+from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.config.environment import EnvironmentConfig, ExecutionRole
+from nanolab.images.bake import render_bake_json
+from nanolab.images.plan import ImagePlan
+from nanolab.release.build import create_source_archive, stage_source_archive
+from nanolab.release.environment import (
+    secure_release_endpoints,
+    verify_release_vm_facts,
+)
+from nanolab.release.model import ArtifactEvidence
+from nanolab.release.secrets import (
+    RemoteCosignCredentials,
+    RemoteDockerCredentials,
+    stage_cosign_credentials,
+    stage_ghcr_credentials,
+)
 from nanolab.tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
@@ -18,42 +35,32 @@ from nanolab.tasks.components.bootstrap import (
     plan_registry_ensure_container,
     plan_vm_provision_base,
 )
-from nanolab.tasks.vm.models import VmInfo, VmRequest
 from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
-
 from nanolab.tasks.provisioning import (
     remote_operations,
     retarget_cloud_operations,
     run_bootstrap_operations,
     scenario_context,
 )
-from nanolab.cli.vm_provider import vm_request_for_role
-from nanolab.config.environment import EnvironmentConfig, ExecutionRole
-from nanolab.images.bake import render_bake_json
-from nanolab.images.plan import ImagePlan
-from nanolab.release.environment import secure_release_endpoints, verify_release_vm_facts
-from nanolab.release.build import create_source_archive, stage_source_archive
-from nanolab.release.model import ArtifactEvidence
-from nanolab.release.secrets import (
-    RemoteCosignCredentials,
-    RemoteDockerCredentials,
-    stage_cosign_credentials,
-    stage_ghcr_credentials,
-)
+from nanolab.tasks.provisioning.resources import provisioned_vm
+from nanolab.tasks.vm.models import VmInfo, VmRequest
 from nanolab.workspace.paths import discover_tool_root
-
 
 T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseEndpoints:
+    """The tunnel-reachable URLs a release talks to its stack VM through."""
+
     control_plane: str
     prometheus: str
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseResources:
+    """The three release VMs and the endpoints that depend on them."""
+
     stack: Resource[VmInfo]
     loadgen: Resource[VmInfo]
     arm_builder: Resource[VmInfo]
@@ -61,11 +68,14 @@ class ReleaseResources:
 
     @property
     def vms(self) -> tuple[Resource[VmInfo], ...]:
+        """Return the stack, loadgen and arm-builder resources in that order."""
         return self.stack, self.loadgen, self.arm_builder
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseSourceResources:
+    """The immutable source archive and the copies staged on its two VMs."""
+
     local: Resource[ArtifactEvidence]
     stack: Resource[str]
     arm: Resource[str]
@@ -73,6 +83,8 @@ class ReleaseSourceResources:
 
 @dataclass(frozen=True, slots=True)
 class BuildInputs:
+    """The generated Bake and BuildKit files, locally and on the VM."""
+
     bake_file: Path
     buildkit_config: Path
     remote_bake_file: str
@@ -81,15 +93,31 @@ class BuildInputs:
 
 @dataclass(frozen=True, slots=True)
 class CredentialLease[T]:
+    """An entered credential context whose exit is deferred to release time."""
+
     value: T
     _manager: AbstractContextManager[T]
 
     def close(self) -> None:
+        """Exit the context manager, removing the staged credential files."""
         self._manager.__exit__(None, None, None)
 
 
+class CredentialValidator(Protocol):
+    """The one credential check the guard makes before cloud resources.
+
+    `CredentialFiles` is the product's implementation; the protocol is what
+    keeps the guard callable with a credential source that does not stage real
+    secret files.
+    """
+
+    def validate(self, *, repo_root: Path) -> object:
+        """Raise if these credentials are unusable for `repo_root`."""
+        ...
+
+
 def release_execution_guard(
-    credentials: object | None,
+    credentials: CredentialValidator | None,
     *,
     repo_roots: tuple[Path, ...],
 ) -> Resource[None]:
@@ -98,7 +126,7 @@ def release_execution_guard(
     def acquire(_inputs: TaskInputs) -> None:
         if credentials is None:
             raise ValueError("release credential config is required for execution")
-        validate = getattr(credentials, "validate")
+        validate = credentials.validate
         for root in repo_roots:
             validate(repo_root=root)
 
@@ -111,7 +139,7 @@ def release_execution_guard(
     )
 
 
-def _credential_resource(
+def _credential_resource[T](
     title: str,
     manager: Callable[[], AbstractContextManager[T]],
     requires: tuple[Resource[Any], ...],
@@ -137,9 +165,12 @@ def ghcr_credentials_resource(
     token_file: Path,
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[CredentialLease[RemoteDockerCredentials]]:
+    """Stage a GHCR token on the VM and hold the resulting Docker login."""
     return _credential_resource(
         "Acquire staged GHCR credentials",
-        lambda: stage_ghcr_credentials(provider, request, username=username, token_file=token_file),
+        lambda: stage_ghcr_credentials(
+            provider, request, username=username, token_file=token_file
+        ),
         requires,
     )
 
@@ -152,6 +183,7 @@ def cosign_credentials_resource(
     password_file: Path,
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[CredentialLease[RemoteCosignCredentials]]:
+    """Stage the cosign key and password on the VM for the signing phases."""
     return _credential_resource(
         "Acquire staged Cosign credentials",
         lambda: stage_cosign_credentials(
@@ -159,6 +191,10 @@ def cosign_credentials_resource(
         ),
         requires,
     )
+
+
+def _release_endpoint(host: str, port: int) -> str:
+    return f"http://{host}:{port}"  # NOSONAR (S5332): reached over the SSH tunnel
 
 
 def _release_remote_root(value: str) -> PurePosixPath:
@@ -172,7 +208,9 @@ def _release_remote_root(value: str) -> PurePosixPath:
         or path.parent.parent == PurePosixPath("/")
         or not path.name
     ):
-        raise ValueError("release remote root must be an absolute versioned nanofaas-release path")
+        raise ValueError(
+            "release remote root must be an absolute versioned nanofaas-release path"
+        )
     return path
 
 
@@ -208,7 +246,12 @@ def _bootstrap_role(
     info: VmInfo,
 ) -> None:
     resolved = request.model_copy(
-        update={"lifecycle": "external", "host": info.host, "user": info.user, "home": info.home}
+        update={
+            "lifecycle": "external",
+            "host": info.host,
+            "user": info.user,
+            "home": info.home,
+        }
     )
     context = scenario_context(repo_root, resolved, discover_tool_root() / "assets")
     if role == "stack":
@@ -284,8 +327,8 @@ def build_release_resources(
         stack_info = inputs.resource(stack)
         _ = inputs.resource(loadgen)
         return ReleaseEndpoints(
-            control_plane=f"http://{stack_info.host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint reached over the SSH tunnel
-            prometheus=f"http://{stack_info.host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): VM endpoint reached over the SSH tunnel
+            control_plane=_release_endpoint(stack_info.host, CONTROL_PLANE_NODE_PORT),
+            prometheus=_release_endpoint(stack_info.host, PROMETHEUS_NODE_PORT),
         )
 
     endpoints = Resource(
@@ -350,8 +393,9 @@ def build_release_source_resources(
                 raise
             return remote_source_dir
 
+        name = getattr(request, "name", "release VM")
         return Resource(
-            title=f"Acquire verified source on {getattr(request, 'name', 'release VM')}",
+            title=f"Acquire verified source on {name}",
             acquire=acquire,
             release=lambda _inputs, _value: cleanup(),
             requires=(local, *requires),
@@ -416,15 +460,22 @@ def build_inputs_resource(
                 request, ("mkdir", "-p", remote_root)
             )
             if int(getattr(result, "return_code", 0)) != 0:
-                raise RuntimeError(f"create {architecture} release input directory failed")
-            for source, destination in ((bake, remote_bake), (buildkit, remote_buildkit)):
+                raise RuntimeError(
+                    f"create {architecture} release input directory failed"
+                )
+            for source, destination in (
+                (bake, remote_bake),
+                (buildkit, remote_buildkit),
+            ):
                 result = provider.transfer_to(  # type: ignore[attr-defined]
                     request, source=source, destination=destination
                 )
                 if int(getattr(result, "return_code", 0)) != 0:
                     raise RuntimeError(f"transfer {source.name} failed")
         except BaseException as error:
-            best_effort(error, cleanup, what=f"{architecture} release inputs failed acquire")
+            best_effort(
+                error, cleanup, what=f"{architecture} release inputs failed acquire"
+            )
             raise
         return BuildInputs(bake, buildkit, remote_bake, remote_buildkit)
 

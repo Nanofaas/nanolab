@@ -1,18 +1,27 @@
 """UIContext — active theme + brand + width, bound via init_ui / bind_ui."""
+
 from __future__ import annotations
 
 import shutil
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from typing import Generator, cast
+from typing import cast
 
-from tui_toolkit.brand import AppBrand, DEFAULT_BRAND
+from tui_toolkit.brand import DEFAULT_BRAND, AppBrand
 from tui_toolkit.theme import DEFAULT_THEME, Theme
 
 
 @dataclass(frozen=True, slots=True)
 class UIContext:
+    """Theme, brand and resolved content width for one terminal session.
+
+    ``content_width`` stays ``None`` until ``init_ui()`` measures the terminal
+    and clamps it to ``max_content_cols``; ``get_ui()`` hands back the default
+    context (and so a ``None`` width) before that call happens.
+    """
+
     theme: Theme = DEFAULT_THEME
     brand: AppBrand = DEFAULT_BRAND
     max_content_cols: int = 140
@@ -37,6 +46,7 @@ def init_ui(ctx: UIContext | None = None) -> UIContext:
     _ctx_var.set(resolved)
     try:
         from tui_toolkit.console import _apply_width
+
         _apply_width(width)
     except ImportError:
         pass

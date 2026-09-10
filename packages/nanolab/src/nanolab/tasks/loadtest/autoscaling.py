@@ -1,10 +1,17 @@
+"""Sample replica counts while load runs, then judge whether autoscaling worked.
+
+Sampling is threaded and lasts exactly as long as the load, because reading the
+counts afterwards only sees residual state and races the autoscaler's downscale
+cooldown.
+"""
+
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, field
 import shlex
 import threading
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.parse import quote
 
@@ -20,8 +27,13 @@ class Sampling(Protocol):
     records elsewhere.
     """
 
-    def start(self) -> None: ...
-    def stop(self) -> None: ...
+    def start(self) -> None:
+        """Start sampling for the load run."""
+        ...
+
+    def stop(self) -> None:
+        """Stop sampling once the load run is over."""
+        ...
 
 
 class InitialReplicaCheck(Protocol):
@@ -31,7 +43,9 @@ class InitialReplicaCheck(Protocol):
     that happens to make it today.
     """
 
-    def run(self) -> None: ...
+    def run(self) -> None:
+        """Assert the run starts where it should."""
+        ...
 
 
 class AutoscalingResult(Protocol):
@@ -42,7 +56,9 @@ class AutoscalingResult(Protocol):
     """
 
     @property
-    def result(self) -> AutoscalingSummary: ...
+    def result(self) -> AutoscalingSummary:
+        """Return what the autoscaling verification concluded."""
+        ...
 
 
 class Watcher(Protocol):
@@ -54,12 +70,21 @@ class Watcher(Protocol):
     """
 
     @property
-    def max_observed(self) -> int: ...
+    def max_observed(self) -> int:
+        """Return the highest replica count anyone observed."""
+        ...
 
 
 class ReplicaStatusProbe(Protocol):
-    def ready_replicas(self) -> int: ...
-    def desired_replicas(self) -> int: ...
+    """Read a deployment's desired and ready replica counts."""
+
+    def ready_replicas(self) -> int:
+        """Return how many replicas are ready."""
+        ...
+
+    def desired_replicas(self) -> int:
+        """Return how many replicas the deployment asks for."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +123,12 @@ def releases_under_load(samples: Sequence[ReplicaSample]) -> int:
     seen_running = False
     previous = None
     for sample in samples:
-        if previous is not None and previous == 0 and sample.desired > 0 and seen_running:
+        if (
+            previous is not None
+            and previous == 0
+            and sample.desired > 0
+            and seen_running
+        ):
             releases += 1
         if sample.desired > 0:
             seen_running = True
@@ -108,6 +138,12 @@ def releases_under_load(samples: Sequence[ReplicaSample]) -> int:
 
 @dataclass(frozen=True)
 class AutoscalingSummary:
+    """What the autoscaling verification concluded about one run.
+
+    Everything the run needs to explain itself: the trajectory it followed, how
+    often the deployment was released mid-load, and the verdict reason, if any.
+    """
+
     deployment_name: str
     max_replicas_observed: int
     final_desired_replicas: int
@@ -139,9 +175,11 @@ class ReplicaProbe:
     remote_dir: str
 
     def ready_replicas(self) -> int:
+        """Return how many replicas the deployment reports ready."""
         return self._replica_count("{.status.readyReplicas}")
 
     def desired_replicas(self) -> int:
+        """Return how many replicas the deployment asks for."""
         return self._replica_count("{.spec.replicas}")
 
     def _replica_count(self, jsonpath: str) -> int:
@@ -163,12 +201,16 @@ class ReplicaProbe:
             detail = (result.stderr or result.stdout or "").strip()
             if "NotFound" in detail:
                 raise RuntimeError(
-                    f"deployment {self.deployment_name!r} not found in namespace {self.namespace!r}: {detail}"
+                    f"deployment {self.deployment_name!r} not found in namespace "
+                    f"{self.namespace!r}: {detail}"
                 )
-            raise RuntimeError(detail or f"kubectl replica query failed (exit {result.return_code})")
+            raise RuntimeError(
+                detail or f"kubectl replica query failed (exit {result.return_code})"
+            )
         raw = (result.stdout or "").strip()
         if not raw:
-            # jsonpath yields empty output when the field is absent (e.g. readyReplicas at 0).
+            # jsonpath yields empty output when the field is absent
+            # (e.g. readyReplicas at 0).
             return 0
         try:
             return int(raw)
@@ -185,9 +227,11 @@ class HttpReplicaProbe:
     timeout_seconds: float = 4.0
 
     def ready_replicas(self) -> int:
+        """Return how many replicas the API reports ready."""
         return self._status()[1]
 
     def desired_replicas(self) -> int:
+        """Return how many replicas the API says are desired."""
         return self._status()[0]
 
     def _status(self) -> tuple[int, int]:
@@ -233,6 +277,7 @@ class ReplicaWatcher:
         probe: ReplicaStatusProbe,
         poll_interval_seconds: float = 2.0,
     ) -> None:
+        """Record the probe and the interval between samples."""
         self._probe = probe
         self._poll_interval = poll_interval_seconds
         self._stop = threading.Event()
@@ -253,12 +298,14 @@ class ReplicaWatcher:
 
     @property
     def max_observed(self) -> int:
+        """Return the highest replica count any sample showed."""
         return max(
             (max(sample.desired, sample.ready) for sample in self._samples),
             default=0,
         )
 
     def start(self) -> None:
+        """Take an opening sample, then sample on a background thread."""
         if self._thread is not None:
             raise RuntimeError("ReplicaWatcher already started")
         self._stop.clear()
@@ -277,10 +324,13 @@ class ReplicaWatcher:
         # unaffected — it asks whether the function was dropped mid-load, which
         # does not depend on having seen the start.
         self._sample()
-        self._thread = threading.Thread(target=self._loop, name="replica-watcher", daemon=True)
+        self._thread = threading.Thread(
+            target=self._loop, name="replica-watcher", daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop sampling and wait for the thread to finish."""
         if self._thread is None:
             return
         self._stop.set()
@@ -321,18 +371,22 @@ class VerifyInitialAutoscalingReplicas:
     expected_replicas: int = 0
 
     def run(self) -> None:
+        """Raise unless both replica counts already equal the floor."""
         desired = self.probe.desired_replicas()
         ready = self.probe.ready_replicas()
         if desired != self.expected_replicas or ready != self.expected_replicas:
             raise RuntimeError(
                 "initial autoscaling replicas: "
-                f"expected desired={self.expected_replicas} and ready={self.expected_replicas}, "
+                f"expected desired={self.expected_replicas} "
+                f"and ready={self.expected_replicas}, "
                 f"got desired={desired} and ready={ready}"
             )
 
 
 @dataclass
 class VerifyAutoscalingReplicas:
+    """Check that load scaled the deployment up and back down to its floor."""
+
     task_id: str
     title: str
     runner: VmCommandRunner
@@ -350,6 +404,7 @@ class VerifyAutoscalingReplicas:
 
     @property
     def result(self) -> AutoscalingSummary:
+        """Return the summary `run` produced, raising if it has not run."""
         if self._result is None:
             raise RuntimeError("VerifyAutoscalingReplicas.run() has not been called")
         return self._result
@@ -386,6 +441,7 @@ class VerifyAutoscalingReplicas:
         return self._resolved_probe().desired_replicas()
 
     def run(self) -> AutoscalingSummary:
+        """Verify the replica trajectory and return what it showed."""
         max_replicas = self.watcher.max_observed if self.watcher is not None else 0
         last_desired = 0
         if max_replicas <= 1:
@@ -402,7 +458,10 @@ class VerifyAutoscalingReplicas:
             message = f"Scale-up not observed: max replicas stayed at {max_replicas}"
             watcher_errors = list(getattr(self.watcher, "errors", []) or [])
             if watcher_errors:
-                message += f" (watcher probe errors: {watcher_errors[-1]!r}, {len(watcher_errors)} total)"
+                message += (
+                    f" (watcher probe errors: {watcher_errors[-1]!r}, "
+                    f"{len(watcher_errors)} total)"
+                )
             return self._complete(max_replicas, last_desired, verdict_error=message)
 
         time.sleep(self.scale_down_initial_delay_seconds)
@@ -423,4 +482,3 @@ class VerifyAutoscalingReplicas:
                 f"desired replicas = {final_desired}"
             ),
         )
-

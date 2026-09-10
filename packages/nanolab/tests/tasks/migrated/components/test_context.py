@@ -46,7 +46,9 @@ def test_context_holds_neutral_fields() -> None:
 def test_resolved_scenario_view_is_satisfied_structurally() -> None:
     rs: ResolvedScenarioView = _FakeResolvedScenario(
         namespace="ns",
-        functions=(_FakeFunction(key="echo", family="echo", runtime="java", image=None),),
+        functions=(
+            _FakeFunction(key="echo", family="echo", runtime="java", image=None),
+        ),
     )
     ctx = ScenarioExecutionContext(
         repo_root=Path("/repo"),

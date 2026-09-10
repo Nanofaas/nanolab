@@ -14,7 +14,7 @@ from nanolab.release.remote_retry import (
 def _op(
     results: list[SimpleNamespace | Exception],
 ) -> tuple[Callable[[], SimpleNamespace], dict[str, int]]:
-    """The operation under retry, and a counter for how often it ran."""
+    """Build the operation under retry and a counter for how often it ran."""
     state = {"i": 0}
 
     def run() -> SimpleNamespace:
@@ -28,7 +28,9 @@ def _op(
 
 
 def test_retries_a_dropped_connection_then_succeeds() -> None:
-    run, state = _op([SimpleNamespace(return_code=CONNECTION_DEAD), SimpleNamespace(return_code=0)])
+    run, state = _op(
+        [SimpleNamespace(return_code=CONNECTION_DEAD), SimpleNamespace(return_code=0)]
+    )
     result = retry_on_connection_death(run, describe="probe", sleep=lambda _s: None)
     assert result.return_code == 0
     assert state["i"] == 2

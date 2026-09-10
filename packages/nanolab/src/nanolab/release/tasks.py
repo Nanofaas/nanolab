@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
-from typing import Any
 import uuid
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from sonata_engine import Evidence, ReusableTask, Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.bindings import CommandTaskExecutor
@@ -19,7 +19,6 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 from nanolab.release.evidence import is_sha256_digest, receipt_artifacts
 from nanolab.release.model import ArtifactEvidence, ReleaseIdentity, digest_path
 from nanolab.release.remote_retry import retry_on_connection_death
-
 
 PhaseWork = Callable[[TaskInputs], Iterable[Evidence]]
 
@@ -57,6 +56,7 @@ class ReleasePhaseTask(ReusableTask):
     idempotent: bool = True
 
     def __post_init__(self) -> None:
+        """Version the run directory and default the title to the phase name."""
         object.__setattr__(
             self,
             "run_dir",
@@ -67,6 +67,7 @@ class ReleasePhaseTask(ReusableTask):
 
     @property
     def receipt(self) -> Path:
+        """Return the path this phase's receipt is written to."""
         # Own subdirectory, not run_dir itself: several phases write their
         # artifact to run_dir/<phase>.json, and a receipt sharing that name
         # replaces the artifact right after its digest is recorded.
@@ -74,6 +75,12 @@ class ReleasePhaseTask(ReusableTask):
 
     @property
     def reuse_key(self) -> str:
+        """Return the key that decides whether this phase may be reused.
+
+        It covers the phase name, the release identity, the phase inputs and
+        the prerequisite and expected-image sets, so a change to any of them
+        makes Sonata run the phase again.
+        """
         payload = {
             "schema": 1,
             "phase": self.phase,
@@ -83,12 +90,23 @@ class ReleasePhaseTask(ReusableTask):
             "expectedImages": self.expected_images,
             "receipt": str(self.receipt),
         }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-        return f"release:{self.phase}:sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        )
+        digest = hashlib.sha256(encoded.encode()).hexdigest()
+        return f"release:{self.phase}:sha256:{digest}"
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Run the phase's work and record everything it produced.
+
+        The prerequisite files and the receipt's own digest are appended to
+        the outcome. When `expected_images` is set, the produced digest
+        evidence must cover exactly that matrix or the phase fails, so a
+        partially built image set can never be recorded as reusable.
+        """
         prerequisite_evidence = tuple(
-            Evidence("file-digest", str(path), digest_path(path)) for path in self.prerequisites
+            Evidence("file-digest", str(path), digest_path(path))
+            for path in self.prerequisites
         )
         produced = tuple(self.work(inputs))
         if self.expected_images:
@@ -97,7 +115,9 @@ class ReleasePhaseTask(ReusableTask):
             # (docker://). Compare the image, not the scheme it was read through
             # -- but a reference missing its own scheme stays uncounted, so
             # malformed evidence still fails the matrix.
-            matrix = tuple(entry for entry in produced if entry.kind in MATRIX_DIGEST_SCHEMES)
+            matrix = tuple(
+                entry for entry in produced if entry.kind in MATRIX_DIGEST_SCHEMES
+            )
             references = {
                 entry.reference.removeprefix(MATRIX_DIGEST_SCHEMES[entry.kind])
                 for entry in matrix
@@ -108,7 +128,9 @@ class ReleasePhaseTask(ReusableTask):
                 or references != set(self.expected_images)
                 or any(not is_sha256_digest(entry.digest) for entry in matrix)
             ):
-                raise RuntimeError(f"{self.phase} evidence does not cover the image matrix")
+                raise RuntimeError(
+                    f"{self.phase} evidence does not cover the image matrix"
+                )
 
         _write_receipt(self.receipt, self.phase, produced)
         receipt = Evidence("file-digest", str(self.receipt), digest_path(self.receipt))
@@ -116,64 +138,88 @@ class ReleasePhaseTask(ReusableTask):
 
 
 def source_test_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that runs the product source tests."""
     return ReleasePhaseTask(phase="source-tests", title="Run source tests", **kwargs)
 
 
 def amd64_build_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that bakes the AMD64 images."""
     return ReleasePhaseTask(phase="amd64-build", title="Build AMD64 images", **kwargs)
 
 
 def registry_push_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that pushes the AMD64 images to the local registry."""
     return ReleasePhaseTask(
-        phase="local-registry-push", title="Push AMD64 images to local registry", **kwargs
+        phase="local-registry-push",
+        title="Push AMD64 images to local registry",
+        **kwargs,
     )
 
 
 def benchmark_task(index: int, **kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that runs benchmark number `index`."""
     return ReleasePhaseTask(
         phase=f"benchmark-{index}", title=f"Run release benchmark {index}", **kwargs
     )
 
 
 def aggregate_benchmarks_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that aggregates the benchmark summaries."""
     return ReleasePhaseTask(phase="aggregate", title="Aggregate benchmarks", **kwargs)
 
 
 def regression_gate_task(**kwargs: Any) -> ReleasePhaseTask:
-    return ReleasePhaseTask(phase="regression-gate", title="Evaluate regression gate", **kwargs)
+    """Build the phase that evaluates the regression gate."""
+    return ReleasePhaseTask(
+        phase="regression-gate", title="Evaluate regression gate", **kwargs
+    )
 
 
 def arm64_build_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that bakes and pushes the ARM64 images."""
     return ReleasePhaseTask(phase="arm64-build", title="Build ARM64 images", **kwargs)
 
 
 def arm64_smoke_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that smoke-tests the freshly built ARM64 images."""
     return ReleasePhaseTask(phase="arm64-smoke", title="Test ARM64 images", **kwargs)
 
 
 def publish_architectures_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that copies the architecture tags to GHCR."""
     return ReleasePhaseTask(
         phase="publish-architectures", title="Publish architecture images", **kwargs
     )
 
 
 def publish_manifests_task(**kwargs: Any) -> ReleasePhaseTask:
-    return ReleasePhaseTask(phase="publish-manifests", title="Publish image manifests", **kwargs)
+    """Build the phase that creates the multi-architecture manifests."""
+    return ReleasePhaseTask(
+        phase="publish-manifests", title="Publish image manifests", **kwargs
+    )
 
 
 def publish_aliases_task(**kwargs: Any) -> ReleasePhaseTask:
-    return ReleasePhaseTask(phase="publish-aliases", title="Publish image aliases", **kwargs)
+    """Build the phase that moves the mutable version aliases, last."""
+    return ReleasePhaseTask(
+        phase="publish-aliases", title="Publish image aliases", **kwargs
+    )
 
 
 def attest_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that signs and attests the published images."""
     return ReleasePhaseTask(phase="attest", title="Attest published images", **kwargs)
 
 
 def finalize_task(**kwargs: Any) -> ReleasePhaseTask:
-    return ReleasePhaseTask(phase="finalize", title="Finalize release documentation", **kwargs)
+    """Build the phase that writes the release performance documentation."""
+    return ReleasePhaseTask(
+        phase="finalize", title="Finalize release documentation", **kwargs
+    )
 
 
 def registry_evidence(artifacts: Iterable[ArtifactEvidence]) -> tuple[Evidence, ...]:
+    """Wrap local registry artifacts as `local-registry-digest` evidence."""
     return tuple(
         Evidence("local-registry-digest", artifact.reference, artifact.digest)
         for artifact in artifacts
@@ -183,6 +229,12 @@ def registry_evidence(artifacts: Iterable[ArtifactEvidence]) -> tuple[Evidence, 
 def registry_artifacts_from_receipt(
     receipt: Path, images: tuple[str, ...]
 ) -> tuple[ArtifactEvidence, ...]:
+    """Return the ARM64 build receipt's artifacts, checking image coverage.
+
+    Raises unless the receipt names exactly the `docker://` references in
+    `images`, each with a sha256 digest, so a partial build cannot be read as
+    a complete one.
+    """
     evidence = receipt_artifacts(receipt, "arm64-build", "local-registry-digest")
     expected = {f"docker://{image}" for image in images}
     if (
@@ -215,15 +267,22 @@ def exact_receipt_artifacts(
     return evidence
 
 
-def verified_file_receipt(receipt: Path, phase: str, expected: Path) -> ArtifactEvidence:
+def verified_file_receipt(
+    receipt: Path, phase: str, expected: Path
+) -> ArtifactEvidence:
     """Require one exact file artifact and verify its current digest."""
-    artifact = exact_receipt_artifacts(receipt, phase, "file-digest", (str(expected),))[0]
+    artifact = exact_receipt_artifacts(receipt, phase, "file-digest", (str(expected),))[
+        0
+    ]
     if digest_path(expected) != artifact.digest:
         raise RuntimeError(f"{phase} evidence changed")
     return artifact
 
 
-def verified_json_receipt(receipt: Path, phase: str, expected: Path) -> Mapping[str, Any]:
+def verified_json_receipt(
+    receipt: Path, phase: str, expected: Path
+) -> Mapping[str, Any]:
+    """Return the parsed JSON object of a verified receipt's evidence file."""
     verified_file_receipt(receipt, phase, expected)
     try:
         payload = json.loads(expected.read_text(encoding="utf-8"))
@@ -243,6 +302,12 @@ def require_release_barriers(
     arm_build_receipt: Path,
     arm_images: tuple[str, ...],
 ) -> tuple[ArtifactEvidence, ...]:
+    """Return the ARM64 build evidence once the pre-publication gates agree.
+
+    Requires a passing regression-gate decision and an ARM smoke record whose
+    architecture and image digests match the ARM build receipt, so publication
+    cannot start on a release that regressed or smoked the wrong images.
+    """
     decision = verified_json_receipt(gate_receipt, "regression-gate", gate_file)
     if decision.get("passed") is not True:
         raise RuntimeError("publication requires a passing regression gate")
@@ -256,7 +321,10 @@ def require_release_barriers(
     expected_images = {
         item.reference.removeprefix("docker://"): item.digest for item in arm_evidence
     }
-    if smoke.get("architecture") != "linux/arm64" or smoke.get("images") != expected_images:
+    if (
+        smoke.get("architecture") != "linux/arm64"
+        or smoke.get("images") != expected_images
+    ):
         raise RuntimeError("ARM smoke evidence does not match the ARM build")
     return arm_evidence
 
@@ -266,6 +334,7 @@ def require_attestation_predicate(
     predicate: Path,
     expected: Mapping[str, Any],
 ) -> None:
+    """Require the attest receipt's predicate to equal the expected payload."""
     if verified_json_receipt(receipt, "attest", predicate) != expected:
         raise RuntimeError("attestation predicate does not match the release evidence")
 
@@ -295,7 +364,9 @@ def _image_inspection_argv(
             "verify-images",
             *images,
         )
-    output_format = "--format={{.Architecture}}|{{.Id}}" if architecture else "--format={{.Id}}"
+    output_format = (
+        "--format={{.Architecture}}|{{.Id}}" if architecture else "--format={{.Id}}"
+    )
     return ("docker", "image", "inspect", output_format, *images)
 
 
@@ -363,6 +434,7 @@ def run_image_steps(
 
 
 def run_steps(steps: Task[Any], inputs: TaskInputs) -> None:
+    """Run a task and reject any outcome that is not a `TaskOutcome`."""
     outcome = steps.run(inputs)
     if not isinstance(outcome, TaskOutcome):
         raise RuntimeError(f"{steps.title} returned an invalid outcome")
@@ -383,7 +455,7 @@ def _write_receipt(path: Path, phase: str, evidence: tuple[Evidence, ...]) -> No
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
             handle.write("\n")
-        os.replace(temporary, path)
+        Path(temporary).replace(path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise

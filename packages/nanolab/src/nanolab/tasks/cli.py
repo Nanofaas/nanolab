@@ -1,18 +1,21 @@
-from __future__ import annotations
+"""The CLI workflow: drive the nanofaas binary through build, register and invoke."""
 
-from sonata_tasks.execution.models import CommandOptions
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sonata_engine import Resource, Workflow
+from sonata_tasks.command import CommandTask
+from sonata_tasks.docker import DockerPushTask
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
     RoleBoundCommandTaskExecutor,
 )
-from nanolab.tasks.execution import ExecutionRole
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.gradle import GradleTask
 
 from nanolab.tasks.cli_function import (
     CliFunctionApplyTask,
@@ -24,14 +27,11 @@ from nanolab.tasks.cli_function import (
     function_update_task,
     runtime_config_tasks,
 )
-from sonata_tasks.command import CommandTask
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE
-from sonata_tasks.docker import DockerPushTask
+from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.function import function_resource
-from sonata_tasks.gradle import GradleTask
 from nanolab.tasks.kubectl import k8s_deployment_readiness
 from nanolab.tasks.manifest import FunctionManifest
-
 
 # Mutable settings `fn update` patches, chosen to differ from every
 # `FunctionManifest` default so a control plane that ignored the patch cannot
@@ -78,6 +78,7 @@ class CliWorkflowRequest:
     replicas: int = 2
 
     def __post_init__(self) -> None:
+        """Reject a role other than host/stack, or an empty function list."""
         if self.cli_role not in ("host", "stack"):
             raise ValueError("CLI workflow can run only on host or stack")
         if self.build_role not in ("host", "stack"):
@@ -87,7 +88,7 @@ class CliWorkflowRequest:
 
 
 def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
-    # The CLI has no --namespace flag; the namespace only addresses k8s readiness checks.
+    # The CLI has no --namespace flag; the namespace only serves k8s readiness checks.
     return (request.binary, "--endpoint", request.endpoint, *arguments)
 
 
@@ -106,7 +107,7 @@ def _function_resource(
     readiness_timeout_seconds: int | None = None,
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[None]:
-    """The registered function as an acquire/release pair.
+    """Build the registered function as an acquire/release pair.
 
     Only the commands are CLI-specific: applying a manifest through the nanofaas
     binary. The lifecycle around them — splicing, compensation on a partial
@@ -119,7 +120,11 @@ def _function_resource(
         manifest, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
     )
     delete_task = CliFunctionDeleteTask(
-        function.name, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
+        function.name,
+        cli_argv=prefix,
+        executor=executor,
+        role=request.cli_role,
+        cwd=cwd,
     )
     ready_tasks = (
         k8s_deployment_readiness(
@@ -196,8 +201,8 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
             workflow.add(
                 CommandTask(
                     title=f"Build application artifact: {function.name}"
-                        if function.image_build_argv is not None
-                        else f"Build image {function.name}",
+                    if function.image_build_argv is not None
+                    else f"Build image {function.name}",
                     argv=function.build_argv,
                     executor=executor,
                     role=request.build_role,
@@ -265,7 +270,7 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
             cwd=cwd,
         ):
             workflow.add(task, requires=requires)
-    for function, resource in zip(request.functions, resources):
+    for function, resource in zip(request.functions, resources, strict=False):
         function_requires_resource = (*requires, resource)
         workflow.add(
             CliFunctionInvokeTask(

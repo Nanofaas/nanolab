@@ -1,4 +1,5 @@
 """Tests for the removal of the legacy k3s-e2e command group."""
+
 from __future__ import annotations
 
 from typer.testing import CliRunner

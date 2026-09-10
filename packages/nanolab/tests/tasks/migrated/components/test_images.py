@@ -16,7 +16,6 @@ from nanolab.tasks.components.images import (
 )
 from nanolab.tasks.vm.models import VmRequest
 
-
 WORKSPACE_ROOT = Path(__file__).resolve().parents[6]
 LIVE_E2E_SCENARIO_IMAGE_CONSUMERS = (
     "packages/nanolab/src/nanolab/tasks/components/images.py",
@@ -39,7 +38,9 @@ class _RS:
     functions: Sequence[ResolvedFunctionView]
 
 
-def _ctx(*, runtime: str = "java", functions: list | None = None) -> ScenarioExecutionContext:
+def _ctx(
+    *, runtime: str = "java", functions: list | None = None
+) -> ScenarioExecutionContext:
     return ScenarioExecutionContext(
         repo_root=Path("/repo"),
         scenario_name="s",
@@ -58,11 +59,18 @@ def test_image_name_helpers() -> None:
 
 
 def test_e2e_image_components_keep_local_e2e_tags() -> None:
-    assert control_image("localhost:5000") == "localhost:5000/nanofaas/control-plane:e2e"
-    assert warm_echo_image("localhost:5000") == "localhost:5000/nanofaas/java-warm-echo:e2e"
+    assert (
+        control_image("localhost:5000") == "localhost:5000/nanofaas/control-plane:e2e"
+    )
+    assert (
+        warm_echo_image("localhost:5000")
+        == "localhost:5000/nanofaas/java-warm-echo:e2e"
+    )
 
 
-def test_live_e2e_scenario_image_consumers_do_not_use_removed_images_cli_syntax() -> None:
+def test_live_e2e_scenario_image_consumers_do_not_use_removed_images_cli_syntax() -> (
+    None
+):
     violations = {
         str(path.relative_to(WORKSPACE_ROOT)): syntax
         for relative_path in LIVE_E2E_SCENARIO_IMAGE_CONSUMERS

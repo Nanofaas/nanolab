@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 import fcntl
 import hashlib
 import ipaddress
 import json
 import os
 import re
-from pathlib import Path
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 
 from nanolab.config import EnvironmentConfig
 from nanolab.config.environment import ExecutionRole
 from nanolab.release.versioning import normalize_version, verify_version_consistency
 from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.tasks.vm.models import VmRequest
-
 
 _STACK_VM_SIZE = "Standard_D8s_v5"
 _LOADGEN_VM_SIZE = "Standard_D2s_v5"
@@ -40,7 +39,9 @@ class ReleaseRunInProgressError(RuntimeError):
 def release_lock_path(environment: EnvironmentConfig) -> Path:
     """One lock per Azure VM identity, independent of version and run directory."""
     azure = environment.azure
-    assert azure is not None
+    # Narrowing only: EnvironmentConfig's validator raises for an azure
+    # provider with no azure block, so this cannot fire at runtime.
+    assert azure is not None  # nosec B101
     identity = json.dumps(
         (
             azure.resource_group.casefold(),
@@ -50,22 +51,37 @@ def release_lock_path(environment: EnvironmentConfig) -> Path:
         separators=(",", ":"),
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-    return Path(tempfile.gettempdir()) / f"nanofaas-release-locks-{os.getuid()}" / f"{digest}.lock"
+    return (
+        Path(tempfile.gettempdir())
+        / f"nanofaas-release-locks-{os.getuid()}"
+        / f"{digest}.lock"
+    )
 
 
 @contextmanager
 def release_run_lock(lock_path: Path) -> Iterator[None]:
+    """Hold the release lock for the duration of the block.
+
+    A second coordinator that finds the lock already taken raises
+    `ReleaseRunInProgressError` instead of waiting, so two releases cannot
+    drive the same Azure VMs at once.
+    """
     lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor = os.open(
         lock_path,
-        os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        os.O_CREAT
+        | os.O_RDWR
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
         0o600,
     )
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise ReleaseRunInProgressError("release run is already in progress") from error
+            raise ReleaseRunInProgressError(
+                "release run is already in progress"
+            ) from error
         yield
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
@@ -81,7 +97,9 @@ def validate_release_environment(
     if environment.provider != "azure" or environment.azure is None:
         raise ValueError("release requires an Azure environment")
     if not {"stack", "loadgen", "arm-builder"}.issubset(environment.roles):
-        raise ValueError("release environment requires stack, loadgen and arm-builder roles")
+        raise ValueError(
+            "release environment requires stack, loadgen and arm-builder roles"
+        )
 
     azure = environment.azure
     _require_exact("Azure location", azure.location, _LOCATION)
@@ -112,7 +130,9 @@ def validate_release_environment(
 
     requested_plain, _ = normalize_version(requested_version)
     if verify_version_consistency(repo_root) != requested_plain:
-        raise ValueError("requested version does not match the prepared project version")
+        raise ValueError(
+            "requested version does not match the prepared project version"
+        )
 
 
 def _require_exact(name: str, actual: str, expected: str) -> None:
@@ -139,7 +159,9 @@ def _validate_operator_source(source: str | None) -> None:
     if source == AUTO_OPERATOR_SOURCE:
         return
     try:
-        network = ipaddress.ip_network(source, strict=True) if source is not None else None
+        network = (
+            ipaddress.ip_network(source, strict=True) if source is not None else None
+        )
     except ValueError:
         network = None
     if network is None or network.prefixlen == 0 or not network.is_global:
@@ -152,8 +174,17 @@ def verify_release_vm_facts(
     role: ExecutionRole,
     request: VmRequest,
 ) -> None:
+    """Require a provisioned VM to match the environment it was planned for.
+
+    Compares the live facts the provider reports -- location, size, disk and
+    image -- with the validated environment, so a release cannot run on a VM
+    that was resized or reprovisioned behind its back. Raises RuntimeError
+    naming every field that differs.
+    """
     azure = environment.azure
-    assert azure is not None
+    # Narrowing only: EnvironmentConfig's validator raises for an azure
+    # provider with no azure block, so this cannot fire at runtime.
+    assert azure is not None  # nosec B101
     facts = provider.release_vm_facts(request)  # type: ignore[attr-defined]
     target = environment.target(role)
     if role == "loadgen":
@@ -172,7 +203,9 @@ def verify_release_vm_facts(
         name for name, value in expected.items() if getattr(facts, name, None) != value
     )
     if mismatches:
-        raise RuntimeError(f"Azure release VM facts mismatch for {role}: {', '.join(mismatches)}")
+        raise RuntimeError(
+            f"Azure release VM facts mismatch for {role}: {', '.join(mismatches)}"
+        )
 
 
 # An operator address that says "work it out". A domestic connection does not
@@ -183,7 +216,7 @@ AUTO_OPERATOR_SOURCE = "auto"
 
 
 def resolve_operator_source(provider: object, stack_request: VmRequest) -> str:
-    """The address the VM sees this operator arriving from, as a /32.
+    """Return the address the VM sees this operator arriving from, as a /32.
 
     Asked of the VM rather than of an address-echo service, for two reasons: no
     third party is involved, and this is by definition the address Azure applies
@@ -192,7 +225,7 @@ def resolve_operator_source(provider: object, stack_request: VmRequest) -> str:
     this works precisely when it is needed.
     """
     result = provider.exec_argv(  # type: ignore[attr-defined]
-        stack_request, ["sh", "-c", "printf %s \"${SSH_CLIENT%% *}\""]
+        stack_request, ["sh", "-c", 'printf %s "${SSH_CLIENT%% *}"']
     )
     address = (result.stdout or "").strip()
     try:
@@ -211,8 +244,20 @@ def secure_release_endpoints(
     stack_request: VmRequest,
     loadgen_request: VmRequest | None,
 ) -> tuple[str, str]:
+    """Restrict the stack VM's release ports and return the endpoint URLs.
+
+    Inbound traffic to the control-plane, actuator and Prometheus node ports
+    is limited to this operator and, when there is one, the loadgen VM.
+    Returns the control-plane and Prometheus URLs, reached over the SSH tunnel.
+    """
     azure = environment.azure
-    assert azure is not None and azure.operator_source_cidr is not None
+    # `azure` is narrowed, not guarded: EnvironmentConfig validates it. The
+    # source CIDR is not, and a None one would restrict the ports to nothing
+    # while reading as if it had restricted them, so it is a real precondition.
+    if azure is None or azure.operator_source_cidr is None:
+        raise ValueError(
+            "secure_release_endpoints requires an azure operator source CIDR"
+        )
     stack_host = provider.connection_host(stack_request)  # type: ignore[attr-defined]
     operator = azure.operator_source_cidr
     if operator == AUTO_OPERATOR_SOURCE:
@@ -223,7 +268,9 @@ def secure_release_endpoints(
             provider.connection_host(loadgen_request)  # type: ignore[attr-defined]
         )
         sources = tuple(
-            dict.fromkeys((f"{loadgen_address}/{loadgen_address.max_prefixlen}", *sources))
+            dict.fromkeys(
+                (f"{loadgen_address}/{loadgen_address.max_prefixlen}", *sources)
+            )
         )
     provider.restrict_inbound_sources(  # type: ignore[attr-defined]
         stack_request,
@@ -231,6 +278,6 @@ def secure_release_endpoints(
         source_cidrs=sources,
     )
     return (
-        f"http://{stack_host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
-        f"http://{stack_host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
+        f"http://{stack_host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): SSH tunnel
+        f"http://{stack_host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): SSH tunnel
     )

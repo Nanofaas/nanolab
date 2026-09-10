@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sonata_tasks.vm.azure import AzureVmProvider
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 from nanolab.tasks.provisioning.providers import provider_for
-from sonata_tasks.vm.azure import AzureVmProvider
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.tasks.vm.orchestrator import VmOrchestrator
-from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 
 def test_provider_for_multipass_returns_orchestrator(tmp_path: Path) -> None:

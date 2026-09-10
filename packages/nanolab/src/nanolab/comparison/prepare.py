@@ -16,19 +16,18 @@ them, and a build made on an arm64 laptop is not the artefact under measurement.
 
 from __future__ import annotations
 
-from sonata_tasks.execution.models import CommandOptions
-
 from collections.abc import Sequence
 from typing import Any
 
 from sonata_engine import Workflow
 from sonata_tasks.command import CommandTask
-from nanolab.tasks.components.operations import RemoteCommandOperation
+from sonata_tasks.execution.models import CommandOptions
 
 from nanolab.images.control_plane_variants import (
     ControlPlaneVariant,
     build_operations,
 )
+from nanolab.tasks.components.operations import RemoteCommandOperation
 
 
 def function_build_operations(
@@ -79,7 +78,7 @@ def prepare_operations(
     build_memory: str | None = None,
     parallelism: int | None = None,
 ) -> tuple[RemoteCommandOperation, ...]:
-    """The whole prepare phase, functions first.
+    """Return the operations for the whole prepare phase, functions first.
 
     Functions first because they are the cheap half and the one most likely to
     expose a broken checkout: finding out that the source does not compile after
@@ -103,7 +102,7 @@ def prepare_operations(
 
 
 def pinned_function_images(functions: Sequence[Any]) -> dict[str, str]:
-    """The tags the cells are handed.
+    """Return the image tag each function was built under, keyed by catalogue key.
 
     Keyed by `key`, the catalogue name, not by `name`: that is what
     `_resolve_with_prebuilt_images` looks up, and the two differ for any function
@@ -120,7 +119,7 @@ def pinned_function_images(functions: Sequence[Any]) -> dict[str, str]:
 CONTROL_PLANE_NODE_PORT = 30080
 
 
-def leftover_cleanup_operations(  # NOSONAR (S8495): one operation is emitted per supplied function
+def leftover_cleanup_operations(  # NOSONAR (S8495): one operation per function
     function_names: Sequence[str],
     *,
     node_port: int = CONTROL_PLANE_NODE_PORT,
@@ -159,7 +158,7 @@ def prepare_workflow(
     remote_dir: str | None = None,
     workflow_id: str = "prepare",
 ) -> Workflow:
-    """The prepare phase as a Sonata workflow rather than a loop of its own.
+    """Wrap the prepare phase's operations in a Sonata workflow.
 
     It ran outside the engine for no better reason than that it was written
     later, and the cost was paid twice: command output routing is bound to the

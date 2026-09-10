@@ -7,6 +7,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
+from sonata_tasks.vm.azure import AzureVmProvider
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
+
+from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
+from nanolab.config import EnvironmentConfig, ScenarioConfig
+from nanolab.config.environment import ExecutionRole
+from nanolab.release.environment import secure_release_endpoints
 from nanolab.tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
@@ -18,25 +25,23 @@ from nanolab.tasks.components.bootstrap import (
     retarget_bootstrap_operation,
 )
 from nanolab.tasks.components.context import ScenarioExecutionContext
-from nanolab.tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from nanolab.tasks.components.operations import (
+    RemoteCommandOperation,
+    ScenarioOperation,
+)
 from nanolab.tasks.provisioning import (
     ProvisionedRole,
     provision_roles,
     remote_operations,
     scenario_context,
 )
-from sonata_tasks.vm.azure import AzureVmProvider
 from nanolab.tasks.vm.models import VmRequest
-from sonata_tasks.vm.proxmox import ProxmoxVmProvider
-
-from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
-from nanolab.config import EnvironmentConfig, ScenarioConfig
-from nanolab.config.environment import ExecutionRole
-from nanolab.release.environment import secure_release_endpoints
 from nanolab.workspace.paths import discover_tool_root
 
 
-def _request(environment: EnvironmentConfig, role: ExecutionRole, *, loadtest: bool) -> VmRequest:
+def _request(
+    environment: EnvironmentConfig, role: ExecutionRole, *, loadtest: bool
+) -> VmRequest:
     return vm_request_for_role(environment, role, loadtest=loadtest)
 
 
@@ -64,7 +69,9 @@ def _stack_operations(
         planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
     if include_repo_sync:
         planners.append(plan_repo_sync_to_vm)
-    return remote_operations(operation for planner in planners for operation in planner(context))
+    return remote_operations(
+        operation for planner in planners for operation in planner(context)
+    )
 
 
 def _role_requests_and_operations(
@@ -77,7 +84,9 @@ def _role_requests_and_operations(
     """Build the per-role (role, request, operations) triples."""
     loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
     dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
-    dedicated_cloud = scenario.workflow == "offload-loadtest" and "cloud" in environment.roles
+    dedicated_cloud = (
+        scenario.workflow == "offload-loadtest" and "cloud" in environment.roles
+    )
     dedicated_arm = "arm-builder" in environment.roles
     assets_root = discover_tool_root() / "assets"
 
@@ -121,7 +130,9 @@ def _role_requests_and_operations(
             for operation in operations
         )
 
-    triples: list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]] = []
+    triples: list[
+        tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]
+    ] = []
 
     stack_request = _request(environment, "stack", loadtest=loadtest_workflow)
     stack_context = context_for(stack_request)
@@ -207,6 +218,14 @@ def provision_environment(
     post_ensure_verifier: Callable[[ExecutionRole, VmRequest], None] | None = None,
     keep: bool = False,
 ) -> Generator[None, None, None]:
+    """Bring up every role the scenario needs, and tear them down on exit.
+
+    Rejects a local environment, which has no machines to provision. On Azure
+    with an operator CIDR, the stack's endpoints are bounded to it once the
+    stack is up. `keep` and `orchestrator_factory` are forwarded to the
+    underlying provisioning so a caller can leave the machines running or swap
+    the provider for a test.
+    """
     if environment.provider == "local":
         raise ValueError("a non-local environment is required")
     provider = provider_for_environment(
@@ -235,7 +254,9 @@ def provision_environment(
             and environment.azure is not None
             and environment.azure.operator_source_cidr
         ):
-            secure_release_endpoints(environment, provider, stack_request, loadgen_request)
+            secure_release_endpoints(
+                environment, provider, stack_request, loadgen_request
+            )
 
     with provision_roles(
         provider,

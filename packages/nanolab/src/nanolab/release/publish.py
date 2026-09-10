@@ -12,11 +12,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanolab.release.remote_retry import retry_on_connection_death
 from nanolab.images.plan import ImageCell, build_image_plan
-from nanolab.release.versioning import normalize_version
 from nanolab.release.model import ArtifactEvidence
-
+from nanolab.release.remote_retry import retry_on_connection_death
+from nanolab.release.versioning import normalize_version
 
 PUBLISH_PHASES = ("publish-architectures", "publish-manifests", "publish-aliases")
 GHCR_REPOSITORY = "ghcr.io/miciav/nanofaas"
@@ -27,6 +26,8 @@ _ATTESTATION_PLATFORM = "unknown/unknown"
 
 @dataclass(frozen=True, slots=True)
 class ArchitectureCopy:
+    """One architecture image copied from the local registry to GHCR."""
+
     target: str
     source: str
     destination: str
@@ -34,6 +35,8 @@ class ArchitectureCopy:
 
 @dataclass(frozen=True, slots=True)
 class ManifestSpec:
+    """A multi-architecture manifest built from two architecture references."""
+
     target: str
     reference: str
     sources: tuple[str, str]
@@ -41,6 +44,8 @@ class ManifestSpec:
 
 @dataclass(frozen=True, slots=True)
 class AliasSpec:
+    """A mutable version tag pointed at an immutable manifest."""
+
     target: str
     reference: str
     source: str
@@ -48,6 +53,12 @@ class AliasSpec:
 
 @dataclass(frozen=True, slots=True)
 class PublishPlan:
+    """The whole publication: architecture copies, manifests and aliases.
+
+    The order matters: `copies` upload the immutable architecture tags,
+    `manifests` combine them, and `aliases` move the mutable tags last.
+    """
+
     version: str
     repository: str
     copies: tuple[ArchitectureCopy, ...]
@@ -56,6 +67,7 @@ class PublishPlan:
 
 
 def ghcr_username(repository: str = GHCR_REPOSITORY) -> str:
+    """Return the GHCR owner from a `ghcr.io/<owner>/...` repository name."""
     parts = repository.split("/")
     if len(parts) < 2 or parts[0] != "ghcr.io" or not parts[1]:
         raise ValueError(f"invalid GHCR repository: {repository}")
@@ -69,6 +81,12 @@ def build_publish_plan(
     local_registry: str,
     repository: str = GHCR_REPOSITORY,
 ) -> PublishPlan:
+    """Plan the GHCR promotion of one release version.
+
+    Expands the two-architecture image plan into one copy per architecture
+    cell, one manifest per target and flavor, and a version alias for each
+    target's native flavor.
+    """
     # architecture cells are v-prefixed by build_image_plan: manifests and
     # aliases must use the same normalized tag scheme
     _, version_tag = normalize_version(version)
@@ -95,8 +113,8 @@ def build_publish_plan(
 
     grouped: dict[tuple[str, str], dict[str, str]] = {}
     for cell in full.cells:
-        grouped.setdefault((cell.target.name, cell.flavor), {})[cell.architecture] = destination(
-            cell
+        grouped.setdefault((cell.target.name, cell.flavor), {})[cell.architecture] = (
+            destination(cell)
         )
 
     manifests: list[ManifestSpec] = []
@@ -180,14 +198,18 @@ def publish_architecture_images(
                 f"docker://{copy.destination}",
             ),
         )
-        published = _registry_digest(provider, request, copy.destination, authfile=authfile)
+        published = _registry_digest(
+            provider, request, copy.destination, authfile=authfile
+        )
         expected = source_digests[copy.source]
         if published != expected:
             raise RuntimeError(
                 "published digest mismatch for "
                 f"{copy.destination}: expected {expected}, got {published}"
             )
-        evidence.append(ArtifactEvidence("remote", f"docker://{copy.destination}", published))
+        evidence.append(
+            ArtifactEvidence("remote", f"docker://{copy.destination}", published)
+        )
     return tuple(evidence)
 
 
@@ -229,14 +251,18 @@ def publish_manifests(
             ("docker", "buildx", "imagetools", "inspect", manifest.reference),
             env={"DOCKER_CONFIG": docker_config},
         )
-        require_dual_architecture(str(getattr(inspection, "stdout", "")), manifest.reference)
+        require_dual_architecture(
+            str(getattr(inspection, "stdout", "")), manifest.reference
+        )
         digest = _registry_digest(
             provider,
             request,
             manifest.reference,
             authfile=f"{docker_config}/config.json",
         )
-        evidence.append(ArtifactEvidence("remote", f"docker://{manifest.reference}", digest))
+        evidence.append(
+            ArtifactEvidence("remote", f"docker://{manifest.reference}", digest)
+        )
     return tuple(evidence)
 
 
@@ -253,7 +279,9 @@ def publish_aliases(
     for alias in plan.aliases:
         expected = manifest_digests.get(alias.source)
         if expected is None:
-            raise RuntimeError(f"alias source manifest has no verified digest: {alias.source}")
+            raise RuntimeError(
+                f"alias source manifest has no verified digest: {alias.source}"
+            )
         _exec(
             provider,
             request,
@@ -279,7 +307,9 @@ def publish_aliases(
                 f"alias digest mismatch for {alias.reference}: "
                 f"expected {expected}, got {published}"
             )
-        evidence.append(ArtifactEvidence("remote", f"docker://{alias.reference}", published))
+        evidence.append(
+            ArtifactEvidence("remote", f"docker://{alias.reference}", published)
+        )
     return tuple(evidence)
 
 
@@ -291,6 +321,11 @@ def _pin(reference: str, digests: Mapping[str, str]) -> str:
 
 
 def require_dual_architecture(output: str, reference: str) -> None:
+    """Require an inspect report to list exactly the two release platforms.
+
+    Provenance and attestation rows report the pseudo-platform `unknown/unknown`
+    and are ignored; anything else is a mismatch.
+    """
     platforms = {
         line.split(":", 1)[1].strip()
         for line in output.splitlines()

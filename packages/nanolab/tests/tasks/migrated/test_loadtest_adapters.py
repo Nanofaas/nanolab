@@ -1,7 +1,7 @@
 # tools/workflow-tasks/tests/loadtest/test_loadtest_adapters.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
@@ -10,8 +10,8 @@ from nanolab.tasks.loadtest.models import TimeWindow
 
 def _make_window() -> TimeWindow:
     return TimeWindow(
-        start=datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 1, 1, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 1, 1, 10, 30, tzinfo=UTC),
     )
 
 

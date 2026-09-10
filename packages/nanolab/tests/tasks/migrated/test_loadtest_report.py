@@ -37,14 +37,19 @@ def _write_series(directory: Path, function: str, depths: list[int]) -> None:
         for index, depth in enumerate(depths)
     ]
     (directory / f"concurrency-series-{function}.json").write_text(
-        json.dumps({"function": function, "dip": None, "errors": [], "samples": samples}),
+        json.dumps(
+            {"function": function, "dip": None, "errors": [], "samples": samples}
+        ),
         encoding="utf-8",
     )
 
 
 def test_the_report_is_one_self_contained_page(tmp_path: Path) -> None:
-    """Inlined rather than linked to a CDN: a record that needs the network to
-    draw itself has stopped being a record."""
+    """Keep the report one self-contained page.
+
+    Inlined rather than linked to a CDN: a record that needs the network to
+    draw itself has stopped being a record.
+    """
     _write_series(tmp_path, "alpha", [0, 40, 97, 12, 88])
     _write_series(tmp_path, "beta", [0, 5, 60, 99, 20])
     (tmp_path / "k6-summary.json").write_text(
@@ -82,9 +87,14 @@ def test_the_report_is_one_self_contained_page(tmp_path: Path) -> None:
         assert expected in page
 
 
-def test_a_run_without_series_says_so_instead_of_drawing_nothing(tmp_path: Path) -> None:
-    """An empty page would be indistinguishable from a run where the governor
-    genuinely did nothing."""
+def test_a_run_without_series_says_so_instead_of_drawing_nothing(
+    tmp_path: Path,
+) -> None:
+    """Say a run has no series instead of drawing nothing.
+
+    An empty page would be indistinguishable from a run where the governor
+    genuinely did nothing.
+    """
     with pytest.raises(FileNotFoundError, match="nothing to report"):
         WriteConcurrencyReport(
             task_id="", title="t", data_dir=tmp_path, output_dir=tmp_path
@@ -92,9 +102,12 @@ def test_a_run_without_series_says_so_instead_of_drawing_nothing(tmp_path: Path)
 
 
 def test_a_counter_that_restarted_mid_window_is_not_reported_as_negative() -> None:
-    """Prometheus keeps its volume across a redeploy, so a window can open on the
+    """Read a counter that restarted mid-window as a restart, not as negative.
+
+    Prometheus keeps its volume across a redeploy, so a window can open on the
     previous run's value and close on the new process's. Last-minus-first called
-    that -10,386 requests served."""
+    that -10,386 requests served.
+    """
     points = [{"value": v} for v in (500.0, 520_655.0, 0.0, 300.0, 510_269.0)]
 
     assert counter_delta(points) == pytest.approx(520_155.0 + 510_269.0)
@@ -104,7 +117,9 @@ def test_the_whole_run_is_one_phase_when_none_are_given(tmp_path: Path) -> None:
     _write_series(tmp_path, "alpha", [0, 40, 97])
 
     page = (
-        WriteConcurrencyReport(task_id="", title="t", data_dir=tmp_path, output_dir=tmp_path)
+        WriteConcurrencyReport(
+            task_id="", title="t", data_dir=tmp_path, output_dir=tmp_path
+        )
         .run()
         .read_text(encoding="utf-8")
     )

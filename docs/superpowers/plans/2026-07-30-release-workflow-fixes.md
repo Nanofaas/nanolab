@@ -79,22 +79,24 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - [ ] **Step 1: Update attest_composite call to use request.credentials**
 
 ```python
-    # --- Phase 12: Attest ---
-    cosign_key = "/secrets/cosign-key"
-    cosign_password = "/secrets/cosign-password"
-    if request.credentials is not None:
-        cosign_key = str(getattr(request.credentials, "cosign_key", cosign_key))
-        cosign_password = str(getattr(request.credentials, "cosign_password", cosign_password))
-    attest = attest_composite(
-        images=(),
-        predicate_remote=Path(f"{remote_root}/predicate.json"),
-        sbom_dir_remote=Path(f"{remote_root}/sboms"),
-        cosign_key=cosign_key,
-        password_file=cosign_password,
-        docker_config="/tmp/ghcr-auth",
-        executor=executor,
-        role="stack",
+# --- Phase 12: Attest ---
+cosign_key = "/secrets/cosign-key"
+cosign_password = "/secrets/cosign-password"
+if request.credentials is not None:
+    cosign_key = str(getattr(request.credentials, "cosign_key", cosign_key))
+    cosign_password = str(
+        getattr(request.credentials, "cosign_password", cosign_password)
     )
+attest = attest_composite(
+    images=(),
+    predicate_remote=Path(f"{remote_root}/predicate.json"),
+    sbom_dir_remote=Path(f"{remote_root}/sboms"),
+    cosign_key=cosign_key,
+    password_file=cosign_password,
+    docker_config="/tmp/ghcr-auth",
+    executor=executor,
+    role="stack",
+)
 ```
 
 - [ ] **Step 2: Run linter + type checker**

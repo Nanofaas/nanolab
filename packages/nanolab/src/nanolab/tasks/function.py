@@ -1,9 +1,10 @@
+"""Resource factory for a registered nanoFaaS function."""
+
 from __future__ import annotations
 
 from typing import Any
 
 from sonata_engine import Resource, TaskInputs
-
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
 
@@ -17,7 +18,7 @@ def function_resource(
     requires: tuple[Resource[Any], ...] = (),
     always_release: bool = True,
 ) -> Resource[None]:
-    """A registered nanoFaaS function as an acquire/release pair.
+    """Build a registered nanoFaaS function as an acquire/release pair.
 
     The commands are injected because every workflow registers differently — the
     CLI applies a manifest through its own binary, others POST with curl — while

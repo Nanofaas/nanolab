@@ -87,4 +87,3 @@ through every phase with a fake provider, failure-injection tests prove cleanup
 and publication barriers, resume tests prove evidence invalidation, and one Azure
 canary passes. Until then, the incomplete generic release execution fails closed
 rather than publishing.
-

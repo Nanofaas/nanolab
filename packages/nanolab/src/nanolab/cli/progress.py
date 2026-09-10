@@ -1,8 +1,15 @@
+"""Render workflow events as a line of console progress per task.
+
+The engine bus emits task lifecycle and log events; this module turns them into
+the `[task-id] status  elapsed` lines a command prints while it runs, and keeps
+the per-task timings that end up in the run record.
+"""
+
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-import time
 
 import typer
 from sonata_engine.workflow.events import WorkflowEvent
@@ -20,6 +27,11 @@ _LOG_KIND = "log.line"
 
 
 class ConsoleProgressSink:
+    """Write one line per task transition, and collect the task timings.
+
+    Attach it to a workflow's event bus; `records` is then the run's task table.
+    """
+
     def __init__(
         self,
         *,
@@ -27,6 +39,12 @@ class ConsoleProgressSink:
         clock: Callable[[], float] = time.monotonic,
         log_lines: bool = False,
     ) -> None:
+        """Set up the sink around a line writer and an elapsed-time clock.
+
+        `write` receives each formatted line; `log_lines` additionally forwards
+        the output of the commands themselves, which is off by default so a
+        chatty task cannot bury the task list.
+        """
         self._write = write
         self._clock = clock
         # Off by default, and deliberately: a k6 run or a helm install would bury
@@ -38,6 +56,11 @@ class ConsoleProgressSink:
         self.records: list[dict[str, object]] = []
 
     def emit(self, event: WorkflowEvent) -> None:
+        """Render one workflow event, and record terminal tasks as they end.
+
+        Log events are passed through only when `log_lines` is set; task events
+        print a running line on start and an elapsed-time line on pass or fail.
+        """
         if event.kind == _LOG_KIND:
             if self._log_lines and event.line:
                 self._write(event.line.rstrip())
@@ -68,4 +91,10 @@ class ConsoleProgressSink:
 
     @contextmanager
     def status(self, label: str) -> Generator[None, None, None]:
+        """Yield a status block that prints nothing on this sink.
+
+        The engine sink protocol offers a labelled status context; the console
+        renderer has no separate line for one, so this only satisfies the
+        interface and calls pass straight through.
+        """
         yield

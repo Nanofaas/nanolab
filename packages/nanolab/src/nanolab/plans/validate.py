@@ -1,27 +1,49 @@
-from dataclasses import replace
+"""Build the `validate` workflow: one smoke run of the platform per backend.
+
+The scenario's selected functions are resolved into Sonata's task shape, the
+per-family envelope and async checks are derived from what the nanoFaaS
+checkout ships, and each backend receives the resource graph it needs — a
+compose project on `container`, the Helm release and queue probe on `k8s`.
+"""
+
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from sonata_engine import Workflow
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.registry import docker_registry_resource
+
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans.functions import (
+    resolve_function,
+    resolve_function_payloads,
+    sonata_function,
+)
+from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
-from sonata_tasks.registry import docker_registry_resource
 from nanolab.tasks.http_function import HttpFunctionExpectation
+from nanolab.tasks.validate import (
+    AsyncCheck,
+    EnvelopeCheck,
+    ValidateWorkflowRequest,
+    build_validate_workflow,
+)
+from nanolab.tasks.validate import ValidateFunction as SonataFunction
 from nanolab.tasks.validate_recovery import managed_container_cleanup_resource
-from nanolab.tasks.validate import AsyncCheck, EnvelopeCheck, ValidateFunction as SonataFunction
-from nanolab.tasks.validate import ValidateWorkflowRequest, build_validate_workflow
-from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
-from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.config.environment import EnvironmentConfig
-from nanolab.plans.functions import resolve_function, resolve_function_payloads, sonata_function
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
 
-
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-_QR_CODES = ("qr-code-exec", "qr-code-go", "qr-code-java", "qr-code-javascript", "qr-code-python")
+_QR_CODES = (
+    "qr-code-exec",
+    "qr-code-go",
+    "qr-code-java",
+    "qr-code-javascript",
+    "qr-code-python",
+)
 _ROMAN_NUMERALS = (
     "roman-numeral-exec",
     "roman-numeral-go",
@@ -45,14 +67,20 @@ _HEADER_ENVELOPE_PROBES = (
 )
 _BINARY_ENVELOPE_PROBE = "binary-envelope-java"
 _HANDLER_ENVELOPE_TARGETS = (
-    *_QR_CODES, *_ROMAN_NUMERALS, *_JSON_TRANSFORMS, *_HEADER_ENVELOPE_PROBES,
-    _BINARY_ENVELOPE_PROBE, "word-stats-java",
+    *_QR_CODES,
+    *_ROMAN_NUMERALS,
+    *_JSON_TRANSFORMS,
+    *_HEADER_ENVELOPE_PROBES,
+    _BINARY_ENVELOPE_PROBE,
+    "word-stats-java",
 )
 _EMPTY_INPUT_PAYLOAD = '{"input":{}}'
 _ASYNC_CONTROL_PLANE_MODULES = "container-deployment-provider,async-queue"
 
 
-def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
+def _handler_envelope_checks(
+    functions: dict[str, SonataFunction],
+) -> tuple[EnvelopeCheck, ...]:
     missing = [key for key in _HANDLER_ENVELOPE_TARGETS if key not in functions]
     if missing:
         raise ValueError(f"handler envelope requires {', '.join(missing)}")
@@ -104,7 +132,11 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                 HttpFunctionExpectation(
                     status=400,
                     api_status="success",
-                    output={"error": "Fields 'data' (array) and 'groupBy' (string) are required"},
+                    output={
+                        "error": (
+                            "Fields 'data' (array) and 'groupBy' (string) are required"
+                        )
+                    },
                     status_code=400,
                     required_headers=marker,
                 ),
@@ -131,7 +163,9 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
             name(_BINARY_ENVELOPE_PROBE),
             _EMPTY_INPUT_PAYLOAD,
             HttpFunctionExpectation(
-                status=200, api_status="success", status_code=200,
+                status=200,
+                api_status="success",
+                status_code=200,
                 required_headers=(
                     *marker,
                     ("Content-Type", "application/json"),
@@ -139,7 +173,8 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                 ),
                 forbidden_header_values=(("Content-Type", "application/octet-stream"),),
                 api_headers={"Content-Type": "application/octet-stream"},
-                encoding="base64", decoded_bytes=b"\x00\x01\x02",
+                encoding="base64",
+                decoded_bytes=b"\x00\x01\x02",
             ),
         ),
         # Java Lite is deliberately exercised by its ordinary invoke only: its
@@ -164,25 +199,26 @@ def _async_checks(
 ) -> tuple[AsyncCheck, ...]:
     """One async check per payload file each selected function owns.
 
-    Reads the payload set from the nanoFaaS checkout (`functions/<runtime>/<family>/payloads/`),
-    wrapping each raw input in the `{"input": ...}` envelope the control plane expects.
+    Reads the payload set from the nanoFaaS checkout
+    (`functions/<runtime>/<family>/payloads/`), wrapping each raw input in the
+    `{"input": ...}` envelope the control plane expects.
     """
     checks: list[AsyncCheck] = []
     for key in config.functions:
         name = functions[key].name
-        for payload in resolve_function_payloads(key, source_root=repo_root):
-            checks.append(
-                AsyncCheck(
-                    function_name=name,
-                    payload=json.dumps({"input": payload.input}, separators=(",", ":")),
-                    expected_output=payload.expected,
-                    payload_name=payload.name,
-                )
+        checks.extend(
+            AsyncCheck(
+                function_name=name,
+                payload=json.dumps({"input": payload.input}, separators=(",", ":")),
+                expected_output=payload.expected,
+                payload_name=payload.name,
             )
+            for payload in resolve_function_payloads(key, source_root=repo_root)
+        )
     return tuple(checks)
 
 
-def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is intentionally co-located
+def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-located
     config: ScenarioConfig,
     bindings: RoleBindings,
     *,
@@ -213,8 +249,12 @@ def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is 
         backend=config.backend,
         build=config.build,
         functions=tuple(functions.values()),
-        envelope_checks=_handler_envelope_checks(functions) if config.handler_envelope else (),
-        async_checks=_async_checks(functions, config, repo_root) if config.async_load else (),
+        envelope_checks=_handler_envelope_checks(functions)
+        if config.handler_envelope
+        else (),
+        async_checks=_async_checks(functions, config, repo_root)
+        if config.async_load
+        else (),
         additional_modules=("sync-queue",) if kubernetes else (),
         source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes,
@@ -225,7 +265,9 @@ def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is 
         product_root = tool_root or discover_tool_root()
         if environment is not None and environment.provider != "local":
             target = environment.target("stack")
-            queue_burst_script = Path(target.remote_home) / "nanolab-assets/k6/k8s-queue-burst.js"
+            queue_burst_script = (
+                Path(target.remote_home) / "nanolab-assets/k6/k8s-queue-burst.js"
+            )
         else:
             queue_burst_script = product_root / "assets/k6/k8s-queue-burst.js"
         request = replace(
@@ -235,7 +277,15 @@ def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is 
                 image=f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e",
                 payload='{"input":{"message":"warmup"}}',
                 build_argv=("./gradlew", ":services:java:warm-echo:bootJar", "--quiet"),
-                image_build_argv=("docker", "build", "-t", f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e", "-f", "services/java/warm-echo/Dockerfile", "services/java/warm-echo"),
+                image_build_argv=(
+                    "docker",
+                    "build",
+                    "-t",
+                    f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e",
+                    "-f",
+                    "services/java/warm-echo/Dockerfile",
+                    "services/java/warm-echo",
+                ),
                 concurrency=1,
             ),
             queue_burst_script=queue_burst_script,
@@ -263,7 +313,9 @@ def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is 
             container=REGISTRY_CONTAINER_NAME,
         )
         project = DockerComposeProject(
-            name="nanofaas-recovery" if config.persistent_recovery else "nanofaas-validate",
+            name="nanofaas-recovery"
+            if config.persistent_recovery
+            else "nanofaas-validate",
             file=Path("deploy/compose/compose.yaml"),
             ready_url="http://127.0.0.1:8081/actuator/health/readiness",
             env=(
@@ -288,7 +340,9 @@ def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is 
             cwd=root,
             requires=(registry,) if cleanup is None else (registry, cleanup),
         )
-        requires = (registry, compose) if cleanup is None else (registry, cleanup, compose)
+        requires = (
+            (registry, compose) if cleanup is None else (registry, cleanup, compose)
+        )
         if config.persistent_recovery:
             request = replace(request, recovery_project=project)
     return build_validate_workflow(

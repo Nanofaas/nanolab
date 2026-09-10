@@ -1,8 +1,10 @@
 """Tests for tui_toolkit.brand."""
+
 from __future__ import annotations
 
 import pytest
-from tui_toolkit.brand import AppBrand, DEFAULT_BRAND
+
+from tui_toolkit.brand import DEFAULT_BRAND, AppBrand
 
 
 def test_default_brand_is_neutral():

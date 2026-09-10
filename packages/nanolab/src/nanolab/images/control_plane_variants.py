@@ -35,6 +35,11 @@ class ControlPlaneVariant:
     build_env: Mapping[str, str]
 
     def image(self, registry: str) -> str:
+        """Return the control-plane image reference this variant is tagged as.
+
+        The variant key is the tag, so the images a run compares sit side by
+        side in the registry under one name.
+        """
         return f"{registry}/nanofaas/control-plane:{self.key}"
 
 
@@ -50,7 +55,12 @@ DEFAULT_JVM_TUNING = "-XX:+UseSerialGC -XX:TieredStopAtLevel=1"
 
 
 def jvm_optimization(variant: ControlPlaneVariant) -> str:
-    """c1 or c2, derived once from the effective JVM_TUNING rather than per call site."""
+    """Return the JIT tier this variant's tuning selects, 'c1' or 'c2'.
+
+    Derived from the effective JVM_TUNING — the variant's own, or the
+    Dockerfile default when it sets none — so callers never have to reason
+    about which flag a silent variant inherits.
+    """
     tuning = variant.build_env.get("JVM_TUNING", DEFAULT_JVM_TUNING)
     return "c1" if "TieredStopAtLevel=1" in tuning else "c2"
 
@@ -79,7 +89,9 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
     ControlPlaneVariant(
         key="jvm-g1",
         label="JVM (G1, C1 only)",
-        rationale="Isolates the collector: G1 against the baseline's serial, JIT held at C1.",
+        rationale=(
+            "Isolates the collector: G1 against the baseline's serial, JIT held at C1."
+        ),
         build_env=_env(JVM_TUNING="-XX:+UseG1GC -XX:TieredStopAtLevel=1"),
     ),
     # Misurato in A1c su questo codice: a un core il solo livello di tiering vale
@@ -89,7 +101,9 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
     ControlPlaneVariant(
         key="jvm-c2",
         label="JVM (serial GC, full tiering)",
-        rationale="Isolates the JIT: C2 restored, collector held at the baseline's serial.",
+        rationale=(
+            "Isolates the JIT: C2 restored, collector held at the baseline's serial."
+        ),
         build_env=_env(JVM_TUNING="-XX:+UseSerialGC"),
     ),
     ControlPlaneVariant(
@@ -116,7 +130,12 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
             "jvm with the event-loop floor removed: isolates whether a single "
             "loop avoids the CFS throttling four loops hit on a one-core quota."
         ),
-        build_env=_env(JVM_TUNING="-XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dreactor.netty.ioWorkerCount=1"),
+        build_env=_env(
+            JVM_TUNING=(
+                "-XX:+UseSerialGC -XX:TieredStopAtLevel=1 "
+                "-Dreactor.netty.ioWorkerCount=1"
+            )
+        ),
     ),
     ControlPlaneVariant(
         key="jvm-c2-loop1",
@@ -166,6 +185,11 @@ VARIANTS_BY_KEY: Mapping[str, ControlPlaneVariant] = MappingProxyType(
 
 
 def resolve_variants(keys: tuple[str, ...]) -> tuple[ControlPlaneVariant, ...]:
+    """Look up each variant key, keeping the order the caller asked for.
+
+    Raises ValueError listing the unknown keys and the available ones when a
+    key is not in the matrix.
+    """
     unknown = [key for key in keys if key not in VARIANTS_BY_KEY]
     if unknown:
         raise ValueError(
@@ -177,7 +201,7 @@ def resolve_variants(keys: tuple[str, ...]) -> tuple[ControlPlaneVariant, ...]:
     return tuple(VARIANTS_BY_KEY[key] for key in keys)
 
 
-def build_operations(  # NOSONAR (S8495): optional Docker arguments deliberately vary in tuple length
+def build_operations(  # NOSONAR (S8495): optional Docker args vary in tuple length
     variant: ControlPlaneVariant,
     *,
     registry: str,

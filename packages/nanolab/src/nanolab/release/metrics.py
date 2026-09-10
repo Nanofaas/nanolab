@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 import math
 import statistics
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, fields
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
 class PerformanceProfile:
+    """The performance series a release record belongs to.
+
+    Two records are comparable only when every field here matches.
+    """
+
     name: str
     provider: str
     stack_vm: str
@@ -22,6 +28,8 @@ class PerformanceProfile:
 
 @dataclass(frozen=True, slots=True)
 class RegressionPolicy:
+    """The regression thresholds a release must stay within."""
+
     throughput_max_loss_percent: float
     p95_max_increase_percent: float
     error_rate_max: float
@@ -29,6 +37,8 @@ class RegressionPolicy:
 
 @dataclass(frozen=True, slots=True)
 class PerformanceAggregate:
+    """The median of each metric across a release's benchmark runs."""
+
     profile: PerformanceProfile
     run_count: int
     metrics: dict[str, float]
@@ -36,6 +46,12 @@ class PerformanceAggregate:
 
 @dataclass(frozen=True, slots=True)
 class RegressionDecision:
+    """The gate's verdict and the failures that produced it.
+
+    `establishes_baseline` marks a passing release with no comparable
+    predecessor, which later releases are then measured against.
+    """
+
     passed: bool
     establishes_baseline: bool
     failures: tuple[str, ...]
@@ -56,13 +72,15 @@ def aggregate_runs(
             # another is an anomaly worth stopping for, not a median to take.
             missing = sorted(set(names) ^ set(run))
             raise ValueError(
-                f"benchmark {index} carries different metrics than benchmark 1: {', '.join(missing)}"
+                f"benchmark {index} carries different metrics than benchmark 1: "
+                f"{', '.join(missing)}"
             )
     return PerformanceAggregate(
         profile=profile,
         run_count=len(per_run),
         metrics={
-            name: float(statistics.median(run[name] for run in per_run)) for name in names
+            name: float(statistics.median(run[name] for run in per_run))
+            for name in names
         },
     )
 
@@ -88,7 +106,9 @@ def evaluate_regression(
     if baseline is not None:
         _require_same_profile(current.profile, baseline.profile)
         throughput_loss = _percent_change(
-            baseline.metrics["throughputRps"], current.metrics["throughputRps"], loss=True
+            baseline.metrics["throughputRps"],
+            current.metrics["throughputRps"],
+            loss=True,
         )
         if throughput_loss > policy.throughput_max_loss_percent:
             failures.append(
@@ -154,7 +174,11 @@ def newest_comparable_record(
     """Return the latest record in the exact same performance series."""
     identity = _profile_dict(profile)
     comparable = (record for record in records if record.get("profile") == identity)
-    return max(comparable, key=lambda record: _version_key(str(record["version"])), default=None)
+    return max(
+        comparable,
+        key=lambda record: _version_key(str(record["version"])),
+        default=None,
+    )
 
 
 def render_history(records: Sequence[Mapping[str, Any]]) -> str:
@@ -162,9 +186,11 @@ def render_history(records: Sequence[Mapping[str, Any]]) -> str:
     lines = [
         "# Release performance history",
         "",
-        "Comparable Azure AMD64 native results. Raw evidence remains in each release run.",
+        "Comparable Azure AMD64 native results. "
+        "Raw evidence remains in each release run.",
         "",
-        "| Version | Profile | Runs | Throughput (req/s) | Error rate | p95 (ms) | Peak replicas |",
+        "| Version | Profile | Runs | Throughput (req/s) | Error rate | "
+        "p95 (ms) | Peak replicas |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for record in sorted(records, key=lambda item: _version_key(str(item["version"]))):
@@ -187,7 +213,9 @@ def _extract_metrics(summary: Mapping[str, Any]) -> dict[str, float]:
     queue_count = _prometheus_value(prometheus, "function_queue_wait_count", "delta")
     queue_sum = _prometheus_value(prometheus, "function_queue_wait_sum", "delta")
     if queue_count == 0 and queue_sum != 0:
-        raise ValueError("function_queue_wait_sum.delta must be zero when count is zero")
+        raise ValueError(
+            "function_queue_wait_sum.delta must be zero when count is zero"
+        )
     metrics = {
         "throughputRps": _k6_value(k6, "http_reqs", "rate"),
         "errorRate": _k6_value(k6, "http_req_failed", "rate", "value"),
@@ -195,8 +223,12 @@ def _extract_metrics(summary: Mapping[str, Any]) -> dict[str, float]:
         "latencyP95Ms": _k6_value(k6, "http_req_duration", "p(95)"),
         "latencyP99Ms": _k6_value(k6, "http_req_duration", "p(99)"),
         "queueWaitSeconds": queue_sum / queue_count if queue_count else 0.0,
-        "coldStarts": _prometheus_value(prometheus, "function_cold_start_total", "delta"),
-        "controlPlaneCpuPeak": _prometheus_value(prometheus, "process_cpu_usage", "max"),
+        "coldStarts": _prometheus_value(
+            prometheus, "function_cold_start_total", "delta"
+        ),
+        "controlPlaneCpuPeak": _prometheus_value(
+            prometheus, "process_cpu_usage", "max"
+        ),
         "peakReplicas": _number(autoscaling, "max_replicas_observed"),
     }
     # A release builds the control plane with G1 on Oracle GraalVM, where
@@ -239,7 +271,7 @@ def _prometheus_value(prometheus: Mapping[str, Any], metric: str, name: str) -> 
 def _optional_prometheus_value(
     prometheus: Mapping[str, Any], metric: str, name: str
 ) -> float | None:
-    """The same reading, for a series the catalogue allows to be absent.
+    """Return the reading for a series the catalogue allows to be absent.
 
     An empty series is the snapshot's own statement that the build publishes
     nothing here, so there is no number rather than a bad one. A series the
@@ -282,13 +314,17 @@ def _validate_metrics(metrics: Mapping[str, object], label: str) -> None:
             or not math.isfinite(float(value))
             or value < 0
         ):
-            raise ValueError(f"{label} metric {name} must be a finite nonnegative number")
+            raise ValueError(
+                f"{label} metric {name} must be a finite nonnegative number"
+            )
     error_rate = metrics.get("errorRate")
     if isinstance(error_rate, (int, float)) and error_rate > 1:
         raise ValueError(f"{label} metric errorRate must be between 0 and 1")
 
 
-def _require_same_profile(current: PerformanceProfile, baseline: PerformanceProfile) -> None:
+def _require_same_profile(
+    current: PerformanceProfile, baseline: PerformanceProfile
+) -> None:
     mismatches = [
         field.name
         for field in fields(PerformanceProfile)

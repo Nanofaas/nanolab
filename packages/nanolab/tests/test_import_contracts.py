@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 
 def test_controlplane_import_contracts_pass() -> None:
@@ -22,7 +22,9 @@ def test_controlplane_import_contracts_pass() -> None:
 
 def test_product_has_no_dead_workflow_engine_routing() -> None:
     source_root = Path(__file__).resolve().parents[1] / "src" / "nanolab"
-    product = ast.parse((source_root / "cli" / "product.py").read_text(encoding="utf-8"))
+    product = ast.parse(
+        (source_root / "cli" / "product.py").read_text(encoding="utf-8")
+    )
     tui = ast.parse((source_root / "tui" / "app.py").read_text(encoding="utf-8"))
 
     product_functions = {

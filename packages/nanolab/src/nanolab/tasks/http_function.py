@@ -1,23 +1,30 @@
+"""Reach the control plane over HTTP for workflows that drive its API directly.
+
+`role` is required throughout: curling from the host and curling from inside a VM
+reach different network namespaces, and the endpoint that works in one is
+usually wrong in the other.
+"""
+
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-import json
 from pathlib import Path
 from time import monotonic, sleep
 from typing import cast
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
-from sonata_tasks.execution.bindings import CommandTaskExecutor
-from nanolab.tasks.execution import ExecutionRole
-from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-
 from sonata_tasks.command import Argv, CommandTask
 from sonata_tasks.core.fingerprint import fingerprint_digest
+from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
-from sonata_tasks.http import Endpoint, HttpStatusCheckTask as SharedHttpStatusCheckTask
-from sonata_tasks.http import endpoint_argv
+from sonata_tasks.http import Endpoint, endpoint_argv
+from sonata_tasks.http import HttpStatusCheckTask as SharedHttpStatusCheckTask
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+
+from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.invocation import verify_invocation
 from nanolab.tasks.manifest import FunctionManifest
 
@@ -52,12 +59,11 @@ def _task_fingerprint(namespace: str, **payload: object) -> object:
     }
 
 
-
 def _command_result(outcome: TaskOutcome[TaskResult], what: str) -> TaskResult:
-    """A CommandTask always carries its result; the outcome type allows None.
+    """Return a CommandTask's result, which its outcome type only permits to be None.
 
-    Saying so here turns what would be an AttributeError on None into a sentence
-    that names the command.
+    A CommandTask always carries one, so this turns what would be an
+    AttributeError on None into a sentence that names the command.
     """
     if outcome.value is None:
         raise RuntimeError(f"{what}: command produced no result")
@@ -87,12 +93,16 @@ def _verify_registration_response(
     }.items():
         if response.get(field) != value:
             raise RuntimeError(
-                f"{manifest.name}: {field} was {response.get(field)!r}, expected {value!r}"
+                f"{manifest.name}: {field} was {response.get(field)!r}, "
+                f"expected {value!r}"
             )
-    if expected_backend is not None and response.get("deploymentBackend") != expected_backend:
+    if (
+        expected_backend is not None
+        and response.get("deploymentBackend") != expected_backend
+    ):
         raise RuntimeError(
-            f"{manifest.name}: deploymentBackend was {response.get('deploymentBackend')!r}, "
-            f"expected {expected_backend!r}"
+            f"{manifest.name}: deploymentBackend was "
+            f"{response.get('deploymentBackend')!r}, expected {expected_backend!r}"
         )
     _verify_registration_endpoint(
         manifest.name, response.get("endpointUrl"), expected_endpoint_prefix
@@ -102,16 +112,20 @@ def _verify_registration_response(
 def _verify_registration_endpoint(
     name: str, endpoint_url: object, expected_prefix: str | None
 ) -> None:
-    """The control plane's assigned endpoint must carry the expected prefix."""
+    """Raise unless the function's endpoint carries the expected prefix."""
     if expected_prefix is not None and (
-        not isinstance(endpoint_url, str) or not endpoint_url.startswith(expected_prefix)
+        not isinstance(endpoint_url, str)
+        or not endpoint_url.startswith(expected_prefix)
     ):
         raise RuntimeError(
-            f"{name}: endpointUrl was {endpoint_url!r}, expected prefix {expected_prefix!r}"
+            f"{name}: endpointUrl was {endpoint_url!r}, "
+            f"expected prefix {expected_prefix!r}"
         )
 
 
-def _registration_matches_manifest(manifest: FunctionManifest, response: object) -> bool:
+def _registration_matches_manifest(
+    manifest: FunctionManifest, response: object
+) -> bool:
     """Whether an existing registration is the same function this call would create.
 
     Only the fields the manifest itself controls: enough to tell "this is the
@@ -156,6 +170,8 @@ class HttpFunctionRegisterTask(CommandTask):
         expected_endpoint_prefix: str | None = None,
         cwd: Path | None = None,
     ) -> None:
+        """Build the registration POST, verifying the derived fields when pinned."""
+
         def verify(result: TaskResult) -> None:
             if expected_backend is None and expected_endpoint_prefix is None:
                 return
@@ -206,17 +222,24 @@ class HttpFunctionRegisterTask(CommandTask):
                 expected_backend=expected_backend,
                 expected_endpoint_prefix=expected_endpoint_prefix,
             ),
-            verify=verify if expected_backend is not None or expected_endpoint_prefix is not None else None,
+            verify=verify
+            if expected_backend is not None or expected_endpoint_prefix is not None
+            else None,
         )
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[TaskResult]:
+        """Return the registration result, treating a matching 409 as success."""
         result = self.executor.run(self._spec(inputs))
         if result.return_code == 0:
             if self.verify is not None:
                 self.verify(result)
             return TaskOutcome(value=result)
         if result.return_code == 22:
-            base = inputs.resource(self._endpoint) if not isinstance(self._endpoint, str) else self._endpoint
+            base = (
+                inputs.resource(self._endpoint)
+                if not isinstance(self._endpoint, str)
+                else self._endpoint
+            )
             existing = self.executor.run(
                 CommandTaskSpec(
                     task_id="",
@@ -236,7 +259,9 @@ class HttpFunctionRegisterTask(CommandTask):
                     response = None
                 if _registration_matches_manifest(self._manifest, response):
                     return TaskOutcome(value=result)
-        detail = "\n".join(part for part in (result.stderr.strip(), result.stdout.strip()) if part)
+        detail = "\n".join(
+            part for part in (result.stderr.strip(), result.stdout.strip()) if part
+        )
         detail = detail or "no output"
         raise RuntimeError(f"{self.title} failed (exit {result.return_code}): {detail}")
 
@@ -258,11 +283,18 @@ class HttpFunctionDeleteTask(CommandTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Build the DELETE that removes `name` from the control plane."""
         super().__init__(
             title=f"Delete {name}",
             argv=_argv(
                 endpoint,
-                lambda base: ("curl", "-fsS", "-X", "DELETE", f"{base}/v1/functions/{name}"),
+                lambda base: (
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "DELETE",
+                    f"{base}/v1/functions/{name}",
+                ),
             ),
             executor=executor,
             role=role,
@@ -288,6 +320,7 @@ class HttpFunctionSetReplicasTask(CommandTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Build the PUT that sets `name`'s desired replicas to `replicas`."""
         super().__init__(
             title=f"Set {name} replicas to {replicas}",
             argv=_argv(
@@ -329,6 +362,8 @@ class HttpFunctionBackendTask(CommandTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Build the GET that reads `name`, verifying it runs on `backend`."""
+
         def verify(result: TaskResult) -> None:
             try:
                 response = json.loads(result.stdout)
@@ -336,8 +371,8 @@ class HttpFunctionBackendTask(CommandTask):
                 raise RuntimeError(f"{name}: invalid function response") from error
             if response.get("deploymentBackend") != backend:
                 raise RuntimeError(
-                    f"{name}: deploymentBackend was {response.get('deploymentBackend')!r}, "
-                    f"expected {backend!r}"
+                    f"{name}: deploymentBackend was "
+                    f"{response.get('deploymentBackend')!r}, expected {backend!r}"
                 )
 
         super().__init__(
@@ -376,6 +411,7 @@ class HttpFunctionReplicaStatusTask(Task[None]):
         sleep_fn: Callable[[float], None] = sleep,
         cwd: Path | None = None,
     ) -> None:
+        """Record the function, its replica target and the polling budget."""
         self.title = f"Wait for {name} replicas"
         self._name = name
         self._replicas = replicas
@@ -403,22 +439,27 @@ class HttpFunctionReplicaStatusTask(Task[None]):
         return self._fingerprint
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Poll the function's replica status until both counts reach the target."""
         command = CommandTask(
-                      title=self.title,
-                      argv=_argv(
+            title=self.title,
+            argv=_argv(
                 self._endpoint,
-                lambda base: ("curl", "-fsS", f"{base}/v1/functions/{self._name}/replicas"),
+                lambda base: (
+                    "curl",
+                    "-fsS",
+                    f"{base}/v1/functions/{self._name}/replicas",
+                ),
             ),
-                      executor=self._executor,
-                      role=self._role,
-                      options=CommandOptions(cwd=self._cwd),
-                      semantic_key=_semantic_key(
-                          "nanolab.http-function.replica-status:v2",
-                          endpoint=_endpoint_identity(self._endpoint),
-                          name=self._name,
-                          replicas=self._replicas,
-                      ),
-                  )
+            executor=self._executor,
+            role=self._role,
+            options=CommandOptions(cwd=self._cwd),
+            semantic_key=_semantic_key(
+                "nanolab.http-function.replica-status:v2",
+                endpoint=_endpoint_identity(self._endpoint),
+                name=self._name,
+                replicas=self._replicas,
+            ),
+        )
         deadline = self._clock() + self._timeout_seconds
         last_response: object = None
         while True:
@@ -434,7 +475,10 @@ class HttpFunctionReplicaStatusTask(Task[None]):
             ):
                 return TaskOutcome(value=None)
             if self._clock() >= deadline:
-                raise RuntimeError(f"{self._name}: replicas did not become ready; last response {last_response!r}")
+                raise RuntimeError(
+                    f"{self._name}: replicas did not become ready; "
+                    f"last response {last_response!r}"
+                )
             self._sleep(self._poll_seconds)
 
 
@@ -459,6 +503,7 @@ class HttpFunctionEnqueueTask(Task[str]):
         title: str | None = None,
         cwd: Path | None = None,
     ) -> None:
+        """Build the enqueue POST that carries `idempotency_key` for `name`."""
         self.title = title or f"Enqueue {name}"
         self._name = name
         self._match_upstream = match_upstream
@@ -474,8 +519,8 @@ class HttpFunctionEnqueueTask(Task[str]):
             cwd=cwd,
         )
         self._command = CommandTask(
-                            title=self.title,
-                            argv=_argv(
+            title=self.title,
+            argv=_argv(
                 endpoint,
                 lambda base: (
                     "curl",
@@ -489,32 +534,41 @@ class HttpFunctionEnqueueTask(Task[str]):
                     f"{base}/v1/functions/{name}:enqueue",
                 ),
             ),
-                            executor=executor,
-                            role=role,
-                            options=CommandOptions(cwd=cwd),
-                            semantic_key=_semantic_key(
-                                "nanolab.http-function.enqueue:v2",
-                                endpoint=_endpoint_identity(endpoint),
-                                name=name,
-                                payload=payload,
-                                idempotency_key=idempotency_key,
-                                match_upstream=match_upstream,
-                            ),
-                        )
+            executor=executor,
+            role=role,
+            options=CommandOptions(cwd=cwd),
+            semantic_key=_semantic_key(
+                "nanolab.http-function.enqueue:v2",
+                endpoint=_endpoint_identity(endpoint),
+                name=name,
+                payload=payload,
+                idempotency_key=idempotency_key,
+                match_upstream=match_upstream,
+            ),
+        )
 
     def _fingerprint_payload(self) -> object:
         return self._fingerprint
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[str]:
+        """Return the execution id, requiring an accepted queue response."""
         result = _command_result(self._command.run(inputs), self._name)
         try:
             response = json.loads(result.stdout)
         except json.JSONDecodeError as error:
             raise RuntimeError(f"{self._name}: invalid enqueue response") from error
         execution_id = response.get("executionId")
-        expected_statuses = {"queued", "success"} if self._match_upstream else {"queued"}
-        if response.get("status") not in expected_statuses or not isinstance(execution_id, str) or not execution_id:
-            raise RuntimeError(f"{self._name}: expected an accepted execution, got {response!r}")
+        expected_statuses = (
+            {"queued", "success"} if self._match_upstream else {"queued"}
+        )
+        if (
+            response.get("status") not in expected_statuses
+            or not isinstance(execution_id, str)
+            or not execution_id
+        ):
+            raise RuntimeError(
+                f"{self._name}: expected an accepted execution, got {response!r}"
+            )
         if self._match_upstream and inputs.upstream() != execution_id:
             raise RuntimeError(
                 f"{self._name}: idempotent enqueue returned {execution_id!r}, "
@@ -550,6 +604,7 @@ class HttpExecutionSuccessTask(Task[None]):
         expected_status_code: object = _UNSET,
         cwd: Path | None = None,
     ) -> None:
+        """Record the endpoint, the polling budget and what success must carry."""
         self.title = "Wait for enqueued execution"
         self._endpoint = endpoint
         self._executor = executor
@@ -576,39 +631,53 @@ class HttpExecutionSuccessTask(Task[None]):
     def _fingerprint_payload(self) -> object:
         return self._fingerprint
 
-    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:  # NOSONAR (S3776): polling state machine reports precise failures
+    def run(
+        self, inputs: TaskInputs
+    ) -> TaskOutcome[
+        None
+    ]:  # NOSONAR (S3776): polling state machine reports precise failures
+        """Poll the execution until it succeeds, checking the expected result."""
         execution_id = inputs.upstream()
         if not isinstance(execution_id, str) or not execution_id:
             raise RuntimeError(f"{self.title}: expected an execution id from enqueue")
         command = CommandTask(
-                      title=self.title,
-                      argv=_argv(self._endpoint, lambda base: ("curl", "-fsS", f"{base}/v1/executions/{execution_id}")),
-                      executor=self._executor,
-                      role=self._role,
-                      options=CommandOptions(cwd=self._cwd),
-                      semantic_key=_semantic_key(
-                          "nanolab.http-function.execution-success:v2",
-                          endpoint=_endpoint_identity(self._endpoint),
-                          execution_id=execution_id,
-                          expected_output=(
-                              "unset" if self._expected_output is _UNSET else self._expected_output
-                          ),
-                          expected_status_code=(
-                              "unset"
-                              if self._expected_status_code is _UNSET
-                              else self._expected_status_code
-                          ),
-                      ),
-                  )
+            title=self.title,
+            argv=_argv(
+                self._endpoint,
+                lambda base: ("curl", "-fsS", f"{base}/v1/executions/{execution_id}"),
+            ),
+            executor=self._executor,
+            role=self._role,
+            options=CommandOptions(cwd=self._cwd),
+            semantic_key=_semantic_key(
+                "nanolab.http-function.execution-success:v2",
+                endpoint=_endpoint_identity(self._endpoint),
+                execution_id=execution_id,
+                expected_output=(
+                    "unset"
+                    if self._expected_output is _UNSET
+                    else self._expected_output
+                ),
+                expected_status_code=(
+                    "unset"
+                    if self._expected_status_code is _UNSET
+                    else self._expected_status_code
+                ),
+            ),
+        )
         deadline = monotonic() + self._timeout_seconds
         while True:
             result = _command_result(command.run(inputs), self.title)
             try:
                 response = json.loads(result.stdout)
             except json.JSONDecodeError as error:
-                raise RuntimeError(f"{self.title}: invalid execution response") from error
+                raise RuntimeError(
+                    f"{self.title}: invalid execution response"
+                ) from error
             if response.get("executionId") != execution_id:
-                raise RuntimeError(f"{self.title}: response was for {response.get('executionId')!r}")
+                raise RuntimeError(
+                    f"{self.title}: response was for {response.get('executionId')!r}"
+                )
             if response.get("status") == "success":
                 if (
                     self._expected_output is not _UNSET
@@ -628,9 +697,13 @@ class HttpExecutionSuccessTask(Task[None]):
                     )
                 return TaskOutcome(value=None)
             if response.get("status") in {"error", "timeout"}:
-                raise RuntimeError(f"{self.title}: execution ended {response.get('status')}")
+                raise RuntimeError(
+                    f"{self.title}: execution ended {response.get('status')}"
+                )
             if monotonic() >= deadline:
-                raise RuntimeError(f"{self.title}: execution {execution_id!r} did not succeed in time")
+                raise RuntimeError(
+                    f"{self.title}: execution {execution_id!r} did not succeed in time"
+                )
             sleep(self._poll_seconds)
 
 
@@ -660,11 +733,11 @@ class HttpFunctionExpectation:
     """The complete externally visible function-response contract to assert."""
 
     status: int
-    api_status: str | None | _UnsetType = _UNSET
+    api_status: str | _UnsetType | None = _UNSET
     output: object = _UNSET
-    status_code: int | None | _UnsetType = _UNSET
-    api_headers: dict[str, str] | None | _UnsetType = _UNSET
-    encoding: str | None | _UnsetType = _UNSET
+    status_code: int | _UnsetType | None = _UNSET
+    api_headers: dict[str, str] | _UnsetType | None = _UNSET
+    encoding: str | _UnsetType | None = _UNSET
     required_headers: tuple[tuple[str, str], ...] = ()
     forbidden_headers: tuple[str, ...] = ()
     forbidden_header_values: tuple[tuple[str, str], ...] = ()
@@ -672,7 +745,9 @@ class HttpFunctionExpectation:
     decoded_prefix: bytes | None = None
 
 
-def _parse_contract_response(name: str, stdout: str) -> tuple[int, dict[str, str], dict[str, object]]:
+def _parse_contract_response(
+    name: str, stdout: str
+) -> tuple[int, dict[str, str], dict[str, object]]:
     response_headers, body = _split_final_response(stdout)
     lines = response_headers.splitlines()
     try:
@@ -727,8 +802,12 @@ def _headers_match(actual_headers: object, expected_headers: object) -> bool:
     """
     matches = actual_headers == expected_headers
     if isinstance(actual_headers, dict) and isinstance(expected_headers, dict):
-        actual_normalized = {header.lower(): value for header, value in actual_headers.items()}
-        expected_normalized = {header.lower(): value for header, value in expected_headers.items()}
+        actual_normalized = {
+            header.lower(): value for header, value in actual_headers.items()
+        }
+        expected_normalized = {
+            header.lower(): value for header, value in expected_headers.items()
+        }
         matches = actual_normalized == expected_normalized
         if (
             actual_normalized.keys() == expected_normalized.keys()
@@ -736,14 +815,16 @@ def _headers_match(actual_headers: object, expected_headers: object) -> bool:
         ):
             actual_content_type = actual_normalized[_CONTENT_TYPE_HEADER_NAME]
             expected_content_type = expected_normalized[_CONTENT_TYPE_HEADER_NAME]
-            if isinstance(actual_content_type, str) and isinstance(expected_content_type, str):
-                matches = (
-                    actual_content_type.partition(";")[0].strip().lower()
-                    == expected_content_type.partition(";")[0].strip().lower()
-                    and all(
-                        actual_normalized[header] == expected_normalized[header]
-                        for header in actual_normalized.keys() - {_CONTENT_TYPE_HEADER_NAME}
-                    )
+            if isinstance(actual_content_type, str) and isinstance(
+                expected_content_type, str
+            ):
+                matches = actual_content_type.partition(";")[
+                    0
+                ].strip().lower() == expected_content_type.partition(";")[
+                    0
+                ].strip().lower() and all(
+                    actual_normalized[header] == expected_normalized[header]
+                    for header in actual_normalized.keys() - {_CONTENT_TYPE_HEADER_NAME}
                 )
     return matches
 
@@ -755,7 +836,9 @@ def _verify_outer_headers(
     expectation: HttpFunctionExpectation,
 ) -> None:
     if actual_status != expectation.status:
-        raise RuntimeError(f"{name}: HTTP status was {actual_status}, expected {expectation.status}")
+        raise RuntimeError(
+            f"{name}: HTTP status was {actual_status}, expected {expectation.status}"
+        )
     for header, expected_value in expectation.required_headers:
         actual_value = headers.get(header.lower())
         if actual_value is None:
@@ -771,7 +854,9 @@ def _verify_outer_headers(
     for header, forbidden_value in expectation.forbidden_header_values:
         actual_value = headers.get(header.lower())
         if _header_matches(actual_value, forbidden_value, header.lower()):
-            raise RuntimeError(f"{name}: forbidden header {header} had value {forbidden_value!r}")
+            raise RuntimeError(
+                f"{name}: forbidden header {header} had value {forbidden_value!r}"
+            )
 
 
 def _verify_api_fields(
@@ -785,7 +870,9 @@ def _verify_api_fields(
         ("encoding", expectation.encoding),
     ):
         if expected is not _UNSET and response.get(field) != expected:
-            raise RuntimeError(f"{name}: {field} was {response.get(field)!r}, expected {expected!r}")
+            raise RuntimeError(
+                f"{name}: {field} was {response.get(field)!r}, expected {expected!r}"
+            )
 
 
 def _verify_api_envelope(
@@ -795,7 +882,10 @@ def _verify_api_envelope(
     if expectation.api_headers is _UNSET:
         return
     if not _headers_match(response.get("headers"), expectation.api_headers):
-        raise RuntimeError(f"{name}: headers was {response.get('headers')!r}, expected {expectation.api_headers!r}")
+        raise RuntimeError(
+            f"{name}: headers was {response.get('headers')!r}, "
+            f"expected {expectation.api_headers!r}"
+        )
 
 
 def _verify_decoded_output(
@@ -811,8 +901,13 @@ def _verify_decoded_output(
     except ValueError as error:
         raise RuntimeError(f"{name}: invalid base64 output") from error
     if expectation.decoded_bytes is not None and decoded != expectation.decoded_bytes:
-        raise RuntimeError(f"{name}: decoded output was {decoded!r}, expected {expectation.decoded_bytes!r}")
-    if expectation.decoded_prefix is not None and not decoded.startswith(expectation.decoded_prefix):
+        raise RuntimeError(
+            f"{name}: decoded output was {decoded!r}, "
+            f"expected {expectation.decoded_bytes!r}"
+        )
+    if expectation.decoded_prefix is not None and not decoded.startswith(
+        expectation.decoded_prefix
+    ):
         raise RuntimeError(
             f"{name}: decoded output did not start with {expectation.decoded_prefix!r}"
         )
@@ -834,9 +929,11 @@ class HttpFunctionContractTask(CommandTask):
         content_type: str = "application/json",
         cwd: Path | None = None,
     ) -> None:
+        """Build the invoke that asserts the whole HTTP envelope of `name`."""
+
         def verify(result: TaskResult) -> None:
-            contract: tuple[int, dict[str, str], dict[str, object]] = _parse_contract_response(
-                name, result.stdout
+            contract: tuple[int, dict[str, str], dict[str, object]] = (
+                _parse_contract_response(name, result.stdout)
             )
             actual_status, response_headers, response = contract
             _verify_outer_headers(name, actual_status, response_headers, expectation)
@@ -871,15 +968,25 @@ class HttpFunctionContractTask(CommandTask):
                 content_type=content_type,
                 expectation={
                     "status": expectation.status,
-                    "api_status": "unset" if expectation.api_status is _UNSET else expectation.api_status,
-                    "output": "unset" if expectation.output is _UNSET else expectation.output,
+                    "api_status": "unset"
+                    if expectation.api_status is _UNSET
+                    else expectation.api_status,
+                    "output": "unset"
+                    if expectation.output is _UNSET
+                    else expectation.output,
                     "status_code": (
-                        "unset" if expectation.status_code is _UNSET else expectation.status_code
+                        "unset"
+                        if expectation.status_code is _UNSET
+                        else expectation.status_code
                     ),
                     "api_headers": (
-                        "unset" if expectation.api_headers is _UNSET else expectation.api_headers
+                        "unset"
+                        if expectation.api_headers is _UNSET
+                        else expectation.api_headers
                     ),
-                    "encoding": "unset" if expectation.encoding is _UNSET else expectation.encoding,
+                    "encoding": "unset"
+                    if expectation.encoding is _UNSET
+                    else expectation.encoding,
                     "required_headers": expectation.required_headers,
                     "forbidden_headers": expectation.forbidden_headers,
                     "forbidden_header_values": expectation.forbidden_header_values,
@@ -916,12 +1023,16 @@ class HttpFunctionInvokeTask(CommandTask):
         require_header: str | None = None,
         cwd: Path | None = None,
     ) -> None:
+        """Build the invoke of `name`, requiring `require_header` when given."""
+
         def verify(result: TaskResult) -> None:
             if require_header is None:
                 verify_invocation(result)
                 return
             headers, body = _split_response(result.stdout)
-            names = [line.split(":", 1)[0].strip().lower() for line in headers.splitlines()]
+            names = [
+                line.split(":", 1)[0].strip().lower() for line in headers.splitlines()
+            ]
             if require_header.lower() not in names:
                 raise RuntimeError(
                     f"{name}: response carried no {require_header} header; "
@@ -959,6 +1070,7 @@ class HttpFunctionInvokeTask(CommandTask):
 
 class HttpStatusCheckTask(SharedHttpStatusCheckTask):
     """nanoFaaS status check that uses JSON for invocation payloads."""
+
     def __init__(
         self,
         *,
@@ -970,9 +1082,14 @@ class HttpStatusCheckTask(SharedHttpStatusCheckTask):
         title: str | None = None,
         cwd: Path | None = None,
     ) -> None:
+        """Build the status check with a JSON content type for its payload."""
         super().__init__(
-            url=url, expected_status=expected_status, executor=executor, role=role,
+            url=url,
+            expected_status=expected_status,
+            executor=executor,
+            role=role,
             payload=payload,
             headers={"Content-Type": "application/json"} if payload is not None else {},
-            options=CommandOptions(cwd=cwd), title=title,
+            options=CommandOptions(cwd=cwd),
+            title=title,
         )

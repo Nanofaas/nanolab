@@ -22,4 +22,8 @@ packages/nanolab/scenarios-v2/release-config.yaml
 .wheel-smoke/
 .worktrees/
 .coverage
+.coverage.*
+coverage.xml
+htmlcov/
+**/.mypy_cache/
 .scannerwork/

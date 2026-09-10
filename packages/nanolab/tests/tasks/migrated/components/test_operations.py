@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from nanolab.tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from nanolab.tasks.components.operations import (
+    RemoteCommandOperation,
+    ScenarioOperation,
+)
 
 
 def test_scenario_operation_holds_id_and_summary() -> None:

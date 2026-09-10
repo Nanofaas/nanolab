@@ -718,7 +718,10 @@ def test_a_remote_run_dir_must_be_an_absolute_run_child(tmp_path: Path) -> None:
         build_loadtest_plan(
             SCENARIO,
             EnvironmentConfig.model_validate(
-                {"provider": "multipass", "roles": {"stack": {"name": "nanofaas-stack"}}}
+                {
+                    "provider": "multipass",
+                    "roles": {"stack": {"name": "nanofaas-stack"}},
+                }
             ),
             RoleBindings(host=executor, stack=executor),
             control_plane_url="http://stack:30080",
@@ -808,7 +811,10 @@ Add to `packages/sonata-tasks/tests/components/test_helm.py`:
 ```python
 def test_helm_set_args_pairs_every_value_with_its_flag() -> None:
     assert helm_mod.helm_set_args({"a": "1", "b": "2"}) == (
-        "--set", "a=1", "--set", "b=2",
+        "--set",
+        "a=1",
+        "--set",
+        "b=2",
     )
 
 
@@ -916,7 +922,9 @@ def test_remote_home_is_slash_root_for_root() -> None:
 
 
 def test_an_explicit_home_wins() -> None:
-    assert RoleTarget(user="ubuntu", home="/srv/nanofaas").remote_home == "/srv/nanofaas"
+    assert (
+        RoleTarget(user="ubuntu", home="/srv/nanofaas").remote_home == "/srv/nanofaas"
+    )
 ```
 
 - [ ] **Step 2: Run it and watch it fail**

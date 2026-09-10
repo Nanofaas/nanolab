@@ -1,3 +1,12 @@
+"""Expand the live repository into the image build cells a release ships.
+
+The plan is derived from the checkout rather than a static manifest: the
+targets are the control plane, the watchdog, and every function that has an
+example directory. Each target is then crossed with the requested
+architectures and flavors into cells, which the Bake renderer and the build
+runners consume without restating any of this structure themselves.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -9,7 +18,6 @@ from nanolab.functions.catalog import FunctionDefinition, list_functions
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, jvm_optimization
 from nanolab.release.versioning import normalize_version
 from nanolab.tasks.deployment import LOCAL_REGISTRY
-
 
 ImageArchitecture = Literal["amd64", "arm64"]
 ImageFlavor = Literal["jvm", "native", "default"]
@@ -39,6 +47,12 @@ class NativeBuild:
 
 @dataclass(frozen=True)
 class ImageTarget:
+    """One image a release builds, and the sources it builds from.
+
+    A target is architecture- and flavor-agnostic; the cells crossed from it
+    carry the resolved tag and image reference for a single build.
+    """
+
     name: str
     flavors: tuple[ImageFlavor, ...]
     dockerfile: Path
@@ -49,6 +63,12 @@ class ImageTarget:
 
 @dataclass(frozen=True)
 class ImageCell:
+    """One buildable combination of a target, an architecture and a flavor.
+
+    The tag and image reference are resolved at expansion time, so every
+    consumer of a cell builds and tags the exact same thing.
+    """
+
     target: ImageTarget
     architecture: ImageArchitecture
     flavor: ImageFlavor
@@ -57,29 +77,50 @@ class ImageCell:
 
     @property
     def platform(self) -> str:
+        """The Docker platform string this cell targets, such as `linux/amd64`."""
         return f"linux/{self.architecture}"
 
     @property
     def native_build(self) -> NativeBuild | None:
-        """The native contract for this cell, or None if it is not a Java native cell."""
+        """The native build contract this cell compiles against, or None.
+
+        Only native-flavored cells of a target that declares a native build
+        carry one; every other cell returns None.
+        """
         if self.flavor != "native":
             return None
         return self.target.native_build
 
     @property
     def dockerfile(self) -> Path:
+        """The Dockerfile that builds this cell.
+
+        Native cells use the shared GraalVM Dockerfile, since their target
+        carries a native build; every other cell uses its target's own.
+        """
         native = self.native_build
         return NATIVE_JAVA_DOCKERFILE if native is not None else self.target.dockerfile
 
     @property
     def context(self) -> Path:
+        """The build context this cell's Dockerfile is resolved against.
+
+        Native cells build from the repository root; every other cell builds
+        from its target's own directory.
+        """
         # The shared native Dockerfile does `COPY . .` — it only builds from the
         # repository root, never from the target's own directory.
         native = self.native_build
-        return Path(".") if native is not None else self.target.context
+        return Path() if native is not None else self.target.context
 
     @property
     def build_args(self) -> dict[str, str]:
+        """The build arguments this cell needs, keyed by argument name.
+
+        JVM cells carry the release tuning profile, native cells the
+        compilation contract the shared Dockerfile reads, and cells of any
+        other flavor none at all.
+        """
         if self.flavor == "jvm":
             return {"JVM_TUNING": JVM_RELEASE_PROFILE.build_env["JVM_TUNING"]}
         native = self.native_build
@@ -114,6 +155,11 @@ class ImageCell:
 
     @property
     def prerequisite_command(self) -> tuple[str, ...] | None:
+        """The command that must finish before this cell's image build, or None.
+
+        JVM cells boot-jar the target first so the Dockerfile has an artifact
+        to copy; native and default cells have no such prerequisite.
+        """
         if self.flavor != "jvm":
             return None
         identity_args = (
@@ -130,6 +176,8 @@ class ImageCell:
 
 @dataclass(frozen=True)
 class ImagePlan:
+    """Every target a release builds, and the cells expanded from them."""
+
     version: str
     registry: str
     targets: tuple[ImageTarget, ...]
@@ -137,6 +185,7 @@ class ImagePlan:
 
     @property
     def target_names(self) -> frozenset[str]:
+        """The names of all targets in the plan, for validating selectors."""
         return frozenset(target.name for target in self.targets)
 
 
@@ -165,7 +214,9 @@ def build_image_plan(
         for flavor in target.flavors
         if flavor in selected_flavors
     )
-    return ImagePlan(version=version_tag, registry=registry, targets=targets, cells=cells)
+    return ImagePlan(
+        version=version_tag, registry=registry, targets=targets, cells=cells
+    )
 
 
 def _all_targets(repo_root: Path) -> tuple[ImageTarget, ...]:
@@ -177,7 +228,9 @@ def _all_targets(repo_root: Path) -> tuple[ImageTarget, ...]:
             context=Path("platform/control-plane"),
             native_build=NativeBuild(
                 task=":control-plane:nativeCompile",
-                binary=Path("platform/control-plane/build/native/nativeCompile/control-plane"),
+                binary=Path(
+                    "platform/control-plane/build/native/nativeCompile/control-plane"
+                ),
                 gradle_args=("-PcontrolPlaneModules=all",),
             ),
             jvm_prerequisite_arguments=(
@@ -192,7 +245,9 @@ def _all_targets(repo_root: Path) -> tuple[ImageTarget, ...]:
             context=Path("services/java/warm-echo"),
             native_build=NativeBuild(
                 task=":services:java:warm-echo:nativeCompile",
-                binary=Path("services/java/warm-echo/build/native/nativeCompile/warm-echo"),
+                binary=Path(
+                    "services/java/warm-echo/build/native/nativeCompile/warm-echo"
+                ),
             ),
             jvm_prerequisite_arguments=(":services:java:warm-echo:bootJar",),
         ),
@@ -235,15 +290,13 @@ def _function_target(repo_root: Path, function: FunctionDefinition) -> ImageTarg
                     f"/build/native/nativeCompile/{function.family}"
                 ),
             ),
-            jvm_prerequisite_arguments=(
-                f":functions:java:{function.family}:bootJar",
-            ),
+            jvm_prerequisite_arguments=(f":functions:java:{function.family}:bootJar",),
         )
     return ImageTarget(
         name=name,
         flavors=("native",) if function.runtime == "java-lite" else ("default",),
         dockerfile=source_dir / "Dockerfile",
-        context=Path("."),
+        context=Path(),
     )
 
 

@@ -1,3 +1,5 @@
+"""Bootstrap operations that bring a VM to the point where nanolab can run."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -7,14 +9,13 @@ from types import MappingProxyType
 from typing import cast
 
 from multipass import find_ssh_public_key
-
-from nanolab.tasks.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
 from sonata_tasks.vm.ssh import find_ssh_private_key_path
-from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
 
-from nanolab.tasks.vm.models import VmRequest
 from nanolab.tasks.components.context import ScenarioExecutionContext
 from nanolab.tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
+from nanolab.tasks.vm.models import VmRequest
+from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
 
 _ASSETS_SYNC_TO_VM = "assets.sync_to_vm"
 
@@ -43,6 +44,7 @@ _remote_project_dir = remote_project_dir
 
 
 def remote_assets_dir(vm_request: VmRequest) -> str:
+    """Return the directory the tooling assets are synced into on the VM."""
     return f"{_remote_home(vm_request)}/nanolab-assets"
 
 
@@ -80,7 +82,9 @@ def _ansible_operation(
         extra_args.extend(["-e", f"{key}={value}"])
 
     private_key = (
-        find_ssh_private_key_path(find_ssh_public_key()) if discover_private_key else None
+        find_ssh_private_key_path(find_ssh_public_key())
+        if discover_private_key
+        else None
     )
     private_key_args: list[str] = (
         ["--private-key", str(private_key)] if private_key is not None else []
@@ -104,7 +108,10 @@ def _ansible_operation(
     )
 
 
-def plan_vm_ensure_running(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
+def plan_vm_ensure_running(
+    context: ScenarioExecutionContext,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Boot the VM, or prove an external one already answers over SSH."""
     vm_request = context.vm_request
     if vm_request.lifecycle == "external":
         return (
@@ -141,6 +148,7 @@ def plan_vm_provision_base(
     discover_private_key: bool = True,
     install_uv: bool = False,
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Install the base dependencies every VM needs, Helm and optionally uv."""
     return (
         _ansible_operation(
             context=context,
@@ -197,6 +205,7 @@ def plan_repo_sync_to_vm(
     *,
     discover_private_key: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Rsync the repository checkout into the VM."""
     return (
         _rsync_operation(
             context.vm_request,
@@ -214,6 +223,7 @@ def plan_assets_sync_to_vm(
     *,
     discover_private_key: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Rsync the scenario's tooling assets into the VM."""
     if context.assets_root is None:
         raise ValueError("assets sync requires context.assets_root")
     return (
@@ -259,7 +269,17 @@ def retarget_bootstrap_operation(
 ) -> RemoteCommandOperation:
     """Point an Ansible or repository-sync operation at a resolved SSH endpoint."""
     if operation.argv and operation.argv[0] == "ansible-playbook":
-        return cast(RemoteCommandOperation, replace(operation, argv=tuple(_retarget_ansible_argv(operation.argv, host=host, port=port, private_key=private_key))))
+        return cast(
+            RemoteCommandOperation,
+            replace(
+                operation,
+                argv=tuple(
+                    _retarget_ansible_argv(
+                        operation.argv, host=host, port=port, private_key=private_key
+                    )
+                ),
+            ),
+        )
 
     if operation.operation_id in ("repo.sync_to_vm", _ASSETS_SYNC_TO_VM):
         request = context.vm_request
@@ -270,11 +290,12 @@ def retarget_bootstrap_operation(
             source=cast(Path, context.assets_root) if assets else context.repo_root,
             user=request.user,
             host=host,
-            destination=remote_assets_dir(request) if assets else _remote_project_dir(request),
+            destination=remote_assets_dir(request)
+            if assets
+            else _remote_project_dir(request),
             ssh_rsh=repo_sync_ssh_rsh(private_key, port=port),
         )
-        retargeted_sync = cast(RemoteCommandOperation, replace(operation, argv=tuple(argv)))
-        return retargeted_sync
+        return cast(RemoteCommandOperation, replace(operation, argv=tuple(argv)))
 
     return operation
 
@@ -284,6 +305,7 @@ def plan_registry_ensure_container(
     *,
     discover_private_key: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Ensure the local registry container is running on the VM."""
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
         _ansible_operation(
@@ -307,6 +329,7 @@ def plan_k3s_install(
     *,
     discover_private_key: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Install k3s and write the VM's kubeconfig."""
     vm_request = context.vm_request
     return (
         _ansible_operation(
@@ -329,6 +352,7 @@ def plan_k3s_configure_registry(
     *,
     discover_private_key: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Point k3s at the local registry so it can pull the images it is given."""
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
         _ansible_operation(
@@ -346,7 +370,10 @@ def plan_k3s_configure_registry(
     )
 
 
-def plan_loadtest_install_k6(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
+def plan_loadtest_install_k6(
+    context: ScenarioExecutionContext,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Install k6 on the VM for the load tests."""
     return (
         _ansible_operation(
             context=context,

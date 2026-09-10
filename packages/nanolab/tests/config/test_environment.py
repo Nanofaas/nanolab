@@ -78,4 +78,6 @@ def test_remote_home_is_slash_root_for_root() -> None:
 
 
 def test_an_explicit_home_wins() -> None:
-    assert RoleTarget(user="ubuntu", home="/srv/nanofaas").remote_home == "/srv/nanofaas"
+    assert (
+        RoleTarget(user="ubuntu", home="/srv/nanofaas").remote_home == "/srv/nanofaas"
+    )

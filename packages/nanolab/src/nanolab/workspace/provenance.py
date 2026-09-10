@@ -13,6 +13,11 @@ from pathlib import Path
 
 
 def git_commit(repo_root: Path) -> str | None:
+    """Return the checkout's HEAD commit hash, or None if git cannot say.
+
+    None when git is missing, the directory is not a repository, or the query
+    fails for any other reason.
+    """
     try:
         result = subprocess.run(
             ("git", "rev-parse", "HEAD"),
@@ -27,6 +32,14 @@ def git_commit(repo_root: Path) -> str | None:
 
 
 def git_provenance(repo_root: Path) -> dict[str, object]:
+    """Summarise the checkout's working state for the run metadata.
+
+    Returns the HEAD commit, whether the tree is dirty, a SHA-256 over the
+    tracked diff plus the contents of every untracked file, and the raw
+    ``git status`` lines. When git is missing or a query fails, the commit is
+    still reported but the dirty flag and fingerprint are None and the status
+    list is empty.
+    """
     commit = git_commit(repo_root)
     try:
         status = subprocess.run(
@@ -51,9 +64,19 @@ def git_provenance(repo_root: Path) -> dict[str, object]:
             check=False,
         )
     except OSError:
-        return {"git_commit": commit, "git_dirty": None, "git_diff_sha256": None, "git_status": []}
+        return {
+            "git_commit": commit,
+            "git_dirty": None,
+            "git_diff_sha256": None,
+            "git_status": [],
+        }
     if status.returncode != 0 or diff.returncode != 0 or untracked.returncode != 0:
-        return {"git_commit": commit, "git_dirty": None, "git_diff_sha256": None, "git_status": []}
+        return {
+            "git_commit": commit,
+            "git_dirty": None,
+            "git_diff_sha256": None,
+            "git_status": [],
+        }
     digest = hashlib.sha256((status.stdout + "\0" + diff.stdout).encode("utf-8"))
     for relative_path in filter(None, untracked.stdout.split("\0")):
         digest.update(b"\0untracked\0")
@@ -71,7 +94,7 @@ def git_provenance(repo_root: Path) -> dict[str, object]:
 
 
 def source_fingerprint(repo_root: Path) -> str | None:
-    """What the checkout contains right now, as one hash.
+    """Fingerprint the checkout's current contents as one hash.
 
     Image tags are built from this. A fixed tag like `:e2e` is a name, not a
     content: rebuilding under it leaves every Deployment manifest byte-identical,
@@ -89,5 +112,5 @@ def source_fingerprint(repo_root: Path) -> str | None:
         return None
     diff_sha = provenance["git_diff_sha256"]
     return hashlib.sha256(
-        f"{commit}\0{diff_sha if isinstance(diff_sha, str) else ''}".encode("utf-8")
+        f"{commit}\0{diff_sha if isinstance(diff_sha, str) else ''}".encode()
     ).hexdigest()

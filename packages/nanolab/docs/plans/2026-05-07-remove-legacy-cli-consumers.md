@@ -70,7 +70,12 @@ Add a regression test that scans the user-facing docs for banned legacy strings 
 Example:
 ```python
 def test_docs_do_not_mention_legacy_cli_wrappers():
-    for path in [Path("README.md"), Path("docs/testing.md"), Path("docs/nanofaas-cli.md"), Path("docs/tutorial-function.md")]:
+    for path in [
+        Path("README.md"),
+        Path("docs/testing.md"),
+        Path("docs/nanofaas-cli.md"),
+        Path("docs/tutorial-function.md"),
+    ]:
         text = path.read_text()
         assert "cli-test run vm" not in text
         assert "e2e-cli.sh" not in text

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from sonata_tasks.execution.models import CommandOptions
-
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanolab.images.plan import ImageCell, ImagePlan, build_image_plan
-from nanolab.release.model import ArtifactEvidence
+from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import CommandTaskSpec
 
+from nanolab.images.plan import ImageCell, ImagePlan, build_image_plan
+from nanolab.release.model import ArtifactEvidence
 
 ARM64_PHASES = ("arm64-build", "arm64-smoke")
 ARM64_PLATFORM = "linux/arm64"
@@ -36,6 +35,8 @@ def registry_tunnel_command(registry_upstream: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True, slots=True)
 class ServerSmokeSpec:
+    """One ARM64 server image to start and health-check in the smoke phase."""
+
     cell: ImageCell
     container_name: str
     container_port: int
@@ -48,6 +49,7 @@ def build_arm64_image_plan(
     *,
     registry: str,
 ) -> ImagePlan:
+    """Build the ARM64 variant of the release image plan."""
     return build_image_plan(
         repo_root,
         version,
@@ -65,6 +67,11 @@ def arm64_build_commands(
     remote_source_dir: str,
     registry_upstream: str,
 ) -> tuple[CommandTaskSpec, ...]:
+    """Return the ARM-builder commands that bake the ARM64 images in order.
+
+    The registry tunnel and the bounded Buildx builder come first, then one
+    prepare step per distinct target, and finally the bake itself.
+    """
     commands = [
         CommandTaskSpec(
             task_id="release.arm64.registry-tunnel",
@@ -140,6 +147,7 @@ def arm64_build_commands(
 
 
 def require_arm64_builder(output: str) -> None:
+    """Raise unless the builder's reported platforms include linux/arm64."""
     platforms = {
         platform.strip().removesuffix("*")
         for line in output.splitlines()
@@ -154,20 +162,29 @@ def require_complete_arm64_evidence(
     plan: ImagePlan,
     artifacts: Iterable[ArtifactEvidence],
 ) -> None:
+    """Require exactly one remote digest per planned ARM64 image.
+
+    The evidence must name every planned image reference and nothing else, so
+    a build that silently dropped or added an image fails here.
+    """
     evidence = tuple(artifacts)
     expected = {f"docker://{cell.image}" for cell in plan.cells}
     actual = {
-        artifact.reference
-        for artifact in evidence
-        if artifact.location == "remote"
+        artifact.reference for artifact in evidence if artifact.location == "remote"
     }
     if len(evidence) != len(plan.cells) or actual != expected:
         raise RuntimeError(
-            f"ARM64 digest evidence does not cover all {len(plan.cells)} planned artifacts"
+            f"ARM64 digest evidence does not cover all {len(plan.cells)} "
+            "planned artifacts"
         )
 
 
 def server_smoke_specs(plan: ImagePlan) -> tuple[ServerSmokeSpec, ...]:
+    """Return one smoke spec per server cell, in plan order.
+
+    The control plane is probed on its own port and health path. The watchdog
+    is left out: it is covered by a separate exit-code check instead.
+    """
     cells = tuple(cell for cell in plan.cells if cell.target.name != "watchdog")
     return tuple(
         ServerSmokeSpec(
@@ -183,13 +200,22 @@ def server_smoke_specs(plan: ImagePlan) -> tuple[ServerSmokeSpec, ...]:
 
 
 def watchdog_cell(plan: ImagePlan) -> ImageCell:
+    """Return the plan's watchdog cell, requiring exactly one to exist."""
     matches = tuple(cell for cell in plan.cells if cell.target.name == "watchdog")
     if len(matches) != 1:
-        raise RuntimeError("ARM64 image plan must contain exactly one watchdog artifact")
+        raise RuntimeError(
+            "ARM64 image plan must contain exactly one watchdog artifact"
+        )
     return matches[0]
 
 
 def require_expected_watchdog_exit(return_code: int, stdout: str, stderr: str) -> None:
+    """Require the ARM watchdog to fail for its missing child, and only that.
+
+    The container must exit 1 having reported that it could not spawn its
+    runtime. A zero exit would mean the smoke proved nothing, and an exec
+    format error would mean the image never ran under ARM64 at all.
+    """
     output = f"{stdout}\n{stderr}".lower()
     if "exec format error" in output:
         raise RuntimeError("ARM64 watchdog smoke failed with exec format error")
@@ -199,4 +225,6 @@ def require_expected_watchdog_exit(return_code: int, stdout: str, stderr: str) -
         "failed to spawn runtime" in output
         and ("no such file or directory" in output or "os error 2" in output)
     ):
-        raise RuntimeError("ARM64 watchdog did not produce the expected missing-child exit")
+        raise RuntimeError(
+            "ARM64 watchdog did not produce the expected missing-child exit"
+        )

@@ -1,13 +1,12 @@
-from pathlib import Path
 import os
+from pathlib import Path
 
 import pytest
-
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.offload import build_offload_plan
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans.offload import build_offload_plan
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -25,7 +24,7 @@ class _RecordingExecutor:
 
 
 def _bindings() -> RoleBindings:
-    return RoleBindings({'host': _RecordingExecutor(), 'stack': _RecordingExecutor()})
+    return RoleBindings({"host": _RecordingExecutor(), "stack": _RecordingExecutor()})
 
 
 def _scenario() -> ScenarioConfig:
@@ -34,7 +33,9 @@ def _scenario() -> ScenarioConfig:
 
 def test_offload_scenario_rejects_a_backend() -> None:
     with pytest.raises(ValueError, match="backend"):
-        ScenarioConfig(workflow="offload", backend="container", functions=["word-stats-java"])
+        ScenarioConfig(
+            workflow="offload", backend="container", functions=["word-stats-java"]
+        )
 
 
 def _ids() -> list[str]:
@@ -49,15 +50,20 @@ def test_plan_starts_both_control_planes_before_anything_registers() -> None:
         "006.acquire-edge-control-plane"
     )
     first_register = next(
-        index for index, name in enumerate(ids) if "-on-the-" in name and "acquire" in name
+        index
+        for index, name in enumerate(ids)
+        if "-on-the-" in name and "acquire" in name
     )
     assert ids.index("006.acquire-edge-control-plane") < first_register
 
 
 def test_plan_ends_with_the_negative_check_then_releases_everything() -> None:
-    """The teardown is compiled in, not a cleanup list the caller has to run,
-    and the negative check comes before it: deleting the remote copy has to
-    happen while the edge still knows the function, or it answers 404."""
+    """End the plan with the negative check, then release everything.
+
+    The teardown is compiled in, not a cleanup list the caller has to run, and
+    the negative check comes before it: deleting the remote copy has to happen
+    while the edge still knows the function, or it answers 404.
+    """
     ids = _ids()
 
     assert ids[-5:] == [

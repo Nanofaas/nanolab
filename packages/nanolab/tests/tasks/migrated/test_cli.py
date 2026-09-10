@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 
 import pytest
 from sonata_engine import Resource, Selection
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -16,13 +17,20 @@ from nanolab.tasks.cli import (
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.testing import (
     CLI_CONTRACT_STEPS as CONTRACT_STEPS,
+)
+from nanolab.tasks.testing import (
     INVOCATION_SUCCESS,
-    cli_function_steps as _function_steps,
     cli_response,
+)
+from nanolab.tasks.testing import (
+    cli_function_steps as _function_steps,
+)
+from nanolab.tasks.testing import (
     cli_task_ids as _ids,
+)
+from nanolab.tasks.testing import (
     passed as _passed,
 )
-from sonata_tasks.command import CommandTask
 
 SUCCESS = INVOCATION_SUCCESS
 
@@ -60,7 +68,9 @@ class ScriptedExecutor:
         return replace(
             result,
             status=(
-                "passed" if result.return_code in task.options.expected_exit_codes else "failed"
+                "passed"
+                if result.return_code in task.options.expected_exit_codes
+                else "failed"
             ),
             expected_exit_codes=task.options.expected_exit_codes,
         )
@@ -89,7 +99,9 @@ def _bindings(executor: ScriptedExecutor) -> RoleBindings:
 
 def test_a_single_function_compiles_to_the_expected_topology() -> None:
     executor = ScriptedExecutor()
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     compiled = workflow.compile()
 
@@ -105,7 +117,9 @@ def test_a_single_function_compiles_to_the_expected_topology() -> None:
 
 def test_running_it_applies_before_listing_and_deletes_last() -> None:
     executor = ScriptedExecutor()
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     workflow.run()
 
@@ -127,7 +141,9 @@ def test_the_function_is_deleted_even_when_invoke_fails() -> None:
             )
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="unreachable"):
         workflow.run()
@@ -141,10 +157,14 @@ def test_a_failed_apply_compensates_best_effort_before_propagating() -> None:
     # and only there.
     executor = ScriptedExecutor(
         responses={
-            "mktemp": TaskResult(task_id="", status="failed", return_code=1, stderr="conflict")
+            "mktemp": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="conflict"
+            )
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="conflict"):
         workflow.run()
@@ -169,7 +189,9 @@ def test_a_failed_compensation_is_noted_without_masking_the_apply_error() -> Non
             ),
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="apply conflict") as captured:
         workflow.run()
@@ -194,7 +216,9 @@ def test_invoke_rejects_a_non_success_status() -> None:
             )
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="did not report success"):
         workflow.run()
@@ -204,11 +228,16 @@ def test_invoke_rejects_a_response_without_output() -> None:
     executor = ScriptedExecutor(
         responses={
             "invoke word-stats-java": TaskResult(
-                task_id="", status="passed", return_code=0, stdout='{"status":"success"}'
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout='{"status":"success"}',
             )
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="carried no output"):
         workflow.run()
@@ -222,7 +251,9 @@ def test_invoke_rejects_malformed_json() -> None:
             )
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="was not JSON"):
         workflow.run()
@@ -279,7 +310,8 @@ def test_the_endpoint_reaches_every_cli_call_and_the_namespace_does_not() -> Non
 
     cli_calls = [spec for spec in executor.seen if spec.summary != "Build nanofaas-cli"]
     assert all("http://stack.example:8080" in " ".join(spec.argv) for spec in cli_calls)
-    # The CLI dropped --namespace: passing it would abort every call as an unknown option.
+    # The CLI dropped --namespace: passing it would abort every call as an
+    # unknown option.
     assert all("--namespace" not in spec.argv for spec in cli_calls)
 
 
@@ -290,11 +322,15 @@ def test_apply_builds_the_manifest_on_the_target_not_in_this_process() -> None:
         image="registry.example/research:v2",
         resources={"limits": {"cpu": 1.0, "memoryMiB": 512}},
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(function,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,)), _bindings(executor)
+    )
 
     workflow.run()
 
-    apply_spec = next(spec for spec in executor.seen if spec.summary.startswith("Apply"))
+    apply_spec = next(
+        spec for spec in executor.seen if spec.summary.startswith("Apply")
+    )
     script = apply_spec.argv[-1]
     assert apply_spec.argv[:2] == ("bash", "-lc")
     assert "mktemp" in script
@@ -304,22 +340,31 @@ def test_apply_builds_the_manifest_on_the_target_not_in_this_process() -> None:
 
 def test_delete_keeps_real_cli_failures_visible() -> None:
     executor = ScriptedExecutor()
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     workflow.run()
 
-    delete_spec = next(spec for spec in executor.seen if spec.summary.startswith("Delete"))
+    delete_spec = next(
+        spec for spec in executor.seen if spec.summary.startswith("Delete")
+    )
     # The nanoFaaS CLI already exits 0 when DELETE returns 404. Accepting 1
     # would also hide network, server, and other real cleanup failures.
     assert delete_spec.options.expected_exit_codes == frozenset({0})
 
 
 def test_keep_still_deletes_the_function() -> None:
-    """`--keep` is for the VM and the platform on it, both expensive to rebuild.
+    """Delete the function even when `--keep` retains the VM and platform.
+
+    `--keep` is for the VM and the platform on it, both expensive to rebuild.
     A registration costs a second to redo and, left behind, makes the next run
-    fail with 409 — which it did, twice, before this changed."""
+    fail with 409 — which it did, twice, before this changed.
+    """
     executor = ScriptedExecutor()
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
     workflow.keep = True
 
     workflow.run()
@@ -445,7 +490,9 @@ def test_a_function_with_dockerfile_build_gets_artifact_and_image_tasks() -> Non
             "functions/java/word-stats",
         ),
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(function,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,)), _bindings(executor)
+    )
 
     assert [task.task_id for task in workflow.compile().tasks] == _ids(
         "Build nanofaas-cli",
@@ -495,16 +542,22 @@ def test_the_image_build_runs_before_the_function_is_registered() -> None:
     function = replace(
         FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage")
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(function,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,)), _bindings(executor)
+    )
 
     workflow.run()
 
     titles = executor.titles
-    assert titles.index("Build image word-stats-java") < titles.index("Apply word-stats-java")
+    assert titles.index("Build image word-stats-java") < titles.index(
+        "Apply word-stats-java"
+    )
 
 
 def test_requested_function_images_are_pushed_before_registration() -> None:
-    function = replace(FUNCTION, build_argv=("docker", "build", "-t", FUNCTION.image, "."))
+    function = replace(
+        FUNCTION, build_argv=("docker", "build", "-t", FUNCTION.image, ".")
+    )
 
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(function,), push_function_images=True),
@@ -525,7 +578,9 @@ def test_requested_function_images_are_pushed_before_registration() -> None:
 
 def test_without_build_argv_nothing_extra_is_emitted() -> None:
     executor = ScriptedExecutor()
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     assert "002.build-image-word-stats-java" not in [
         task.task_id for task in workflow.compile().tasks
@@ -652,7 +707,9 @@ def test_readiness_runs_after_apply_and_before_the_function_is_usable() -> None:
         *_function_steps(WORD_STATS),
         "Delete word-stats-java",
     ]
-    rollout = next(spec for spec in executor.seen if spec.summary.startswith("Roll out"))
+    rollout = next(
+        spec for spec in executor.seen if spec.summary.startswith("Roll out")
+    )
     assert rollout.argv == (
         "kubectl",
         "-n",
@@ -746,7 +803,9 @@ def test_slicing_the_invoke_task_keeps_function_requires_transitively() -> None:
 
 def test_without_readiness_timeout_no_extra_commands_are_emitted() -> None:
     executor = ScriptedExecutor()
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     workflow.run()
 
@@ -787,21 +846,32 @@ def test_the_new_cli_surface_is_exercised_against_the_control_plane() -> None:
 
 
 def test_runtime_config_is_skipped_where_no_namespace_is_available() -> None:
-    """The k8s workflow talks to a control plane whose admin API may be off; a
-    check that quietly passed against it would be worse than no check."""
+    """Skip the runtime-config check where no namespace can answer it.
+
+    The k8s workflow talks to a control plane whose admin API may be off; a
+    check that quietly passed against it would be worse than no check.
+    """
     executor = ScriptedExecutor()
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     workflow.run()
 
-    assert not any("control-plane config" in " ".join(spec.argv) for spec in executor.seen)
+    assert not any(
+        "control-plane config" in " ".join(spec.argv) for spec in executor.seen
+    )
 
 
 def test_update_fails_when_the_control_plane_ignored_the_patch() -> None:
     executor = ScriptedExecutor(
-        responses={"fn update": _passed('{"concurrency":3,"timeoutMs":5000,"maxRetries":1}')}
+        responses={
+            "fn update": _passed('{"concurrency":3,"timeoutMs":5000,"maxRetries":1}')
+        }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="timeoutMs is 5000, expected 9000"):
         workflow.run()
@@ -815,18 +885,25 @@ def test_scaling_fails_when_the_desired_count_did_not_change() -> None:
             )
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="desiredReplicas is 1, expected 2"):
         workflow.run()
 
 
 def test_an_apply_that_replaces_without_being_asked_fails_the_run() -> None:
-    """The point of the refusal check: a CLI that silently replaced on a changed
+    """Fail the run when an apply replaces without being asked.
+
+    The point of the refusal check: a CLI that silently replaced on a changed
     immutable field would exit 0 here, and the delete-then-register it did would
-    never be noticed."""
+    never be noticed.
+    """
     executor = ScriptedExecutor(responses={'"queueSize":21': _passed("")})
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="without asking for --replace"):
         workflow.run()
@@ -834,9 +911,13 @@ def test_an_apply_that_replaces_without_being_asked_fails_the_run() -> None:
 
 def test_replace_fails_when_the_immutable_field_did_not_change() -> None:
     executor = ScriptedExecutor(
-        responses={"fn apply --replace": _passed('{"name":"word-stats-java","queueSize":20}')}
+        responses={
+            "fn apply --replace": _passed('{"name":"word-stats-java","queueSize":20}')
+        }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="queueSize is 20, expected 21"):
         workflow.run()
@@ -850,14 +931,18 @@ def test_a_control_plane_missing_an_optional_capability_fails_early() -> None:
             )
         }
     )
-    workflow = build_cli_workflow(CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
 
     with pytest.raises(RuntimeError, match="does not advertise replicas"):
         workflow.run()
 
 
 def test_an_invalid_runtime_config_that_is_accepted_fails_the_run() -> None:
-    executor = ScriptedExecutor(responses={'"rateMaxPerSecond":-1': _passed('{"valid":true}')})
+    executor = ScriptedExecutor(
+        responses={'"rateMaxPerSecond":-1': _passed('{"valid":true}')}
+    )
     workflow = build_cli_workflow(
         CliWorkflowRequest(
             functions=(FUNCTION,), runtime_config_namespace=RUNTIME_CONFIG_NAMESPACE

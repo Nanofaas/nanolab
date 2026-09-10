@@ -2,34 +2,43 @@
 
 from __future__ import annotations
 
-from sonata_tasks.execution.models import CommandOptions
-
-from collections.abc import Callable, Iterable, Mapping
+import contextlib
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
 import tarfile
 import tempfile
 import textwrap
+from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 from typing import Any
+
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.images.bake import render_bake_json
 from nanolab.images.plan import ImagePlan
 from nanolab.release import arm
-from nanolab.release.model import Amd64ReleasePlan, ArtifactEvidence, digest_path, git_state
+from nanolab.release.model import (
+    Amd64ReleasePlan,
+    ArtifactEvidence,
+    digest_path,
+    git_state,
+)
 from nanolab.release.remote_retry import retry_on_connection_death
-from sonata_tasks.tasks.models import CommandTaskSpec
 
 _GO_TOOLCHAIN = (
-    "golang:1.24-alpine@sha256:757779acac4af1b349a20f357c7296097b4a0b89da4ad0e370b339060077282a"
+    "golang:1.24-alpine@"
+    "sha256:757779acac4af1b349a20f357c7296097b4a0b89da4ad0e370b339060077282a"
 )
 _NODE_TOOLCHAIN = (
-    "node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2"
+    "node:22-alpine@"
+    "sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2"
 )
 _RUST_TOOLCHAIN = (
-    "rust:1.97.1-alpine3.21@sha256:e5c73e7a712b368eb90b1190c6e1c4a01a3ebb0fe0abfff68c3bcd2df26ecc41"
+    "rust:1.97.1-alpine3.21@"
+    "sha256:e5c73e7a712b368eb90b1190c6e1c4a01a3ebb0fe0abfff68c3bcd2df26ecc41"
 )
 
 _SHA256_PREFIX = "sha256:"
@@ -60,7 +69,7 @@ def _provider_exec(
             "sh",
             "-c",
             "{ " + script + " ; } >/tmp/release-cmd.log 2>&1; "
-                            "ec=$?; tail -c 65536 /tmp/release-cmd.log; exit $ec",
+            "ec=$?; tail -c 65536 /tmp/release-cmd.log; exit $ec",
         )
     result = retry_on_connection_death(
         lambda: provider.exec_argv(  # type: ignore[attr-defined]
@@ -116,13 +125,20 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> ArtifactEvidence:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
     return ArtifactEvidence("local", str(path), digest_path(path))
 
 
 def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]:
+    """Return the source test commands run against the staged release tree.
+
+    One command per language: the Gradle suite, the Python SDK and functions,
+    and the Go, JavaScript, Rust and Bash suites inside digest-pinned
+    toolchains. All run in the staged `remote_source_dir`, and the Gradle
+    command also collects failure reports and environment diagnostics.
+    """
     source = str(remote_source_dir)
     container_prefix = (
         "docker",
@@ -282,8 +298,8 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 _GO_TOOLCHAIN,
                 "sh",
                 "-c",
-                copy_source
-                + "for d in sdks/go functions/go/word-stats functions/go/json-transform "
+                copy_source + "for d in sdks/go functions/go/word-stats "
+                "functions/go/json-transform "
                 'functions/go/roman-numeral; do (cd "$d" && go test ./...); done',
             ),
             role="stack",
@@ -297,10 +313,12 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 _NODE_TOOLCHAIN,
                 "sh",
                 "-c",
-                copy_source
-                + "npm --prefix sdks/javascript ci && npm --prefix sdks/javascript test && "
-                "for d in functions/javascript/word-stats functions/javascript/json-transform "
-                'functions/javascript/roman-numeral; do (cd "$d" && npm ci && npm test); done',
+                copy_source + "npm --prefix sdks/javascript ci && "
+                "npm --prefix sdks/javascript test && "
+                "for d in functions/javascript/word-stats "
+                "functions/javascript/json-transform "
+                "functions/javascript/roman-numeral; "
+                'do (cd "$d" && npm ci && npm test); done',
             ),
             role="stack",
             options=CommandOptions(remote_dir=source),
@@ -313,8 +331,8 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 _RUST_TOOLCHAIN,
                 "sh",
                 "-c",
-                copy_source
-                + "apk add --no-cache bash curl jq netcat-openbsd python3 >/dev/null && "
+                copy_source + "apk add --no-cache bash curl jq netcat-openbsd "
+                "python3 >/dev/null && "
                 "cargo test --manifest-path runtimes/watchdog/Cargo.toml && "
                 "bash runtimes/watchdog/test-local.sh",
             ),
@@ -400,7 +418,9 @@ def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path
         output.mkdir(parents=True, exist_ok=True)
         if any(output.iterdir()):
             raise ValueError(f"extraction destination is not empty: {output}")
-        descriptor, temporary_name = tempfile.mkstemp(prefix=".commit-tree.", suffix=".tar")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".commit-tree.", suffix=".tar"
+        )
         os.close(descriptor)
         archive = Path(temporary_name)
         subprocess.run(
@@ -428,6 +448,12 @@ def create_source_archive(
     guarded_commit: str,
     destination: Path,
 ) -> ArtifactEvidence:
+    """Archive one commit as a tar file and return its file evidence.
+
+    Refuses to overwrite an existing archive, and re-checks the Git state
+    before and after, so the returned digest always describes the tree that
+    was archived.
+    """
     root = Path(repo_root)
     before = git_state(root)
     if not before.clean:
@@ -452,7 +478,7 @@ def create_source_archive(
         after = git_state(root)
         if after != before:
             raise ValueError("release source changed while creating archive")
-        os.replace(temporary, output)
+        temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
     return ArtifactEvidence("local", str(output), digest_path(output))
@@ -467,6 +493,11 @@ def stage_source_archive(
     remote_source_dir: str,
     expected_digest: str | None = None,
 ) -> None:
+    """Upload the source archive to a VM and unpack it at `remote_source_dir`.
+
+    The remote file's checksum must match the local digest before it is
+    unpacked, so a truncated transfer or a stale archive is never staged.
+    """
     local_digest = digest_path(archive)
     if expected_digest is not None and local_digest != expected_digest:
         raise RuntimeError("source-tests evidence changed before consumption")
@@ -507,7 +538,9 @@ def _build_arm64_images(
 ) -> tuple[ArtifactEvidence, ...]:
     if stage_inputs:
         bake_file.write_text(render_bake_json(image_plan), encoding="utf-8")
-        _provider_exec(provider, request, ("mkdir", "-p", str(Path(remote_bake).parent)))
+        _provider_exec(
+            provider, request, ("mkdir", "-p", str(Path(remote_bake).parent))
+        )
         for source, destination in (
             (bake_file, remote_bake),
             (plan.buildkit_config, remote_buildkit),
@@ -581,7 +614,9 @@ def _smoke_arm64_images(
 ) -> tuple[ArtifactEvidence, ...]:
     _assert_guarded_source(plan)
     if ensure_tunnel:
-        _provider_exec(provider, request, arm.registry_tunnel_command(registry_upstream))
+        _provider_exec(
+            provider, request, arm.registry_tunnel_command(registry_upstream)
+        )
     expected = tuple(expected_build_evidence)
     arm.require_complete_arm64_evidence(image_plan, expected)
     current = tuple(
@@ -598,7 +633,9 @@ def _smoke_arm64_images(
     checked_servers: list[str] = []
     for smoke in arm.server_smoke_specs(image_plan):
         digest = digests[f"docker://{smoke.cell.image}"]
-        _smoke_arm64_server(provider, request, smoke, _pinned_image(smoke.cell.image, digest))
+        _smoke_arm64_server(
+            provider, request, smoke, _pinned_image(smoke.cell.image, digest)
+        )
         checked_servers.append(smoke.cell.image)
 
     watchdog = arm.watchdog_cell(image_plan)
@@ -630,7 +667,10 @@ def _smoke_arm64_images(
         plan.run_dir / "arm64-smoke.json",
         {
             "architecture": arm.ARM64_PLATFORM,
-            "images": {cell.image: digests[f"docker://{cell.image}"] for cell in image_plan.cells},
+            "images": {
+                cell.image: digests[f"docker://{cell.image}"]
+                for cell in image_plan.cells
+            },
             "serverHealthChecks": checked_servers,
             "watchdog": {
                 "image": watchdog.image,
@@ -656,7 +696,8 @@ def _require_image_architecture(
     actual = str(getattr(result, "stdout", "")).strip()
     if actual != expected:
         raise RuntimeError(
-            f"image architecture mismatch for {reference}: expected {expected}, got {actual or 'empty'}"
+            f"image architecture mismatch for {reference}: "
+            f"expected {expected}, got {actual or 'empty'}"
         )
 
 
@@ -692,7 +733,9 @@ def _smoke_arm64_server(
         endpoint = str(getattr(port, "stdout", "")).strip()
         host, separator, value = endpoint.rpartition(":")
         if host != "127.0.0.1" or separator != ":" or not value.isdigit():
-            raise RuntimeError(f"invalid ARM64 smoke port mapping: {endpoint or 'empty'}")
+            raise RuntimeError(
+                f"invalid ARM64 smoke port mapping: {endpoint or 'empty'}"
+            )
         _provider_exec(
             provider,
             request,
@@ -712,11 +755,11 @@ def _smoke_arm64_server(
                 "--retry-all-errors",
                 "--retry-max-time",
                 "120",
-                f"http://{endpoint}{smoke.health_path}",  # NOSONAR (S5332): smoke-test health probe
+                f"http://{endpoint}{smoke.health_path}",  # NOSONAR (S5332): smoke probe
             ),
         )
     except BaseException:
-        try:
+        with contextlib.suppress(OSError, RuntimeError):
             provider.exec_argv(  # type: ignore[attr-defined]
                 request,
                 ("docker", "rm", "--force", smoke.container_name),
@@ -724,8 +767,6 @@ def _smoke_arm64_server(
                 remote_dir=None,
                 dry_run=False,
             )
-        except (OSError, RuntimeError):
-            pass
         raise
     _provider_exec(
         provider,
@@ -762,7 +803,10 @@ def _reset_named_builder(
 def _evidence_map(
     artifacts: Iterable[ArtifactEvidence],
 ) -> dict[tuple[str, str], str]:
-    return {(artifact.location, artifact.reference): artifact.digest for artifact in artifacts}
+    return {
+        (artifact.location, artifact.reference): artifact.digest
+        for artifact in artifacts
+    }
 
 
 def _inspect_image_digest(provider: object, request: object, reference: str) -> str:
@@ -857,4 +901,6 @@ def _registry_digest_map(
     expected = {f"docker://{cell.image}" for cell in image_plan.cells}
     if set(by_reference) != expected:
         raise ValueError("local-registry-push evidence does not cover the image matrix")
-    return {cell.image: by_reference[f"docker://{cell.image}"] for cell in image_plan.cells}
+    return {
+        cell.image: by_reference[f"docker://{cell.image}"] for cell in image_plan.cells
+    }

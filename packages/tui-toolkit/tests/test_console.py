@@ -1,4 +1,5 @@
 """Tests for tui_toolkit.console — Rich Console singleton + width helpers."""
+
 from __future__ import annotations
 
 from rich.console import Console

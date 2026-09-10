@@ -13,7 +13,9 @@ from nanolab.tasks.loadtest.resources import (
 )
 
 
-def _stats(usage: int, inactive: int, cpu: int, precpu: int, system: int, presystem: int) -> dict:
+def _stats(
+    usage: int, inactive: int, cpu: int, precpu: int, system: int, presystem: int
+) -> dict:
     return {
         "memory_stats": {
             "usage": usage,
@@ -33,10 +35,20 @@ def _stats(usage: int, inactive: int, cpu: int, precpu: int, system: int, presys
 
 
 def test_page_cache_is_not_counted_as_memory_the_container_needs() -> None:
-    """Raw usage counts the page cache, so a container that has merely read its
+    """Count only the working set, not the page cache, as memory needed.
+
+    Raw usage counts the page cache, so a container that has merely read its
     own jar looks like one that needs the memory. Kubernetes decides OOM kills
-    on the working set, so that is the honest number."""
-    stats = _stats(usage=200 * 1024**2, inactive=120 * 1024**2, cpu=0, precpu=0, system=0, presystem=0)
+    on the working set, so that is the honest number.
+    """
+    stats = _stats(
+        usage=200 * 1024**2,
+        inactive=120 * 1024**2,
+        cpu=0,
+        precpu=0,
+        system=0,
+        presystem=0,
+    )
 
     assert working_set_bytes(stats) == 80 * 1024**2
 
@@ -48,25 +60,34 @@ def test_cgroup_v1_naming_is_understood_too() -> None:
 
 
 def test_cpu_is_a_share_of_the_interval_not_a_running_total() -> None:
-    """The Engine reports cumulative nanoseconds plus the previous read, so the
+    """Report CPU as a share of the interval, not a running total.
+
+    The Engine reports cumulative nanoseconds plus the previous read, so the
     interval travels with the sample and no state is kept here. Four cores fully
-    busy reads as 400%."""
+    busy reads as 400%.
+    """
     stats = _stats(usage=0, inactive=0, cpu=400, precpu=0, system=1000, presystem=0)
 
     assert cpu_percent(stats) == 160.0
 
 
 def test_the_first_reading_of_a_container_reports_no_cpu_rather_than_a_spike() -> None:
-    """There is no predecessor to subtract, and inventing one would put a false
-    spike at the start of every series."""
+    """Report no CPU for a container's first reading rather than a spike.
+
+    There is no predecessor to subtract, and inventing one would put a false
+    spike at the start of every series.
+    """
     stats = {"cpu_stats": {"cpu_usage": {"total_usage": 500}}, "precpu_stats": {}}
 
     assert cpu_percent(stats) == 0.0
 
 
 def test_the_series_is_written_even_when_some_snapshots_failed(tmp_path: Path) -> None:
-    """A failed snapshot costs one reading; the run's other readings are still
-    the record."""
+    """Write the series even when some snapshots failed.
+
+    A failed snapshot costs one reading; the run's other readings are still
+    the record.
+    """
     watcher = ResourceWatcher.__new__(ResourceWatcher)
     watcher._samples = [  # type: ignore[attr-defined]
         ResourceSample(

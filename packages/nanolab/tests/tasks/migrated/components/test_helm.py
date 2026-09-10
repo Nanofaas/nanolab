@@ -122,7 +122,10 @@ def test_helm_values_can_enable_sync_queue_admission_for_validation() -> None:
 
 def test_helm_set_args_pairs_every_value_with_its_flag() -> None:
     assert helm_mod.helm_set_args({"a": "1", "b": "2"}) == (
-        "--set", "a=1", "--set", "b=2",
+        "--set",
+        "a=1",
+        "--set",
+        "b=2",
     )
 
 

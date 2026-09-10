@@ -8,21 +8,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from sonata_engine.workflow.reporting import subtask
+from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.ports import VmOrchestratorProtocol
+from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
+
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.provisioning.bootstrap import (
     retarget_cloud_operations,
     run_bootstrap_operations,
     scenario_context,
 )
-from sonata_tasks.vm.adapters import VmLifecycleAdapter
-from sonata_tasks.vm.ports import VmOrchestratorProtocol
 from nanolab.tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
-from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
-from sonata_engine.workflow.reporting import subtask
 
 
 @dataclass(frozen=True)
 class ProvisionedRole:
+    """One role to bring up, with the bootstrap operations to run on its VM."""
+
     role: str
     request: VmRequest
     operations: tuple[RemoteCommandOperation, ...] = ()
@@ -58,7 +61,9 @@ def _ensure_vm(provider: object, request: VmRequest, *, role: str) -> VmRequest:
     )
 
 
-def _destroy_task(provider: object, request: VmRequest, *, role: str) -> DestroyVm | None:
+def _destroy_task(
+    provider: object, request: VmRequest, *, role: str
+) -> DestroyVm | None:
     if request.lifecycle == "external":
         return None
     lifecycle = VmLifecycleAdapter(
@@ -115,6 +120,12 @@ def provision_roles(
     keep: bool = False,
     after_ensure: Callable[[str, VmRequest], None] | None = None,
 ) -> Generator[None, None, None]:
+    """Ensure every role's VM, run its bootstrap operations, then tear it all down.
+
+    On exit the VMs this call created are destroyed in reverse order unless
+    `keep` is set. An exception from the body is re-raised after cleanup, with
+    any cleanup failures appended to it.
+    """
     cleanup_tasks: list[DestroyVm] = []
     main_error: BaseException | None = None
     cleanup_errors: list[str] = []
@@ -125,16 +136,20 @@ def provision_roles(
             if cleanup is not None:
                 cleanup_tasks.append(cleanup)
             resolved.append(_ensure_vm(provider, entry.request, role=entry.role))
-        for entry, request in zip(roles, resolved):
+        for entry, _request in zip(roles, resolved, strict=False):
             if after_ensure is not None:
                 after_ensure(entry.role, entry.request)
-        for entry, request in zip(roles, resolved):
+        for entry, request in zip(roles, resolved, strict=False):
             if entry.operations:
                 context = scenario_context(repo_root, request, assets_root)
-                retargeted = retarget_cloud_operations(provider, context, entry.operations)
+                retargeted = retarget_cloud_operations(
+                    provider, context, entry.operations
+                )
                 run_bootstrap_operations(provider, retargeted, role=entry.role)
         yield
-    except BaseException as exc:  # NOSONAR (S5754): cleanup must run across the yield boundary
+    except (
+        BaseException
+    ) as exc:  # NOSONAR (S5754): cleanup must run across the yield boundary
         main_error = exc
     finally:
         if not keep:

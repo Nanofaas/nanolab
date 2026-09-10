@@ -1,9 +1,14 @@
 import time
+
 from nanolab.cli import comparison
 
+
 def test_heartbeat_reports_while_a_long_command_runs(capsys):
-    """Without it, twenty minutes of compiling and twenty minutes of being wedged
-    look identical from the log."""
+    """Emit progress while a long command runs.
+
+    Without it, twenty minutes of compiling and twenty minutes of being wedged
+    look identical from the log.
+    """
     with comparison._heartbeat("Compile native image", interval=0.05):
         time.sleep(0.17)
     out = capsys.readouterr().out

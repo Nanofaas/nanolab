@@ -1,3 +1,5 @@
+"""Typer application behind the ``nanolab`` console script."""
+
 from __future__ import annotations
 
 import sys
@@ -17,6 +19,7 @@ app = typer.Typer(
 
 @app.command("tui")
 def tui() -> None:
+    """Launch the interactive Rich TUI."""
     from nanolab.tui.app import NanofaasTUI
 
     setup_ui()
@@ -29,11 +32,13 @@ install_comparison_commands(app)
 
 
 def main() -> None:
+    """Run the CLI, or the TUI when invoked with no arguments at all."""
     setup_ui()
     install_rich_tracebacks(show_locals=False)
     # No arguments → launch the interactive Rich TUI
     if len(sys.argv) == 1:
         from nanolab.tui.app import NanofaasTUI
+
         NanofaasTUI().run()
         return
     app()

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
+
+import pytest
 
 from nanolab.tasks.loadtest.autoscaling import (
     HttpReplicaProbe,
@@ -73,12 +76,8 @@ def test_initial_autoscaling_replicas_requires_zero_desired_and_ready() -> None:
         def ready_replicas(self) -> int:
             return 1
 
-    try:
+    with pytest.raises(RuntimeError, match="expected desired=0 and ready=0"):
         VerifyInitialAutoscalingReplicas(probe=_Probe()).run()
-    except RuntimeError as exc:
-        assert "expected desired=0 and ready=0" in str(exc)
-        return
-    raise AssertionError("expected RuntimeError")
 
 
 def test_initial_autoscaling_replicas_accepts_a_configured_floor() -> None:
@@ -139,7 +138,9 @@ def test_verify_autoscaling_replicas_quotes_shell_arguments(monkeypatch) -> None
     assert "'nanofaas; touch /tmp/ns-pwned'" in command
 
 
-def test_verify_autoscaling_replicas_accepts_scale_down_on_final_poll(monkeypatch) -> None:
+def test_verify_autoscaling_replicas_accepts_scale_down_on_final_poll(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr("nanolab.tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["2", "2", "1", "0"])
     task = VerifyAutoscalingReplicas(
@@ -160,7 +161,9 @@ def test_verify_autoscaling_replicas_accepts_scale_down_on_final_poll(monkeypatc
     assert summary.final_desired_replicas == 0
 
 
-def test_verify_autoscaling_replicas_fails_when_scale_up_never_exceeds_one(monkeypatch) -> None:
+def test_verify_autoscaling_replicas_fails_when_scale_up_never_exceeds_one(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr("nanolab.tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["1", "1", "1", "1"])
     task = VerifyAutoscalingReplicas(
@@ -183,7 +186,9 @@ def test_verify_autoscaling_replicas_fails_when_scale_up_never_exceeds_one(monke
     assert "Scale-up not observed" in summary.verdict_error
 
 
-def test_verify_autoscaling_replicas_fails_when_scale_down_never_reaches_zero(monkeypatch) -> None:
+def test_verify_autoscaling_replicas_fails_when_scale_down_never_reaches_zero(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr("nanolab.tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["2", "2", "2", "2", "1"])
     task = VerifyAutoscalingReplicas(
@@ -217,18 +222,19 @@ def test_replica_probe_reports_missing_deployment_clearly() -> None:
     from nanolab.tasks.loadtest.autoscaling import ReplicaProbe
 
     probe = ReplicaProbe(
-        runner=_FailingRunner('Error from server (NotFound): deployments.apps "fn-x" not found'),
+        runner=_FailingRunner(
+            'Error from server (NotFound): deployments.apps "fn-x" not found'
+        ),
         namespace="nanofaas",
         deployment_name="fn-x",
         remote_dir="/home/ubuntu/mcFaas",
     )
-    try:
+    with pytest.raises(RuntimeError) as exc_info:
         probe.desired_replicas()
-    except RuntimeError as exc:
-        assert "not found" in str(exc)
-        assert "fn-x" in str(exc)
-        return
-    raise AssertionError("expected RuntimeError")
+
+    message = str(exc_info.value)
+    assert "not found" in message
+    assert "fn-x" in message
 
 
 def test_replica_probe_propagates_kubectl_errors() -> None:
@@ -240,12 +246,8 @@ def test_replica_probe_propagates_kubectl_errors() -> None:
         deployment_name="fn-word-stats-java",
         remote_dir="/home/ubuntu/mcFaas",
     )
-    try:
+    with pytest.raises(RuntimeError, match="Unable to connect"):
         probe.ready_replicas()
-    except RuntimeError as exc:
-        assert "Unable to connect" in str(exc)
-        return
-    raise AssertionError("expected RuntimeError")
 
 
 def test_replica_probe_treats_empty_jsonpath_output_as_zero() -> None:
@@ -274,6 +276,7 @@ def test_replica_watcher_records_max_while_running() -> None:
 
     watcher.start()
     import time as _time
+
     deadline = _time.time() + 2.0
     while watcher.max_observed < 3 and _time.time() < deadline:
         _time.sleep(0.01)
@@ -294,6 +297,7 @@ def test_replica_watcher_survives_probe_errors() -> None:
     watcher = ReplicaWatcher(probe, poll_interval_seconds=0.01)
     watcher.start()
     import time as _time
+
     _time.sleep(0.05)
     watcher.stop()  # must not raise; errors recorded, watcher keeps sampling
 
@@ -341,8 +345,6 @@ def test_verify_result_requires_a_completed_run(monkeypatch) -> None:
         remote_dir=".",
     )
 
-    import pytest
-
     with pytest.raises(RuntimeError, match="has not been called"):
         _ = task.result
 
@@ -352,7 +354,7 @@ def test_scale_up_failure_message_includes_watcher_probe_errors(monkeypatch) -> 
 
     class _WatcherStub:
         max_observed = 0
-        errors = ["Unable to connect to the server: dial tcp"]
+        errors: ClassVar[list[str]] = ["Unable to connect to the server: dial tcp"]
 
     runner = _Runner(["0", "0"])
     task = VerifyAutoscalingReplicas(
@@ -373,8 +375,10 @@ def test_scale_up_failure_message_includes_watcher_probe_errors(monkeypatch) -> 
     assert summary.verdict_error is not None
     assert "Scale-up not observed" in summary.verdict_error
     assert "Unable to connect" in summary.verdict_error
+
+
 def test_watcher_keeps_the_whole_trajectory_not_just_its_peak() -> None:
-    """The peak is derivable from the series; the series is not derivable from the peak."""
+    """The series is not derivable from the peak, so keep the whole trajectory."""
     import time as _time
 
     from nanolab.tasks.loadtest.autoscaling import ReplicaProbe, ReplicaWatcher
@@ -446,9 +450,12 @@ def test_a_collapse_in_a_run_that_never_parked_is_still_a_release() -> None:
 
 
 def test_a_run_never_seen_at_zero_releases_nothing() -> None:
-    """An autoscaler that wakes a function as it dispatches to it never shows the
+    """Read a run that was never seen at zero as releasing nothing.
+
+    An autoscaler that wakes a function as it dispatches to it never shows the
     parked state to an external sampler. That must read as "no release", not as a
-    verdict about how the run began."""
+    verdict about how the run began.
+    """
     from nanolab.tasks.loadtest.autoscaling import ReplicaSample, releases_under_load
 
     internal = [

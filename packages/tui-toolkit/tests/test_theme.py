@@ -1,9 +1,11 @@
 """Tests for tui_toolkit.theme — Theme dataclass and style adapters."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+
 from tui_toolkit.theme import (
     DEFAULT_THEME,
     Theme,
@@ -47,25 +49,31 @@ def test_with_overrides_returns_new_immutable_theme():
         DEFAULT_THEME.accent = "red"  # type: ignore[misc]
 
 
-@pytest.mark.parametrize("rich_style, expected_pt", [
-    ("cyan", "fg:cyan"),
-    ("bold cyan", "fg:cyan bold"),
-    ("cyan dim", "fg:cyan"),  # 'dim' as modifier is dropped
-    ("dim", "fg:grey"),       # 'dim' alone → grey foreground (legacy mapping)
-    ("grey", "fg:grey"),
-    ("green", "fg:green"),
-    ("red", "fg:red"),
-    ("yellow", "fg:yellow"),
-    ("bold", "bold"),
-    ("", ""),
-])
+@pytest.mark.parametrize(
+    ("rich_style", "expected_pt"),
+    [
+        ("cyan", "fg:cyan"),
+        ("bold cyan", "fg:cyan bold"),
+        ("cyan dim", "fg:cyan"),  # 'dim' as modifier is dropped
+        ("dim", "fg:grey"),  # 'dim' alone → grey foreground (legacy mapping)
+        ("grey", "fg:grey"),
+        ("green", "fg:green"),
+        ("red", "fg:red"),
+        ("yellow", "fg:yellow"),
+        ("bold", "bold"),
+        ("", ""),
+    ],
+)
 def test_to_pt_translates_rich_format(rich_style, expected_pt):
     assert _to_pt(rich_style) == expected_pt
 
 
 def test_to_questionary_style_matches_legacy_byte_for_byte():
-    """Parity gate: DEFAULT_THEME must produce the exact same selector→style
-    mapping as the legacy monolithic TUI mapping."""
+    """Verify DEFAULT_THEME reproduces the legacy selector→style mapping exactly.
+
+    Byte-for-byte parity gate against the mapping captured from the legacy
+    monolithic TUI before theming was extracted.
+    """
     qs = to_questionary_style(DEFAULT_THEME)
     # Serialize in the same format as the captured golden file.
     actual_lines = [f"{sel}\t{style}" for sel, style in qs.style_rules]

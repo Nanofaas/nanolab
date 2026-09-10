@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nanolab.tasks.loadtest.models import (
@@ -32,7 +32,7 @@ def test_k6_config_defaults() -> None:
 
 
 def test_k6_run_result_passed_flag() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = K6RunResult(
         summary_path=Path("/results/summary.json"),
         started_at=now,
@@ -43,8 +43,8 @@ def test_k6_run_result_passed_flag() -> None:
 
 
 def test_time_window_stores_start_end() -> None:
-    start = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    end = datetime(2026, 1, 1, 10, 30, tzinfo=UTC)
     window = TimeWindow(start=start, end=end)
     assert window.start == start
     assert window.end == end

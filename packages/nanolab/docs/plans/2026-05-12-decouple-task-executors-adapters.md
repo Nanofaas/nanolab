@@ -90,7 +90,10 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
+from controlplane_tool.tasks.executors import (
+    HostCommandTaskExecutor,
+    VmCommandTaskExecutor,
+)
 from controlplane_tool.tasks.models import CommandTaskSpec
 
 
@@ -102,7 +105,9 @@ class _CommandResult:
 
 
 class _RecordingCommandRunner:
-    def __init__(self, *, return_code: int = 0, stdout: str = "", stderr: str = "") -> None:
+    def __init__(
+        self, *, return_code: int = 0, stdout: str = "", stderr: str = ""
+    ) -> None:
         self.return_code = return_code
         self.stdout = stdout
         self.stderr = stderr
@@ -223,7 +228,11 @@ class HostCommandTaskExecutor:
             env=dict(task.env),
             dry_run=dry_run,
         )
-        status = "passed" if command_result.return_code in task.expected_exit_codes else "failed"
+        status = (
+            "passed"
+            if command_result.return_code in task.expected_exit_codes
+            else "failed"
+        )
         return TaskResult(
             task_id=task.task_id,
             status=status,
@@ -282,7 +291,9 @@ from controlplane_tool.core.task_shell_adapter import (
 from controlplane_tool.tasks.models import CommandTaskSpec, TaskResult
 
 
-def test_shell_command_task_runner_adapts_shell_backend_to_task_runner_protocol() -> None:
+def test_shell_command_task_runner_adapts_shell_backend_to_task_runner_protocol() -> (
+    None
+):
     shell = RecordingShell()
     runner = ShellCommandTaskRunner(shell=shell)
 
@@ -298,8 +309,12 @@ def test_shell_command_task_runner_adapts_shell_backend_to_task_runner_protocol(
 
 
 def test_task_result_to_shell_result_preserves_command_and_output() -> None:
-    task = CommandTaskSpec(task_id="x", summary="X", argv=("echo", "hi"), env={"A": "B"})
-    result = TaskResult(task_id="x", status="passed", return_code=0, stdout="hi\n", stderr="warn\n")
+    task = CommandTaskSpec(
+        task_id="x", summary="X", argv=("echo", "hi"), env={"A": "B"}
+    )
+    result = TaskResult(
+        task_id="x", status="passed", return_code=0, stdout="hi\n", stderr="warn\n"
+    )
 
     shell_result = task_result_to_shell_result(task, result, dry_run=True)
 
@@ -311,7 +326,9 @@ def test_task_result_to_shell_result_preserves_command_and_output() -> None:
     assert shell_result.dry_run is True
 
 
-def test_task_result_to_shell_result_maps_missing_failed_return_code_to_failure() -> None:
+def test_task_result_to_shell_result_maps_missing_failed_return_code_to_failure() -> (
+    None
+):
     task = CommandTaskSpec(task_id="x", summary="X", argv=("false",))
     result = TaskResult(task_id="x", status="failed", return_code=None)
 
@@ -320,7 +337,9 @@ def test_task_result_to_shell_result_maps_missing_failed_return_code_to_failure(
     assert shell_result.return_code == 1
 
 
-def test_task_result_to_shell_result_maps_missing_passed_return_code_to_success() -> None:
+def test_task_result_to_shell_result_maps_missing_passed_return_code_to_success() -> (
+    None
+):
     task = CommandTaskSpec(task_id="x", summary="X", argv=("true",))
     result = TaskResult(task_id="x", status="passed", return_code=None)
 
@@ -716,7 +735,9 @@ from __future__ import annotations
 from pathlib import Path
 
 
-TASK_PACKAGE = Path(__file__).resolve().parents[1] / "src" / "controlplane_tool" / "tasks"
+TASK_PACKAGE = (
+    Path(__file__).resolve().parents[1] / "src" / "controlplane_tool" / "tasks"
+)
 
 FORBIDDEN_IMPORT_TOKENS = (
     "controlplane_tool.core",

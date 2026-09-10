@@ -12,8 +12,13 @@ from nanolab.release import arm
 from nanolab.release import build as release_build
 from nanolab.release.model import digest_path
 
-from ._release_support import NANOFAAS_ROOT, _ArchiveProvider, _ArmFailureProvider, _ReleaseProvider, _plan
-
+from ._release_support import (
+    NANOFAAS_ROOT,
+    _ArchiveProvider,
+    _ArmFailureProvider,
+    _plan,
+    _ReleaseProvider,
+)
 
 
 def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None:
@@ -30,7 +35,9 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
     assert "-u KUBECONFIG" in script
     assert "-u NANOFAAS_RUN_K8S_E2E" in script
     assert "-u NANOFAAS_E2E_NAMESPACE" in script
-    python_commands = [command for command in commands if command.argv[:2] == ("uv", "run")]
+    python_commands = [
+        command for command in commands if command.argv[:2] == ("uv", "run")
+    ]
     assert {command.task_id for command in python_commands} == {
         "release.source.python-sdk",
     }
@@ -41,7 +48,9 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
         "functions/python/json-transform/tests",
         "functions/python/roman-numeral/tests",
     )
-    container_commands = [command for command in commands if command.argv[:2] == ("docker", "run")]
+    container_commands = [
+        command for command in commands if command.argv[:2] == ("docker", "run")
+    ]
     assert {command.task_id for command in container_commands} == {
         "release.source.go",
         "release.source.node",
@@ -60,8 +69,9 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
 
 
 def test_amd64_build_commands_prepare_jvm_cells_and_bake_everything() -> None:
-    """Native cells no longer get a separate build step: the bake already
-    covers them, since every cell is a Bake cell now.
+    """Assert native cells need no separate build step.
+
+    The bake already covers them, since every cell is a Bake cell now.
     """
     plan = build_image_plan(NANOFAAS_ROOT, "v9.9.9", architectures=("amd64",))
 
@@ -96,7 +106,9 @@ def test_amd64_build_commands_prepare_jvm_cells_and_bake_everything() -> None:
     )
     # No separate native build step exists any more; the bake is the last command.
     assert bake_index == len(commands) - 1
-    assert all(c.role == "stack" and c.options.remote_dir == "/remote/source" for c in commands)
+    assert all(
+        c.role == "stack" and c.options.remote_dir == "/remote/source" for c in commands
+    )
 
 
 def test_amd64_commands_contain_no_gradle_image_builds() -> None:
@@ -109,7 +121,9 @@ def test_amd64_commands_contain_no_gradle_image_builds() -> None:
         remote_source_dir="/remote/source",
     )
 
-    assert not any(spec.task_id.startswith("release.images.native.") for spec in commands)
+    assert not any(
+        spec.task_id.startswith("release.images.native.") for spec in commands
+    )
     assert not any("bootBuildImage" in " ".join(spec.argv) for spec in commands)
     assert any(spec.task_id == "release.images.bake.amd64" for spec in commands)
 
@@ -139,7 +153,9 @@ def test_sonata_owned_arm_resources_are_not_recreated_and_every_image_is_pushed(
     )
 
     assert len(evidence) == len(arm_plan.cells)
-    assert sum(event.startswith("exec:docker push") for event in events) == len(arm_plan.cells)
+    assert sum(event.startswith("exec:docker push") for event in events) == len(
+        arm_plan.cells
+    )
     assert not any("buildx create" in event for event in events)
     assert not any("nanofaas-registry-tunnel" in event for event in events)
 
@@ -183,7 +199,9 @@ def test_arm64_smoke_health_checks_every_server_and_probes_the_watchdog(
     arm_plan, evidence = _arm64_build_and_smoke(plan, provider, events)
 
     marker = json.loads((plan.run_dir / "arm64-smoke.json").read_text(encoding="utf-8"))
-    assert [artifact.reference for artifact in evidence] == [str(plan.run_dir / "arm64-smoke.json")]
+    assert [artifact.reference for artifact in evidence] == [
+        str(plan.run_dir / "arm64-smoke.json")
+    ]
     assert marker["architecture"] == arm.ARM64_PLATFORM
     assert set(marker["images"]) == {cell.image for cell in arm_plan.cells}
     assert marker["serverHealthChecks"] == [
@@ -191,7 +209,9 @@ def test_arm64_smoke_health_checks_every_server_and_probes_the_watchdog(
     ]
     assert marker["watchdog"]["image"] == arm.watchdog_cell(arm_plan).image
     # every smoke container is started by digest and torn down again
-    assert all("@sha256:" in event for event in events if event.startswith("exec:docker run"))
+    assert all(
+        "@sha256:" in event for event in events if event.startswith("exec:docker run")
+    )
     assert sum(event.startswith("exec:docker rm --force") for event in events) == len(
         marker["serverHealthChecks"]
     )
@@ -240,13 +260,13 @@ def test_arm64_smoke_refuses_evidence_that_moved_since_the_build(
 
 @pytest.mark.parametrize(
     ("failure", "error"),
-    (
+    [
         ("start", "arm server failed"),
         ("health", "arm health failed"),
         # the original failure must survive a cleanup that also fails
         ("health-cleanup", "arm health failed"),
         ("health-cleanup-raises", "arm health failed"),
-    ),
+    ],
 )
 def test_arm64_smoke_server_failures_still_remove_the_container(
     failure: str,
@@ -294,11 +314,11 @@ def test_arm64_smoke_rejects_a_watchdog_that_fails_the_wrong_way(
 
 @pytest.mark.parametrize(
     ("failure", "error"),
-    (
+    [
         ("bake", "arm bake failed"),
         ("architecture", "image architecture mismatch"),
         ("push", "arm push failed"),
-    ),
+    ],
 )
 def test_arm64_build_failures_never_produce_evidence(
     failure: str,
@@ -322,7 +342,9 @@ def test_source_archive_contains_only_the_exact_guarded_commit(tmp_path: Path) -
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(("git", "init", "-q"), cwd=repo, check=True)
-    subprocess.run(("git", "config", "user.email", "release@example.test"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "config", "user.email", "release@example.test"), cwd=repo, check=True
+    )
     subprocess.run(("git", "config", "user.name", "Release Test"), cwd=repo, check=True)
     (repo / "tracked.txt").write_text("tracked", encoding="utf-8")
     subprocess.run(("git", "add", "tracked.txt"), cwd=repo, check=True)
@@ -350,7 +372,9 @@ def test_source_archive_rechecks_clean_commit_and_never_overwrites_on_guard_fail
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(("git", "init", "-q"), cwd=repo, check=True)
-    subprocess.run(("git", "config", "user.email", "release@example.test"), cwd=repo, check=True)
+    subprocess.run(
+        ("git", "config", "user.email", "release@example.test"), cwd=repo, check=True
+    )
     subprocess.run(("git", "config", "user.name", "Release Test"), cwd=repo, check=True)
     (repo / "tracked.txt").write_text("tracked", encoding="utf-8")
     subprocess.run(("git", "add", "tracked.txt"), cwd=repo, check=True)
@@ -392,7 +416,9 @@ def test_source_transfer_verifies_checksum_before_extracting(tmp_path: Path) -> 
     )
 
 
-def test_source_transfer_rejects_checksum_mismatch_before_extracting(tmp_path: Path) -> None:
+def test_source_transfer_rejects_checksum_mismatch_before_extracting(
+    tmp_path: Path,
+) -> None:
     archive = tmp_path / "source.tar"
     archive.write_bytes(b"source")
     provider = _ArchiveProvider("sha256:" + "f" * 64)
@@ -418,7 +444,9 @@ def test_extract_commit_tree_ignores_worktree_only_paths(tmp_path: Path) -> None
 
     repo = tmp_path / "repo"
     (repo / "functions/python/solo").mkdir(parents=True)
-    (repo / "functions/python/solo/function.yaml").write_text("name: solo\n", encoding="utf-8")
+    (repo / "functions/python/solo/function.yaml").write_text(
+        "name: solo\n", encoding="utf-8"
+    )
     (repo / ".gitignore").write_text("build/\n", encoding="utf-8")
     for argv in (
         ("git", "init", "-q"),
@@ -427,9 +455,13 @@ def test_extract_commit_tree_ignores_worktree_only_paths(tmp_path: Path) -> None
     ):
         subprocess.run(argv, cwd=repo, check=True)
     commit = subprocess.run(
-        ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
+        ("git", "rev-parse", "HEAD"),
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
-    # Leftovers of the shape that broke the release: gitignored, so the tree stays clean.
+    # Leftovers of the shape that broke the release: gitignored, tree stays clean.
     (repo / "functions/java/figlet/build").mkdir(parents=True)
     (repo / "functions/java/figlet/payloads").mkdir(parents=True)
 
@@ -453,7 +485,11 @@ def test_extract_commit_tree_refuses_a_non_empty_destination(tmp_path: Path) -> 
     ):
         subprocess.run(argv, cwd=repo, check=True)
     commit = subprocess.run(
-        ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
+        ("git", "rev-parse", "HEAD"),
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
     destination = tmp_path / "tree"
@@ -467,7 +503,9 @@ def test_extract_commit_tree_refuses_a_non_empty_destination(tmp_path: Path) -> 
     assert (destination / "functions/java/figlet").is_dir()
 
 
-def test_extract_commit_tree_normalizes_git_failures_to_value_error(tmp_path: Path) -> None:
+def test_extract_commit_tree_normalizes_git_failures_to_value_error(
+    tmp_path: Path,
+) -> None:
     from nanolab.release.build import extract_commit_tree
 
     repo = tmp_path / "repo"

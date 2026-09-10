@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import pytest
+from sonata_tasks.tasks.models import TaskResult
+from sonata_tasks.vm.models import VmRequest as SharedVmRequest
 
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.provisioning.environment import ProvisionedRole, provision_roles
-from sonata_tasks.tasks.models import TaskResult
 from nanolab.tasks.vm.models import VmRequest
-from sonata_tasks.vm.models import VmRequest as SharedVmRequest
 
 
 @dataclass
@@ -56,7 +56,9 @@ class _Result:
 def test_provision_roles_ensures_runs_operations_and_destroys(tmp_path) -> None:
     provider = FakeOrchestrator()
     request = VmRequest(lifecycle="multipass", name="stack")
-    op = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm", "install"))
+    op = RemoteCommandOperation(
+        operation_id="k3s", summary="install", argv=("helm", "install")
+    )
     with provision_roles(
         provider,
         (ProvisionedRole(role="stack", request=request, operations=(op,)),),
@@ -83,24 +85,29 @@ def test_provision_roles_keep_skips_teardown(tmp_path) -> None:
     assert provider.destroyed == []
 
 
-def test_provision_roles_destroy_failure_keeps_destroying_and_aggregates(tmp_path) -> None:
+def test_provision_roles_destroy_failure_keeps_destroying_and_aggregates(
+    tmp_path,
+) -> None:
     provider = FakeOrchestrator()
     provider.destroy_failures = {"loadgen"}
-    with pytest.raises(RuntimeError) as excinfo:
-        with provision_roles(
+    with (
+        pytest.raises(RuntimeError) as excinfo,
+        provision_roles(
             provider,
             (
                 ProvisionedRole(
                     role="stack", request=VmRequest(lifecycle="multipass", name="stack")
                 ),
                 ProvisionedRole(
-                    role="loadgen", request=VmRequest(lifecycle="multipass", name="loadgen")
+                    role="loadgen",
+                    request=VmRequest(lifecycle="multipass", name="loadgen"),
                 ),
             ),
             repo_root=tmp_path,
             assets_root=tmp_path / "assets",
-        ):
-            raise RuntimeError("main exploded")
+        ),
+    ):
+        raise RuntimeError("main exploded")
     assert provider.destroyed == ["stack"]
     assert "main exploded" in str(excinfo.value)
     assert "destroy loadgen failed" in str(excinfo.value)
@@ -109,8 +116,9 @@ def test_provision_roles_destroy_failure_keeps_destroying_and_aggregates(tmp_pat
 def test_provision_roles_cleanup_error_without_main_error(tmp_path) -> None:
     provider = FakeOrchestrator()
     provider.destroy_failures = {"stack"}
-    with pytest.raises(RuntimeError) as excinfo:
-        with provision_roles(
+    with (
+        pytest.raises(RuntimeError) as excinfo,
+        provision_roles(
             provider,
             (
                 ProvisionedRole(
@@ -119,8 +127,9 @@ def test_provision_roles_cleanup_error_without_main_error(tmp_path) -> None:
             ),
             repo_root=tmp_path,
             assets_root=tmp_path / "assets",
-        ):
-            pass
+        ),
+    ):
+        pass
     assert "Cleanup failed:" in str(excinfo.value)
     assert "destroy stack failed" in str(excinfo.value)
 
@@ -130,8 +139,9 @@ def test_provision_roles_propagates_programming_errors_from_destroy(tmp_path) ->
         def teardown(self, request: SharedVmRequest) -> _Result:
             raise ValueError("bad teardown contract")
 
-    with pytest.raises(ValueError, match="bad teardown contract"):
-        with provision_roles(
+    with (
+        pytest.raises(ValueError, match="bad teardown contract"),
+        provision_roles(
             BrokenOrchestrator(),
             (
                 ProvisionedRole(
@@ -140,14 +150,17 @@ def test_provision_roles_propagates_programming_errors_from_destroy(tmp_path) ->
             ),
             repo_root=tmp_path,
             assets_root=tmp_path / "assets",
-        ):
-            pass
+        ),
+    ):
+        pass
 
 
 def test_provision_roles_ensures_all_before_verify_then_operations(tmp_path) -> None:
     events: list[str] = []
     provider = FakeOrchestrator(events=events, shell=RecordingShell(events=events))
-    op = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm", "install"))
+    op = RemoteCommandOperation(
+        operation_id="k3s", summary="install", argv=("helm", "install")
+    )
     with provision_roles(
         provider,
         (

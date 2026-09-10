@@ -1,16 +1,22 @@
 from types import MappingProxyType
 from typing import get_args
 
+from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import (
     CommandTaskSpec,
     TaskResult,
     TaskStatus,
 )
-from sonata_tasks.execution.models import CommandOptions
 
 
 def test_task_type_aliases_cover_expected_values() -> None:
-    assert set(get_args(TaskStatus)) == {"pending", "running", "passed", "failed", "skipped"}
+    assert set(get_args(TaskStatus)) == {
+        "pending",
+        "running",
+        "passed",
+        "failed",
+        "skipped",
+    }
 
 
 def test_command_task_spec_defaults_to_the_host_role_and_empty_env() -> None:

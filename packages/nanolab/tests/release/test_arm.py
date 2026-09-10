@@ -9,12 +9,11 @@ from nanolab.images.plan import build_image_plan
 from nanolab.release import arm
 from nanolab.release.model import ArtifactEvidence
 
-
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 REGISTRY = "localhost:5000/nanofaas"
 
 
-def _plan():  # noqa: ANN202
+def _plan():
     return arm.build_arm64_image_plan(
         NANOFAAS_ROOT,
         "v0.18.0",
@@ -28,7 +27,9 @@ def test_arm64_plan_covers_the_live_matrix_without_loss() -> None:
 
     assert plan.cells
     assert {cell.architecture for cell in plan.cells} == {"arm64"}
-    assert len({(cell.target.name, cell.flavor) for cell in plan.cells}) == len(plan.cells)
+    assert len({(cell.target.name, cell.flavor) for cell in plan.cells}) == len(
+        plan.cells
+    )
 
 
 def test_arm64_commands_contain_no_gradle_image_builds() -> None:
@@ -41,7 +42,9 @@ def test_arm64_commands_contain_no_gradle_image_builds() -> None:
         registry_upstream="203.0.113.10",
     )
 
-    assert not any(spec.task_id.startswith("release.arm64.native.") for spec in commands)
+    assert not any(
+        spec.task_id.startswith("release.arm64.native.") for spec in commands
+    )
     assert not any("dashaun/builder" in " ".join(spec.argv) for spec in commands)
     assert any(spec.task_id == "release.images.bake.arm64" for spec in commands)
 
@@ -85,7 +88,11 @@ def test_arm64_commands_tunnel_the_registry_and_create_the_named_builder() -> No
         "nanofaas-release-v0-18-0",
         "--bootstrap",
     )
-    bake = next(command for command in commands if command.task_id == "release.images.bake.arm64")
+    bake = next(
+        command
+        for command in commands
+        if command.task_id == "release.images.bake.arm64"
+    )
     assert bake.argv == (
         "docker",
         "buildx",
@@ -99,7 +106,9 @@ def test_arm64_commands_tunnel_the_registry_and_create_the_named_builder() -> No
     )
     # No separate native build step exists any more: the bake is the last command.
     assert commands[-1] is bake
-    assert not any(command.task_id.startswith("release.arm64.native") for command in commands)
+    assert not any(
+        command.task_id.startswith("release.arm64.native") for command in commands
+    )
 
 
 def test_builder_bootstrap_must_explicitly_support_linux_arm64() -> None:
@@ -122,13 +131,15 @@ def test_arm64_evidence_must_cover_every_planned_registry_artifact() -> None:
         arm.require_complete_arm64_evidence(plan, evidence[:-1])
 
 
-def test_server_smokes_cover_every_non_watchdog_artifact_and_existing_health_endpoint() -> None:
+def test_server_smokes_cover_every_non_watchdog_artifact_and_health_endpoint() -> None:
     plan = _plan()
     smokes = arm.server_smoke_specs(plan)
 
     assert len(smokes) == sum(cell.target.name != "watchdog" for cell in plan.cells)
     assert all(smoke.cell.target.name != "watchdog" for smoke in smokes)
-    control_planes = [smoke for smoke in smokes if smoke.cell.target.name == "control-plane"]
+    control_planes = [
+        smoke for smoke in smokes if smoke.cell.target.name == "control-plane"
+    ]
     assert {(smoke.container_port, smoke.health_path) for smoke in control_planes} == {
         (8081, "/actuator/health")
     }

@@ -3,30 +3,37 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sonata_engine import Evidence, JournalConfig, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import (
+    Evidence,
+    JournalConfig,
+    Task,
+    TaskInputs,
+    TaskOutcome,
+    Workflow,
+)
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from nanolab.release.evidence import file_digest_verifier, receipt_artifacts
 from nanolab.release import tasks as release_tasks
+from nanolab.release.evidence import file_digest_verifier, receipt_artifacts
 from nanolab.release.model import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     amd64_build_task,
     arm64_build_task,
     arm64_smoke_task,
-    registry_push_task,
+    attest_task,
+    exact_receipt_artifacts,
+    finalize_task,
+    publish_aliases_task,
+    publish_architectures_task,
+    publish_manifests_task,
     registry_artifacts_from_receipt,
+    registry_push_task,
+    require_attestation_predicate,
+    require_release_barriers,
     run_image_steps,
     run_source_steps,
     source_test_task,
-    publish_architectures_task,
-    publish_manifests_task,
-    publish_aliases_task,
-    attest_task,
-    finalize_task,
-    exact_receipt_artifacts,
     verified_file_receipt,
-    require_release_barriers,
-    require_attestation_predicate,
 )
 
 
@@ -41,7 +48,9 @@ def _identity(**changes: str) -> ReleaseIdentity:
     return ReleaseIdentity(**values)
 
 
-def test_reuse_key_is_secret_free_and_covers_identity_and_phase_inputs(tmp_path: Path) -> None:
+def test_reuse_key_is_secret_free_and_covers_identity_and_phase_inputs(
+    tmp_path: Path,
+) -> None:
     secret = "fixture-ghcr-token-must-not-leak"
 
     def work_with_secret_closed_over(_inputs: TaskInputs):
@@ -89,13 +98,17 @@ def test_reuse_key_is_secret_free_and_covers_identity_and_phase_inputs(tmp_path:
     assert secret not in base.receipt.read_text(encoding="utf-8")
 
 
-def test_phase_tasks_write_compact_receipts_and_registry_covers_matrix(tmp_path: Path) -> None:
+def test_phase_tasks_write_compact_receipts_and_registry_covers_matrix(
+    tmp_path: Path,
+) -> None:
     digest = "sha256:" + "d" * 64
     source = source_test_task(
         identity=_identity(),
         run_dir=tmp_path,
         phase_inputs={"commands": "v1"},
-        work=lambda _inputs: (Evidence("file-digest", __file__, digest_path(Path(__file__))),),
+        work=lambda _inputs: (
+            Evidence("file-digest", __file__, digest_path(Path(__file__))),
+        ),
     )
     source_outcome = source.run(TaskInputs.empty())
     build = amd64_build_task(
@@ -123,9 +136,14 @@ def test_phase_tasks_write_compact_receipts_and_registry_covers_matrix(tmp_path:
     push_outcome = push.run(TaskInputs.empty())
 
     assert source_outcome.value is build_outcome.value is push_outcome.value is None
-    assert json.loads(push.receipt.read_text(encoding="utf-8"))["phase"] == "local-registry-push"
+    assert (
+        json.loads(push.receipt.read_text(encoding="utf-8"))["phase"]
+        == "local-registry-push"
+    )
     assert {
-        item.reference for item in push_outcome.evidence if item.kind == "local-registry-digest"
+        item.reference
+        for item in push_outcome.evidence
+        if item.kind == "local-registry-digest"
     } == {
         "docker://image-a:v1",
         "docker://image-b:v1",
@@ -204,7 +222,8 @@ def test_journal_resume_reruns_only_unsafe_suffix(tmp_path: Path) -> None:
         phase_inputs={"matrix": ["image:v1"]},
         prerequisites=(source.receipt,),
         work=work(
-            "amd64-build", Evidence("file-digest", str(build_artifact), digest_path(build_artifact))
+            "amd64-build",
+            Evidence("file-digest", str(build_artifact), digest_path(build_artifact)),
         ),
     )
     push = registry_push_task(
@@ -243,7 +262,9 @@ def test_registry_push_rejects_incomplete_dynamic_matrix(tmp_path: Path) -> None
         phase_inputs={"matrix": ["image-a:v1", "image-b:v1"]},
         expected_images=("image-a:v1", "image-b:v1"),
         work=lambda _inputs: (
-            Evidence("local-registry-digest", "docker://image-a:v1", "sha256:" + "d" * 64),
+            Evidence(
+                "local-registry-digest", "docker://image-a:v1", "sha256:" + "d" * 64
+            ),
         ),
     )
 
@@ -282,7 +303,9 @@ def test_expected_images_accepts_daemon_local_digests(tmp_path: Path) -> None:
         run_dir=tmp_path,
         phase_inputs={"matrix": [image]},
         expected_images=(image,),
-        work=lambda _inputs: (Evidence("local-image-digest", f"docker-daemon:{image}", digest),),
+        work=lambda _inputs: (
+            Evidence("local-image-digest", f"docker-daemon:{image}", digest),
+        ),
     )
 
     outcome = task.run(TaskInputs.empty())
@@ -301,17 +324,23 @@ def test_expected_images_still_rejects_an_incomplete_matrix(tmp_path: Path) -> N
         ),
     )
 
-    with pytest.raises(RuntimeError, match="amd64-build evidence does not cover the image matrix"):
+    with pytest.raises(
+        RuntimeError, match="amd64-build evidence does not cover the image matrix"
+    ):
         task.run(TaskInputs.empty())
 
 
-def test_expected_images_rejects_a_daemon_digest_without_its_scheme(tmp_path: Path) -> None:
+def test_expected_images_rejects_a_daemon_digest_without_its_scheme(
+    tmp_path: Path,
+) -> None:
     task = amd64_build_task(
         identity=_identity(),
         run_dir=tmp_path,
         phase_inputs={"matrix": ["a:v1"]},
         expected_images=("a:v1",),
-        work=lambda _inputs: (Evidence("local-image-digest", "a:v1", "sha256:" + "d" * 64),),
+        work=lambda _inputs: (
+            Evidence("local-image-digest", "a:v1", "sha256:" + "d" * 64),
+        ),
     )
 
     with pytest.raises(RuntimeError, match="does not cover the image matrix"):
@@ -319,7 +348,9 @@ def test_expected_images_rejects_a_daemon_digest_without_its_scheme(tmp_path: Pa
 
 
 def test_registry_push_rejects_duplicate_matrix_evidence(tmp_path: Path) -> None:
-    item = Evidence("local-registry-digest", "docker://image-a:v1", "sha256:" + "d" * 64)
+    item = Evidence(
+        "local-registry-digest", "docker://image-a:v1", "sha256:" + "d" * 64
+    )
     task = registry_push_task(
         identity=_identity(),
         run_dir=tmp_path,
@@ -355,7 +386,11 @@ def test_benchmark_gate_tasks_form_a_digest_prerequisite_chain(tmp_path: Path) -
         **common,
     )
 
-    assert [task.phase for task in runs] == ["benchmark-1", "benchmark-2", "benchmark-3"]
+    assert [task.phase for task in runs] == [
+        "benchmark-1",
+        "benchmark-2",
+        "benchmark-3",
+    ]
     assert aggregate.phase == "aggregate"
     assert gate.phase == "regression-gate"
     assert aggregate.prerequisites == tuple(task.receipt for task in runs)
@@ -419,7 +454,9 @@ def test_arm_work_never_starts_without_its_prerequisite(tmp_path: Path) -> None:
     assert called is False
 
 
-def test_terminal_tasks_keep_finalize_as_the_only_documentation_retry(tmp_path: Path) -> None:
+def test_terminal_tasks_keep_finalize_as_the_only_documentation_retry(
+    tmp_path: Path,
+) -> None:
     common = {"identity": _identity(), "run_dir": tmp_path, "phase_inputs": {"v": 1}}
     gate = tmp_path / "regression-gate.json"
     smoke = tmp_path / "arm64-smoke.json"
@@ -442,7 +479,10 @@ def test_terminal_tasks_keep_finalize_as_the_only_documentation_retry(tmp_path: 
         prerequisites=(attestation.receipt,), work=lambda _inputs: (), **common
     )
 
-    assert [task.phase for task in (architectures, manifests, aliases, attestation, finalize)] == [
+    assert [
+        task.phase
+        for task in (architectures, manifests, aliases, attestation, finalize)
+    ] == [
         "publish-architectures",
         "publish-manifests",
         "publish-aliases",
@@ -452,7 +492,9 @@ def test_terminal_tasks_keep_finalize_as_the_only_documentation_retry(tmp_path: 
     assert finalize.prerequisites == (attestation.receipt,)
 
 
-def test_documentation_failure_resumes_finalize_without_reattesting(tmp_path: Path) -> None:
+def test_documentation_failure_resumes_finalize_without_reattesting(
+    tmp_path: Path,
+) -> None:
     calls = {"attest": 0, "finalize": 0}
     signed = tmp_path / "signed"
     documentation = tmp_path / "history.md"
@@ -467,10 +509,14 @@ def test_documentation_failure_resumes_finalize_without_reattesting(tmp_path: Pa
         if calls["finalize"] == 1:
             raise RuntimeError("documentation failed")
         documentation.write_text("published", encoding="utf-8")
-        return (Evidence("file-digest", str(documentation), digest_path(documentation)),)
+        return (
+            Evidence("file-digest", str(documentation), digest_path(documentation)),
+        )
 
     workflow = Workflow("release-finalize-resume")
-    attestation = attest_task(identity=_identity(), run_dir=tmp_path, phase_inputs={}, work=sign)
+    attestation = attest_task(
+        identity=_identity(), run_dir=tmp_path, phase_inputs={}, work=sign
+    )
     finalize = finalize_task(
         identity=_identity(),
         run_dir=tmp_path,
@@ -495,11 +541,11 @@ def test_documentation_failure_resumes_finalize_without_reattesting(tmp_path: Pa
 
 @pytest.mark.parametrize(
     "references",
-    (
+    [
         ("docker://a:v1",),
         ("docker://a:v1", "docker://x:v1"),
         ("docker://a:v1", "docker://a:v1"),
-    ),
+    ],
 )
 def test_exact_receipt_coverage_rejects_missing_extra_and_duplicate(
     tmp_path: Path, references: tuple[str, ...]
@@ -574,7 +620,9 @@ def _file_receipt(receipt: Path, phase: str, artifact: Path) -> None:
     )
 
 
-def test_release_barriers_reject_failed_gate_and_mismatched_smoke(tmp_path: Path) -> None:
+def test_release_barriers_reject_failed_gate_and_mismatched_smoke(
+    tmp_path: Path,
+) -> None:
     digest = "sha256:" + "a" * 64
     image = "registry/image:v1-arm64"
     arm_receipt = tmp_path / "arm-build.json"
@@ -681,7 +729,7 @@ def test_finalize_rejects_semantically_wrong_current_predicate(tmp_path: Path) -
 
 @pytest.mark.parametrize(
     "payload",
-    (
+    [
         [],
         {"phase": "wrong", "evidence": []},
         {"phase": "arm64-build", "evidence": {}},
@@ -699,16 +747,24 @@ def test_finalize_rejects_semantically_wrong_current_predicate(tmp_path: Path) -
         {
             "phase": "arm64-build",
             "evidence": [
-                {"kind": "local-registry-digest", "reference": 1, "digest": "sha256:" + "a" * 64}
+                {
+                    "kind": "local-registry-digest",
+                    "reference": 1,
+                    "digest": "sha256:" + "a" * 64,
+                }
             ],
         },
         {
             "phase": "arm64-build",
             "evidence": [
-                {"kind": "local-registry-digest", "reference": "docker://image:v1", "digest": None}
+                {
+                    "kind": "local-registry-digest",
+                    "reference": "docker://image:v1",
+                    "digest": None,
+                }
             ],
         },
-    ),
+    ],
 )
 def test_arm_receipt_parser_rejects_malformed_schema(payload, tmp_path: Path) -> None:
     receipt = tmp_path / "arm64-build.json"
@@ -780,7 +836,9 @@ def test_image_steps_reject_malformed_digest_output(stdout) -> None:
             return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
     with pytest.raises(RuntimeError, match="invalid image digest"):
-        run_image_steps(Steps(), TaskInputs.empty(), Executor(), ("image:v1",), registry=False)
+        run_image_steps(
+            Steps(), TaskInputs.empty(), Executor(), ("image:v1",), registry=False
+        )
 
 
 class _NoopSteps(Task[Any]):
@@ -802,7 +860,10 @@ class _ScriptedExecutor:
 
     def run(self, task, *, dry_run=False):
         return TaskResult(
-            task_id="", status="passed", return_code=0, stdout=self._responses[task.argv]
+            task_id="",
+            status="passed",
+            return_code=0,
+            stdout=self._responses[task.argv],
         )
 
 
@@ -810,7 +871,9 @@ def test_run_source_steps_records_the_tested_source_tree(tmp_path: Path) -> None
     archive = tmp_path / "source.tar"
     archive.write_bytes(b"tree")
 
-    evidence = run_source_steps(_NoopSteps(), TaskInputs.empty(), source_archive=archive)
+    evidence = run_source_steps(
+        _NoopSteps(), TaskInputs.empty(), source_archive=archive
+    )
 
     assert len(evidence) == 1
     assert evidence[0].kind == "file-digest"

@@ -1,3 +1,5 @@
+"""Run the bundled Ansible playbooks against a VM, on the host or remotely."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,8 +8,6 @@ from typing import Protocol
 
 from multipass import MultipassClient
 from sonata_tasks.ansible import build_ansible_argv
-
-from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
 from sonata_tasks.shell import (
     ShellBackend,
     ShellExecutionResult,
@@ -15,9 +15,15 @@ from sonata_tasks.shell import (
 )
 from sonata_tasks.vm.models import VmRequest
 
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+
 
 class HostResolver(Protocol):
-    def __call__(self, request: VmRequest, *, dry_run: bool = False) -> str: ...
+    """Resolve the SSH host a playbook should target for `request`."""
+
+    def __call__(self, request: VmRequest, *, dry_run: bool = False) -> str:
+        """Return the address to put in the inventory for `request`."""
+        ...
 
 
 def bundled_ansible_root() -> Path:
@@ -26,6 +32,8 @@ def bundled_ansible_root() -> Path:
 
 
 class AnsibleAdapter:
+    """Run bundled playbooks against a VM, with the SSH details filled in."""
+
     def __init__(
         self,
         repo_root: Path,
@@ -35,6 +43,11 @@ class AnsibleAdapter:
         multipass_client: MultipassClient | None = None,
         ansible_root: Path | None = None,
     ) -> None:
+        """Wire the adapter to its shell, host resolver, key and playbook root.
+
+        `host_resolver` stays multipass's by default, built from
+        `multipass_client` and consulted once per inventory target.
+        """
         self.repo_root = Path(repo_root)
         # Playbooks are bundled with the library; callers may override.
         self.ansible_root = (
@@ -45,11 +58,14 @@ class AnsibleAdapter:
             from sonata_tasks.vm.providers.multipass import resolve_connection_host
 
             client = multipass_client or MultipassClient()
-            host_resolver = lambda request, dry_run=False: resolve_connection_host(
-                request,
-                client,
-                dry_run=dry_run,
-            )
+
+            def multipass_host_resolver(
+                request: VmRequest, dry_run: bool = False
+            ) -> str:
+                return resolve_connection_host(request, client, dry_run=dry_run)
+
+            host_resolver = multipass_host_resolver
+
         self.host_resolver = host_resolver
         self.private_key_path = private_key_path
 
@@ -85,6 +101,7 @@ class AnsibleAdapter:
         extra_vars: dict[str, str] | None = None,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
+        """Run `playbook_name` against `request` and return the shell result."""
         command, env = self._build_command(
             playbook_name, request, extra_vars=extra_vars, dry_run=dry_run
         )
@@ -114,6 +131,7 @@ class AnsibleAdapter:
         helm_version: str = "3.16.4",
         dry_run: bool = False,
     ) -> ShellExecutionResult:
+        """Install the base VM dependencies, Helm included when asked."""
         return self.run_playbook(
             "provision-base.yml",
             request,
@@ -147,6 +165,7 @@ class AnsibleAdapter:
         k3s_version: str | None = None,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
+        """Install k3s and write the kubeconfig at `kubeconfig_path`."""
         extra_vars = {
             "vm_user": request.user,
             "kubeconfig_path": kubeconfig_path,
@@ -168,6 +187,7 @@ class AnsibleAdapter:
         container_name: str = REGISTRY_CONTAINER_NAME,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
+        """Ensure the registry container runs on the VM."""
         return self.run_playbook(
             "ensure-registry.yml",
             request,
@@ -185,6 +205,7 @@ class AnsibleAdapter:
         registry: str,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
+        """Point k3s at `registry` so it can pull the images it is given."""
         return self.run_playbook(
             "configure-k3s-registry.yml",
             request,
@@ -200,6 +221,7 @@ class AnsibleAdapter:
         container_name: str = REGISTRY_CONTAINER_NAME,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
+        """Ensure the registry container, then point k3s at the registry."""
         ensure_result = self.ensure_registry_container(
             request,
             registry=registry,
@@ -233,7 +255,10 @@ class RunPlaybook:
     extra_vars: dict[str, str] | None = None
 
     def run(self) -> None:
-        result = self.adapter.run_playbook(self.playbook, self.request, extra_vars=self.extra_vars)
+        """Run the playbook and raise its output if the exit code was non-zero."""
+        result = self.adapter.run_playbook(
+            self.playbook, self.request, extra_vars=self.extra_vars
+        )
         if result.return_code != 0:
             # Surface stdout AND stderr: ansible reports task failures on stdout
             # (PLAY RECAP / "fatal: ... FAILED!") while benign warnings go to stderr,
@@ -241,7 +266,9 @@ class RunPlaybook:
             detail = "\n".join(
                 part for part in (result.stdout.strip(), result.stderr.strip()) if part
             )
-            raise RuntimeError(detail or f"{self.task_id} failed (exit {result.return_code})")
+            raise RuntimeError(
+                detail or f"{self.task_id} failed (exit {result.return_code})"
+            )
 
 
 def install_k6_task(
@@ -265,7 +292,9 @@ def install_k6_task(
     """
     adapter = AnsibleAdapter(
         repo_root=repo_root,
-        shell=shell,
+        # AnsibleAdapter's ShellBackend argument, not the subprocess shell flag
+        # bandit's B604 looks for.
+        shell=shell,  # nosec B604
         host_resolver=lambda request, dry_run=False: host,
         private_key_path=private_key,
     )

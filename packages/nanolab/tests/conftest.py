@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import os
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 import yaml
+from sonata_engine.workflow.events import WorkflowEvent
 
 from nanolab.release.versioning import read_project_version
-from sonata_engine.workflow.events import WorkflowEvent
 
 # Typer force-enables Rich terminal rendering (ANSI highlighting of option-like
 # tokens such as "--provision") whenever GITHUB_ACTIONS/FORCE_COLOR/PY_COLORS is
@@ -47,10 +47,11 @@ def fake_sink() -> FakeSink:
 
 @pytest.fixture
 def canonical_release_configs(tmp_path: Path, nanofaas_root: Path) -> tuple[Path, Path]:
-    """The (scenario, environment) pair the release preflight accepts, in tmp_path.
+    """Return the (scenario, environment) pair the release preflight accepts.
 
-    Every value here is pinned by `validate_release_environment` and by the
-    canonical policy check in `build_release_request`, so it lives in one place.
+    Both files are written into tmp_path. Every value here is pinned by
+    `validate_release_environment` and by the canonical policy check in
+    `build_release_request`, so it lives in one place.
     """
     scenario = tmp_path / "release.yaml"
     scenario.write_text(
@@ -82,8 +83,14 @@ def canonical_release_configs(tmp_path: Path, nanofaas_root: Path) -> tuple[Path
                 "provider": "azure",
                 "roles": {
                     "stack": {"name": "nanofaas-azure-release", "disk": "128G"},
-                    "loadgen": {"name": "nanofaas-azure-release-loadgen", "disk": "30G"},
-                    "arm-builder": {"name": "nanofaas-azure-release-arm", "disk": "64G"},
+                    "loadgen": {
+                        "name": "nanofaas-azure-release-loadgen",
+                        "disk": "30G",
+                    },
+                    "arm-builder": {
+                        "name": "nanofaas-azure-release-arm",
+                        "disk": "64G",
+                    },
                 },
                 "azure": {
                     "resource_group": "nanofaas-rg",
@@ -92,7 +99,8 @@ def canonical_release_configs(tmp_path: Path, nanofaas_root: Path) -> tuple[Path
                     "loadgen_vm_size": "Standard_D2s_v5",
                     "arm_vm_size": "Standard_D8ps_v5",
                     "image_urn": "Canonical:ubuntu-24_04-lts:server:24.04.202607140",
-                    "arm_image_urn": "Canonical:ubuntu-24_04-lts:server-arm64:24.04.202607140",
+                    "arm_image_urn": "Canonical:ubuntu-24_04-lts:server-arm64:"
+                    "24.04.202607140",
                     "operator_source_cidr": "8.8.8.8/32",
                 },
             }
@@ -167,7 +175,9 @@ def pytest_configure(config: pytest.Config) -> None:
     # and the catalog resolves the paths it discovers -- an unresolved root makes
     # every example_dir comparison fail on macOS.
     _SOURCE = extract_commit_tree(
-        _CHECKOUT, head, Path(tempfile.mkdtemp(prefix="nanofaas-source-")).resolve() / "tree"
+        _CHECKOUT,
+        head,
+        Path(tempfile.mkdtemp(prefix="nanofaas-source-")).resolve() / "tree",
     )
     os.environ["NANOFAAS_ROOT"] = str(_SOURCE)
 
@@ -182,13 +192,13 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 
 @pytest.fixture(scope="session")
 def nanofaas_root() -> Path:
-    """What the suite plans from: the commit, materialized by `git archive`."""
+    """Return the commit the suite plans from, materialized by `git archive`."""
     assert _SOURCE is not None
     return _SOURCE
 
 
 @pytest.fixture(scope="session")
 def nanofaas_checkout() -> Path:
-    """The real git repository, for the few tests that need git itself."""
+    """Return the real git repository, for the few tests that need git itself."""
     assert _CHECKOUT is not None
     return _CHECKOUT

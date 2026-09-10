@@ -14,15 +14,15 @@ on the other.
 
 from __future__ import annotations
 
-from sonata_tasks.execution.models import CommandOptions
-
 from functools import partial
 from pathlib import Path
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import CommandTaskExecutor
-from nanolab.tasks.execution import ExecutionRole
+from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
+
+from nanolab.tasks.execution import ExecutionRole
 
 CONTROL_PLANE_DEPLOYMENT = "deploy/nanofaas-control-plane"
 
@@ -42,17 +42,17 @@ def collect_control_plane_log(
     remote_dir: str | None = None,
     title: str = "Collect the control-plane log",
 ) -> CommandTask:
-    """The command, bound to the cluster that answers for it."""
+    """Build the task that reads the control-plane log from its own cluster."""
     return CommandTask(
-               title=title,
-               argv=(
+        title=title,
+        argv=(
             "bash",
             "-lc",
             f"sudo kubectl -n {namespace} logs {CONTROL_PLANE_DEPLOYMENT} --tail=-1",
         ),
-               executor=executor,
-               role=role,
-               options=CommandOptions(remote_dir=remote_dir),
-               semantic_key=f"nanolab.diagnostics.control-plane-log:{namespace}:v1",
-               verify=partial(write_control_plane_log, destination),
-           )
+        executor=executor,
+        role=role,
+        options=CommandOptions(remote_dir=remote_dir),
+        semantic_key=f"nanolab.diagnostics.control-plane-log:{namespace}:v1",
+        verify=partial(write_control_plane_log, destination),
+    )

@@ -5,13 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-
 from typing import cast
 
 import pytest
 from sonata_engine import Evidence, Steps, Workflow
-from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks import release_composites
 from nanolab.tasks.release_composites import (
@@ -20,7 +19,6 @@ from nanolab.tasks.release_composites import (
     command_specs_composite,
     registry_push_composite,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test double: a RecordingExecutor that records every command without
@@ -52,7 +50,7 @@ def _attest(
     executor: RecordingExecutor | None = None,
     signed: list[Evidence] | None = None,
 ) -> Steps:
-    """An attest composite whose inputs a test can vary one at a time."""
+    """Build an attest composite whose inputs a test can vary one at a time."""
     return attest_composite(
         images,
         predicate_remote=predicate_remote,
@@ -68,7 +66,7 @@ def _attest(
 
 
 def _attest_group(composite: Steps) -> _AttestImageTask:
-    """The first per-image group of an attest composite."""
+    """Return the first per-image group of an attest composite."""
     group = composite._steps[0]
     assert isinstance(group, _AttestImageTask)
     return group
@@ -90,7 +88,7 @@ def _run_composite(composite: Steps, executor: RecordingExecutor) -> None:
 class _FakeTarget:
     name: str
     dockerfile: Path = Path("Dockerfile")
-    context: Path = Path(".")
+    context: Path = Path()
     native_gradle_task: str | None = None
     native_image_property: str | None = None
 
@@ -121,7 +119,9 @@ def _bake_cell(
     flavor: str = "jvm",
 ) -> _FakeCell:
     return _FakeCell(
-        target=_FakeTarget(name=name, dockerfile=Path(f"{name}/Dockerfile"), context=Path(name)),
+        target=_FakeTarget(
+            name=name, dockerfile=Path(f"{name}/Dockerfile"), context=Path(name)
+        ),
         architecture=arch,
         flavor=flavor,
         tag=image.rsplit(":", 1)[-1],
@@ -143,11 +143,16 @@ class TestSourceTestsComposite:
                 task_id="lint", summary="Run linter", argv=("echo", "lint"), role="host"
             ),
             CommandTaskSpec(
-                task_id="unit", summary="Run unit tests", argv=("echo", "test"), role="host"
+                task_id="unit",
+                summary="Run unit tests",
+                argv=("echo", "test"),
+                role="host",
             ),
         ]
 
-        composite = command_specs_composite(commands, executor, title="Run source tests")
+        composite = command_specs_composite(
+            commands, executor, title="Run source tests"
+        )
         workflow = Workflow("source-tests")
         workflow.add(composite)
         workflow.run()
@@ -174,7 +179,9 @@ class TestSourceTestsComposite:
             ),
         ]
 
-        composite = command_specs_composite(commands, executor, title="Run source tests")
+        composite = command_specs_composite(
+            commands, executor, title="Run source tests"
+        )
         workflow = Workflow("source-tests-fields")
         workflow.add(composite)
         workflow.run()
@@ -189,16 +196,22 @@ class TestSourceTestsComposite:
     def test_default_title(self) -> None:
         executor = RecordingExecutor()
         commands = [
-            CommandTaskSpec(task_id="lint", summary="Lint", argv=("echo", "x"), role="host"),
+            CommandTaskSpec(
+                task_id="lint", summary="Lint", argv=("echo", "x"), role="host"
+            ),
         ]
 
-        composite = command_specs_composite(commands, executor, title="Run source tests")
+        composite = command_specs_composite(
+            commands, executor, title="Run source tests"
+        )
         assert "Run source tests" in composite.title
 
     def test_custom_title(self) -> None:
         executor = RecordingExecutor()
         commands = [
-            CommandTaskSpec(task_id="lint", summary="Lint", argv=("echo", "x"), role="host"),
+            CommandTaskSpec(
+                task_id="lint", summary="Lint", argv=("echo", "x"), role="host"
+            ),
         ]
 
         composite = command_specs_composite(commands, executor, title="Custom title")
@@ -219,10 +232,14 @@ class TestRegistryPushComposite:
         executor = RecordingExecutor()
         plan = _plan_with_cells(
             _bake_cell("ctrl", "reg/ctrl:v1-amd64", arch="amd64"),
-            _bake_cell("watchdog", "reg/watch:v1-amd64", arch="amd64", flavor="default"),
+            _bake_cell(
+                "watchdog", "reg/watch:v1-amd64", arch="amd64", flavor="default"
+            ),
         )
 
-        composite = registry_push_composite(plan, executor, "host", authfile="/auth/config.json")
+        composite = registry_push_composite(
+            plan, executor, "host", authfile="/auth/config.json"
+        )
         workflow = Workflow("registry-push")
         workflow.add(composite)
         workflow.run()
@@ -243,7 +260,9 @@ class TestRegistryPushComposite:
             _bake_cell("ctrl", "reg/ctrl:v1-amd64", arch="amd64"),
         )
 
-        composite = registry_push_composite(plan, executor, "host", authfile="/custom/auth.json")
+        composite = registry_push_composite(
+            plan, executor, "host", authfile="/custom/auth.json"
+        )
         workflow = Workflow("registry-push")
         workflow.add(composite)
         workflow.run()
@@ -382,9 +401,15 @@ class TestAttestComposite:
         base = _attest_group(_attest())
 
         for other in (
-            _attest_group(_attest(cosign_key="/tmp/nanofaas-release-credentials.b/cosign-key")),
-            _attest_group(_attest(password_file="/tmp/nanofaas-release-credentials.b/pw")),
-            _attest_group(_attest(docker_config="/tmp/nanofaas-release-credentials.b/docker")),
+            _attest_group(
+                _attest(cosign_key="/tmp/nanofaas-release-credentials.b/cosign-key")
+            ),
+            _attest_group(
+                _attest(password_file="/tmp/nanofaas-release-credentials.b/pw")
+            ),
+            _attest_group(
+                _attest(docker_config="/tmp/nanofaas-release-credentials.b/docker")
+            ),
         ):
             assert other.reuse_key == base.reuse_key, other.title
             assert other.title == base.title, other.reuse_key
@@ -406,7 +431,9 @@ class TestAttestComposite:
         images = ("repo/a@sha256:aa", "repo/b@sha256:bb")
         signed: list[Evidence] = []
 
-        _run_composite(_attest(images=images, executor=executor, signed=signed), executor)
+        _run_composite(
+            _attest(images=images, executor=executor, signed=signed), executor
+        )
 
         assert [(e.kind, e.reference, e.digest) for e in signed] == [
             ("cosign-attestation", image, image.split("@", 1)[1]) for image in images
@@ -414,14 +441,22 @@ class TestAttestComposite:
 
 
 class TestCommandSpecsComposite:
-    def test_command_specs_composite_titles_each_step_from_the_spec_summary(self) -> None:
+    def test_command_specs_composite_titles_each_step_from_the_spec_summary(
+        self,
+    ) -> None:
         executor = RecordingExecutor()
         commands = (
-            CommandTaskSpec(task_id="a", summary="First", argv=("echo", "one"), role="stack"),
-            CommandTaskSpec(task_id="b", summary="Second", argv=("echo", "two"), role="stack"),
+            CommandTaskSpec(
+                task_id="a", summary="First", argv=("echo", "one"), role="stack"
+            ),
+            CommandTaskSpec(
+                task_id="b", summary="Second", argv=("echo", "two"), role="stack"
+            ),
         )
 
-        composite = command_specs_composite(commands, executor=executor, title="Build AMD64 images")
+        composite = command_specs_composite(
+            commands, executor=executor, title="Build AMD64 images"
+        )
 
         workflow = Workflow("test-command-specs")
         workflow.add(composite)
@@ -439,10 +474,14 @@ class TestCompositeCompilation:
     def test_source_tests_compiles(self) -> None:
         executor = RecordingExecutor()
         commands = [
-            CommandTaskSpec(task_id="lint", summary="Lint", argv=("echo", "lint"), role="host"),
+            CommandTaskSpec(
+                task_id="lint", summary="Lint", argv=("echo", "lint"), role="host"
+            ),
         ]
 
-        composite = command_specs_composite(commands, executor, title="Run source tests")
+        composite = command_specs_composite(
+            commands, executor, title="Run source tests"
+        )
         workflow = Workflow("source-tests")
         workflow.add(composite)
         compiled = workflow.compile()

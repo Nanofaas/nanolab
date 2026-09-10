@@ -17,7 +17,6 @@ import pytest
 
 from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
 
-
 # One file per decision worth making, and the .gitignore that should decide it.
 KEEP = (
     "settings.gradle.kts",

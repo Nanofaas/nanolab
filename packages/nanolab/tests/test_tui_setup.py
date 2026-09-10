@@ -1,10 +1,11 @@
 from types import SimpleNamespace
 
+from tui_toolkit import AppBrand, Theme
+from tui_toolkit.context import get_ui
+
 import nanolab.app.main as main_module
 import nanolab.tui.app as tui_app
 from nanolab.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME, setup_ui
-from tui_toolkit import AppBrand, Theme
-from tui_toolkit.context import get_ui
 
 EXPECTED_ASCII_LOGO = """\
  ███╗   ██╗ █████╗ ███╗   ██╗ ██████╗ ███████╗ █████╗  █████╗ ███████╗
@@ -22,14 +23,17 @@ def test_setup_ui_installs_exact_nanofaas_context_idempotently() -> None:
     assert first.brand is second.brand is NANOFAAS_BRAND
     assert first.theme is second.theme is NANOFAAS_THEME
     assert get_ui() == second
-    assert NANOFAAS_BRAND == AppBrand(
-        name="nanofaas",
-        wordmark="NANOFAAS",
-        ascii_logo=EXPECTED_ASCII_LOGO,
-        default_breadcrumb="Main",
-        default_footer_hint="Esc back | Ctrl+C exit",
+    assert (
+        AppBrand(
+            name="nanofaas",
+            wordmark="NANOFAAS",
+            ascii_logo=EXPECTED_ASCII_LOGO,
+            default_breadcrumb="Main",
+            default_footer_hint="Esc back | Ctrl+C exit",
+        )
+        == NANOFAAS_BRAND
     )
-    assert NANOFAAS_THEME == Theme()
+    assert Theme() == NANOFAAS_THEME
 
 
 def test_tui_command_sets_up_ui_before_running(monkeypatch) -> None:

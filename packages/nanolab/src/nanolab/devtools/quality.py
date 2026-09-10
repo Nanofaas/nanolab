@@ -1,3 +1,10 @@
+"""The repository's own quality gates, run as one command.
+
+Chains the checks CI runs — ruff, basedpyright, import-linter, the entrypoint
+imports and the cross-project coupling probe — and exits non-zero, naming every
+check that failed.
+"""
+
 from __future__ import annotations
 
 import subprocess
@@ -43,7 +50,8 @@ CHECKS = (
             "-c",
             (
                 "import importlib; "
-                f"[importlib.import_module(name) for name in {ENTRYPOINT_IMPORT_MODULES!r}]"
+                "[importlib.import_module(name) "
+                f"for name in {ENTRYPOINT_IMPORT_MODULES!r}]"
             ),
         ],
     ),
@@ -52,6 +60,7 @@ CHECKS = (
 
 
 def main() -> None:
+    """Run every check in `CHECKS` and fail if any of them did."""
     failures: list[str] = []
     for name, command in CHECKS:
         completed = subprocess.run(command, check=False, cwd=MEMBER_ROOT)

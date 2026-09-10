@@ -38,9 +38,12 @@ def test_the_same_source_and_modules_give_the_same_tag() -> None:
 
 
 def test_different_modules_give_different_tags() -> None:
-    """The modules are a build input: the same checkout compiled with and without
+    """Give different module sets different image tags.
+
+    The modules are a build input: the same checkout compiled with and without
     the autoscaler is two different binaries. Sharing one tag would let the
-    second one never reach the cluster."""
+    second one never reach the cluster.
+    """
     with_autoscaler = _request(
         source_fingerprint="abc123",
         additional_modules=("autoscaler", "async-queue", "sync-queue"),
@@ -49,7 +52,9 @@ def test_different_modules_give_different_tags() -> None:
         source_fingerprint="abc123", additional_modules=("async-queue", "sync-queue")
     )
 
-    assert with_autoscaler.control_plane_image_tag() != without.control_plane_image_tag()
+    assert (
+        with_autoscaler.control_plane_image_tag() != without.control_plane_image_tag()
+    )
 
 
 def test_different_backends_give_different_tags() -> None:

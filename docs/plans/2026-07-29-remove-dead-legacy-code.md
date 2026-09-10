@@ -70,4 +70,3 @@
 3. Run `git diff --check`.
 4. Generate representative plans and build all wheels.
 5. Inspect the final diff and confirm active legacy infrastructure was preserved.
-

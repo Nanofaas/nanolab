@@ -1,10 +1,13 @@
+"""Load-test tasks: fetch results, snapshot Prometheus, and write the reports."""
+
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +22,8 @@ _PROMETHEUS_SNAPSHOT = "prometheus-snapshot.json"
 
 @dataclass
 class FetchVmResults:
+    """Copy a file the load VM produced onto the host machine."""
+
     task_id: str
     title: str
     fetcher: RemoteFileFetcher
@@ -26,6 +31,7 @@ class FetchVmResults:
     local_dest: Path
 
     def run(self) -> Path:
+        """Fetch `remote_source` into `local_dest` and return the resolved path."""
         # Absolute on purpose: the fetchers shell out to scp/multipass with their
         # own working directory, so a relative destination lands wherever that
         # happens to point — for the VM providers, inside the nanoFaaS checkout.
@@ -62,6 +68,8 @@ def _unreachable_hint(error: Exception) -> str:
 
 @dataclass
 class CapturePrometheusSnapshot:
+    """Query every requested series over the run window and save the answers."""
+
     task_id: str
     title: str
     client: PrometheusClient
@@ -99,7 +107,9 @@ class CapturePrometheusSnapshot:
         left unshifted.
         """
         lead = timedelta(
-            seconds=self._WINDOW_MARGIN_S if self.lead_seconds is None else self.lead_seconds
+            seconds=self._WINDOW_MARGIN_S
+            if self.lead_seconds is None
+            else self.lead_seconds
         )
         trail = timedelta(seconds=self._WINDOW_MARGIN_S)
         expanded = TimeWindow(start=window.start - lead, end=window.end + trail)
@@ -107,7 +117,7 @@ class CapturePrometheusSnapshot:
         if server_time is None:
             return expanded
         try:
-            offset = float(server_time()) - datetime.now(timezone.utc).timestamp()
+            offset = float(server_time()) - datetime.now(UTC).timestamp()
         except (RuntimeError, OSError, ValueError, TypeError):
             return expanded
         if abs(offset) < self._CLOCK_SKEW_THRESHOLD_S:
@@ -116,11 +126,17 @@ class CapturePrometheusSnapshot:
         return TimeWindow(start=expanded.start + shift, end=expanded.end + shift)
 
     def run(self) -> Path:
+        """Write the snapshot and return its path.
+
+        Every query is attempted and recorded before anything is raised, so a
+        failure still leaves the other series on disk to explain it. Raises
+        RuntimeError listing all required queries that gave no usable data.
+        """
         source_window = self._resolve_window()
         wait_seconds = (
             source_window.end
             + timedelta(seconds=self._WINDOW_MARGIN_S)
-            - datetime.now(timezone.utc)
+            - datetime.now(UTC)
         ).total_seconds()
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, self._WINDOW_MARGIN_S))
@@ -136,7 +152,11 @@ class CapturePrometheusSnapshot:
         result: dict[str, dict] = {}
         failures: list[str] = []
         for q in self.queries:
-            entry: dict[str, object] = {"query": q.expr, "required": q.required, "points": []}
+            entry: dict[str, object] = {
+                "query": q.expr,
+                "required": q.required,
+                "points": [],
+            }
             try:
                 points = self.client.query_range(q.expr, window)
             except RuntimeError as exc:
@@ -181,7 +201,11 @@ def _render_k6_html(k6_summary: dict, prom_snapshot: dict | None) -> str:
             f"{k}: {v:.3g}" if isinstance(v, float) else f"{k}: {v}"
             for k, v in values.items()
         )
-        rows.append(f"<tr><td>{name}</td><td>{entry.get('type', '')}</td><td>{formatted}</td></tr>")
+        rows.append(
+            f"<tr><td>{name}</td>"
+            f"<td>{entry.get('type', '')}</td>"
+            f"<td>{formatted}</td></tr>"
+        )
 
     prom_section = ""
     if prom_snapshot:
@@ -206,7 +230,8 @@ def _render_k6_html(k6_summary: dict, prom_snapshot: dict | None) -> str:
         '<meta charset="utf-8">\n'
         "<title>k6 Loadtest Report</title>\n"
         "<style>\n"
-        "  body { font-family: sans-serif; max-width: 1000px; margin: 0 auto; padding: 24px; }\n"
+        "  body { font-family: sans-serif; max-width: 1000px; "
+        "margin: 0 auto; padding: 24px; }\n"
         "  h1, h2 { border-bottom: 1px solid #eee; padding-bottom: 8px; }\n"
         "  table { border-collapse: collapse; width: 100%; margin: 16px 0; }\n"
         "  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }\n"
@@ -228,22 +253,23 @@ def _render_k6_html(k6_summary: dict, prom_snapshot: dict | None) -> str:
 
 @dataclass
 class WriteK6Report:
+    """Render the k6 summary and any Prometheus snapshot into an HTML report."""
+
     task_id: str
     title: str
     data_dir: Path
     output_dir: Path
 
     def run(self) -> Path:
+        """Write `report.html` under `output_dir` and return its path."""
         k6_summary_path = self.data_dir / "k6-summary.json"
         k6_summary = json.loads(k6_summary_path.read_text(encoding="utf-8"))
 
         prom_path = self.data_dir / "metrics" / _PROMETHEUS_SNAPSHOT
         prom_snapshot: dict | None = None
         if prom_path.exists():
-            try:
+            with contextlib.suppress(json.JSONDecodeError):
                 prom_snapshot = json.loads(prom_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                pass
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         html = _render_k6_html(k6_summary, prom_snapshot)
@@ -268,13 +294,16 @@ def _point_stats(points: list[dict]) -> dict[str, float | int]:
 
 @dataclass
 class WriteLoadtestSummary:
+    """Write the compact `summary.json` the comparison report reads."""
+
     task_id: str
     title: str
     data_dir: Path
     output_dir: Path
-    autoscaling: "AutoscalingResult | None" = None
+    autoscaling: AutoscalingResult | None = None
 
     def run(self) -> Path:
+        """Collect the selected k6 metrics and point stats, then write summary.json."""
         k6 = json.loads((self.data_dir / "k6-summary.json").read_text(encoding="utf-8"))
         prometheus_path = self.data_dir / "metrics" / _PROMETHEUS_SNAPSHOT
         prometheus = (
@@ -290,7 +319,9 @@ class WriteLoadtestSummary:
                 name: _point_stats(entry.get("points", []))
                 for name, entry in prometheus.get("queries", {}).items()
             },
-            "autoscaling": asdict(self.autoscaling.result) if self.autoscaling else None,
+            "autoscaling": asdict(self.autoscaling.result)
+            if self.autoscaling
+            else None,
         }
         self.output_dir.mkdir(parents=True, exist_ok=True)
         destination = self.output_dir / "summary.json"

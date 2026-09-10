@@ -7,7 +7,11 @@ from sonata_engine import Resource, TaskInputs
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks.cli_function import CliFunctionInvokeTask
-from nanolab.tasks.http_function import HttpFunctionContractTask, HttpFunctionExpectation, HttpFunctionInvokeTask
+from nanolab.tasks.http_function import (
+    HttpFunctionContractTask,
+    HttpFunctionExpectation,
+    HttpFunctionInvokeTask,
+)
 from nanolab.tasks.invocation import verify_invocation
 
 SUCCESS = '{"status":"success","output":"5 words"}'
@@ -23,7 +27,9 @@ class RecordingExecutor:
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(task_id="", status="passed", return_code=0, stdout=self.stdout)
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout=self.stdout
+        )
 
 
 def _result(stdout: str) -> TaskResult:
@@ -43,9 +49,14 @@ def test_a_successful_response_passes() -> None:
         ('{"status":"success"}', "carried no output"),
     ],
 )
-def test_it_separates_the_ways_an_invocation_can_be_unusable(stdout: str, expected: str) -> None:
-    """The shell version piped this through two `grep -q` calls, which reported
-    every one of these four cases identically."""
+def test_it_separates_the_ways_an_invocation_can_be_unusable(
+    stdout: str, expected: str
+) -> None:
+    """Separate the ways an invocation can be unusable.
+
+    The shell version piped this through two `grep -q` calls, which reported
+    every one of these four cases identically.
+    """
     with pytest.raises(RuntimeError, match=expected):
         verify_invocation(_result(stdout))
 
@@ -75,8 +86,11 @@ def test_http_invoke_posts_the_payload_to_the_invoke_endpoint() -> None:
 
 
 def test_the_endpoint_can_arrive_as_a_resource_value() -> None:
-    """On Kubernetes the address exists only once the Service does, so it is read
-    at run time from the resource that created it rather than spelled up front."""
+    """Read the endpoint from a resource value at run time.
+
+    On Kubernetes the address exists only once the Service does, so it is read
+    at run time from the resource that created it rather than spelled up front.
+    """
     executor = RecordingExecutor()
     endpoint: Resource[str] = Resource(
         title="Acquire control plane",
@@ -91,7 +105,9 @@ def test_the_endpoint_can_arrive_as_a_resource_value() -> None:
         role="stack",
     )
 
-    _ = task.run(TaskInputs._for_resources({endpoint: "http://10.43.0.7:8080"}, {endpoint}))
+    _ = task.run(
+        TaskInputs._for_resources({endpoint: "http://10.43.0.7:8080"}, {endpoint})
+    )
 
     assert executor.seen[0].argv[-1] == (
         "http://10.43.0.7:8080/v1/functions/word-stats:invoke"
@@ -126,7 +142,11 @@ def test_both_transports_reject_a_200_that_carries_an_error(transport: str) -> N
     executor = RecordingExecutor(stdout='{"status":"error","output":"boom"}')
     task = (
         HttpFunctionInvokeTask(
-            "fn", payload="{}", endpoint="http://cp:8080", executor=executor, role="host"
+            "fn",
+            payload="{}",
+            endpoint="http://cp:8080",
+            executor=executor,
+            role="host",
         )
         if transport == "http"
         else CliFunctionInvokeTask(
@@ -139,9 +159,12 @@ def test_both_transports_reject_a_200_that_carries_an_error(transport: str) -> N
 
 
 def test_it_repeats_the_reason_the_control_plane_gave() -> None:
-    """A live run once reported only "error", leaving the reader to guess between
+    """Repeat the reason the control plane gave.
+
+    A live run once reported only "error", leaving the reader to guess between
     a function that threw, a pod that was not ready, and a dispatch that found no
-    endpoint. The answer was in the response all along."""
+    endpoint. The answer was in the response all along.
+    """
     with pytest.raises(RuntimeError, match=r"DISPATCH_FAILED: no ready endpoint"):
         verify_invocation(
             _result(
@@ -155,7 +178,9 @@ def test_it_repeats_the_reason_the_control_plane_gave() -> None:
     "error",
     ['"boom"', "null", "{}", '{"code":null,"message":null}'],
 )
-def test_a_response_without_a_usable_reason_still_reports_the_status(error: str) -> None:
+def test_a_response_without_a_usable_reason_still_reports_the_status(
+    error: str,
+) -> None:
     with pytest.raises(RuntimeError, match=r"did not report success: 'error'$"):
         verify_invocation(_result('{"status":"error","error":' + error + "}"))
 
@@ -194,7 +219,10 @@ def _contract(
             api_status="success",
             output={"header": "real", "body": "unique"},
             status_code=422,
-            required_headers=(("x-nanofaas-function-status", "true"), ("x-caller-id", "real")),
+            required_headers=(
+                ("x-nanofaas-function-status", "true"),
+                ("x-caller-id", "real"),
+            ),
             forbidden_headers=("x-secret",),
         ),
     )
@@ -261,7 +289,9 @@ def test_http_contract_accepts_curl_modern_http_status_lines(protocol: str) -> N
 
 
 def test_http_contract_rejects_a_mismatched_outer_header_value() -> None:
-    task, _ = _contract(ENVELOPE_422.replace("X-Caller-Id: real", "X-Caller-Id: spoofed"))
+    task, _ = _contract(
+        ENVELOPE_422.replace("X-Caller-Id: real", "X-Caller-Id: spoofed")
+    )
 
     with pytest.raises(RuntimeError, match="required header x-caller-id was 'spoofed'"):
         task.run(TaskInputs.empty())
@@ -270,10 +300,24 @@ def test_http_contract_rejects_a_mismatched_outer_header_value() -> None:
 @pytest.mark.parametrize(
     ("stdout", "expectation", "error"),
     [
-        (ENVELOPE_422.replace("422 Unprocessable Content", "200 OK"), None, "status was 200"),
-        (ENVELOPE_422.replace("X-NanoFaaS-Function-Status: true\r\n", ""), None, "missing required header"),
+        (
+            ENVELOPE_422.replace("422 Unprocessable Content", "200 OK"),
+            None,
+            "status was 200",
+        ),
+        (
+            ENVELOPE_422.replace("X-NanoFaaS-Function-Status: true\r\n", ""),
+            None,
+            "missing required header",
+        ),
         (ENVELOPE_422.replace("unique", "wrong-output"), None, "output was"),
-        (ENVELOPE_422.replace("X-Caller-Id: real\r\n", "X-Caller-Id: real\r\nX-Secret: nope\r\n"), None, "forbidden header"),
+        (
+            ENVELOPE_422.replace(
+                "X-Caller-Id: real\r\n", "X-Caller-Id: real\r\nX-Secret: nope\r\n"
+            ),
+            None,
+            "forbidden header",
+        ),
         (
             "HTTP/1.1 200 OK\r\n\r\n"
             '{"status":"success","output":"not base64!","statusCode":200}',
@@ -390,7 +434,9 @@ def test_http_contract_rejects_different_decoded_base64_bytes() -> None:
         task.run(TaskInputs.empty())
 
 
-def test_http_contract_accepts_a_base64_output_with_the_expected_png_signature() -> None:
+def test_http_contract_accepts_a_base64_output_with_the_expected_png_signature() -> (
+    None
+):
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\n\r\n"
         '{"status":"success","output":"iVBORw0KGgpwYXlsb2Fk","statusCode":200,'
@@ -446,7 +492,9 @@ def test_http_contract_rejects_a_base64_output_with_the_wrong_signature() -> Non
     [
         (
             '{"status":"success","output":"ok","statusCode":200}',
-            HttpFunctionExpectation(status=200, api_headers={"Content-Type": "image/png"}),
+            HttpFunctionExpectation(
+                status=200, api_headers={"Content-Type": "image/png"}
+            ),
             "headers was None",
         ),
         (
@@ -465,7 +513,7 @@ def test_http_contract_rejects_mismatched_api_envelope_fields(
         task.run(TaskInputs.empty())
 
 
-def test_http_contract_requires_encoding_marker_but_rejects_function_content_type_on_outer_response() -> None:
+def test_http_contract_rejects_forbidden_outer_content_type_despite_encoding() -> None:
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: image/png; charset=binary\r\n"
@@ -484,14 +532,15 @@ def test_http_contract_requires_encoding_marker_but_rejects_function_content_typ
 
 def test_http_contract_rejects_missing_required_encoding_marker() -> None:
     task, _ = _contract(
-        "HTTP/1.1 200 OK\r\n\r\n"
-        '{"status":"success","output":"ok","statusCode":200}',
+        'HTTP/1.1 200 OK\r\n\r\n{"status":"success","output":"ok","statusCode":200}',
         expectation=HttpFunctionExpectation(
             status=200, required_headers=(("X-NanoFaaS-Encoding", "base64"),)
         ),
     )
 
-    with pytest.raises(RuntimeError, match="missing required header X-NanoFaaS-Encoding"):
+    with pytest.raises(
+        RuntimeError, match="missing required header X-NanoFaaS-Encoding"
+    ):
         task.run(TaskInputs.empty())
 
 

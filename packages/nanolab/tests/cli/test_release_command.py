@@ -17,19 +17,17 @@ from sonata_engine import (
 from sonata_engine import Workflow as SonataWorkflow
 from typer.testing import CliRunner
 
-from nanolab.app.main import app
-import nanolab.cli.release as release_cli
 import nanolab.cli.product as product_module
+import nanolab.cli.release as release_cli
 import nanolab.plans.release as release_plan
+from nanolab.app.main import app
 from nanolab.release.environment import release_lock_path, release_run_lock
 from nanolab.release.evidence import RECEIPT_KINDS
 from nanolab.release.model import GitState
 from nanolab.release.versioning import read_project_version
-from nanolab.workspace.paths import ToolPaths
 from nanolab.tasks.vm.models import VmInfo
-
-from ..conftest import RejectingProvider
-
+from nanolab.workspace.paths import ToolPaths
+from tests.conftest import RejectingProvider
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
@@ -45,9 +43,13 @@ def test_release_command_surface_is_prepare_alone() -> None:
     result = CliRunner().invoke(app, ["release", "--help"])
 
     assert result.exit_code == 0, result.output
-    release_group = next(group for group in app.registered_groups if group.name == "release")
+    release_group = next(
+        group for group in app.registered_groups if group.name == "release"
+    )
     assert release_group.typer_instance is not None
-    commands = {command.name for command in release_group.typer_instance.registered_commands}
+    commands = {
+        command.name for command in release_group.typer_instance.registered_commands
+    }
     assert commands == {"prepare"}
 
 
@@ -179,15 +181,17 @@ def release_cli_harness(
         workflow = _SpyWorkflow(workflow_id="release-test")
         resource = Resource(
             title="Acquire release stack VM",
-            acquire=lambda _inputs: state.events.append("acquire")
-            or VmInfo(
-                name="nanofaas-azure-release",
-                host="10.0.0.1",
-                user="azureuser",
-                home="/home/azureuser",
+            acquire=lambda _inputs: (
+                state.events.append("acquire")
+                or VmInfo(
+                    name="nanofaas-azure-release",
+                    host="10.0.0.1",
+                    user="azureuser",
+                    home="/home/azureuser",
+                )
             ),
             release=lambda _inputs, _value: state.events.append("release"),
-                    )
+        )
         workflow.add(_Phase(state.events, state.failure), requires=(resource,))
         state.workflows.append(workflow)
         return workflow
@@ -212,14 +216,18 @@ def release_cli_harness(
     return state
 
 
-def test_generic_release_run_starts_without_provision_acknowledgement(release_cli_harness) -> None:
+def test_generic_release_run_starts_without_provision_acknowledgement(
+    release_cli_harness,
+) -> None:
     result = release_cli_harness.invoke()
 
     assert result.exit_code == 0, result.output
     assert release_cli_harness.events == ["acquire", "phase", "release"]
 
 
-def test_generic_release_run_rejects_the_retired_provision_flag(release_cli_harness) -> None:
+def test_generic_release_run_rejects_the_retired_provision_flag(
+    release_cli_harness,
+) -> None:
     result = release_cli_harness.invoke("--provision")
 
     assert result.exit_code != 0
@@ -240,7 +248,9 @@ def test_generic_release_run_journals_and_passes(release_cli_harness) -> None:
     # records it can never be skipped on resume
     assert set(kwargs["verifiers"]) == RECEIPT_KINDS
     metadata = json.loads(
-        (release_cli_harness.release_dir / "run-metadata.json").read_text(encoding="utf-8")
+        (release_cli_harness.release_dir / "run-metadata.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert metadata["status"] == "passed"
 
@@ -274,7 +284,9 @@ def test_generic_release_run_forwards_keep_and_selection(release_cli_harness) ->
     assert release_cli_harness.events == ["acquire", "phase"]
 
 
-def test_generic_release_resume_requires_an_existing_journal(release_cli_harness) -> None:
+def test_generic_release_resume_requires_an_existing_journal(
+    release_cli_harness,
+) -> None:
     result = release_cli_harness.invoke("--resume")
 
     assert result.exit_code != 0
@@ -283,7 +295,9 @@ def test_generic_release_resume_requires_an_existing_journal(release_cli_harness
     assert release_cli_harness.built == []
 
 
-def test_generic_release_fresh_run_supersedes_the_previous_one(release_cli_harness) -> None:
+def test_generic_release_fresh_run_supersedes_the_previous_one(
+    release_cli_harness,
+) -> None:
     """A fresh run starts clean without destroying the last attempt.
 
     The journal never sits alone: the phase receipts the publication barriers
@@ -312,21 +326,29 @@ def test_generic_release_fresh_run_supersedes_the_previous_one(release_cli_harne
     assert (release_cli_harness.release_dir / "sonata.jsonl").is_file()
 
 
-def test_generic_release_resume_names_the_journal_it_wanted(release_cli_harness) -> None:
-    """The old message sent operators to --resume as the only way out; after a
-    run without --keep, or a changed DAG, resume fails closed. Name the file."""
+def test_generic_release_resume_names_the_journal_it_wanted(
+    release_cli_harness,
+) -> None:
+    """Name the journal file --resume wanted when it cannot be reopened.
+
+    The old message sent operators to --resume as the only way out; after a run
+    without --keep, or a changed DAG, resume fails closed. Name the file.
+    """
     result = release_cli_harness.invoke("--resume")
 
     assert result.exit_code != 0
     # Printed outside the error box, so the path survives intact rather than
     # being split across Rich's borders as `sonat||a.jsonl`.
-    assert f"no release journal at: {release_cli_harness.release_dir / 'sonata.jsonl'}" in (
-        result.output
+    assert (
+        f"no release journal at: {release_cli_harness.release_dir / 'sonata.jsonl'}"
+        in (result.output)
     )
     assert "Traceback" not in result.output
 
 
-def test_generic_release_resume_reuses_the_verified_journal(release_cli_harness) -> None:
+def test_generic_release_resume_reuses_the_verified_journal(
+    release_cli_harness,
+) -> None:
     assert release_cli_harness.invoke().exit_code == 0
     release_cli_harness.events.clear()
 
@@ -347,14 +369,18 @@ def test_generic_release_failure_releases_resources_and_records_metadata(
         trees.append(Path(kwargs["source_tree"]))
         return original(**kwargs)
 
-    release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
+    release_cli_harness.monkeypatch.setattr(
+        product_module, "build_release_request", record
+    )
 
     result = release_cli_harness.invoke()
 
     assert result.exit_code != 0
     assert release_cli_harness.events == ["acquire", "phase", "release"]
     metadata = json.loads(
-        (release_cli_harness.release_dir / "run-metadata.json").read_text(encoding="utf-8")
+        (release_cli_harness.release_dir / "run-metadata.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert metadata["status"] == "failed"
     assert "source tests failed" in metadata["error"]
@@ -367,7 +393,9 @@ def test_generic_release_failure_releases_resources_and_records_metadata(
     assert not trees[0].exists()
 
 
-def test_generic_release_interrupt_still_releases_infrastructure(release_cli_harness) -> None:
+def test_generic_release_interrupt_still_releases_infrastructure(
+    release_cli_harness,
+) -> None:
     release_cli_harness.failure = KeyboardInterrupt()
 
     result = release_cli_harness.invoke()
@@ -376,7 +404,9 @@ def test_generic_release_interrupt_still_releases_infrastructure(release_cli_har
     assert release_cli_harness.events == ["acquire", "phase", "release"]
 
 
-def test_generic_release_run_rejects_a_concurrent_coordinator(release_cli_harness) -> None:
+def test_generic_release_run_rejects_a_concurrent_coordinator(
+    release_cli_harness,
+) -> None:
     environment = product_module._environment(release_cli_harness.environment)
 
     with release_run_lock(release_lock_path(environment)):
@@ -388,7 +418,9 @@ def test_generic_release_run_rejects_a_concurrent_coordinator(release_cli_harnes
     assert release_cli_harness.events == []
 
 
-def test_locked_release_does_not_supersede_the_active_journal(release_cli_harness) -> None:
+def test_locked_release_does_not_supersede_the_active_journal(
+    release_cli_harness,
+) -> None:
     assert release_cli_harness.invoke().exit_code == 0
     receipt = release_cli_harness.release_dir / "source-tests.json"
     receipt.write_text("active receipt", encoding="utf-8")
@@ -403,7 +435,9 @@ def test_locked_release_does_not_supersede_the_active_journal(release_cli_harnes
 
 
 def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> None:
-    """Pins that `source_tree` is a real absolute path plumbed through to
+    """Check the extracted source tree is absolute and removed on a clean run.
+
+    It pins that `source_tree` is a real absolute path plumbed through to
     `build_release_request`, and that it's gone after a clean run.
 
     This does NOT discriminate the cleanup guard on its own: on a clean
@@ -422,7 +456,9 @@ def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> 
         trees.append(Path(kwargs["source_tree"]))
         return original(**kwargs)
 
-    release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
+    release_cli_harness.monkeypatch.setattr(
+        product_module, "build_release_request", record
+    )
 
     result = release_cli_harness.invoke()
 
@@ -447,7 +483,9 @@ def test_generic_release_preflight_rejection_removes_the_extracted_tree(
         trees.append(Path(kwargs["source_tree"]))
         return original(**kwargs)
 
-    release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
+    release_cli_harness.monkeypatch.setattr(
+        product_module, "build_release_request", record
+    )
 
     result = release_cli_harness.invoke("--resume")
 
@@ -561,10 +599,15 @@ def test_teardown_is_idempotent(release_cli_harness) -> None:
     assert destroyed == ["nanofaas-azure-release"]
 
 
-def test_teardown_works_after_a_preflight_that_would_reject(release_cli_harness) -> None:
-    """The reason teardown skips build_release_request: after a failed release the
+def test_teardown_works_after_a_preflight_that_would_reject(
+    release_cli_harness,
+) -> None:
+    """Tear down a release whose preflight would now reject.
+
+    This is why teardown skips build_release_request: after a failed release the
     tree is usually dirty or the version has moved on, and the VMs still need
-    closing."""
+    closing.
+    """
     assert release_cli_harness.invoke("--keep").exit_code == 0
     destroyed: list[str] = []
     _teardown_harness(release_cli_harness, destroyed)
@@ -578,7 +621,9 @@ def test_teardown_works_after_a_preflight_that_would_reject(release_cli_harness)
     assert destroyed == ["nanofaas-azure-release"]
 
 
-def test_teardown_without_a_journal_says_so_and_touches_nothing(release_cli_harness) -> None:
+def test_teardown_without_a_journal_says_so_and_touches_nothing(
+    release_cli_harness,
+) -> None:
     destroyed: list[str] = []
     _teardown_harness(release_cli_harness, destroyed)
 
@@ -590,7 +635,7 @@ def test_teardown_without_a_journal_says_so_and_touches_nothing(release_cli_harn
 
 
 @pytest.mark.parametrize(
-    "flag", ("--resume", "--keep", "--only=x", "--from=x", "--until=x")
+    "flag", ["--resume", "--keep", "--only=x", "--from=x", "--until=x"]
 )
 def test_teardown_refuses_flags_that_describe_running_a_workflow(
     flag: str, release_cli_harness

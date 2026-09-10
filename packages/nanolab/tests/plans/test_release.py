@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -14,18 +14,16 @@ import yaml
 from sonata_engine import JournalConfig, Resource, Selection
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from nanolab.tasks.vm.models import VmInfo
 
 import nanolab.plans.release as release_plan
-import nanolab.release.resources as release_resources
 import nanolab.release.build as release_build
+import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImageCell, ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
 from nanolab.release.evidence import signature_evidence_verifier
 from nanolab.release.metrics import PerformanceAggregate, PerformanceProfile
-from nanolab.release.publish import PublishPlan, build_publish_plan
 from nanolab.release.model import (
     ArtifactEvidence,
     CredentialFiles,
@@ -33,15 +31,18 @@ from nanolab.release.model import (
     ReleaseSettings,
     digest_path,
 )
+from nanolab.release.publish import PublishPlan, build_publish_plan
 from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
-
-from ..conftest import RejectingProvider
-
+from nanolab.tasks.vm.models import VmInfo
+from tests.conftest import RejectingProvider
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
+
+
+_UBUNTU_2404_URN = "Canonical:0001-com-ubuntu-server-noble:24_04-lts-gen2:latest"
 
 
 _AZURE_ENV = EnvironmentConfig.model_validate(
@@ -58,8 +59,8 @@ _AZURE_ENV = EnvironmentConfig.model_validate(
             "vm_size": "Standard_D8s_v5",
             "loadgen_vm_size": "Standard_D4s_v5",
             "arm_vm_size": "Standard_D4ps_v6",
-            "image_urn": "Canonical:0001-com-ubuntu-server-noble:24_04-lts-gen2:latest",
-            "arm_image_urn": "Canonical:0001-com-ubuntu-server-noble:24_04-lts-gen2:latest",
+            "image_urn": _UBUNTU_2404_URN,
+            "arm_image_urn": _UBUNTU_2404_URN,
             "operator_source_cidr": "1.2.3.4/32",
         },
     }
@@ -72,7 +73,7 @@ def release_request(
     tmp_path: Path,
     canonical_release_configs: tuple[Path, Path],
 ) -> ReleaseRequest:
-    """The canonical offline release request every workflow test compiles from."""
+    """Provide the canonical offline release request every test compiles from."""
     scenario_path, environment_path = canonical_release_configs
     monkeypatch.setattr(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
@@ -122,7 +123,9 @@ def test_amd64_build_phase_records_the_commands_it_will_run(
     assert any(argv[:3] == ("docker", "buildx", "bake") for argv in argvs)
     # The JVM prerequisite is the source of truth: control-plane's carries its
     # own extra argument, and dropping it is what shipped in v0.18.1.
-    prepares = [argv for argv in argvs if argv[0] == "./gradlew" and "bootJar" in " ".join(argv)]
+    prepares = [
+        argv for argv in argvs if argv[0] == "./gradlew" and "bootJar" in " ".join(argv)
+    ]
     assert prepares, "no JVM bootJar prepare command"
     assert any("-PcontrolPlaneModules=all" in argv for argv in prepares)
     assert phase.expected_images == tuple(
@@ -147,7 +150,9 @@ def test_release_request_rejects_non_azure_environment():
         version="1.0.0",
         environment=local_env,
         scenario=ScenarioConfig(workflow="loadtest", functions=["word-stats-java"]),
-        image_plan=ImagePlan(version="v1", registry="localhost:5000", targets=(), cells=()),
+        image_plan=ImagePlan(
+            version="v1", registry="localhost:5000", targets=(), cells=()
+        ),
         settings=ReleaseSettings(
             max_parallelism=4,
             scenario=Path("autoscaling-cycle-k8s.yaml"),
@@ -172,7 +177,9 @@ def test_release_request_is_frozen():
         version="1.0.0",
         environment=_AZURE_ENV,
         scenario=ScenarioConfig(workflow="loadtest", functions=["word-stats-java"]),
-        image_plan=ImagePlan(version="v1", registry="localhost:5000", targets=(), cells=()),
+        image_plan=ImagePlan(
+            version="v1", registry="localhost:5000", targets=(), cells=()
+        ),
         settings=ReleaseSettings(
             max_parallelism=4,
             scenario=Path("autoscaling-cycle-k8s.yaml"),
@@ -282,7 +289,9 @@ class _ArmWorkflowProvider:
     def transfer_to(self, _request, *, source: Path, destination: str):
         self.transfers.append(destination)
         if self.failure == "source-transfer" and destination.endswith("/source.tar"):
-            return SimpleNamespace(return_code=1, stdout="", stderr="source transfer failed")
+            return SimpleNamespace(
+                return_code=1, stdout="", stderr="source transfer failed"
+            )
         self.remote_digests[destination] = digest_path(source)
         return SimpleNamespace(return_code=0, stdout="", stderr="")
 
@@ -302,7 +311,9 @@ class _ArmWorkflowProvider:
             )
         if argv[0] == "sha256sum":
             digest = self.remote_digests[argv[1]].removeprefix("sha256:")
-            return SimpleNamespace(return_code=0, stdout=f"{digest}  {argv[1]}\n", stderr="")
+            return SimpleNamespace(
+                return_code=0, stdout=f"{digest}  {argv[1]}\n", stderr=""
+            )
         if (
             self.failure == "build"
             and "docker buildx bake" in rendered
@@ -311,13 +322,17 @@ class _ArmWorkflowProvider:
             # Native images no longer get their own Gradle build step: every
             # cell (JVM, native, default) bakes together in this one command,
             # so this is where an "individual build" failure now surfaces.
-            return SimpleNamespace(return_code=1, stdout="", stderr="individual build failed")
+            return SimpleNamespace(
+                return_code=1, stdout="", stderr="individual build failed"
+            )
         if self.failure == "push" and "docker push" in rendered:
             return SimpleNamespace(return_code=1, stdout="", stderr="push failed")
         if argv[:3] == ("docker", "image", "inspect"):
             if argv[3] == "--format={{.Architecture}}":
                 return SimpleNamespace(return_code=0, stdout="arm64\n", stderr="")
-            return SimpleNamespace(return_code=0, stdout="sha256:" + "a" * 64, stderr="")
+            return SimpleNamespace(
+                return_code=0, stdout="sha256:" + "a" * 64, stderr=""
+            )
         if "docker push" in rendered:
             image = rendered.split("docker push ", 1)[1].split()[0]
             self.registry_digests[image] = "sha256:" + "b" * 64
@@ -335,7 +350,9 @@ class _ArmWorkflowProvider:
             return SimpleNamespace(
                 return_code=1,
                 stdout="",
-                stderr="Failed to spawn runtime: No such file or directory (os error 2)",
+                stderr=(
+                    "Failed to spawn runtime: No such file or directory (os error 2)"
+                ),
             )
         return SimpleNamespace(return_code=0, stdout="", stderr="")
 
@@ -364,7 +381,15 @@ def _arm_failure_workflow(
         release_plan,
         "build_role_bindings",
         lambda *_args, **_kwargs: (
-            RoleBindings({'host': executor, 'stack': executor, 'loadgen': executor, 'cloud': executor, 'arm-builder': executor}),
+            RoleBindings(
+                {
+                    "host": executor,
+                    "stack": executor,
+                    "loadgen": executor,
+                    "cloud": executor,
+                    "arm-builder": executor,
+                }
+            ),
             None,
         ),
     )
@@ -377,7 +402,7 @@ def _arm_failure_workflow(
                     name=name, host="10.0.0.1", user="azureuser", home="/home/azureuser"
                 ),
                 release=lambda _inputs, _value: None,
-                                requires=requires,
+                requires=requires,
             )
 
         stack = vm("Acquire release stack VM", "release-stack")
@@ -391,11 +416,15 @@ def _arm_failure_workflow(
             release=lambda _inputs, _value: None,
             requires=(stack, loadgen),
         )
-        return release_resources.ReleaseResources(stack, loadgen, arm_builder, endpoints)
+        return release_resources.ReleaseResources(
+            stack, loadgen, arm_builder, endpoints
+        )
 
     monkeypatch.setattr(release_plan, "build_release_resources", infrastructure)
 
-    def create_archive(_root: Path, _commit: str, destination: Path) -> ArtifactEvidence:
+    def create_archive(
+        _root: Path, _commit: str, destination: Path
+    ) -> ArtifactEvidence:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"immutable source")
         return ArtifactEvidence("local", str(destination), digest_path(destination))
@@ -411,7 +440,9 @@ def _arm_failure_workflow(
         performance_root=tmp_path / "performance",
         source_tree=tmp_path / "tree",
     )
-    secret_paths = tuple(tmp_path / name for name in ("ghcr", "cosign.key", "cosign.password"))
+    secret_paths = tuple(
+        tmp_path / name for name in ("ghcr", "cosign.key", "cosign.password")
+    )
     for path in secret_paths:
         path.write_text(path.name, encoding="utf-8")
         path.chmod(0o600)
@@ -438,12 +469,12 @@ def _arm_failure_workflow(
 
 @pytest.mark.parametrize(
     ("failure", "error"),
-    (
+    [
         ("build", "individual build failed"),
         ("push", "push failed"),
         ("digest", "invalid registry digest"),
         ("smoke", "smoke failed"),
-    ),
+    ],
 )
 def test_new_arm_workflow_failures_cleanup_and_never_publish(
     failure: str,
@@ -468,16 +499,22 @@ def test_new_arm_workflow_failures_cleanup_and_never_publish(
         for command in (task.argv for task in executor.commands)
     )
     assert (
-        sum("systemctl stop nanofaas-registry-tunnel" in command for command in provider_rendered)
+        sum(
+            "systemctl stop nanofaas-registry-tunnel" in command
+            for command in provider_rendered
+        )
         >= 2
     )
-    assert any("rm -rf --" in command and "/source" in command for command in provider_rendered)
+    assert any(
+        "rm -rf --" in command and "/source" in command for command in provider_rendered
+    )
     assert phases["Build ARM64 images"].receipt.exists() is (failure == "smoke")
     assert not phases["Test ARM64 images"].receipt.exists()
 
 
 def test_new_arm_source_transfer_failure_compensates_all_acquired_resources(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     canonical_release_configs: tuple[Path, Path],
 ) -> None:
     workflow, provider, executor, phases = _arm_failure_workflow(
@@ -488,9 +525,19 @@ def test_new_arm_source_transfer_failure_compensates_all_acquired_resources(
         workflow.run(select=Selection(start="build-arm64-images"))
 
     rendered = [" ".join(argv) for argv in provider.commands]
-    assert any("rm -rf --" in command and "source.tar" in command for command in rendered)
-    assert sum("systemctl stop nanofaas-registry-tunnel" in command for command in rendered) >= 2
-    assert any(task.argv[:4] == ("docker", "buildx", "rm", "--force") for task in executor.commands)
+    assert any(
+        "rm -rf --" in command and "source.tar" in command for command in rendered
+    )
+    assert (
+        sum(
+            "systemctl stop nanofaas-registry-tunnel" in command for command in rendered
+        )
+        >= 2
+    )
+    assert any(
+        task.argv[:4] == ("docker", "buildx", "rm", "--force")
+        for task in executor.commands
+    )
     assert not any("skopeo copy" in " ".join(task.argv) for task in executor.commands)
     assert not phases["Build ARM64 images"].receipt.exists()
 
@@ -559,7 +606,11 @@ def _stage_attest_inputs(phases: Mapping[str, ReleasePhaseTask]) -> dict[str, st
                         scenario="autoscaling-cycle-k8s.yaml",
                     ),
                     run_count=3,
-                    metrics={"throughputRps": 100.0, "latencyP95Ms": 10.0, "errorRate": 0.0},
+                    metrics={
+                        "throughputRps": 100.0,
+                        "latencyP95Ms": 10.0,
+                        "errorRate": 0.0,
+                    },
                 )
             )
         ),
@@ -595,10 +646,15 @@ def test_attest_phase_records_one_signature_per_pinned_digest(
     evidence = json.loads(attest.receipt.read_text(encoding="utf-8"))["evidence"]
     signatures = [item for item in evidence if item["kind"] == "cosign-attestation"]
     assert signatures, "attest produced no signing evidence"
-    assert any(item["kind"] == "file-digest" for item in evidence), "predicate evidence lost"
+    assert any(item["kind"] == "file-digest" for item in evidence), (
+        "predicate evidence lost"
+    )
     # one signature per unique pinned digest -- aliases resolve to the same
     # digest as their manifest and must not be signed twice
-    pinned = {f"{reference.rsplit(':', 1)[0]}@{value}" for reference, value in published.items()}
+    pinned = {
+        f"{reference.rsplit(':', 1)[0]}@{value}"
+        for reference, value in published.items()
+    }
     assert {item["reference"] for item in signatures} == pinned
     assert len(signatures) == len(pinned) < len(published)
     assert all(item["reference"].endswith(f"@{item['digest']}") for item in signatures)
@@ -610,13 +666,21 @@ def test_attest_phase_records_one_signature_per_pinned_digest(
         if task.argv[-5:-1] == ("sign", "--yes", "--key", "/key.cosign")
     ]
     assert sorted(signed) == sorted(item["reference"] for item in signatures)
-    assert any(destination.endswith("/predicate.json") for destination in provider.transfers)
-    assert any(task.argv[:3] == ("grep", "-q", "PUBLIC KEY") for task in executor.commands)
+    assert any(
+        destination.endswith("/predicate.json") for destination in provider.transfers
+    )
+    assert any(
+        task.argv[:3] == ("grep", "-q", "PUBLIC KEY") for task in executor.commands
+    )
 
 
 def _touched(commands, references: set[str]) -> set[str]:
     """Which references the executor was asked to do any work on."""
-    return {reference for reference in references if any(reference in c.argv for c in commands)}
+    return {
+        reference
+        for reference in references
+        if any(reference in c.argv for c in commands)
+    }
 
 
 def _attested(commands, references: set[str]) -> set[str]:
@@ -635,7 +699,9 @@ def _spoil_signature_evidence(journal: Path, reference: str) -> None:
     pinned to the digest it claims, so this is the smallest edit that makes a
     real journal record stop verifying.
     """
-    records = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    records = [
+        json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()
+    ]
     spoiled = 0
     for record in records:
         if "/attest-" not in str(record.get("task_id", "")):
@@ -671,7 +737,10 @@ def test_resumed_attest_skips_the_digests_it_already_signed(
     journal = JournalConfig(tmp_path / "release.jsonl")
     verifiers = {"cosign-attestation": signature_evidence_verifier}
     only_attest = Selection(only="attest-published-images")
-    pinned = {f"{reference.rsplit(':', 1)[0]}@{digest}" for reference, digest in published.items()}
+    pinned = {
+        f"{reference.rsplit(':', 1)[0]}@{digest}"
+        for reference, digest in published.items()
+    }
     assert len(pinned) > 1, "one digest cannot show a resume skipping anything"
 
     # Run 1 dies on the second signature, so at least one group finished first.
@@ -701,7 +770,9 @@ def test_resumed_attest_skips_the_digests_it_already_signed(
     assert _attested(resumed, pinned) == pinned - finished
     # The receipt claims what this run signed, not what it set out to sign.
     evidence = json.loads(attest.receipt.read_text(encoding="utf-8"))["evidence"]
-    signatures = {item["reference"] for item in evidence if item["kind"] == "cosign-attestation"}
+    signatures = {
+        item["reference"] for item in evidence if item["kind"] == "cosign-attestation"
+    }
     assert signatures == pinned - finished
 
     # Run 3: one group's recorded evidence stops verifying, and that group
@@ -806,10 +877,13 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Finalize release documentation",
     }
     assert all(
-        task.receipt.parent == tmp_path / "run" / "releases" / CURRENT_VERSION / "receipts"
+        task.receipt.parent
+        == tmp_path / "run" / "releases" / CURRENT_VERSION / "receipts"
         for task in release_phases.values()
     )
-    benchmarks = tuple(release_phases[f"Run release benchmark {index}"] for index in range(1, 4))
+    benchmarks = tuple(
+        release_phases[f"Run release benchmark {index}"] for index in range(1, 4)
+    )
     push = release_phases["Push AMD64 images to local registry"]
     aggregate = release_phases["Aggregate benchmarks"]
     gate = release_phases["Evaluate regression gate"]
@@ -823,7 +897,10 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     assert all(task.prerequisites == (push.receipt,) for task in benchmarks)
     assert aggregate.prerequisites == tuple(task.receipt for task in benchmarks)
     assert gate.prerequisites == (aggregate.receipt,)
-    assert arm_build.prerequisites == (gate.receipt, release_phases["Run source tests"].receipt)
+    assert arm_build.prerequisites == (
+        gate.receipt,
+        release_phases["Run source tests"].receipt,
+    )
     assert arm_smoke.prerequisites == (arm_build.receipt,)
     assert publish_architectures.prerequisites == (
         gate.receipt,
@@ -858,7 +935,9 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     always_released = {
         task.resource.title
         for task in compiled.tasks
-        if task.kind == "acquire" and task.resource is not None and task.resource.always_release
+        if task.kind == "acquire"
+        and task.resource is not None
+        and task.resource.always_release
     }
     assert always_released == {
         "Acquire immutable release source archive",
@@ -976,11 +1055,11 @@ def test_amd64_buildx_builder_replaces_a_surviving_builder(
 
 @pytest.mark.parametrize(
     "selection",
-    (
+    [
         None,
         Selection(only="build-arm64-images"),
         Selection(only="publish-architecture-images"),
-    ),
+    ],
 )
 def test_missing_execution_credentials_fail_before_any_provider_call(
     selection: Selection | None,
@@ -1018,7 +1097,9 @@ def test_missing_execution_credentials_fail_before_any_provider_call(
 
 def test_release_scenario_matches_comparable_history() -> None:
     scenario = ScenarioConfig.model_validate(
-        yaml.safe_load((NANOLAB_ROOT / "scenarios-v2/release.yaml").read_text(encoding="utf-8"))
+        yaml.safe_load(
+            (NANOLAB_ROOT / "scenarios-v2/release.yaml").read_text(encoding="utf-8")
+        )
     )
 
     assert scenario.release is not None
@@ -1100,19 +1181,25 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
     assert all(value not in repr(workflow.compile()) for value in secret_values)
     publish_titles = [
         item.task.title
-        for item in workflow.compile(select=Selection(only="publish-architecture-images")).tasks
+        for item in workflow.compile(
+            select=Selection(only="publish-architecture-images")
+        ).tasks
     ]
     assert "Acquire staged GHCR credentials" in publish_titles
     assert "Acquire staged Cosign credentials" not in publish_titles
     attest_titles = [
         item.task.title
-        for item in workflow.compile(select=Selection(only="attest-published-images")).tasks
+        for item in workflow.compile(
+            select=Selection(only="attest-published-images")
+        ).tasks
     ]
     assert "Acquire staged GHCR credentials" in attest_titles
     assert "Acquire staged Cosign credentials" in attest_titles
     finalize_titles = [
         item.task.title
-        for item in workflow.compile(select=Selection(only="finalize-release-documentation")).tasks
+        for item in workflow.compile(
+            select=Selection(only="finalize-release-documentation")
+        ).tasks
     ]
     assert not any("credentials" in title.lower() for title in finalize_titles)
 
@@ -1218,7 +1305,9 @@ def test_build_release_request_rejects_symlink_credential(
         )
 
 
-def test_build_release_request_rejects_noncanonical_policy(tmp_path: Path, canonical_release_configs: tuple[Path, Path]) -> None:
+def test_build_release_request_rejects_noncanonical_policy(
+    tmp_path: Path, canonical_release_configs: tuple[Path, Path]
+) -> None:
     scenario_path, environment_path = canonical_release_configs
     scenario = yaml.safe_load(scenario_path.read_text(encoding="utf-8"))
     scenario["release"]["profile"] = "different-profile"
@@ -1237,7 +1326,7 @@ def test_build_release_request_rejects_noncanonical_policy(tmp_path: Path, canon
         )
 
 
-@pytest.mark.parametrize("repository", ("nanolab", "nanofaas"))
+@pytest.mark.parametrize("repository", ["nanolab", "nanofaas"])
 def test_build_release_request_rejects_credentials_inside_either_repository(
     repository: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -1270,7 +1359,9 @@ def test_build_release_request_rejects_credentials_inside_either_repository(
         encoding="utf-8",
     )
     monkeypatch.setattr(release_plan, "_release_source_commit", lambda *_args: "a" * 40)
-    monkeypatch.setattr(release_plan, "validate_release_environment", lambda *_args: None)
+    monkeypatch.setattr(
+        release_plan, "validate_release_environment", lambda *_args: None
+    )
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
@@ -1416,7 +1507,9 @@ def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
         arm_roots.append(root)
         return ImagePlan(version=version, registry=registry, targets=(), cells=())
 
-    monkeypatch.setattr(release_plan, "build_arm64_image_plan", fake_build_arm64_image_plan)
+    monkeypatch.setattr(
+        release_plan, "build_arm64_image_plan", fake_build_arm64_image_plan
+    )
 
     publish_roots: list[Path] = []
 
@@ -1470,7 +1563,9 @@ def test_release_source_outlives_the_benchmarks(
 
     titles = [
         task.task.title
-        for task in build_release_workflow(request, provider=RejectingProvider()).compile().tasks
+        for task in build_release_workflow(request, provider=RejectingProvider())
+        .compile()
+        .tasks
     ]
     release_source = titles.index("Release verified source on nanofaas-azure-release")
 

@@ -1,18 +1,20 @@
+"""Drive a workflow on a Rich ``Live`` dashboard, from start to final frame."""
+
 from __future__ import annotations
 
-from collections.abc import Callable
 import traceback
+from collections.abc import Callable
 from typing import Any
 
 from rich.console import Console
 from rich.live import Live
+from sonata_engine.workflow.context import bind_workflow_sink
+from sonata_engine.workflow.event_builders import build_task_event
+from tui_toolkit.console import console as default_console
 
 from nanolab.tui.event_aggregator import WorkflowEventAggregator
 from nanolab.tui.models import TuiPhaseSnapshot, TuiWorkflowSnapshot
 from nanolab.tui.workflow import TuiWorkflowSink, WorkflowDashboard, WorkflowKeyListener
-from sonata_engine.workflow.context import bind_workflow_sink
-from sonata_engine.workflow.event_builders import build_task_event
-from tui_toolkit.console import console as default_console
 
 
 def _flatten_phase_snapshots(snapshot: TuiWorkflowSnapshot) -> list[TuiPhaseSnapshot]:
@@ -36,7 +38,9 @@ def _failure_targets(phases: list[TuiPhaseSnapshot]) -> list[TuiPhaseSnapshot]:
         )
         targets = [pending] if pending is not None else []
     if not targets:
-        targets = [TuiPhaseSnapshot(label="Workflow failed", task_id="workflow.failure")]
+        targets = [
+            TuiPhaseSnapshot(label="Workflow failed", task_id="workflow.failure")
+        ]
     return targets
 
 
@@ -88,7 +92,14 @@ def _stop_listener(
 
 
 class TuiWorkflowController:
+    """Run a workflow action behind a live dashboard.
+
+    Kept as a small object rather than a function so callers can supply the
+    Rich console the display renders to.
+    """
+
     def __init__(self, *, console: Console = default_console) -> None:
+        """Use ``console`` for the live display and screen clearing."""
         self.console = console
 
     def run_live_workflow(
@@ -99,6 +110,16 @@ class TuiWorkflowController:
         planned_steps: list[str] | None,
         action: Callable[[WorkflowDashboard, TuiWorkflowSink], Any],
     ) -> Any:
+        """Run ``action`` under a live dashboard and return what it returns.
+
+        The aggregator, dashboard and sink are created here and the sink is
+        bound for the duration, so command output emitted anywhere in the
+        execution layer reaches the log pane. A failure inside ``action`` is
+        recorded on the dashboard and re-raised after the display closes;
+        start/stop faults in the key listener are attached to that error as
+        notes rather than replacing it. On a terminal the final frame stays up
+        until the user presses a key.
+        """
         aggregator = WorkflowEventAggregator(planned_steps=planned_steps)
         dashboard = WorkflowDashboard(
             title=title,

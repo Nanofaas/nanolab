@@ -1,3 +1,5 @@
+"""Image names and the build plan that produces them on the VM."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -8,10 +10,12 @@ from nanolab.tasks.components.operations import RemoteCommandOperation
 
 
 def control_image(local_registry: str) -> str:
+    """Return the control-plane image tag published on `local_registry`."""
     return f"{local_registry}/nanofaas/control-plane:e2e"
 
 
 def warm_echo_image(local_registry: str) -> str:
+    """Return the warm-echo image tag published on `local_registry`."""
     return f"{local_registry}/nanofaas/java-warm-echo:e2e"
 
 
@@ -42,7 +46,10 @@ _RUST_CP_DIR = (
 )
 
 
-def plan_build_core(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
+def plan_build_core(
+    context: ScenarioExecutionContext,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Plan the build and push of the control-plane and warm-echo images."""
     control_plane_image = control_image(context.local_registry)
     warm_echo = warm_echo_image(context.local_registry)
     if context.runtime == "rust":
@@ -55,8 +62,8 @@ def plan_build_core(context: ScenarioExecutionContext) -> tuple[RemoteCommandOpe
     operations: list[RemoteCommandOperation] = []
 
     if context.runtime != "rust":
-        # Rust Dockerfile is a self-contained multi-stage build (cargo runs inside Docker);
-        # no pre-build step is needed on the VM.
+        # Rust's Dockerfile is a self-contained multi-stage build (cargo runs
+        # inside Docker); no pre-build step is needed on the VM.
         operations.append(
             RemoteCommandOperation(
                 operation_id="images.build_core.boot_jars",

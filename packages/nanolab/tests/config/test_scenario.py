@@ -60,7 +60,8 @@ def test_persistent_recovery_requires_validate_workflow(
     workflow: str, extra: dict[str, object]
 ) -> None:
     with pytest.raises(
-        ValidationError, match="persistentRecovery is only supported by the validate workflow"
+        ValidationError,
+        match="persistentRecovery is only supported by the validate workflow",
     ):
         ScenarioConfig.model_validate(
             {
@@ -95,7 +96,9 @@ def test_resource_request_must_not_exceed_limit() -> None:
 
 
 def test_resources_must_refer_to_selected_functions() -> None:
-    with pytest.raises(ValidationError, match="resources must refer to selected functions"):
+    with pytest.raises(
+        ValidationError, match="resources must refer to selected functions"
+    ):
         ScenarioConfig.model_validate(
             {
                 "workflow": "validate",
@@ -127,7 +130,9 @@ def test_hpa_autoscaling_is_available_only_for_kubernetes_loadtests() -> None:
 
     assert config.autoscaling_strategy == "HPA"
 
-    with pytest.raises(ValidationError, match="HPA autoscaling requires the k8s backend"):
+    with pytest.raises(
+        ValidationError, match="HPA autoscaling requires the k8s backend"
+    ):
         ScenarioConfig.model_validate(
             {
                 "workflow": "loadtest",
@@ -188,7 +193,9 @@ def test_async_load_is_opt_in_for_container_validation() -> None:
 
 
 def test_async_load_requires_container_validation() -> None:
-    with pytest.raises(ValidationError, match="async load requires the validate workflow"):
+    with pytest.raises(
+        ValidationError, match="async load requires the validate workflow"
+    ):
         ScenarioConfig.model_validate(
             {
                 "workflow": "validate",

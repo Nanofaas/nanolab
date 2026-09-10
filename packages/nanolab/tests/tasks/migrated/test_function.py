@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 
 import pytest
 from sonata_engine import Resource, TaskInputs
+from sonata_tasks.command import CommandTask
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from sonata_tasks.command import CommandTask
 from nanolab.tasks.function import function_resource
 
 
@@ -83,10 +83,17 @@ def test_readiness_tasks_run_after_the_register_in_order() -> None:
 
 
 def test_a_failed_register_deletes_best_effort_before_propagating() -> None:
-    """The engine never releases an acquire that did not pass, so a register that
-    created the function before failing would leak it."""
+    """Delete best-effort when register fails, before propagating.
+
+    The engine never releases an acquire that did not pass, so a register that
+    created the function before failing would leak it.
+    """
     executor = ScriptedExecutor(
-        responses={"register": TaskResult(task_id="", status="failed", return_code=1, stderr="boom")}
+        responses={
+            "register": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="boom"
+            )
+        }
     )
     resource = _resource(executor)
 
@@ -98,9 +105,15 @@ def test_a_failed_register_deletes_best_effort_before_propagating() -> None:
 
 def test_a_failed_readiness_also_deletes_because_the_register_did_land() -> None:
     executor = ScriptedExecutor(
-        responses={"wait": TaskResult(task_id="", status="failed", return_code=1, stderr="timeout")}
+        responses={
+            "wait": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="timeout"
+            )
+        }
     )
-    resource = _resource(executor, readiness=(_task("Wait for word-stats", executor, "wait"),))
+    resource = _resource(
+        executor, readiness=(_task("Wait for word-stats", executor, "wait"),)
+    )
 
     with pytest.raises(RuntimeError, match="timeout"):
         resource.acquire(TaskInputs.empty())
@@ -111,7 +124,9 @@ def test_a_failed_readiness_also_deletes_because_the_register_did_land() -> None
 def test_a_failed_compensation_is_noted_without_masking_the_original_error() -> None:
     executor = ScriptedExecutor(
         responses={
-            "register": TaskResult(task_id="", status="failed", return_code=1, stderr="conflict"),
+            "register": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="conflict"
+            ),
             "delete": TaskResult(
                 task_id="", status="failed", return_code=1, stderr="cleanup unavailable"
             ),
@@ -135,13 +150,18 @@ def test_requires_is_carried_onto_the_resource() -> None:
     )
     resource = _resource(ScriptedExecutor(), requires=(helm,))
 
-    assert [dependency.title for dependency in resource.requires] == ["Acquire helm release"]
+    assert [dependency.title for dependency in resource.requires] == [
+        "Acquire helm release"
+    ]
 
 
 def test_a_function_always_releases_itself() -> None:
-    """`keep` is for the VM and the platform on it, both expensive to rebuild.
+    """Declare the function so opt-out retention still releases it.
+
+    `keep` is for the VM and the platform on it, both expensive to rebuild.
     A registration costs a second to redo and, left behind, makes the next run
     fail with 409 — which it did, twice. Under opt-out retention a function that
-    did not declare itself would be kept, so it declares itself."""
+    did not declare itself would be kept, so it declares itself.
+    """
     assert _resource(ScriptedExecutor()).always_release is True
     assert _resource(ScriptedExecutor(), always_release=False).always_release is False

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -16,21 +16,29 @@ def _repo(root: Path) -> Path:
         subprocess.run(argv, cwd=root, check=True, capture_output=True)
     (root / "app.txt").write_text("one")
     subprocess.run(("git", "add", "-A"), cwd=root, check=True, capture_output=True)
-    subprocess.run(("git", "commit", "-qm", "init"), cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ("git", "commit", "-qm", "init"), cwd=root, check=True, capture_output=True
+    )
     return root
 
 
 def test_the_same_source_keeps_the_same_tag(tmp_path: Path) -> None:
-    """Rebuilding unchanged source must not churn the image name: no change,
-    nothing for Kubernetes to roll."""
+    """Keep the tag stable while the source is unchanged.
+
+    Rebuilding must not churn the image name: no change, nothing for
+    Kubernetes to roll.
+    """
     root = _repo(tmp_path / "repo")
 
     assert source_fingerprint(root) == source_fingerprint(root)
 
 
 def test_an_edit_changes_the_tag(tmp_path: Path) -> None:
-    """The whole point: an edited control plane cannot reach the registry under
-    a name the cluster already runs."""
+    """Change the tag when the source changes.
+
+    The whole point: an edited control plane cannot reach the registry under a
+    name the cluster already runs.
+    """
     root = _repo(tmp_path / "repo")
     before = source_fingerprint(root)
 

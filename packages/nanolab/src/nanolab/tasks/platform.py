@@ -1,30 +1,31 @@
+"""Build, deploy and register the platform that `validate` and `loadtest` share."""
+
 from __future__ import annotations
 
-from sonata_tasks.execution.models import CommandOptions
-
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
-import hashlib
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from sonata_engine import Resource, Steps, Workflow
+from sonata_tasks.command import CommandTask
+from sonata_tasks.compensation import compensated_resource
+from sonata_tasks.docker import DockerBuildTask, DockerPushTask
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
 )
-from nanolab.tasks.execution import ExecutionRole
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.gradle import GradleTask
+from sonata_tasks.helm import HelmInstallTask, HelmReleaseSpec, HelmUninstallTask
 
-from sonata_tasks.command import CommandTask
-from sonata_tasks.compensation import compensated_resource
 from nanolab.tasks.deployment import (
     DEFAULT_NAMESPACE,
     LOCAL_CONTROL_PLANE_API_PORT,
     LOCAL_REGISTRY,
 )
-from sonata_tasks.docker import DockerBuildTask, DockerPushTask
+from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.function import function_resource
-from sonata_tasks.gradle import GradleTask
-from sonata_tasks.helm import HelmInstallTask, HelmReleaseSpec, HelmUninstallTask
 from nanolab.tasks.http_function import (
     Endpoint,
     HttpFunctionDeleteTask,
@@ -72,6 +73,7 @@ class PlatformFunction:
     max_retries: int = 3
 
     def manifest(self) -> FunctionManifest:
+        """Build the manifest this function is registered with."""
         return FunctionManifest(
             name=self.name,
             image=self.image,
@@ -117,9 +119,11 @@ class PlatformRequest:
     label: str = ""
 
     def titled(self, title: str) -> str:
+        """Prefix `title` with the side label, when there is one."""
         return f"{title} on the {self.label}" if self.label else title
 
     def __post_init__(self) -> None:
+        """Reject a request with no functions, or a k8s build with no image."""
         if not self.functions:
             raise ValueError("a platform request needs at least one function")
         if (
@@ -127,20 +131,23 @@ class PlatformRequest:
             and not self.build_images
             and self.control_plane_image is None
         ):
-            raise ValueError("control_plane_image is required when build_images is false")
+            raise ValueError(
+                "control_plane_image is required when build_images is false"
+            )
 
     @property
     def role(self) -> ExecutionRole:
-        """Kubernetes work happens on the VM holding the cluster; container work here."""
+        """Kubernetes work runs on the cluster's VM; container work runs here."""
         if self.execution_role is not None:
             return self.execution_role
         return "stack" if self.backend == "k8s" else "host"
 
     def control_plane_modules(self) -> tuple[str, ...]:
+        """Return the backend's module plus every additional one requested."""
         return (_MODULES[self.backend], *self.additional_modules)
 
     def control_plane_image_tag(self) -> str:
-        """The tag the built control plane is published under.
+        """Return the image tag the built control plane is published under.
 
         The modules go into the hash because they are a build input: the same
         checkout compiled with and without the autoscaler yields two different
@@ -150,14 +157,16 @@ class PlatformRequest:
         if self.source_fingerprint is None:
             return "e2e"
         digest = hashlib.sha256(
-            "\0".join((self.source_fingerprint, *self.control_plane_modules())).encode("utf-8")
+            "\0".join((self.source_fingerprint, *self.control_plane_modules())).encode(
+                "utf-8"
+            )
         ).hexdigest()
         return f"e2e-{digest[:12]}"
 
     def control_plane_image_reference(self) -> str:
-        return (
-            self.control_plane_image
-            or f"{self.registry}/nanofaas/control-plane:{self.control_plane_image_tag()}"
+        """Return the reference the control plane is built and pushed as."""
+        return self.control_plane_image or (
+            f"{self.registry}/nanofaas/control-plane:{self.control_plane_image_tag()}"
         )
 
 
@@ -169,13 +178,13 @@ def _control_plane_build(
     target = ":control-plane:bootJar"
     modules = request.control_plane_modules()
     return GradleTask(
-               target,
-               title=request.titled("Build control plane"),
-               executor=executor,
-               role=request.role,
-               properties={"controlPlaneModules": ",".join(modules)},
-               options=CommandOptions(cwd=cwd),
-           )
+        target,
+        title=request.titled("Build control plane"),
+        executor=executor,
+        role=request.role,
+        properties={"controlPlaneModules": ",".join(modules)},
+        options=CommandOptions(cwd=cwd),
+    )
 
 
 def _helm_release_with_endpoint(
@@ -184,7 +193,7 @@ def _helm_release_with_endpoint(
     cwd: Path | None,
     requires: tuple[Resource[Any], ...],
 ) -> Resource[str]:
-    """The control plane's Helm release, whose value is where it answers.
+    """Acquire the control plane's Helm release, whose value is where it answers.
 
     A `Steps` composite rather than `helm_release_resource`, because this
     release's value is not its spec: the address exists only once the Service
@@ -206,11 +215,11 @@ def _helm_release_with_endpoint(
         values=request.helm_values,
     )
     uninstall = HelmUninstallTask(
-                    spec,
-                    executor=executor,
-                    role=request.role,
-                    options=CommandOptions(cwd=cwd),
-                )
+        spec,
+        executor=executor,
+        role=request.role,
+        options=CommandOptions(cwd=cwd),
+    )
     acquire = Steps(
         title=request.titled(f"Acquire Helm release {spec.release}"),
         steps=(
@@ -231,7 +240,9 @@ def _helm_release_with_endpoint(
                 title=f"Read the {CONTROL_PLANE_SERVICE} address",
                 options=CommandOptions(cwd=cwd),
             ),
-            ClusterIpEndpointTask(service=CONTROL_PLANE_SERVICE, port=CONTROL_PLANE_PORT),
+            ClusterIpEndpointTask(
+                service=CONTROL_PLANE_SERVICE, port=CONTROL_PLANE_PORT
+            ),
         ),
     )
 
@@ -241,7 +252,6 @@ def _helm_release_with_endpoint(
         compensate=uninstall.run,
         requires=requires,
     )
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,7 +351,9 @@ def _add_build_tasks(
             # Titled by repository, not by the full reference: the tag now
             # carries a source fingerprint, and a task id that changes with
             # every edit would churn the journal and every run's task list.
-            repository = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
+            repository = (
+                image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
+            )
             workflow.add(
                 DockerBuildTask(
                     image=image,
@@ -457,7 +469,9 @@ def add_platform(
     )
 
     functions = tuple(
-        _function_resource(request, function, endpoint, requires, resources, executor, cwd)
+        _function_resource(
+            request, function, endpoint, requires, resources, executor, cwd
+        )
         for function in request.functions
     )
 

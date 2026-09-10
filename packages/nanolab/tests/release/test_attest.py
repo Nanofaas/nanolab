@@ -7,7 +7,6 @@ import pytest
 
 from nanolab.release import attest
 
-
 PROFILE = "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1"
 
 
@@ -16,7 +15,10 @@ def _record() -> dict[str, object]:
         "schemaVersion": 1,
         "version": "v0.18.0",
         "sourceCommit": "a" * 40,
-        "imageDigests": {"ghcr.io/miciav/nanofaas/control-plane:v0.18.0-amd64-native": "sha256:" + "1" * 64},
+        "imageDigests": {
+            "ghcr.io/miciav/nanofaas/control-plane:v0.18.0-amd64-native": "sha256:"
+            + "1" * 64
+        },
         "profile": {"name": PROFILE},
         "runCount": 3,
         "thresholds": {},
@@ -31,7 +33,8 @@ def _record() -> dict[str, object]:
 
 def _images() -> dict[str, str]:
     return {
-        "ghcr.io/miciav/nanofaas/control-plane:v0.18.0-amd64-native": "sha256:" + "1" * 64,
+        "ghcr.io/miciav/nanofaas/control-plane:v0.18.0-amd64-native": "sha256:"
+        + "1" * 64,
         "ghcr.io/miciav/nanofaas/control-plane:v0.18.0-native": "sha256:" + "2" * 64,
     }
 
@@ -59,7 +62,7 @@ def test_release_predicate_contains_the_required_evidence() -> None:
 
 
 def test_predicate_rejects_missing_or_invalid_digests() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must be a sha256 digest"):
         attest.build_release_predicate(
             version="v0.18.0",
             source_commit="a" * 40,
@@ -67,7 +70,7 @@ def test_predicate_rejects_missing_or_invalid_digests() -> None:
             benchmark_record_digest="not-a-digest",
             image_digests=_images(),
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least one image digest"):
         attest.build_release_predicate(
             version="v0.18.0",
             source_commit="a" * 40,
@@ -97,9 +100,7 @@ def test_history_regeneration_includes_previous_release_records(tmp_path: Path) 
     docs = tmp_path / "performance"
     (docs / "releases").mkdir(parents=True)
     older = dict(_record(), version="v0.17.0")
-    (docs / "releases" / "v0.17.0.json").write_text(
-        json.dumps(older), encoding="utf-8"
-    )
+    (docs / "releases" / "v0.17.0.json").write_text(json.dumps(older), encoding="utf-8")
 
     attest.finalize_release(record=_record(), performance_root=docs)
 
@@ -117,7 +118,7 @@ def test_finalize_retries_after_a_documentation_failure_without_rebuilding(
     blocker = docs / "history.md"
     blocker.mkdir()
 
-    with pytest.raises(OSError):
+    with pytest.raises(IsADirectoryError):
         attest.finalize_release(record=_record(), performance_root=docs)
 
     blocker.rmdir()

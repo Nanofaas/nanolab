@@ -206,7 +206,9 @@ def remap_loadtest_component_id(scenario_name: str, component_id: str) -> str:
 Replace the hard-coded two-scenario condition in `src/controlplane_tool/scenario/scenario_flows.py` with:
 
 ```python
-from controlplane_tool.scenario.two_vm_loadtest_config import remap_loadtest_component_id
+from controlplane_tool.scenario.two_vm_loadtest_config import (
+    remap_loadtest_component_id,
+)
 ```
 
 and:
@@ -266,8 +268,18 @@ def test_control_plane_nodeports_enabled_for_all_vm_loadtest_scenarios() -> None
         request = E2eRequest(
             scenario=scenario,
             runtime="java",
-            vm=VmRequest(lifecycle="proxmox" if scenario == "proxmox-vm-loadtest" else "multipass", name="stack"),
-            loadgen_vm=VmRequest(lifecycle="proxmox" if scenario == "proxmox-vm-loadtest" else "multipass", name="loadgen"),
+            vm=VmRequest(
+                lifecycle="proxmox"
+                if scenario == "proxmox-vm-loadtest"
+                else "multipass",
+                name="stack",
+            ),
+            loadgen_vm=VmRequest(
+                lifecycle="proxmox"
+                if scenario == "proxmox-vm-loadtest"
+                else "multipass",
+                name="loadgen",
+            ),
         )
         steps = plan_recipe_steps(
             Path("/repo"),
@@ -330,13 +342,13 @@ from controlplane_tool.scenario.two_vm_loadtest_config import LOADTEST_SCENARIOS
 and replace:
 
 ```python
-expose_node_port=context.scenario_name == "two-vm-loadtest",
+expose_node_port = (context.scenario_name == "two-vm-loadtest",)
 ```
 
 with:
 
 ```python
-expose_node_port=context.scenario_name in LOADTEST_SCENARIOS,
+expose_node_port = (context.scenario_name in LOADTEST_SCENARIOS,)
 ```
 
 - [ ] **Step 4: Run Helm tests**
@@ -372,7 +384,9 @@ def test_proxmox_provider_exposes_published_ssh_endpoint(monkeypatch, tmp_path):
         proxmox_host="149.132.176.73",
     )
 
-    monkeypatch.setattr(provider, "_ssh_endpoint", lambda req: ("149.132.176.73", 20001))
+    monkeypatch.setattr(
+        provider, "_ssh_endpoint", lambda req: ("149.132.176.73", 20001)
+    )
 
     assert provider.ssh_endpoint(request) == ("149.132.176.73", 20001)
 ```
@@ -451,7 +465,9 @@ Expected: PASS.
 Append to `tests/test_recipe_execution_hooks.py`:
 
 ```python
-def test_plan_recipe_steps_uses_proxmox_provider_for_proxmox_lifecycle(monkeypatch) -> None:
+def test_plan_recipe_steps_uses_proxmox_provider_for_proxmox_lifecycle(
+    monkeypatch,
+) -> None:
     from pathlib import Path
 
     from controlplane_tool.e2e.e2e_models import E2eRequest
@@ -530,23 +546,27 @@ from workflow_tasks.vm.multipass import repo_rsync_command, repo_sync_ssh_rsh
 Add helper:
 
 ```python
-    def _on_repo_sync_to_vm() -> None:
-        if request.vm is None:
-            raise RuntimeError("repo sync requires a VM request")
-        if request.vm.lifecycle != "proxmox":
-            return _on_host_command(tuple(component_steps[0].command), component_steps[0].env)
-        host, port = vm_orch.ssh_endpoint(vm_request)
-        key = vm_orch.ssh_private_key_path(vm_request)
-        command = repo_rsync_command(
-            source=repo_root,
-            user=vm_request.user,
-            host=host,
-            destination=remote_dir,
-            ssh_rsh=repo_sync_ssh_rsh(key, port=port),
+def _on_repo_sync_to_vm() -> None:
+    if request.vm is None:
+        raise RuntimeError("repo sync requires a VM request")
+    if request.vm.lifecycle != "proxmox":
+        return _on_host_command(
+            tuple(component_steps[0].command), component_steps[0].env
         )
-        result = runner.shell.run(command, cwd=repo_root)
-        if result.return_code != 0:
-            raise RuntimeError(result.stderr or result.stdout or f"exit {result.return_code}")
+    host, port = vm_orch.ssh_endpoint(vm_request)
+    key = vm_orch.ssh_private_key_path(vm_request)
+    command = repo_rsync_command(
+        source=repo_root,
+        user=vm_request.user,
+        host=host,
+        destination=remote_dir,
+        ssh_rsh=repo_sync_ssh_rsh(key, port=port),
+    )
+    result = runner.shell.run(command, cwd=repo_root)
+    if result.return_code != 0:
+        raise RuntimeError(
+            result.stderr or result.stdout or f"exit {result.return_code}"
+        )
 ```
 
 When `component.component_id == "repo.sync_to_vm"` and lifecycle is Proxmox, replace its step with a `ScenarioPlanStep` carrying `action=_on_repo_sync_to_vm`.
@@ -573,7 +593,12 @@ Add helper:
 For Proxmox lifecycle, when `component.component_id` is one of:
 
 ```python
-{"vm.provision_base", "registry.ensure_container", "k3s.install", "k3s.configure_registry"}
+{
+    "vm.provision_base",
+    "registry.ensure_container",
+    "k3s.install",
+    "k3s.configure_registry",
+}
 ```
 
 replace each step with an action that runs the rewritten command through `runner.shell.run(...)`.
@@ -627,17 +652,19 @@ _PROXMOX_LOADTEST_PRELUDE_COMPONENTS: tuple[str, ...] = (
 Replace the current empty `steps=[]` in `build_proxmox_vm_loadtest_plan` with:
 
 ```python
-    steps = plan_recipe_steps(
-        runner.paths.workspace_root,
-        request,
-        "proxmox-vm-loadtest",
-        shell=runner.shell,
-        manifest_root=runner.manifest_root,
-        host_resolver=runner._host_resolver,
-        multipass_client=runner._multipass_client,
-        component_ids=_PROXMOX_LOADTEST_PRELUDE_COMPONENTS,
-    )
-    return ProxmoxVmLoadtestPlan(scenario=scenario, request=request, steps=steps, runner=runner)
+steps = plan_recipe_steps(
+    runner.paths.workspace_root,
+    request,
+    "proxmox-vm-loadtest",
+    shell=runner.shell,
+    manifest_root=runner.manifest_root,
+    host_resolver=runner._host_resolver,
+    multipass_client=runner._multipass_client,
+    component_ids=_PROXMOX_LOADTEST_PRELUDE_COMPONENTS,
+)
+return ProxmoxVmLoadtestPlan(
+    scenario=scenario, request=request, steps=steps, runner=runner
+)
 ```
 
 - [ ] **Step 3: Include prelude IDs and titles**
@@ -645,19 +672,27 @@ Replace the current empty `steps=[]` in `build_proxmox_vm_loadtest_plan` with:
 Change `ProxmoxVmLoadtestPlan.task_ids`:
 
 ```python
-    @property
-    def task_ids(self) -> list[str]:
-        pre, wf = self._skeleton()
-        return [s.step_id for s in self.steps if s.step_id] + [t.task_id for t in pre] + wf.task_ids
+@property
+def task_ids(self) -> list[str]:
+    pre, wf = self._skeleton()
+    return (
+        [s.step_id for s in self.steps if s.step_id]
+        + [t.task_id for t in pre]
+        + wf.task_ids
+    )
 ```
 
 Change `phase_titles`:
 
 ```python
-    @property
-    def phase_titles(self) -> list[str]:
-        pre, wf = self._skeleton()
-        return [s.summary for s in self.steps if s.step_id] + [t.title for t in pre] + wf.phase_titles
+@property
+def phase_titles(self) -> list[str]:
+    pre, wf = self._skeleton()
+    return (
+        [s.summary for s in self.steps if s.step_id]
+        + [t.title for t in pre]
+        + wf.phase_titles
+    )
 ```
 
 - [ ] **Step 4: Execute prelude before the Proxmox tail**
@@ -702,7 +737,9 @@ Expected: PASS.
 Append to `tests/test_recipe_execution_hooks.py`:
 
 ```python
-def test_proxmox_register_functions_uses_published_control_plane_endpoint(monkeypatch) -> None:
+def test_proxmox_register_functions_uses_published_control_plane_endpoint(
+    monkeypatch,
+) -> None:
     from pathlib import Path
 
     from controlplane_tool.e2e.e2e_models import E2eRequest

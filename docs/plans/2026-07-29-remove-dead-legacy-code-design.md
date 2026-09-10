@@ -34,4 +34,3 @@ behavioral tests continue to cover every Sonata scenario plan and the CLI/TUI
 rendered task lists. The four package test suites, static type checks, Ruff,
 import contracts, package builds, and representative plan generation must all
 remain green.
-

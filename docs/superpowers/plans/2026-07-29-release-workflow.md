@@ -81,11 +81,15 @@ def test_file_transfer_raises_on_nonzero_exit():
 
     class _FailingProvider:
         def transfer_to(self, request, *, source, destination):
-            return type("Result", (), {"return_code": 1, "stdout": "", "stderr": "disk full"})()
+            return type(
+                "Result", (), {"return_code": 1, "stdout": "", "stderr": "disk full"}
+            )()
 
     task = FileTransferTask(
-        source=Path("/tmp/bake.json"), destination="/remote/bake.json",
-        provider=_FailingProvider(), request=object(),
+        source=Path("/tmp/bake.json"),
+        destination="/remote/bake.json",
+        provider=_FailingProvider(),
+        request=object(),
     )
     with pytest.raises(RuntimeError, match="Transfer bake.json failed"):
         task.run(TaskInputs.empty())
@@ -126,7 +130,9 @@ class FileTransferTask(Task[None]):
         )
         rc = int(getattr(result, "return_code", 0))
         if rc != 0:
-            detail = getattr(result, "stderr", None) or getattr(result, "stdout", None) or ""
+            detail = (
+                getattr(result, "stderr", None) or getattr(result, "stdout", None) or ""
+            )
             raise RuntimeError(
                 f"{self.title} failed (exit {rc})" + (f": {detail}" if detail else "")
             )
@@ -180,7 +186,9 @@ class RecordingExecutor:
         self.seen.append(task)
         if task.argv[1] == "inspect":
             return TaskResult(
-                task_id="", status="passed", return_code=0,
+                task_id="",
+                status="passed",
+                return_code=0,
                 stdout="Name: builder\nPlatforms: linux/amd64*, linux/arm64*\n",
             )
         return TaskResult(task_id="", status="passed", return_code=0)
@@ -189,7 +197,9 @@ class RecordingExecutor:
 def test_buildx_builder_creates_bootstraps_and_removes():
     executor = RecordingExecutor()
     resource = buildx_builder_resource(
-        name="release-builder", executor=executor, role="stack",
+        name="release-builder",
+        executor=executor,
+        role="stack",
     )
     state = resource.acquire(TaskInputs.empty())
     assert state == "release-builder"
@@ -198,8 +208,16 @@ def test_buildx_builder_creates_bootstraps_and_removes():
     argv_seqs = [tuple(s.argv) for s in executor.seen]
     assert argv_seqs == [
         ("docker", "buildx", "inspect", "release-builder"),
-        ("docker", "buildx", "create", "--name", "release-builder",
-         "--driver", "docker-container", "--use"),
+        (
+            "docker",
+            "buildx",
+            "create",
+            "--name",
+            "release-builder",
+            "--driver",
+            "docker-container",
+            "--use",
+        ),
         ("docker", "buildx", "inspect", "--bootstrap", "release-builder"),
         ("docker", "buildx", "rm", "--force", "release-builder"),
     ]
@@ -208,7 +226,9 @@ def test_buildx_builder_creates_bootstraps_and_removes():
 def test_buildx_builder_preexisting_is_not_removed():
     executor = RecordingExecutor()
     resource = buildx_builder_resource(
-        name="reuse-me", executor=executor, role="stack",
+        name="reuse-me",
+        executor=executor,
+        role="stack",
     )
     state = resource.acquire(TaskInputs.empty())
     assert state == "existing"
@@ -412,7 +432,9 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
     loadgen_req = vm_request_for_role(env, "loadgen", loadtest=True)
     arm_req = vm_request_for_role(env, "arm-builder")
-    bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=request.repo_root)
+    bindings, fetcher = build_role_bindings(
+        env, vm_provider=provider, repo_root=request.repo_root
+    )
     executor = RoleBoundCommandTaskExecutor(bindings)
     stack_host = provider.connection_host(stack_req)
 
@@ -425,49 +447,68 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
 
     # 01 — Source Tests
     archive = source_archive_resource(
-        repo_root=request.repo_root, commit=git_state(request.repo_root).commit,
-        remote_source_dir=source_dir, remote_archive=f"{remote_root}/source.tar",
-        provider=provider, request=stack_req,
+        repo_root=request.repo_root,
+        commit=git_state(request.repo_root).commit,
+        remote_source_dir=source_dir,
+        remote_archive=f"{remote_root}/source.tar",
+        provider=provider,
+        request=stack_req,
     )
     source_tests = source_tests_composite(
-        source_test_commands(Path(source_dir)), executor=executor,
+        source_test_commands(Path(source_dir)),
+        executor=executor,
     )
 
     # 02 — AMD64 Build
     amd64_builder = buildx_builder_resource(
-        name=f"release-amd64-{request.version}", executor=executor, role="stack",
+        name=f"release-amd64-{request.version}",
+        executor=executor,
+        role="stack",
     )
     amd64_build = amd64_build_composite(
-        request.image_plan, executor=executor, role="stack",
+        request.image_plan,
+        executor=executor,
+        role="stack",
     )
 
     # 03 — Registry Push
     registry_push = registry_push_composite(
-        request.image_plan, executor=executor, role="stack",
+        request.image_plan,
+        executor=executor,
+        role="stack",
     )
 
     # 04-06 — Benchmarks
     from nanolab.plans.loadtest import build_loadtest_plan
     from workflow_tasks.loadtest.adapters import HttpPrometheusClient
+
     benchmarks = []
     for i in range(1, request.settings.benchmark_runs + 1):
         benchmarks.append(
             build_loadtest_plan(
-                request.scenario, env, bindings,
+                request.scenario,
+                env,
+                bindings,
                 control_plane_url=control_plane_url,
                 prometheus_client=HttpPrometheusClient(prometheus_url),
                 run_dir=request.run_dir / f"run-{i}",
-                fetcher=fetcher, repo_root=request.repo_root,
+                fetcher=fetcher,
+                repo_root=request.repo_root,
             )
         )
 
     # 07 — Aggregate
     aggregate = AggregateBenchmarks(
-        run_dir=request.run_dir, benchmark_runs=request.settings.benchmark_runs,
+        run_dir=request.run_dir,
+        benchmark_runs=request.settings.benchmark_runs,
         profile=PerformanceProfile(
-            name=request.settings.profile, provider="azure",
-            stack_vm=env.azure.vm_size, loadgen_vm=env.azure.loadgen_vm_size,
-            architecture="amd64", flavor="native", scenario=request.settings.scenario_name,
+            name=request.settings.profile,
+            provider="azure",
+            stack_vm=env.azure.vm_size,
+            loadgen_vm=env.azure.loadgen_vm_size,
+            architecture="amd64",
+            flavor="native",
+            scenario=request.settings.scenario_name,
         ),
     )
 
@@ -480,56 +521,82 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
             p95_max_increase_percent=request.settings.p95_max_increase_percent,
             error_rate_max=request.settings.error_rate_max,
         ),
-        k6_passed=True, autoscaling_passed=True,
+        k6_passed=True,
+        autoscaling_passed=True,
     )
 
     # 09 — ARM64 Build
     tunnel = registry_tunnel_resource(
-        registry_upstream=stack_host, provider=provider, request=arm_req,
+        registry_upstream=stack_host,
+        provider=provider,
+        request=arm_req,
     )
     arm64_builder = buildx_builder_resource(
-        name=f"release-arm64-{request.version}", executor=executor, role="arm-builder",
+        name=f"release-arm64-{request.version}",
+        executor=executor,
+        role="arm-builder",
     )
     arm_plan = arm.build_arm64_image_plan(
-        request.repo_root, request.version, registry=request.image_plan.registry,
+        request.repo_root,
+        request.version,
+        registry=request.image_plan.registry,
     )
     arm64_build = arm64_build_composite(
-        arm_plan, executor=executor, role="arm-builder",
+        arm_plan,
+        executor=executor,
+        role="arm-builder",
         builder_name=f"release-arm64-{request.version}",
         remote_bake_file=f"{remote_root}/docker-bake-arm64.json",
         remote_buildkit_config=f"{remote_root}/buildkitd.toml",
-        remote_source_dir=source_dir, registry_upstream=stack_host,
+        remote_source_dir=source_dir,
+        registry_upstream=stack_host,
     )
 
     # 10 — ARM64 Smoke
     arm64_smoke = arm64_smoke_composite(
-        arm_plan, provider=provider, request=arm_req,
+        arm_plan,
+        provider=provider,
+        request=arm_req,
     )
 
     # 11 — Publish
     pub_plan = build_publish_plan(
-        request.repo_root, request.version,
+        request.repo_root,
+        request.version,
         local_registry=request.image_plan.registry,
     )
     pub_arch = publish_architectures_composite(
-        pub_plan, executor=executor, role="stack",
-        source_digests={}, authfile="...",  # resolved at runtime
+        pub_plan,
+        executor=executor,
+        role="stack",
+        source_digests={},
+        authfile="...",  # resolved at runtime
     )
     pub_manifests = publish_manifests_composite(
-        pub_plan, executor=executor, role="stack",
-        architecture_digests={}, docker_config="...",
+        pub_plan,
+        executor=executor,
+        role="stack",
+        architecture_digests={},
+        docker_config="...",
     )
     pub_aliases = publish_aliases_composite(
-        pub_plan, executor=executor, role="stack",
-        manifest_digests={}, docker_config="...",
+        pub_plan,
+        executor=executor,
+        role="stack",
+        manifest_digests={},
+        docker_config="...",
     )
 
     # 12 — Attest + Finalize
     attest = attest_composite(
-        images={}, predicate_remote=f"{remote_root}/predicate.json",
+        images={},
+        predicate_remote=f"{remote_root}/predicate.json",
         sbom_dir_remote=f"{remote_root}/sboms",
-        cosign_key="...", cosign_pw="...", docker_config="...",
-        executor=executor, role="stack",
+        cosign_key="...",
+        cosign_pw="...",
+        docker_config="...",
+        executor=executor,
+        role="stack",
     )
 
     # Wire the DAG
@@ -581,6 +648,7 @@ Note: the actual implementation needs to handle the full benchmark workflow embe
 @dataclass
 class RunBenchmarkWorkflow(Task[Path]):
     """Run a loadtest workflow and return the summary path."""
+
     workflow: Workflow
     summary_path: Path
 

@@ -20,24 +20,27 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import typer
-
-from nanolab.tasks.components.bootstrap import remote_project_dir
-from nanolab.tasks.deployment import LOCAL_REGISTRY
-from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
+from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
-from sonata_engine.workflow.context import bind_workflow_sink
-
 from nanolab.cli.execution import build_role_bindings
-from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.cli.progress import ConsoleProgressSink
-from nanolab.comparison.matrix import ComparisonCell, build_matrix, pending, write_manifest
+from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.comparison.matrix import (
+    ComparisonCell,
+    build_matrix,
+    pending,
+    write_manifest,
+)
 from nanolab.comparison.prepare import prepare_operations, prepare_workflow
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
 from nanolab.plans.functions import resolve_function
 from nanolab.plans.runtime_comparison import COMPARISON_MODULES
+from nanolab.tasks.components.bootstrap import remote_project_dir
+from nanolab.tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
 
@@ -90,7 +93,9 @@ def _run_prepare(
 ) -> None:
     """Compile the functions and every control-plane build, on the VM, once."""
     functions = tuple(
-        resolve_function(scenario_config, key, source_root=repo_root, tool_root=tool_root)
+        resolve_function(
+            scenario_config, key, source_root=repo_root, tool_root=tool_root
+        )
         for key in scenario_config.functions
     )
     operations = prepare_operations(
@@ -176,7 +181,7 @@ def _run_cell(
                 resume=False,
             )
             return
-        except Exception as error:  # noqa: BLE001 - any cell failure is retryable once
+        except Exception as error:
             if attempt == CELL_ATTEMPTS:
                 raise
             typer.echo(f"  {cell.label} failed ({error}); retrying once")
@@ -185,7 +190,7 @@ def _run_cell(
 
 
 def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfig:
-    """The scenario for one cell: the base, with the build it measures named.
+    """Return one cell's scenario: the base with the build it measures named.
 
     A copy rather than a mutation, because the base is read once and every cell
     must differ from it in exactly one field.
@@ -194,10 +199,15 @@ def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfi
 
 
 def register(app: typer.Typer) -> None:
+    """Register the `compare` command on `app`."""
+
     @app.command("compare")
+    # Typer's documented API takes the parameter spec as the default, and each
+    # call builds a fresh object that is not shared between invocations, so
+    # B008's mutable-default concern does not apply.
     def compare_command(
-        scenario: Path = typer.Argument(..., exists=True),
-        environment: Path = typer.Option(..., "--environment", exists=True),
+        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
+        environment: Path = typer.Option(..., "--environment", exists=True),  # noqa: B008
         repetitions: int = typer.Option(
             3,
             "--repetitions",
@@ -208,7 +218,7 @@ def register(app: typer.Typer) -> None:
             "--variants",
             help="Comma-separated control-plane builds to compare.",
         ),
-        run_dir: Path | None = typer.Option(None, "--run-dir"),
+        run_dir: Path | None = typer.Option(None, "--run-dir"),  # noqa: B008
         fresh: bool = typer.Option(
             False,
             "--fresh",
@@ -280,7 +290,9 @@ def register(app: typer.Typer) -> None:
         # One cluster and one registry for the whole matrix. Tearing down between
         # cells would make each one pay for a fresh k3s and would destroy the
         # images the prepare phase just built.
-        with _provisioning_context(scenario_config, environment_config, paths, True) as _:
+        with _provisioning_context(
+            scenario_config, environment_config, paths, True
+        ) as _:
             bindings, _fetcher = build_role_bindings(environment_config)
             _run_prepare(
                 scenario_config,

@@ -17,7 +17,7 @@ from nanolab.tasks.loadtest.concurrency import (
 
 
 def series(*values: int) -> tuple[ConcurrencySample, ...]:
-    """A series with no load recorded: enough for shape questions."""
+    """Build a series with no load recorded, enough for shape questions."""
     return tuple(
         ConcurrencySample(elapsed_seconds=float(index), effective=value)
         for index, value in enumerate(values)
@@ -98,9 +98,12 @@ def test_verify_rejects_a_limit_that_never_moved() -> None:
 
 
 def test_verify_accepts_a_governor_that_converged_and_held() -> None:
-    """The shape a sustained load actually produces. Demanding a climb back made
+    """Accept a governor that converged and held.
+
+    The shape a sustained load actually produces. Demanding a climb back made
     the verdict depend on the tail relaxing, and failed a run that descended
-    8 -> 2 and held there for 146 readings."""
+    8 -> 2 and held there for 146 readings.
+    """
     summary = summarise(
         loaded_series((8, 0), (8, 1), (6, 6), (4, 4), (2, 2), (2, 2), (2, 2))
     )
@@ -178,7 +181,9 @@ def test_watcher_refuses_a_second_start() -> None:
 
 def test_trajectory_survives_the_failure_that_discards_the_summary() -> None:
     samples = series(2, 4, 4, 4, 8, 8)
-    summary = ConcurrencySummary(function_name="fn", samples=samples, dip=find_dip(samples))
+    summary = ConcurrencySummary(
+        function_name="fn", samples=samples, dip=find_dip(samples)
+    )
 
     assert summary.trajectory() == "2x1 4x3 8x2"
 
@@ -187,9 +192,14 @@ def test_trajectory_survives_the_failure_that_discards_the_summary() -> None:
 
 
 def test_describe_names_the_shape_for_the_run_log() -> None:
-    """A green run is otherwise silent about what the governor did, and nothing
-    downstream persists the series."""
-    described = summarise(loaded_series((6, 0), (6, 1), (2, 5), (2, 5), (6, 0))).describe()
+    """Name the shape for the run log.
+
+    A green run is otherwise silent about what the governor did, and nothing
+    downstream persists the series.
+    """
+    described = summarise(
+        loaded_series((6, 0), (6, 1), (2, 5), (2, 5), (6, 0))
+    ).describe()
 
     assert "[6x2 2x2 6x1]" in described
     assert "idle peak 6 -> busy floor 2" in described
@@ -197,8 +207,11 @@ def test_describe_names_the_shape_for_the_run_log() -> None:
 
 
 def test_the_trajectory_pairs_each_block_with_its_service_time() -> None:
-    """Aggregate extremes could not say whether the function slowed while the
-    limit was still high, which is the whole diagnosis."""
+    """Pair each trajectory block with its service time.
+
+    Aggregate extremes could not say whether the function slowed while the
+    limit was still high, which is the whole diagnosis.
+    """
     samples = (
         ConcurrencySample(elapsed_seconds=0.0, effective=8, mean_latency_ms=None),
         ConcurrencySample(elapsed_seconds=2.0, effective=8, mean_latency_ms=2.0),
@@ -212,15 +225,25 @@ def test_the_trajectory_pairs_each_block_with_its_service_time() -> None:
 
 def test_describe_still_names_the_series_when_there_was_no_excursion() -> None:
     samples = series(4, 4, 4)
-    summary = ConcurrencySummary(function_name="fn", samples=samples, dip=find_dip(samples))
+    summary = ConcurrencySummary(
+        function_name="fn", samples=samples, dip=find_dip(samples)
+    )
 
     assert summary.describe() == "concurrency governor for 'fn': [4x3]"
 
 
 def test_readings_before_the_governors_first_decision_are_dropped() -> None:
-    """The queue opens at the function's configured `concurrency`, a value nobody
-    decided and higher than anything the governor picks while still climbing."""
-    assert [s.effective for s in governed_samples(series(8, 8, 5, 6, 7, 8))] == [5, 6, 7, 8]
+    """Drop readings taken before the governor's first decision.
+
+    The queue opens at the function's configured `concurrency`, a value nobody
+    decided and higher than anything the governor picks while still climbing.
+    """
+    assert [s.effective for s in governed_samples(series(8, 8, 5, 6, 7, 8))] == [
+        5,
+        6,
+        7,
+        8,
+    ]
 
 
 def test_nothing_is_dropped_when_the_limit_never_left_its_opening_value() -> None:
@@ -236,18 +259,35 @@ def test_the_verdict_ignores_the_warm_up_that_a_real_run_passed_on() -> None:
     run has no cycle to report — which is the honest answer.
     """
     observed = series(
-        *([8] * 2 + [5] * 3 + [6] * 4 + [7] * 3 + [8] * 44 + [7] * 5 + [6] * 3 + [5] * 5 + [4] * 5 + [3])
+        *(
+            [8] * 2
+            + [5] * 3
+            + [6] * 4
+            + [7] * 3
+            + [8] * 44
+            + [7] * 5
+            + [6] * 3
+            + [5] * 5
+            + [4] * 5
+            + [3]
+        )
     )
 
-    assert find_dip(observed) is not None, "the raw series does contain the warm-up excursion"
+    assert find_dip(observed) is not None, (
+        "the raw series does contain the warm-up excursion"
+    )
     assert find_dip(governed_samples(observed)) is None
 
 
 def test_the_interval_mean_service_time_travels_with_the_limit() -> None:
     watcher = ConcurrencyWatcher(
         _StubProbe(
-            ConcurrencyReading(effective=8, in_flight=6, latency_count=10, latency_total_ms=50),
-            ConcurrencyReading(effective=8, in_flight=7, latency_count=20, latency_total_ms=250),
+            ConcurrencyReading(
+                effective=8, in_flight=6, latency_count=10, latency_total_ms=50
+            ),
+            ConcurrencyReading(
+                effective=8, in_flight=7, latency_count=20, latency_total_ms=250
+            ),
         ),
         poll_interval_seconds=60,
     )
@@ -263,15 +303,24 @@ def test_the_interval_mean_service_time_travels_with_the_limit() -> None:
 
 
 def test_the_series_is_written_before_the_verdict_can_raise(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Seven runs were spent inferring an ordering recorded nowhere; the failing
-    run is exactly the one whose readings are worth keeping."""
+    """Write the series before the verdict can raise.
+
+    Seven runs were spent inferring an ordering recorded nowhere; the failing
+    run is exactly the one whose readings are worth keeping.
+    """
     from nanolab.tasks.loadtest.concurrency import write_series
 
     samples = (
-        ConcurrencySample(elapsed_seconds=0.0, effective=8, in_flight=1, mean_latency_ms=None),
-        ConcurrencySample(elapsed_seconds=2.0, effective=8, in_flight=7, mean_latency_ms=19.3),
+        ConcurrencySample(
+            elapsed_seconds=0.0, effective=8, in_flight=1, mean_latency_ms=None
+        ),
+        ConcurrencySample(
+            elapsed_seconds=2.0, effective=8, in_flight=7, mean_latency_ms=19.3
+        ),
     )
-    summary = ConcurrencySummary(function_name="fn", samples=samples, dip=find_dip(samples))
+    summary = ConcurrencySummary(
+        function_name="fn", samples=samples, dip=find_dip(samples)
+    )
     path = tmp_path / "nested" / "concurrency-series.json"
 
     write_series(summary, path)
@@ -291,9 +340,12 @@ def test_the_series_is_written_before_the_verdict_can_raise(tmp_path) -> None:  
 
 
 def test_the_series_carries_what_the_limit_cost_the_caller() -> None:
-    """A limit does not delete work, it moves it into the buffer. A series with
+    """Carry in the series what the limit cost the caller.
+
+    A limit does not delete work, it moves it into the buffer. A series with
     the limit and the service time but no queue depth and no queue wait reports
-    the decision while hiding its price."""
+    the decision while hiding its price.
+    """
     watcher = ConcurrencyWatcher(
         _StubProbe(
             ConcurrencyReading(
@@ -331,15 +383,26 @@ def test_the_series_carries_what_the_limit_cost_the_caller() -> None:
 
 
 def test_an_interval_that_completed_nothing_still_reports_its_rejections() -> None:
-    """The interval where the queue was full is the one worth recording, and it
-    is exactly the one where no request completed to feed the latency timer."""
+    """Report the rejections of an interval that completed nothing.
+
+    The interval where the queue was full is the one worth recording, and it
+    is exactly the one where no request completed to feed the latency timer.
+    """
     watcher = ConcurrencyWatcher(
         _StubProbe(
             ConcurrencyReading(
-                effective=1, in_flight=1, latency_count=10, latency_total_ms=50, rejected=0
+                effective=1,
+                in_flight=1,
+                latency_count=10,
+                latency_total_ms=50,
+                rejected=0,
             ),
             ConcurrencyReading(
-                effective=1, in_flight=1, latency_count=10, latency_total_ms=50, rejected=430
+                effective=1,
+                in_flight=1,
+                latency_count=10,
+                latency_total_ms=50,
+                rejected=430,
             ),
         ),
         poll_interval_seconds=60,
@@ -351,13 +414,18 @@ def test_an_interval_that_completed_nothing_still_reports_its_rejections() -> No
         watcher.stop()
 
     latest = watcher.samples[-1]
-    assert latest.mean_latency_ms is None, "nothing completed, so there is no service time"
+    assert latest.mean_latency_ms is None, (
+        "nothing completed, so there is no service time"
+    )
     assert latest.rejected == 430
 
 
 def test_the_scrape_records_what_the_queue_was_actually_running() -> None:
-    """A limit of 8 with one request in flight is not the governor holding
-    firm under load; it is load that never became concurrent."""
+    """Record what the queue was actually running, not the limit.
+
+    A limit of 8 with one request in flight is not the governor holding
+    firm under load; it is load that never became concurrent.
+    """
     reading = ConcurrencyReading(
         effective=8, in_flight=1, latency_count=10, latency_total_ms=25
     )
@@ -366,9 +434,12 @@ def test_the_scrape_records_what_the_queue_was_actually_running() -> None:
 
 
 def test_a_governor_converged_to_one_still_counts_as_loaded() -> None:
-    """With a limit of 1 the function can never show two requests in flight, so a
+    """Count a governor converged to one as loaded.
+
+    With a limit of 1 the function can never show two requests in flight, so a
     fixed threshold filed its converged state as idle and reported a floor it had
-    already left."""
+    already left.
+    """
     response = measure_response(loaded_series((8, 0), (8, 2), (1, 1), (1, 1)))
 
     assert response is not None
@@ -376,8 +447,11 @@ def test_a_governor_converged_to_one_still_counts_as_loaded() -> None:
 
 
 def test_a_group_starts_and_stops_its_watchers_together() -> None:
-    """Both series have to cover the same window, or "the neighbour arrived here"
-    is not a statement about both."""
+    """Start and stop the group's watchers together.
+
+    Both series have to cover the same window, or "the neighbour arrived here"
+    is not a statement about both.
+    """
     from nanolab.tasks.loadtest.concurrency import ConcurrencyWatcherGroup
 
     group = ConcurrencyWatcherGroup(
@@ -409,15 +483,22 @@ def test_an_exploratory_run_still_has_to_prove_it_measured_something() -> None:
 
 
 def test_the_interval_carries_throughput_as_well_as_latency() -> None:
-    """Latency alone cannot say whether the concurrency was worth having: service
+    """Carry throughput through the interval as well as latency.
+
+    Latency alone cannot say whether the concurrency was worth having: service
     time rises with concurrency on any shared resource, so a limit that costs
-    latency is only wrong if it bought no completions."""
+    latency is only wrong if it bought no completions.
+    """
     import time as _time
 
     watcher = ConcurrencyWatcher(
         _StubProbe(
-            ConcurrencyReading(effective=8, in_flight=6, latency_count=100, latency_total_ms=200),
-            ConcurrencyReading(effective=8, in_flight=7, latency_count=140, latency_total_ms=360),
+            ConcurrencyReading(
+                effective=8, in_flight=6, latency_count=100, latency_total_ms=200
+            ),
+            ConcurrencyReading(
+                effective=8, in_flight=7, latency_count=140, latency_total_ms=360
+            ),
         ),
         poll_interval_seconds=60,
     )

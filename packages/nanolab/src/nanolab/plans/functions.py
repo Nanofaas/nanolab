@@ -10,15 +10,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from nanolab.tasks.validate import ValidateFunction as SonataFunction
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
+from nanolab.tasks.validate import ValidateFunction as SonataFunction
 from nanolab.workspace.paths import discover_tool_root
 
 
 @dataclass(frozen=True, slots=True)
 class ResolvedFunction:
+    """One function key resolved into the concrete values a task runs with.
+
+    The identity (`key`, `name`, `image`), what to build the image from
+    (`build_argv`, `image_build_argv`), the serialized `payload` to send, and
+    the resource and scaling knobs the scenario declared.
+    """
+
     key: str
     name: str
     image: str
@@ -45,10 +52,11 @@ class FunctionPayload:
 def resolve_function_payloads(
     key: str, source_root: Path | None = None
 ) -> tuple[FunctionPayload, ...]:
-    """The payload set a function owns under `functions/<runtime>/<family>/payloads/`.
+    """Return the payloads a function owns under its `payloads/` directory.
 
-    Each file is the nanoFaaS function-test shape `{description, input, expected}`.
-    Functions without a payload directory (or none at all) contribute nothing.
+    Each file lives at `functions/<runtime>/<family>/payloads/` and has the
+    nanoFaaS function-test shape `{description, input, expected}`. Functions
+    without a payload directory (or none at all) contribute nothing.
     """
     definition = resolve_function_definition(key, source_root)
     if definition.example_dir is None:
@@ -99,12 +107,20 @@ def _build_argv(definition: FunctionDefinition, image: str) -> tuple[str, ...]:
     return argv
 
 
-def _image_build_argv(definition: FunctionDefinition, image: str) -> tuple[str, ...] | None:
+def _image_build_argv(
+    definition: FunctionDefinition, image: str
+) -> tuple[str, ...] | None:
     if definition.runtime != "java":
         return None
     family = definition.family
     return (
-        "docker", "build", "-t", image, "-f", f"functions/java/{family}/Dockerfile", f"functions/java/{family}"
+        "docker",
+        "build",
+        "-t",
+        image,
+        "-f",
+        f"functions/java/{family}/Dockerfile",
+        f"functions/java/{family}",
     )
 
 
@@ -137,6 +153,12 @@ def resolve_function(
     source_root: Path | None = None,
     tool_root: Path | None = None,
 ) -> ResolvedFunction:
+    """Resolve a scenario function key into the values a task runs with.
+
+    The image is taken from the function definition and must be present; the
+    name and payload fall back when the definition does not supply one, and
+    the resource overrides come from the scenario's `resources` map.
+    """
     definition = resolve_function_definition(key, source_root)
     image = _function_image(definition)
     resource = config.resources.get(key)
@@ -148,7 +170,9 @@ def resolve_function(
         image_build_argv=_image_build_argv(definition, image),
         payload=_payload(definition, tool_root),
         resources=(
-            resource.model_dump(by_alias=True, exclude_none=True) if resource is not None else None
+            resource.model_dump(by_alias=True, exclude_none=True)
+            if resource is not None
+            else None
         ),
     )
 

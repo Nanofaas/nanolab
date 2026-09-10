@@ -54,7 +54,13 @@ dev = [
     "import-linter>=2.11",
     "pydeps>=3.0.6",
     "pytest>=9.0.3",
-    "ruff>=0.15.12",
+    "pytest-cov>=6.0",
+    # Pinned exactly to match the ruff-pre-commit revision in
+    # .pre-commit-config.yaml. A newer ruff in either place makes the hook and a
+    # local `ruff check` disagree about what a violation is. Bump both together.
+    "ruff==0.16.6",
+    "bandit>=1.8",
+    "pre-commit>=4.0",
 ]
 
 [tool.uv.sources]
@@ -63,26 +69,114 @@ tui-toolkit = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--import-mode=importlib"
+# Named explicitly rather than a bare `--cov`: a bare one means "everything
+# importable", which pulled the sibling tui-toolkit package into this gate and
+# mixed two packages' coverage into one number.
+addopts = "--import-mode=importlib --cov=nanolab --cov-report=term-missing"
+
+# =============================================================================
+# Ruff - linting + formatting
+# =============================================================================
+# The project previously selected only ["F", "SLF"]. SLF is kept - it was a
+# deliberate choice here and dropping it would be a loosening - and the rest of
+# the shared rule set is added on top.
 
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 88
+# ruff's built-in exclude list has `dist` but not `build`, so a setuptools build
+# tree left in the package gets linted as if it were source.
+extend-exclude = ["build", "dist"]
 
 [tool.ruff.lint]
-select = ["F", "SLF"]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # Pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "SLF",   # flake8-self - private member access
+    "TID",   # flake8-tidy-imports
+    "RUF",   # Ruff-specific rules
+    "PERF",  # Perflint
+    "PT",    # flake8-pytest-style
+    "RET",   # flake8-return
+    "PTH",   # flake8-use-pathlib
+    "ERA",   # eradicate - commented-out code
+    "D",     # pydocstyle - this is a published product with a public API
+]
+ignore = [
+    # Mutually exclusive summary conventions. Summary on the first line (D212)
+    # is the chosen convention, so its counterpart D213 is off; D203 pairs with
+    # D211 the same way.
+    "D203",
+    "D213",
+    "PT018",
+]
+
+[tool.ruff.lint.isort]
+# Declared rather than inferred: ruff derives first-party packages from the
+# project root, which changes with --config, and this workspace runs ruff once
+# per package. See the same note in the sibling projects.
+known-first-party = ["nanolab"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/nanolab/tui/app.py" = ["SLF001"]
-"tests/**/*.py" = ["F841", "SLF001"]
+# Test functions are documented by their name; requiring a docstring on every
+# one of them is noise, not documentation. Style rules (D2xx/D4xx) still apply.
+"tests/**/*.py" = [
+    "F841",
+    "SLF001",
+    "D100", "D101", "D102", "D103", "D104", "D105", "D107",
+]
+
+# =============================================================================
+# Coverage
+# =============================================================================
+
+[tool.coverage.run]
+branch = true
+source = ["nanolab"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90
+
+# =============================================================================
+# basedpyright - type checking
+# =============================================================================
+# Raised from "basic" to match the sibling projects. reportImplicitOverride is
+# left off because typing.override requires 3.12 and tui-toolkit in this
+# workspace supports 3.11; keeping the two packages on one setting is worth
+# more than the rule here.
 
 [tool.basedpyright]
 include = [
     "src/nanolab",
     "tests",
 ]
-typeCheckingMode = "basic"
+typeCheckingMode = "standard"
 reportMissingTypeStubs = false
 reportPrivateUsage = false
 venvPath = "../.."
 venv = ".venv"
+
+# =============================================================================
+# Bandit - security static analysis
+# =============================================================================
+# This product drives VMs, containers and Ansible through external CLIs, so
+# subprocess is its subject matter rather than a smell. B604 (shell=True) is NOT
+# skipped: this codebase has real shell=True call sites and they are reviewed
+# individually.
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+skips = [
+    "B404",
+    "B603",
+    "B607",
+]

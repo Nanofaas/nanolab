@@ -32,7 +32,9 @@ def test_vm_file_fetcher_calls_transfer_from(tmp_path: Path) -> None:
 
 def test_vm_file_fetcher_raises_on_nonzero() -> None:
     orch = MagicMock()
-    orch.transfer_from.return_value = _FakeResult(return_code=1, stderr="permission denied")
+    orch.transfer_from.return_value = _FakeResult(
+        return_code=1, stderr="permission denied"
+    )
 
     fetcher = VmFileFetcher(vm=orch, request=MagicMock())
     with pytest.raises(RuntimeError, match="permission denied"):

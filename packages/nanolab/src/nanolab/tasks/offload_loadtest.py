@@ -1,3 +1,5 @@
+"""Workflow that exercises function offloading between a cloud and an edge."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,7 +21,9 @@ class ConservationEvaluator(Protocol):
     from — reading a file and fetching two URLs is the caller's business.
     """
 
-    def run(self) -> object: ...
+    def run(self) -> object:
+        """Return the conservation report for the collected metrics."""
+        ...
 
 
 class EvaluateConservationTask(Task[LoadtestOutcome]):
@@ -43,6 +47,7 @@ class EvaluateConservationTask(Task[LoadtestOutcome]):
         evaluate: ConservationEvaluator,
         title: str = "Evaluate offload conservation",
     ) -> None:
+        """Bind the task to the evaluator that produces the report."""
         self.title = title
         self._evaluate = evaluate
 
@@ -66,6 +71,7 @@ class OffloadLoadtestRequest:
     edge: PlatformRequest
 
     def __post_init__(self) -> None:
+        """Reject a request whose cloud and edge share a role."""
         if self.cloud.role == self.edge.role:
             raise ValueError(
                 "cloud and edge must run on different roles; "
@@ -98,15 +104,29 @@ def build_offload_loadtest_workflow(
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
     cloud = add_platform(
-        workflow, request.cloud, executor=executor, cwd=cwd, requires=requires,
+        workflow,
+        request.cloud,
+        executor=executor,
+        cwd=cwd,
+        requires=requires,
         local_endpoint=cloud_local_endpoint,
     )
     edge = add_platform(
-        workflow, request.edge, executor=executor, cwd=cwd, requires=requires,
+        workflow,
+        request.edge,
+        executor=executor,
+        cwd=cwd,
+        requires=requires,
         local_endpoint=edge_local_endpoint,
     )
     workflow.add(
         load,
-        requires=(*requires, *cloud.resources, *cloud.functions, *edge.resources, *edge.functions),
+        requires=(
+            *requires,
+            *cloud.resources,
+            *cloud.functions,
+            *edge.resources,
+            *edge.functions,
+        ),
     )
     return workflow

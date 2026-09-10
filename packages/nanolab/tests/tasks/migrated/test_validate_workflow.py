@@ -9,10 +9,10 @@ import pytest
 from sonata_engine import Resource, TaskInputs, UndeclaredResourceError, Workflow
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.execution.bindings import RoleBindings
-from nanolab.tasks.http_function import HttpFunctionExpectation
 from sonata_tasks.tasks.executors import VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.tasks.http_function import HttpFunctionExpectation
 from nanolab.tasks.validate import (
     AsyncCheck,
     EnvelopeCheck,
@@ -26,7 +26,10 @@ FUNCTION = ValidateFunction(
     image="localhost:5000/nanofaas/java-word-stats:e2e",
     payload='{"text":"a b"}',
     build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"),
-    resources={"requests": {"cpu": 0.5, "memoryMiB": 256}, "limits": {"cpu": 1, "memoryMiB": 512}},
+    resources={
+        "requests": {"cpu": 0.5, "memoryMiB": 256},
+        "limits": {"cpu": 1, "memoryMiB": 512},
+    },
 )
 
 QUEUE_PROBE = ValidateFunction(
@@ -69,6 +72,7 @@ class ScriptedExecutor:
 
     def binding_key(self, role: str) -> str:
         return f"test:{role}"
+
     default_stdout: str = '{"status":"success","output":"ok"}'
 
     def __post_init__(self) -> None:
@@ -98,7 +102,9 @@ class ScriptedExecutor:
         for spec in self.seen:
             if fragment in " ".join(spec.argv):
                 return spec.argv
-        raise AssertionError(f"no command matching {fragment!r} in {len(self.seen)} commands")
+        raise AssertionError(
+            f"no command matching {fragment!r} in {len(self.seen)} commands"
+        )
 
 
 class VmScriptedRunner:
@@ -121,7 +127,10 @@ class VmScriptedRunner:
         }
         return VmResult(
             return_code=0,
-            stdout=next((value for key, value in stdout.items() if key in " ".join(argv)), '{"status":"success","output":"ok"}'),
+            stdout=next(
+                (value for key, value in stdout.items() if key in " ".join(argv)),
+                '{"status":"success","output":"ok"}',
+            ),
         )
 
 
@@ -209,7 +218,9 @@ def test_envelope_check_runs_after_registration_and_accepts_expected_422() -> No
     ).run()
 
     commands = [" ".join(spec.argv) for spec in executor.seen]
-    registered = next(i for i, command in enumerate(commands) if command.endswith("/v1/functions"))
+    registered = next(
+        i for i, command in enumerate(commands) if command.endswith("/v1/functions")
+    )
     checked = next(i for i, command in enumerate(commands) if "curl -isS" in command)
     assert registered < checked
     contract = executor.seen[checked]
@@ -356,10 +367,12 @@ def test_queue_burst_writes_its_summary_in_the_task_directory() -> None:
             queue_probe=QUEUE_PROBE,
             queue_burst_script=Path("assets/k6/k8s-queue-burst.js"),
         ),
-        RoleBindings({
-            "host": ScriptedExecutor(),
-            "stack": VmCommandTaskExecutor(runner, target_key="test-stack"),
-        }),
+        RoleBindings(
+            {
+                "host": ScriptedExecutor(),
+                "stack": VmCommandTaskExecutor(runner, target_key="test-stack"),
+            }
+        ),
     ).run()
 
     k6_argv, remote_dir = next(
@@ -379,22 +392,33 @@ def test_queue_burst_summaries_are_unique_per_workflow_build() -> None:
                 queue_probe=QUEUE_PROBE,
                 queue_burst_script=Path("assets/k6/k8s-queue-burst.js"),
             ),
-            RoleBindings({
-                "host": ScriptedExecutor(),
-                "stack": VmCommandTaskExecutor(runner, target_key="test-stack"),
-            }),
+            RoleBindings(
+                {
+                    "host": ScriptedExecutor(),
+                    "stack": VmCommandTaskExecutor(runner, target_key="test-stack"),
+                }
+            ),
         ).run()
         summaries.append(
-            next(command[0][3] for command in runner.commands if command[0][:2] == ("k6", "run"))
+            next(
+                command[0][3]
+                for command in runner.commands
+                if command[0][:2] == ("k6", "run")
+            )
         )
 
     assert summaries[0] != summaries[1]
 
 
 def test_the_teardown_is_compiled_in_rather_than_left_to_the_caller() -> None:
-    """The legacy workflow exposed cleanup as a separate function the caller had
-    to remember; a crash before that call leaked the release and the function."""
-    titles = _titles(build_validate_workflow(_request(backend="k8s"), _bindings(ScriptedExecutor())))
+    """Compile the teardown in rather than leaving it to the caller.
+
+    The legacy workflow exposed cleanup as a separate function the caller had
+    to remember; a crash before that call leaked the release and the function.
+    """
+    titles = _titles(
+        build_validate_workflow(_request(backend="k8s"), _bindings(ScriptedExecutor()))
+    )
 
     assert titles[-2:] == ["Release word-stats-java", "Release Helm release nanofaas"]
 
@@ -446,8 +470,11 @@ def test_the_container_backend_curls_the_endpoint_it_was_given() -> None:
 
 
 def test_the_k8s_endpoint_is_read_from_the_release_not_spelled_in_advance() -> None:
-    """The address exists only once the Service does, so it arrives as a resource
-    value. The shell version embedded `$(kubectl ...)` in the URL instead."""
+    """Read the k8s endpoint from the released Service, not up front.
+
+    The address exists only once the Service does, so it arrives as a resource
+    value. The shell version embedded `$(kubectl ...)` in the URL instead.
+    """
     executor = ScriptedExecutor(
         responses={
             "get service control-plane": TaskResult(
@@ -464,8 +491,11 @@ def test_the_k8s_endpoint_is_read_from_the_release_not_spelled_in_advance() -> N
 
 
 def test_a_service_without_an_address_fails_the_acquire_and_uninstalls() -> None:
-    """Better than registering against an empty URL: the acquire compensates, so
-    the half-installed release does not survive the failure."""
+    """Fail the acquire and uninstall when the Service has no address.
+
+    Better than registering against an empty URL: the acquire compensates, so
+    the half-installed release does not survive the failure.
+    """
     executor = ScriptedExecutor(
         responses={
             "get service control-plane": TaskResult(
@@ -482,7 +512,9 @@ def test_a_service_without_an_address_fails_the_acquire_and_uninstalls() -> None
 
 def test_skipping_the_builds_still_deploys_the_named_image() -> None:
     workflow = build_validate_workflow(
-        _request(backend="k8s", build_images=False, control_plane_image="ghcr.io/x/cp:1"),
+        _request(
+            backend="k8s", build_images=False, control_plane_image="ghcr.io/x/cp:1"
+        ),
         _bindings(ScriptedExecutor()),
     )
 
@@ -513,8 +545,11 @@ def test_a_local_control_plane_is_only_built_when_one_is_supplied() -> None:
 
 
 def test_the_inspection_asks_the_backend_not_the_control_plane() -> None:
-    """A control plane would report what it was told; this proves the declared
-    limits reached the object that actually runs the function."""
+    """Ask the backend, not the control plane, for the running object.
+
+    A control plane would report what it was told; this proves the declared
+    limits reached the object that actually runs the function.
+    """
     executor = ScriptedExecutor(
         responses={
             "docker inspect": TaskResult(
@@ -595,8 +630,11 @@ def test_every_function_gets_its_own_resource_so_a_slice_keeps_its_own() -> None
 
 
 def test_inputs_are_only_readable_where_declared() -> None:
-    """A sanity check on the mechanism the k8s endpoint relies on: reading a
-    resource a task did not declare is an error, not an empty string."""
+    """Read inputs only where they were declared.
+
+    A sanity check on the mechanism the k8s endpoint relies on: reading a
+    resource a task did not declare is an error, not an empty string.
+    """
     resource: Resource[str] = Resource(
         title="X", acquire=lambda _inputs: "v", release=lambda _inputs, _value: None
     )
@@ -605,7 +643,9 @@ def test_inputs_are_only_readable_where_declared() -> None:
         _ = TaskInputs.empty().resource(resource)
 
 
-def _started(workflow: Workflow, executor: ScriptedExecutor) -> list[tuple[str, str | None]]:
+def _started(
+    workflow: Workflow, executor: ScriptedExecutor
+) -> list[tuple[str, str | None]]:
     """(task_id, parent_task_id) for every task.started of a real run."""
 
     class Sink:
@@ -629,9 +669,14 @@ def _started(workflow: Workflow, executor: ScriptedExecutor) -> list[tuple[str, 
     ]
 
 
-def test_the_helm_acquire_reports_its_three_steps_without_becoming_three_units() -> None:
-    """The point of the composite: the plan keeps one line for the release, and a
-    run stops being silent through a chart install that takes minutes."""
+def test_the_helm_acquire_reports_its_three_steps_without_becoming_three_units() -> (
+    None
+):
+    """Report the helm acquire's three steps as one unit of the plan.
+
+    The point of the composite: the plan keeps one line for the release, and a
+    run stops being silent through a chart install that takes minutes.
+    """
     executor = ScriptedExecutor()
     workflow = build_validate_workflow(_request(backend="k8s"), _bindings(executor))
 
@@ -662,16 +707,21 @@ def test_the_address_travels_between_steps_rather_than_being_read_by_hand() -> N
 
 
 def test_kubernetes_waits_for_the_pod_before_invoking_it() -> None:
-    """A live run invoked 0.4s after registering and got POOL_ERROR: Connection
+    """Wait for the pod before invoking it on Kubernetes.
+
+    A live run invoked 0.4s after registering and got POOL_ERROR: Connection
     refused — the Service existed, nothing was listening behind it. Registering
     asks the control plane to create the Deployment; it answers before the pod
-    does."""
+    does.
+    """
     executor = ScriptedExecutor()
 
     build_validate_workflow(_request(backend="k8s"), _bindings(executor)).run()
 
     commands = [" ".join(spec.argv) for spec in executor.seen]
-    appeared = next(i for i, c in enumerate(commands) if "get deployment/fn-word-stats-java" in c)
+    appeared = next(
+        i for i, c in enumerate(commands) if "get deployment/fn-word-stats-java" in c
+    )
     rolled_out = next(i for i, c in enumerate(commands) if "rollout status" in c)
     invoked = next(i for i, c in enumerate(commands) if ":invoke" in c)
 
@@ -687,7 +737,19 @@ def test_the_container_backend_has_no_deployment_to_wait_for() -> None:
 
 
 def test_waiting_does_not_add_units_to_the_plan() -> None:
-    """Readiness shares the register's fate, so it belongs inside the function's
+    """Keep the readiness wait inside the acquire so it adds no plan units.
+
+    Readiness shares the register's fate, so it belongs inside the function's
     acquire rather than beside it: a timeout must still delete what register
-    created."""
-    assert len(build_validate_workflow(_request(backend="k8s"), _bindings(ScriptedExecutor())).compile().tasks) == 12
+    created.
+    """
+    assert (
+        len(
+            build_validate_workflow(
+                _request(backend="k8s"), _bindings(ScriptedExecutor())
+            )
+            .compile()
+            .tasks
+        )
+        == 12
+    )

@@ -1,3 +1,5 @@
+"""The validate workflow: stand the platform up, then probe what it deployed."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -7,13 +9,14 @@ from typing import Any
 from uuid import uuid4
 
 from sonata_engine import Resource, Steps, Workflow
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
     RoleBoundCommandTaskExecutor,
 )
 
-from sonata_tasks.command import CommandTask
+from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from nanolab.tasks.http_function import (
     HttpExecutionSuccessTask,
@@ -31,7 +34,6 @@ from nanolab.tasks.platform import (
     add_platform,
 )
 from nanolab.tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
-from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.validate_recovery import (
     ContainerPersistentRecoveryTask,
     KubernetesPersistentRecoveryTask,
@@ -109,7 +111,7 @@ def _inspection_task(
     )
 
 
-def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the execution graph
+def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution graph
     # ValidateWorkflowRequest, not PlatformRequest: this reads queue_probe,
     # extended_k8s_checks and queue_burst_script, none of which exist on the
     # base. Every caller already passes the subclass — the wider annotation only
@@ -151,7 +153,9 @@ def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the e
         requires=requires,
     )
 
-    for function, registered in zip(request.functions, platform.functions):
+    for function, registered in zip(
+        request.functions, platform.functions, strict=False
+    ):
         if request.persistent_recovery:
             recovery = (
                 ContainerPersistentRecoveryTask(
@@ -163,7 +167,8 @@ def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the e
                     role=request.role,
                     cwd=cwd,
                 )
-                if request.backend == "container" and request.recovery_project is not None
+                if request.backend == "container"
+                and request.recovery_project is not None
                 else KubernetesPersistentRecoveryTask(
                     name=function.name,
                     payload=function.payload,
@@ -199,9 +204,33 @@ def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the e
                 Steps(
                     title=f"Verify async lifecycle of {function.name}",
                     steps=(
-                        HttpFunctionEnqueueTask(function.name, payload=function.payload, endpoint=platform.endpoint, executor=executor, role=request.role, idempotency_key=f"{function.name}-idempotent", title=f"Enqueue {function.name}", cwd=cwd),
-                        HttpFunctionEnqueueTask(function.name, payload=function.payload, endpoint=platform.endpoint, executor=executor, role=request.role, idempotency_key=f"{function.name}-idempotent", match_upstream=True, title=f"Repeat enqueue {function.name}", cwd=cwd),
-                        HttpExecutionSuccessTask(endpoint=platform.endpoint, executor=executor, role=request.role, cwd=cwd),
+                        HttpFunctionEnqueueTask(
+                            function.name,
+                            payload=function.payload,
+                            endpoint=platform.endpoint,
+                            executor=executor,
+                            role=request.role,
+                            idempotency_key=f"{function.name}-idempotent",
+                            title=f"Enqueue {function.name}",
+                            cwd=cwd,
+                        ),
+                        HttpFunctionEnqueueTask(
+                            function.name,
+                            payload=function.payload,
+                            endpoint=platform.endpoint,
+                            executor=executor,
+                            role=request.role,
+                            idempotency_key=f"{function.name}-idempotent",
+                            match_upstream=True,
+                            title=f"Repeat enqueue {function.name}",
+                            cwd=cwd,
+                        ),
+                        HttpExecutionSuccessTask(
+                            endpoint=platform.endpoint,
+                            executor=executor,
+                            role=request.role,
+                            cwd=cwd,
+                        ),
                     ),
                 ),
                 requires=(*requires, *platform.resources, registered),
@@ -209,7 +238,10 @@ def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the e
             workflow.add(
                 PrometheusMinimumCheckTask(
                     url=platform.endpoint,
-                    minimums=(("function_enqueue_total", {"function": function.name}, 1), ("function_success_total", {"function": function.name}, 1)),
+                    minimums=(
+                        ("function_enqueue_total", {"function": function.name}, 1),
+                        ("function_success_total", {"function": function.name}, 1),
+                    ),
                     executor=executor,
                     role=request.role,
                     title=f"Check metrics for {function.name}",
@@ -219,7 +251,9 @@ def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the e
             )
     registered_by_name = {
         function.name: registered
-        for function, registered in zip(request.functions, platform.functions)
+        for function, registered in zip(
+            request.functions, platform.functions, strict=False
+        )
     }
     for check in request.envelope_checks:
         try:
@@ -250,7 +284,10 @@ def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the e
             ) from error
         workflow.add(
             Steps(
-                title=f"Verify async execution of {check.function_name} ({check.payload_name})",
+                title=(
+                    f"Verify async execution of {check.function_name}"
+                    f" ({check.payload_name})"
+                ),
                 steps=(
                     HttpFunctionEnqueueTask(
                         check.function_name,

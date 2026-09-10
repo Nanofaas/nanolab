@@ -9,13 +9,13 @@ at all — the series belonged to the pod just replaced.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from nanolab.tasks.loadtest.models import TimeWindow
 from nanolab.tasks.loadtest.tasks import CapturePrometheusSnapshot
 
-START = datetime(2026, 8, 19, 10, 0, 0, tzinfo=timezone.utc)
+START = datetime(2026, 8, 19, 10, 0, 0, tzinfo=UTC)
 WINDOW = TimeWindow(start=START, end=START + timedelta(seconds=450))
 
 

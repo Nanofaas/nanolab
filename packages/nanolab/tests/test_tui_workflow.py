@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from rich.console import Console
+from sonata_engine.workflow.event_builders import build_log_event, build_task_event
 
 from nanolab.tui.event_aggregator import WorkflowEventAggregator
 from nanolab.tui.workflow import TuiWorkflowSink, WorkflowDashboard, WorkflowStepState
-from sonata_engine.workflow.event_builders import build_log_event, build_task_event
 
 
 def rendered_text(dashboard: WorkflowDashboard, *, width: int = 120) -> str:
@@ -29,7 +29,9 @@ def test_dashboard_renders_summary_phases_logs_breadcrumb_and_footer() -> None:
             title="Ensure VM is running",
         )
     )
-    dashboard.apply_event(build_log_event(flow_id="e2e", task_id="vm.ensure", line="Boot VM"))
+    dashboard.apply_event(
+        build_log_event(flow_id="e2e", task_id="vm.ensure", line="Boot VM")
+    )
 
     text = rendered_text(dashboard)
 
@@ -55,7 +57,10 @@ def test_dashboard_renders_nested_child_without_replacing_planned_rows() -> None
     )
     dashboard.apply_event(
         build_task_event(
-            kind="task.started", flow_id="e2e", task_id="verify", title="Run verification"
+            kind="task.started",
+            flow_id="e2e",
+            task_id="verify",
+            title="Run verification",
         )
     )
     dashboard.apply_event(
@@ -69,7 +74,10 @@ def test_dashboard_renders_nested_child_without_replacing_planned_rows() -> None
         )
     )
 
-    assert [step.label for step in dashboard.steps] == ["Run verification", "Teardown VM"]
+    assert [step.label for step in dashboard.steps] == [
+        "Run verification",
+        "Teardown VM",
+    ]
     assert dashboard.steps[0].children[0].state == "success"
     assert "Nested Verification Work" in rendered_text(dashboard)
     assert "Verify control-plane health" in rendered_text(dashboard)
@@ -89,8 +97,12 @@ def test_dashboard_toggle_hides_and_restores_log_panel() -> None:
 def test_dashboard_renders_durations_right_aligned_and_panels_bottom_aligned() -> None:
     dashboard = WorkflowDashboard(title="E2E", summary_lines=["Scenario: cli-stack"])
     dashboard.steps = [
-        WorkflowStepState(label="Short task", state="success", started_at=10.0, finished_at=11.0),
-        WorkflowStepState(label="Longer task", state="success", started_at=20.0, finished_at=32.3),
+        WorkflowStepState(
+            label="Short task", state="success", started_at=10.0, finished_at=11.0
+        ),
+        WorkflowStepState(
+            label="Longer task", state="success", started_at=20.0, finished_at=32.3
+        ),
     ]
     dashboard.log_lines = ["one line"]
 

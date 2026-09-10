@@ -78,7 +78,11 @@ Rename `_build_provisioned_k8s_plan` to `_build_k8s_plan`. Remove its `--provisi
 The minimal branch is:
 
 ```python
-if config.backend == "k8s" and environment is not None and environment.provider != "local":
+if (
+    config.backend == "k8s"
+    and environment is not None
+    and environment.provider != "local"
+):
     return _build_k8s_plan(...)
 ```
 

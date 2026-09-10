@@ -12,10 +12,12 @@ Terminal UI widgets and workflow event renderer extracted from `nanofaas`'s cont
 ```python
 from tui_toolkit import init_ui, UIContext, Theme, AppBrand, select, Choice
 
-init_ui(UIContext(
-    theme=Theme(accent="green", accent_strong="bold green", brand="bold green"),
-    brand=AppBrand(name="myapp", wordmark="MYAPP"),
-))
+init_ui(
+    UIContext(
+        theme=Theme(accent="green", accent_strong="bold green", brand="bold green"),
+        brand=AppBrand(name="myapp", wordmark="MYAPP"),
+    )
+)
 
 answer = select(
     "Pick a runtime",

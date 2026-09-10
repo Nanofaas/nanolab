@@ -59,7 +59,11 @@ class ConcurrencyReading:
 
 
 class EffectiveConcurrencyReader(Protocol):
-    def read(self) -> ConcurrencyReading: ...
+    """Read one scrape of the governor's gauge and its input timer."""
+
+    def read(self) -> ConcurrencyReading:
+        """Return the concurrency reading this scrape produced."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +89,7 @@ class ConcurrencySample:
 
 @dataclass(frozen=True, slots=True)
 class ConcurrencyDip:
-    """A down-then-up excursion of the limit: the governor backing off and recovering."""
+    """A down-then-up excursion: the governor backing off, then recovering."""
 
     peak_before: int
     trough: int
@@ -93,10 +97,12 @@ class ConcurrencyDip:
 
     @property
     def descent(self) -> int:
+        """Return how far the limit fell from its peak."""
         return self.peak_before - self.trough
 
     @property
     def ascent(self) -> int:
+        """Return how far the limit climbed back from the trough."""
         return self.recovery_after - self.trough
 
 
@@ -127,7 +133,7 @@ def governed_samples(
 
 
 def find_dip(samples: Sequence[ConcurrencySample]) -> ConcurrencyDip | None:
-    """The clearest "went down, then came back up" excursion in the series, if any.
+    """Return the clearest "went down, then came back up" excursion, if any.
 
     Phase windows are deliberately not taken as input. Tying the check to the k6
     stage boundaries would assert that the governor reacted *on schedule*, which
@@ -186,10 +192,12 @@ class ConcurrencySummary:
 
     @property
     def min_observed(self) -> int:
+        """Return the lowest limit the governor was seen at."""
         return min((sample.effective for sample in self.samples), default=0)
 
     @property
     def max_observed(self) -> int:
+        """Return the highest limit the governor was seen at."""
         return max((sample.effective for sample in self.samples), default=0)
 
     def describe(self) -> str:
@@ -213,7 +221,7 @@ class ConcurrencySummary:
         )
 
     def trajectory(self) -> str:
-        """The series, run-length encoded with each block's service time.
+        """Return the series run-length encoded, each block with its service time.
 
         For example `8x42@2.0-19.3` — the limit sat at 8 for 42 readings while
         the mean service time of those intervals ranged from 2.0ms to 19.3ms.
@@ -287,10 +295,13 @@ class ConcurrencyResponse:
 
     @property
     def gave_ground(self) -> bool:
+        """Return whether the loaded floor sits below the idle peak."""
         return self.loaded_floor < self.idle_peak
 
 
-def measure_response(samples: Sequence[ConcurrencySample]) -> ConcurrencyResponse | None:
+def measure_response(
+    samples: Sequence[ConcurrencySample],
+) -> ConcurrencyResponse | None:
     """Compare the limit while the function was concurrent against while it was not.
 
     Partitioned by observed saturation rather than by the load profile's clock.
@@ -316,7 +327,9 @@ def measure_response(samples: Sequence[ConcurrencySample]) -> ConcurrencyRespons
     # flight, so its converged state was filed as idle and the floor it reported
     # was a value it had already left.
     idle = [s.effective for s in samples if s.in_flight < s.effective]
-    loaded = [s.effective for s in samples if s.effective >= 1 and s.in_flight >= s.effective]
+    loaded = [
+        s.effective for s in samples if s.effective >= 1 and s.in_flight >= s.effective
+    ]
     if not idle or not loaded:
         return None
     return ConcurrencyResponse(idle_peak=max(idle), loaded_floor=min(loaded))
@@ -359,7 +372,8 @@ def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
     """
     verify_observable(summary)
     response = summary.response
-    assert response is not None  # verify_observable has just established this
+    # Narrowing only: verify_observable raised just above if it were None.
+    assert response is not None  # nosec B101
     if not response.gave_ground:
         raise RuntimeError(
             f"{summary.function_name!r} never gave concurrency back under load: "
@@ -385,13 +399,16 @@ class ScrapeConcurrencyProbe:
     timeout_seconds: float = 4.0
 
     def read(self) -> ConcurrencyReading:
+        """Return the gauge and timer values from one metrics scrape."""
         url = f"{self.management_url.rstrip('/')}/actuator/prometheus"
         try:
             response = httpx.get(url, timeout=self.timeout_seconds)
         except httpx.HTTPError as exc:
             raise RuntimeError(f"metrics scrape failed for {url}: {exc}") from exc
         if response.status_code != 200:
-            raise RuntimeError(f"metrics scrape failed for {url} (HTTP {response.status_code})")
+            raise RuntimeError(
+                f"metrics scrape failed for {url} (HTTP {response.status_code})"
+            )
 
         labels = {"function": self.function_name}
         matches, effective = metric_sum(response.text, _EFFECTIVE_CONCURRENCY, labels)
@@ -430,18 +447,22 @@ class ConcurrencyWatcherGroup:
     here" a statement about both.
     """
 
-    def __init__(self, watchers: dict[str, "ConcurrencyWatcher"]) -> None:
+    def __init__(self, watchers: dict[str, ConcurrencyWatcher]) -> None:
+        """Record the watchers, one per function, to be driven as one."""
         self._watchers = dict(watchers)
 
     def start(self) -> None:
+        """Start every watcher, so each series covers the same window."""
         for watcher in self._watchers.values():
             watcher.start()
 
     def stop(self) -> None:
+        """Stop every watcher."""
         for watcher in self._watchers.values():
             watcher.stop()
 
     def summaries(self) -> dict[str, ConcurrencySummary]:
+        """Return each function's summary, keyed by function name."""
         return {name: watcher.summary(name) for name, watcher in self._watchers.items()}
 
 
@@ -458,6 +479,7 @@ class ConcurrencyWatcher:
         probe: EffectiveConcurrencyReader,
         poll_interval_seconds: float = 2.0,
     ) -> None:
+        """Record the probe and the poll interval used between readings."""
         self._probe = probe
         self._poll_interval = poll_interval_seconds
         self._stop = threading.Event()
@@ -470,9 +492,11 @@ class ConcurrencyWatcher:
 
     @property
     def samples(self) -> tuple[ConcurrencySample, ...]:
+        """Return the readings taken so far, oldest first."""
         return tuple(self._samples)
 
     def summary(self, function_name: str) -> ConcurrencySummary:
+        """Summarise the series for `function_name`, with its dip and response."""
         samples = self.samples
         return ConcurrencySummary(
             function_name=function_name,
@@ -488,6 +512,7 @@ class ConcurrencyWatcher:
         )
 
     def start(self) -> None:
+        """Start sampling on a background thread."""
         if self._thread is not None:
             raise RuntimeError("ConcurrencyWatcher already started")
         self._stop.clear()
@@ -502,6 +527,7 @@ class ConcurrencyWatcher:
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop sampling and wait for the thread to finish."""
         if self._thread is None:
             return
         self._stop.set()
@@ -535,8 +561,10 @@ class ConcurrencyWatcher:
         self._previous = reading
         self._previous_at = now
 
-    def _interval(self, reading: ConcurrencyReading, now: float) -> dict[str, float | None]:
-        """What the interval just ended looked like: mean service time and throughput.
+    def _interval(
+        self, reading: ConcurrencyReading, now: float
+    ) -> dict[str, float | None]:
+        """Return the mean service time and throughput of the interval just closed.
 
         The cumulative timer answers "since startup", which flattens exactly the
         change the governor is reacting to; the difference between two scrapes is
@@ -568,9 +596,12 @@ class ConcurrencyWatcher:
         }
 
     def _rejected_since_previous(self, reading: ConcurrencyReading) -> float:
-        """Counted outside `_interval` on purpose: an interval that completed
+        """Return how many requests the queue refused since the previous scrape.
+
+        Counted outside `_interval` on purpose: an interval that completed
         nothing because the queue was full is exactly the one worth recording,
-        and sharing the latency timer's guard would have discarded it."""
+        and sharing the latency timer's guard would have discarded it.
+        """
         previous = self._previous
         if previous is None:
             return 0.0

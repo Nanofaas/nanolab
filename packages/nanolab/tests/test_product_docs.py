@@ -1,7 +1,6 @@
 import re
 from pathlib import Path
 
-
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NANOLAB_ROOT = Path(__file__).resolve().parents[1]
 DOCS = (WORKSPACE_ROOT / "README.md", NANOLAB_ROOT / "README.md")
@@ -16,7 +15,13 @@ def test_product_docs_use_the_standalone_command_surface() -> None:
     assert "packages/nanolab/environments/multipass.yaml" in text
     assert "packages/nanolab/environments/external.yaml.example" in text
     assert "scripts/controlplane.sh" not in text
-    for legacy in ("--saved-profile", "cli-test", "e2e run", "loadtest run", "--profile core"):
+    for legacy in (
+        "--saved-profile",
+        "cli-test",
+        "e2e run",
+        "loadtest run",
+        "--profile core",
+    ):
         assert legacy not in text
 
 
@@ -70,7 +75,9 @@ def test_nanolab_readme_explains_provider_setup_entries() -> None:
     text = (NANOLAB_ROOT / "README.md").read_text(encoding="utf-8")
     marker = "When only the provider templates are present"
     assert marker in text
-    setup_block = marker + text.split(marker, maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+    setup_block = (
+        marker + text.split(marker, maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+    )
 
     for phrase in (
         "Azure (setup required)",

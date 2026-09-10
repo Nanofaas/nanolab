@@ -1,18 +1,19 @@
-from __future__ import annotations
+"""Checks that a workload's declared resource limits reached the running object."""
 
-from sonata_tasks.execution.models import CommandOptions
+from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from sonata_tasks.core.fingerprint import fingerprint_digest
+from sonata_tasks.docker import DockerInspectTask
 from sonata_tasks.execution.bindings import CommandTaskExecutor
-from nanolab.tasks.execution import ExecutionRole
+from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
 
-from sonata_tasks.docker import DockerInspectTask
-from sonata_tasks.core.fingerprint import fingerprint_digest
+from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.kubectl import KubectlTask
 
 ResourceSpec = Mapping[str, Any]
@@ -22,13 +23,17 @@ def _payload(result: TaskResult, subject: str) -> dict[str, Any]:
     try:
         parsed = json.loads(result.stdout)
     except ValueError as error:
-        raise RuntimeError(f"{subject} was not JSON: {result.stdout[:200]!r}") from error
+        raise RuntimeError(
+            f"{subject} was not JSON: {result.stdout[:200]!r}"
+        ) from error
     if not isinstance(parsed, dict):
         raise RuntimeError(f"{subject} was not a JSON object: {result.stdout[:200]!r}")
     return parsed
 
 
-def _compare(actual: Mapping[str, Any], expected: Mapping[str, Any], subject: str) -> None:
+def _compare(
+    actual: Mapping[str, Any], expected: Mapping[str, Any], subject: str
+) -> None:
     """Report the first field that differs, by name.
 
     The shell version this replaces joined four values into one line and ran
@@ -69,18 +74,33 @@ class ContainerResourceCheckTask(DockerInspectTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Translate the spec into Docker host-config fields and compare against them.
+
+        With no spec the task only checks that the container exists.
+        """
         verify: Callable[[TaskResult], None] | None = None
+        # Both the check and its identity come from the same spec, so they are
+        # set together: a key for a check that is not run would collapse two
+        # different tasks onto one journal entry.
+        semantic_key: str | None = None
         if resources is not None:
             requests, limits = _halves(resources)
-            request_memory = int(requests.get("memoryMiB") or 0)
+            # `requests` is the spec's resource-request dict, not the HTTP library.
+            request_memory = int(requests.get("memoryMiB") or 0)  # nosec B113
             limit_memory = int(limits.get("memoryMiB") or 0)
             expected = {
                 # Docker floors CPU shares at 2; the control plane rounds half up.
-                "CpuShares": max(2, int(float(str(requests.get("cpu", 0))) * 1024 + 0.5)),
+                # `requests` is the resource-request dict, not the HTTP library.
+                "CpuShares": max(
+                    2,
+                    int(float(str(requests.get("cpu", 0))) * 1024 + 0.5),  # nosec B113
+                ),
                 "NanoCpus": int(float(str(limits.get("cpu", 0))) * 1_000_000_000),
                 # A reservation equal to the limit is left unset rather than restated.
                 "MemoryReservation": (
-                    0 if request_memory == limit_memory else request_memory * 1024 * 1024
+                    0
+                    if request_memory == limit_memory
+                    else request_memory * 1024 * 1024
                 ),
                 "Memory": limit_memory * 1024 * 1024,
             }
@@ -89,6 +109,10 @@ class ContainerResourceCheckTask(DockerInspectTask):
                 _compare(_payload(result, "container host config"), expected, container)
 
             verify = check_container
+            semantic_key = (
+                "nanolab.container-resources:v2:"
+                f"{fingerprint_digest({'expected': expected})}"
+            )
 
         super().__init__(
             container=container,
@@ -97,11 +121,7 @@ class ContainerResourceCheckTask(DockerInspectTask):
             title=f"Inspect resources of {container}",
             options=CommandOptions(cwd=cwd),
             verify=verify,
-            semantic_key=(
-                f"nanolab.container-resources:v2:{fingerprint_digest({'expected': expected})}"
-                if resources is not None
-                else None
-            ),
+            semantic_key=semantic_key,
         )
 
 
@@ -127,12 +147,19 @@ class K8sResourceCheckTask(KubectlTask):
         role: ExecutionRole,
         cwd: Path | None = None,
     ) -> None:
+        """Translate the spec into Kubernetes resource fields and compare against them.
+
+        With no spec the task only checks that the Deployment exists.
+        """
         verify: Callable[[TaskResult], None] | None = None
+        # Set with the check below, for the same reason: one spec, one key.
+        semantic_key: str | None = None
         if resources is not None:
             requests, limits = _halves(resources)
+            # `requests`/`limits` are the spec's resource dicts, not the HTTP library.
             expected = {
-                "requests.cpu": _k8s_cpu(requests.get("cpu", 0)),
-                "requests.memory": f"{requests.get('memoryMiB', 0)}Mi",
+                "requests.cpu": _k8s_cpu(requests.get("cpu", 0)),  # nosec B113
+                "requests.memory": f"{requests.get('memoryMiB', 0)}Mi",  # nosec B113
                 "limits.cpu": _k8s_cpu(limits.get("cpu", 0)),
                 "limits.memory": f"{limits.get('memoryMiB', 0)}Mi",
             }
@@ -144,7 +171,8 @@ class K8sResourceCheckTask(KubectlTask):
                     declared = container["resources"]
                 except (KeyError, IndexError, TypeError) as error:
                     raise RuntimeError(
-                        f"{deployment}: no container resources in the deployment payload"
+                        f"{deployment}: no container resources "
+                        "in the deployment payload"
                     ) from error
                 actual = {
                     f"{half}.{key}": (declared.get(half) or {}).get(key)
@@ -154,6 +182,9 @@ class K8sResourceCheckTask(KubectlTask):
                 _compare(actual, expected, deployment)
 
             verify = check_deployment
+            semantic_key = (
+                f"nanolab.k8s-resources:v2:{fingerprint_digest({'expected': expected})}"
+            )
 
         super().__init__(
             "get",
@@ -166,9 +197,5 @@ class K8sResourceCheckTask(KubectlTask):
             title=f"Inspect resources of {deployment}",
             options=CommandOptions(cwd=cwd),
             verify=verify,
-            semantic_key=(
-                f"nanolab.k8s-resources:v2:{fingerprint_digest({'expected': expected})}"
-                if resources is not None
-                else None
-            ),
+            semantic_key=semantic_key,
         )

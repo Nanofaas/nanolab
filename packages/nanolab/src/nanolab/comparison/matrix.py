@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nanolab.images.control_plane_variants import ControlPlaneVariant
@@ -33,12 +33,14 @@ class ComparisonCell:
     repetition: int
 
     def run_dir(self, root: Path) -> Path:
+        """Return the directory this cell's run writes its artefacts to."""
         # Keyed by variant first so a half-finished matrix is still readable by
         # build, and by repetition second so the reader can see how many landed.
         return root / self.variant.key / f"run-{self.repetition}"
 
     @property
     def label(self) -> str:
+        """Return the human-readable name this cell takes in the manifest."""
         return f"{self.variant.key} run {self.repetition}"
 
 
@@ -76,8 +78,10 @@ def completed(cell: ComparisonCell, root: Path) -> bool:
     ).is_file()
 
 
-def pending(cells: tuple[ComparisonCell, ...], root: Path) -> tuple[ComparisonCell, ...]:
-    """The cells still to run, in matrix order."""
+def pending(
+    cells: tuple[ComparisonCell, ...], root: Path
+) -> tuple[ComparisonCell, ...]:
+    """Return the cells that have not completed yet, in matrix order."""
     return tuple(cell for cell in cells if not completed(cell, root))
 
 
@@ -111,7 +115,7 @@ def write_manifest(
             }
         )
     manifest = {
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
         "functions": list(functions),
         "repetitions": max(cell.repetition for cell in cells),
         "order": [cell.label for cell in cells],

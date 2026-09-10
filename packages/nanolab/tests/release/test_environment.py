@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from nanolab.tasks.vm.models import VmRequest
-
 import os
 from pathlib import Path
 
@@ -11,7 +9,7 @@ import yaml
 from nanolab.config import EnvironmentConfig
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.versioning import read_project_version
-
+from nanolab.tasks.vm.models import VmRequest
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 # The validator compares this against the checkout's own version, so reading it
@@ -51,7 +49,9 @@ def _release_environment(**changes: object) -> EnvironmentConfig:
 
 def test_release_environment_example_requires_real_operator_cidr() -> None:
     path = NANOLAB_ROOT / "environments/azure-release.yaml.example"
-    environment = EnvironmentConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    environment = EnvironmentConfig.model_validate(
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+    )
 
     with pytest.raises(ValueError, match="operator source CIDR"):
         validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
@@ -62,7 +62,7 @@ def test_release_environment_example_requires_real_operator_cidr() -> None:
     assert environment.azure.operator_source_cidr == "203.0.113.0/24"
 
 
-@pytest.mark.parametrize("provider", ("local", "multipass", "proxmox"))
+@pytest.mark.parametrize("provider", ["local", "multipass", "proxmox"])
 def test_release_environment_rejects_non_azure_provider(provider: str) -> None:
     changes: dict[str, object] = {"provider": provider, "azure": None}
     if provider == "proxmox":
@@ -75,13 +75,15 @@ def test_release_environment_rejects_non_azure_provider(provider: str) -> None:
 
 @pytest.mark.parametrize(
     "roles",
-    (
+    [
         {"stack": {"disk": "128G"}},
         {"loadgen": {"disk": "30G"}},
         {"stack": {"disk": "128G"}, "loadgen": {"disk": "30G"}},
-    ),
+    ],
 )
-def test_release_environment_requires_stack_and_loadgen_roles(roles: dict[str, object]) -> None:
+def test_release_environment_requires_stack_and_loadgen_roles(
+    roles: dict[str, object],
+) -> None:
     environment = _release_environment(roles=roles)
 
     with pytest.raises(ValueError, match="stack, loadgen and arm-builder"):
@@ -90,11 +92,11 @@ def test_release_environment_requires_stack_and_loadgen_roles(roles: dict[str, o
 
 @pytest.mark.parametrize(
     ("role", "name"),
-    (
+    [
         ("stack", "shared-stack"),
         ("loadgen", "shared-loadgen"),
         ("arm-builder", "shared-arm"),
-    ),
+    ],
 )
 def test_release_environment_requires_dedicated_vm_names(role: str, name: str) -> None:
     environment = _release_environment()
@@ -106,7 +108,7 @@ def test_release_environment_requires_dedicated_vm_names(role: str, name: str) -
 
 @pytest.mark.parametrize(
     "source",
-    (None, "*", "0.0.0.0/0", "::/0", "not-a-cidr", "203.0.113.0/24"),
+    [None, "*", "0.0.0.0/0", "::/0", "not-a-cidr", "203.0.113.0/24"],
 )
 def test_release_environment_requires_restricted_operator_source(
     source: str | None,
@@ -121,14 +123,14 @@ def test_release_environment_requires_restricted_operator_source(
 
 @pytest.mark.parametrize(
     "urn",
-    (
+    [
         "Canonical:ubuntu-24_04-lts:server:latest",
         "Canonical:ubuntu-24_04-lts:server:",
         "Canonical :ubuntu-24_04-lts:server:24.04.202505280",
         "Canonical:ubuntu 24:server:24.04.202505280",
         "Canonical:ubuntu-24_04-lts:ser\nver:24.04.202505280",
         "Canonical:ubuntu-24_04-lts:server:24.04.202505280 ",
-    ),
+    ],
 )
 def test_release_environment_rejects_unpinned_or_malformed_urn(urn: str) -> None:
     environment = _release_environment(
@@ -147,7 +149,7 @@ def test_release_environment_rejects_unpinned_or_malformed_urn(urn: str) -> None
         validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
 
 
-@pytest.mark.parametrize("field", ("vm_size", "loadgen_vm_size", "arm_vm_size"))
+@pytest.mark.parametrize("field", ["vm_size", "loadgen_vm_size", "arm_vm_size"])
 def test_release_environment_rejects_burstable_vm_size(field: str) -> None:
     azure = {
         "resource_group": "nanofaas-rg",
@@ -189,7 +191,7 @@ def test_auto_resolves_the_operator_address_from_the_vm() -> None:
     from nanolab.release.environment import resolve_operator_source
 
     class _Provider:
-        def exec_argv(self, request, argv):  # noqa: ANN001, ARG002
+        def exec_argv(self, request, argv):
             return SimpleNamespace(stdout="151.44.218.179\n", stderr="", returncode=0)
 
     assert resolve_operator_source(_Provider(), _request()) == "151.44.218.179/32"
@@ -203,7 +205,7 @@ def test_an_unresolvable_address_says_what_to_do_instead() -> None:
     from nanolab.release.environment import resolve_operator_source
 
     class _Provider:
-        def exec_argv(self, request, argv):  # noqa: ANN001, ARG002
+        def exec_argv(self, request, argv):
             return SimpleNamespace(stdout="", stderr="", returncode=0)
 
     with pytest.raises(ValueError, match="set operator_source_cidr explicitly"):

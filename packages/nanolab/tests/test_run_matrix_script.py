@@ -4,7 +4,6 @@ import os
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[3]
 SCRIPT = ROOT / "run-matrix.sh"
 
@@ -23,7 +22,8 @@ def _run_matrix(
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     script = tmp_path / "run-matrix.sh"
     source = SCRIPT.read_text().replace(
-        "cd /Users/micheleciavotta/Downloads/nanolab/.worktrees/dispatch-instrumentation || exit 1",
+        "cd /Users/micheleciavotta/Downloads/nanolab/.worktrees/"
+        "dispatch-instrumentation || exit 1",
         'cd "$NANOLAB_ROOT" || exit 1',
     )
     _ = script.write_text(source)
@@ -42,7 +42,8 @@ def _run_matrix(
         "\n".join(
             (
                 'echo "ssh $*" >> "$EVENT_LOG"',
-                'if [ "${HELM_FAIL:-0}" = 1 ] && [[ "$*" != *"; true"* ]]; then exit 42; fi',
+                'if [ "${HELM_FAIL:-0}" = 1 ] && [[ "$*" != *"; true"* ]]; then '
+                "exit 42; fi",
                 "exit 0",
             )
         ),
@@ -115,7 +116,9 @@ def test_failed_compare_propagates_and_does_not_teardown_historical_runs(
     tmp_path: Path,
 ) -> None:
     for repetition in range(1, 13):
-        historical = tmp_path / f"packages/nanolab/runs/azure-matrix-old/run-{repetition}"
+        historical = (
+            tmp_path / f"packages/nanolab/runs/azure-matrix-old/run-{repetition}"
+        )
         historical.mkdir(parents=True)
         (historical / "k6-summary.json").touch()
 

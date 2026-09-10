@@ -1,3 +1,5 @@
+"""Shared validation of a nanoFaaS invocation response."""
+
 from __future__ import annotations
 
 import json
@@ -19,9 +21,13 @@ def verify_invocation(result: TaskResult) -> None:
     try:
         response = json.loads(result.stdout)
     except ValueError as error:
-        raise RuntimeError(f"invocation response was not JSON: {result.stdout[:200]!r}") from error
+        raise RuntimeError(
+            f"invocation response was not JSON: {result.stdout[:200]!r}"
+        ) from error
     if not isinstance(response, dict):
-        raise RuntimeError(f"invocation response was not JSON object: {result.stdout[:200]!r}")
+        raise RuntimeError(
+            f"invocation response was not JSON object: {result.stdout[:200]!r}"
+        )
     if response.get("status") != "success":
         raise RuntimeError(
             f"invocation did not report success: {response.get('status')!r}"
@@ -32,7 +38,7 @@ def verify_invocation(result: TaskResult) -> None:
 
 
 def _reason(error: object) -> str:
-    """The control plane's own account of the failure, if it gave one.
+    """Return the control plane's own account of the failure, if it gave one.
 
     `InvocationResponse` carries an `ErrorInfo(code, message)` beside the
     status. Reporting only the status turned a run that said exactly what went

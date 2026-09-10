@@ -10,4 +10,3 @@ source_modules = tui_toolkit
 forbidden_modules =
     nanolab
 include_external_packages = True
-

@@ -2,25 +2,27 @@
 
 from __future__ import annotations
 
-from sonata_tasks.execution.models import CommandOptions
-
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
-from nanolab.tasks.components.bootstrap import retarget_bootstrap_operation
-from nanolab.tasks.components.context import ScenarioExecutionContext
-from nanolab.tasks.components.operations import RemoteCommandOperation
-from nanolab.tasks.components.operations import ScenarioOperation
-from nanolab.tasks.deployment import LOCAL_REGISTRY
+from sonata_engine.workflow.reporting import subtask
+from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.shell import SubprocessShell
 from sonata_tasks.tasks.executors import HostCommandRunner, HostCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm.azure import AzureVmProvider
-from nanolab.tasks.vm.models import VmRequest
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
-from sonata_engine.workflow.reporting import subtask
+
+from nanolab.tasks.components.bootstrap import retarget_bootstrap_operation
+from nanolab.tasks.components.context import ScenarioExecutionContext
+from nanolab.tasks.components.operations import (
+    RemoteCommandOperation,
+    ScenarioOperation,
+)
+from nanolab.tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.vm.models import VmRequest
 
 
 def scenario_context(
@@ -28,6 +30,7 @@ def scenario_context(
     request: VmRequest,
     assets_root: Path,
 ) -> ScenarioExecutionContext:
+    """Build the execution context the bootstrap planners expect for `request`."""
     return ScenarioExecutionContext(
         repo_root=repo_root,
         scenario_name="provision",
@@ -51,9 +54,17 @@ class OperationTask:
     executor: HostCommandTaskExecutor
 
     def run(self) -> TaskResult:
+        """Run the operation and raise with its output if it did not pass."""
         result = self.executor.run(self.spec)
         if result.status != "passed":
-            detail = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part) or "no output"
+            detail = (
+                "\n".join(
+                    part
+                    for part in (result.stdout.strip(), result.stderr.strip())
+                    if part
+                )
+                or "no output"
+            )
             raise RuntimeError(
                 f"{self.task_id} failed (exit {result.return_code}): {detail}"
             )
@@ -66,13 +77,14 @@ def operation_task(
     *,
     title: str | None = None,
 ) -> OperationTask:
+    """Wrap `operation` as a runnable task for a host executor."""
     spec = CommandTaskSpec(
-               task_id=operation.operation_id,
-               summary=operation.summary,
-               argv=tuple(operation.argv),
-               role="stack" if operation.execution_target == "vm" else "host",
-               options=CommandOptions(env=dict(operation.env), remote_dir=None),
-           )
+        task_id=operation.operation_id,
+        summary=operation.summary,
+        argv=tuple(operation.argv),
+        role="stack" if operation.execution_target == "vm" else "host",
+        options=CommandOptions(env=dict(operation.env), remote_dir=None),
+    )
     return OperationTask(
         task_id=spec.task_id,
         title=title if title is not None else spec.summary,
@@ -87,6 +99,7 @@ def run_bootstrap_operations(
     *,
     role: str,
 ) -> None:
+    """Run the planned operations in order, refusing any that ask for the VM."""
     runner = cast(
         HostCommandRunner, getattr(provider, "shell", None) or SubprocessShell()
     )
@@ -109,7 +122,12 @@ def run_bootstrap_operations(
     executor = HostCommandTaskExecutor(runner)
     tasks: list[OperationTask] = [
         operation_task(
-            cast(RemoteCommandOperation, replace(operation, operation_id=f"provision.{role}.{operation.operation_id}")),
+            cast(
+                RemoteCommandOperation,
+                replace(
+                    operation, operation_id=f"provision.{role}.{operation.operation_id}"
+                ),
+            ),
             executor,
         )
         for operation in planned
@@ -122,6 +140,7 @@ def run_bootstrap_operations(
 def remote_operations(
     operations: Iterable[ScenarioOperation],
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Narrow scenario operations to the remote commands bootstrap can run."""
     resolved: list[RemoteCommandOperation] = []
     for operation in operations:
         if not isinstance(operation, RemoteCommandOperation):
@@ -135,6 +154,7 @@ def retarget_cloud_operations(
     context: ScenarioExecutionContext,
     operations: Iterable[RemoteCommandOperation],
 ) -> tuple[RemoteCommandOperation, ...]:
+    """Re-point the operations at the host the provider resolved after ensure."""
     request = context.vm_request
     if not isinstance(orchestrator, (AzureVmProvider, ProxmoxVmProvider)):
         # Multipass plans are built against the synthetic "{name}.internal"
