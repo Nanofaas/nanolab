@@ -5,13 +5,13 @@ license-files = ["LICENSE"]
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@82369b962e2a3f9ebe36c8ec0e761a631ae921d0",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
 ]
 
 [tool.uv]
 package = false
 override-dependencies = [
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@82369b962e2a3f9ebe36c8ec0e761a631ae921d0",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
 ]
 
 [tool.uv.workspace]
@@ -21,5 +21,5 @@ members = [
 ]
 
 [tool.uv.sources]
-sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "82369b962e2a3f9ebe36c8ec0e761a631ae921d0" }
+sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "e81d559" }
 sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "82369b962e2a3f9ebe36c8ec0e761a631ae921d0", subdirectory = "packages/sonata-tasks" }

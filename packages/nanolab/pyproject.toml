@@ -19,7 +19,7 @@ dependencies = [
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@82369b962e2a3f9ebe36c8ec0e761a631ae921d0",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
     "sonata-tasks[shell,prometheus,multipass,azure,proxmox] @ git+https://github.com/miciav/sonata.git@82369b962e2a3f9ebe36c8ec0e761a631ae921d0#subdirectory=packages/sonata-tasks",
     "tui-toolkit",
 ]
