@@ -19,8 +19,8 @@ dependencies = [
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
-    "sonata-tasks[shell,prometheus,multipass,azure,proxmox] @ git+https://github.com/miciav/sonata.git@82369b962e2a3f9ebe36c8ec0e761a631ae921d0#subdirectory=packages/sonata-tasks",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@ba8e02b097943202e5d09b89ae0a3b692cebe278",
+    "sonata-tasks[shell,prometheus,multipass,azure,proxmox] @ git+https://github.com/miciav/sonata.git@ba8e02b097943202e5d09b89ae0a3b692cebe278#subdirectory=packages/sonata-tasks",
     "tui-toolkit",
 ]
 
@@ -64,7 +64,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "82369b962e2a3f9ebe36c8ec0e761a631ae921d0", subdirectory = "packages/sonata-tasks" }
+sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "ba8e02b097943202e5d09b89ae0a3b692cebe278", subdirectory = "packages/sonata-tasks" }
 tui-toolkit = { workspace = true }
 
 [tool.pytest.ini_options]

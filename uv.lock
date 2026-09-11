@@ -16,7 +16,7 @@ members = [
     "nanolab-workspace",
     "tui-toolkit",
 ]
-overrides = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" }]
+overrides = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=ba8e02b097943202e5d09b89ae0a3b692cebe278" }]
 
 [[package]]
 name = "annotated-doc"
@@ -714,8 +714,8 @@ requires-dist = [
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.8" },
     { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0" },
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
-    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0" },
+    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=ba8e02b097943202e5d09b89ae0a3b692cebe278" },
+    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=ba8e02b097943202e5d09b89ae0a3b692cebe278" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
@@ -742,7 +742,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" }]
+requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=ba8e02b097943202e5d09b89ae0a3b692cebe278" }]
 
 [[package]]
 name = "narwhals"
@@ -1367,13 +1367,13 @@ wheels = [
 
 [[package]]
 name = "sonata-engine"
-version = "0.5.0"
-source = { git = "https://github.com/miciav/sonata.git?rev=e81d559#e81d559952d4a168edffbe3c7108bd9a017046e9" }
+version = "0.6.0"
+source = { git = "https://github.com/miciav/sonata.git?rev=ba8e02b097943202e5d09b89ae0a3b692cebe278#ba8e02b097943202e5d09b89ae0a3b692cebe278" }
 
 [[package]]
 name = "sonata-tasks"
 version = "0.2.0"
-source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=82369b962e2a3f9ebe36c8ec0e761a631ae921d0#82369b962e2a3f9ebe36c8ec0e761a631ae921d0" }
+source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=ba8e02b097943202e5d09b89ae0a3b692cebe278#ba8e02b097943202e5d09b89ae0a3b692cebe278" }
 dependencies = [
     { name = "sonata-engine" },
 ]
