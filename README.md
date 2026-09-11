@@ -55,17 +55,18 @@ uv lock --check
 uv sync --locked --all-packages --all-groups
 
 uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
-uv run --locked --all-packages --all-groups pytest packages/nanolab/tests
 uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
 
 uv run --locked --all-packages --all-groups ruff check packages
 uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
-uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
 uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
 
 uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
-uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
 uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
+
+# The same hooks a developer runs on commit: ruff format, bandit and the
+# generic file-hygiene checks live here, not in the commands above.
+uv run --locked --all-packages --all-groups pre-commit run --all-files
 
 uv build --all-packages --out-dir dist --clear
 
