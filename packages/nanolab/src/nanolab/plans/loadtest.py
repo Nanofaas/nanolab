@@ -43,6 +43,7 @@ from nanolab.tasks.loadtest import (
     CapturePrometheusTask,
     EvaluateGateTask,
     FetchResultsTask,
+    ObserveDrainStep,
     ReportCoTenancyTask,
     RunK6Task,
     SideCommandTask,
@@ -75,6 +76,7 @@ from nanolab.tasks.loadtest.resources import (
     ResourceWatcher,
     ResourceWatcherGroup,
 )
+from nanolab.tasks.loadtest.soak import ObserveDrainTask
 from nanolab.tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
@@ -765,6 +767,34 @@ def _build_platform_requires(
     return platform_requires
 
 
+
+def drain_checkpoints(drain_minutes: int) -> tuple[int, ...]:
+    """Return the checkpoints to sample, in seconds, bounded by the drain window.
+
+    The plan names 30 seconds, 5 minutes and 30 minutes, because those are the
+    retention windows under test; a shorter drain simply stops earlier rather than
+    silently sampling past its own end and reporting a window it never observed.
+    """
+    wanted = (0, 30, 300, 1800)
+    limit = drain_minutes * 60
+    inside = tuple(c for c in wanted if c <= limit)
+    return inside if inside[-1] == limit else (*inside, limit)
+
+
+def management_url_for(backend: str, control_plane_url: str) -> str | None:
+    """Return where the control plane's own metrics are readable, or None.
+
+    Only the container backend is wired here: its compose stack publishes the
+    management port on the loopback address, so the observation needs no proxy. A
+    Kubernetes run reaches the same endpoint through a port-forward that the drain
+    observer does not own, and claiming an unproxied URL there would produce an
+    unreachable sample rather than an honest absence.
+    """
+    if backend != "container":
+        return None
+    return control_plane_url.rsplit(":", 1)[0] + ":8081"
+
+
 def k6_environment(
     config: ScenarioConfig, control_plane_url: str, function_name: str
 ) -> dict[str, str]:
@@ -778,6 +808,10 @@ def k6_environment(
     nothing to react to. Zero think time makes in-flight equal the VU count.
     """
     env = {"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": function_name}
+    if config.soak_minutes is not None:
+        # Told in seconds because that is what a k6 stage takes; the scenario asks in
+        # minutes because that is the unit the soak is reasoned about in.
+        env["K6_SOAK_SECONDS"] = str(config.soak_minutes * 60)
     if config.concurrency_control:
         env["K6_THINK_SECONDS"] = "0"
         # The SLO as a caller would state it: a percentile of end-to-end
@@ -1039,8 +1073,25 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     heap_metrics_required: bool = True,
     neighbour: str | None = None,
     concurrency_report: WriteConcurrencyReport | None = None,
+    drain_minutes: int | None = None,
+    management_url: str | None = None,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
+    # First, because it has to sample while the stack is still up and before the
+    # fetch and report steps spend time of their own. A drain observation taken
+    # after the release steps would read an empty process, not a drained one.
+    if drain_minutes is not None and management_url is not None:
+        after.append(
+            ObserveDrainStep(
+                observe=ObserveDrainTask(
+                    task_id="",
+                    title="Observe drain",
+                    management_url=management_url,
+                    output_path=run_dir / "drain-populations.json",
+                    checkpoints_s=drain_checkpoints(drain_minutes),
+                )
+            )
+        )
     if remote:
         after.append(
             FetchResultsTask(
@@ -1531,6 +1582,8 @@ def build_loadtest_plan(
         # riportato il 30% di richieste HTTP fallite con lo 0,3% di rifiuti
         # sull'unica funzione osservata.
         neighbour=neighbour_name(config) if len(config.functions) >= 2 else None,
+        drain_minutes=config.drain_minutes,
+        management_url=management_url_for(backend, control_plane_url),
         concurrency_report=_build_concurrency_report(config, run_dir),
         container_functions=tuple(config.functions) if container_metrics else None,
         observed_modules=observed_modules or additional_modules,

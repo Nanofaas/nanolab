@@ -173,6 +173,14 @@ class ScenarioConfig(BaseModel):
     # il generatore puramente sincrono, che e' come si guida un braccio di
     # confronto: uno script solo, il mix come parametri, cosi' ogni braccio e'
     # misurato dallo stesso codice.
+    # A soak holds the mixed generator flat for this many minutes instead of running
+    # its ramping shape. The memory question the campaign exists for needs demand that
+    # never moves, so a population that grows is the system rather than the load.
+    soak_minutes: int | None = Field(default=None, alias="soakMinutes", gt=0)
+    # How long to keep observing after the traffic stops. It has to exceed the
+    # retention windows under test, or a population still inside its own TTL would be
+    # read as a leak; the plan names 30 seconds, 5 minutes and 30 minutes.
+    drain_minutes: int | None = Field(default=None, alias="drainMinutes", gt=0)
     async_share: float | None = Field(default=None, alias="asyncShare", ge=0.0, le=1.0)
     idem_share: float | None = Field(default=None, alias="idemShare", ge=0.0, le=1.0)
     control_plane_runtime: ControlPlaneRuntime = Field(
@@ -187,6 +195,14 @@ class ScenarioConfig(BaseModel):
     # importing it here would make the scenario schema depend on the image layer.
     # The name is checked against that catalogue by the plan, which can also say
     # what the alternatives are.
+    # An explicit image, for the comparison a variant key cannot express: two builds of
+    # DIFFERENT revisions. A variant names a way of building one source, so tagging a
+    # second revision with a variant key would label it as something it is not.
+    # Function images need no such field: the comparison profile already pins them to
+    # the tags the prepare phase produces and skips their build, so every arm reuses
+    # one set of function images — which a revision comparison depends on, since the
+    # function SDKs are compiled into them.
+    control_plane_image: str | None = Field(default=None, alias="controlPlaneImage")
     control_plane_variant: str | None = Field(default=None, alias="controlPlaneVariant")
     # The CPU budget of the control plane under test. Unset means the chart's
     # own default, which is 1 CPU: every comparison so far ran against that

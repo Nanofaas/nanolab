@@ -31,6 +31,7 @@ from nanolab.tasks.loadtest.report import ReportPhase as ReportPhase
 from nanolab.tasks.loadtest.report import (
     WriteConcurrencyReport as WriteConcurrencyReport,
 )
+from nanolab.tasks.loadtest.soak import ObserveDrainTask
 from nanolab.tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
@@ -409,6 +410,21 @@ class FetchResultsTask(Task[LoadtestOutcome]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         _ = self._fetch.run()
+        return TaskOutcome(value=outcome)
+
+
+class ObserveDrainStep(Task[LoadtestOutcome]):
+    """Run the drain observation as a post-run step, carrying the outcome through."""
+
+    def __init__(self, *, observe: ObserveDrainTask) -> None:
+        """Adopt the observation's title so the compiler slugifies one name."""
+        self.title = observe.title
+        self._observe = observe
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = load_outcome(inputs, self.title)
+        _ = self._observe.run()
         return TaskOutcome(value=outcome)
 
 

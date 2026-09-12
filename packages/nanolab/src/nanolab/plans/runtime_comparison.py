@@ -108,6 +108,10 @@ def _variant_image(config: ScenarioConfig) -> str | None:
     entirely when an image is supplied, so a run measures the artefact the matrix
     compiled and cannot silently rebuild a different one under the same name.
     """
+    # An explicit image wins: it is the only way to name a build of another revision,
+    # which no variant key can describe.
+    if config.control_plane_image is not None:
+        return config.control_plane_image
     if config.control_plane_variant is None:
         return None
     variant = resolve_variants((config.control_plane_variant,))[0]

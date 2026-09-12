@@ -1,0 +1,53 @@
+# The soak the lifecycle-memory campaign exists to run: does anything the control
+# plane holds keep growing under demand that never changes?
+#
+# Held flat on purpose. The other load scenarios ramp, because they ask what the tail
+# does as demand moves; a retention question needs the opposite, so that a population
+# which grows can only be the system and not the load. `soakMinutes` replaces the
+# ramping shape with one constant stage, and `drainMinutes` keeps observing after the
+# traffic stops — retention is only visible once demand is gone, because under load
+# every population is legitimately non-empty and a leak looks like a busy system.
+#
+# The drain has to outlast the retention windows under test. The control plane's
+# documented bounds are 30 seconds, 5 minutes and 30 minutes, so a drain that stopped
+# earlier would read a population still inside its own TTL as a leak.
+#
+# Unkeyed SYNC, which is the original RAM question: with both shares at zero the mixed
+# generator is the purely synchronous one, so this arm and every other arm of the
+# comparison are driven by the same generator code rather than by two scripts that
+# could differ in more than their workload.
+#
+# Container backend, not Kubernetes: both arms then run on identical local
+# infrastructure with no VM between the measurement and the process, and the control
+# plane's own management port is readable without a proxy the observer does not own.
+#
+# No governor and no autoscaler. Either would move the concurrency limits underneath a
+# comparison whose subject is memory, and a limit that changed between arms would put a
+# second moving part in it.
+workflow: loadtest
+backend: container
+loadProfile: mixed
+# Named by the caller, one arm per revision. The comparison profile pins the function
+# images to fixed tags and skips their build, so the two arms differ in the control
+# plane alone — which matters here because the function SDKs changed between the
+# revisions under comparison and are compiled into those images.
+controlPlaneImage: 127.0.0.1:5000/nanofaas/control-plane:soak-candidate
+asyncShare: 0.0
+idemShare: 0.0
+soakMinutes: 90
+drainMinutes: 35
+# Declared rather than inherited, because every one of these is a term in the memory
+# question and a chart default that changed later would silently change the experiment.
+resources:
+  control-plane:
+    limits:
+      cpu: 2
+      memoryMiB: 1024
+functions:
+  - word-stats-java
+  - word-stats-javascript
+# Moderate, as the question was asked: enough sustained work to fill the retention
+# windows many times over, well below the measured saturation point so the arms are
+# compared serving the same offered load rather than at two different refusal rates.
+loadScale: 1.0
+loadVus: 200

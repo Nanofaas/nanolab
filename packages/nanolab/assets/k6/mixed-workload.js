@@ -52,7 +52,14 @@ const MAX_VUS = Number(
 
 const JS_SCALE = Number(__ENV.K6_JS_SCALE || 0.35);
 
-const SHAPE = [
+// A soak is the same generator held flat: one warm ramp, then a single constant
+// stage for as long as the caller asks. The ramping shape below answers "what does
+// the tail do as demand moves"; a memory question needs the opposite — demand that
+// never moves, so anything that grows is the system and not the load. Unset by
+// default, so every existing arm keeps the exact shape it was measured with.
+const SOAK_SECONDS = Number(__ENV.K6_SOAK_SECONDS || 0);
+
+const RAMPING_SHAPE = [
     ['30s', WARM_RPS],
     ['60s', BASE_RPS],
     ['60s', BASE_RPS],
@@ -66,6 +73,13 @@ const SHAPE = [
     ['30s', PEAK_RPS],
     ['45s', WARM_RPS],
 ];
+
+const SOAK_SHAPE = [
+    ['30s', WARM_RPS],
+    [String(SOAK_SECONDS) + 's', BASE_RPS],
+];
+
+const SHAPE = SOAK_SECONDS > 0 ? SOAK_SHAPE : RAMPING_SHAPE;
 
 const stages = (scale) =>
     SHAPE.map(([duration, target]) => ({
