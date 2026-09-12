@@ -504,22 +504,29 @@ def test_remote_prebuilt_loadtest_uses_the_staged_chart_path(tmp_path: Path) -> 
     assert str(staged_source / "deploy/helm/nanofaas") in install
 
 
-def test_prebuilt_loadtest_requires_function_images(tmp_path: Path) -> None:
+def test_a_prebuilt_control_plane_still_lets_the_functions_be_built(
+    tmp_path: Path,
+) -> None:
+    """The two halves are independent, and the container backend depends on that.
+
+    There the control plane validates a function image by pulling it from the run's own
+    registry, so functions declared prebuilt but never pushed leave that registry empty
+    and every registration fails with a 503. Naming a control-plane image must therefore
+    not imply that the functions already exist somewhere.
+    """
     executor = RecordingExecutor()
 
-    with pytest.raises(
-        ValueError,
-        match="prebuilt function images are required in prebuilt mode",
-    ):
-        build_loadtest_plan(
-            SCENARIO,
-            EnvironmentConfig(provider="local"),
-            RoleBindings({"host": executor, "stack": executor}),
-            control_plane_url="http://stack:30080",
-            prometheus_client=NoopPrometheus(),
-            run_dir=tmp_path,
-            prebuilt_control_plane_image="localhost:5000/control-plane:v0.18.0",
-        )
+    plan = build_loadtest_plan(
+        SCENARIO,
+        EnvironmentConfig(provider="local"),
+        RoleBindings({"host": executor, "stack": executor}),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        prebuilt_control_plane_image="localhost:5000/control-plane:v0.18.0",
+    )
+
+    assert plan is not None
 
 
 def test_prebuilt_loadtest_reports_missing_selected_function_images(

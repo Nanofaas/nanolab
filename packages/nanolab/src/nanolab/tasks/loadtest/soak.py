@@ -29,23 +29,27 @@ DEFAULT_CHECKPOINTS_S: tuple[int, ...] = (0, 30, 300, 1800)
 # that only ever rises says nothing about retention, and summing it with a gauge
 # would produce a number that means nothing at all.
 POPULATION_SERIES: tuple[str, ...] = (
-    "nanofaas_execution_store_live",
-    "nanofaas_execution_store_outcomes",
-    "nanofaas_execution_store_keys",
-    "nanofaas_execution_store_outcome_bytes",
-    "nanofaas_invocation_capacity_executions_reserved",
-    "nanofaas_invocation_capacity_input_bytes_reserved",
-    "nanofaas_waiter_capacity_reserved",
-    "nanofaas_capacity_generations_retiring",
-    "nanofaas_replica_snapshot_entries",
-    "nanofaas_replica_snapshot_queue_depth",
-    "nanofaas_replica_snapshot_active_tasks",
-    "nanofaas_deployment_wakeup_pending",
-    "nanofaas_http_pending_acquisitions",
-    "nanofaas_http_active_connections",
-    "nanofaas_http_destination_pools",
+    # Read from a running control plane, not guessed: an invented name is
+    # indistinguishable from a population that is genuinely empty, and the first
+    # version of this list silently observed nothing for exactly that reason.
+    # Retained execution state.
+    "execution_store_size",
+    "execution_in_flight_records",
+    "idempotency_keys_held",
+    # HTTP ownership: pools, their connections and anything still waiting for one.
+    "nanofaas_http_pool_destinations",
+    "nanofaas_http_pool_connections",
+    "nanofaas_http_pool_active_connections",
+    "nanofaas_http_pool_idle_connections",
+    "nanofaas_http_pool_pending_acquisitions",
+    # Executors the control plane owns, and what is still queued on them.
+    "executor_active_threads",
+    "executor_pool_size_threads",
+    "executor_queued_tasks",
+    # Process-level retention, kept separate from the Java heap on purpose.
     "jvm_memory_used_bytes",
     "jvm_buffer_memory_used_bytes",
+    "jvm_buffer_count_buffers",
     "jvm_threads_live_threads",
     "process_open_fds",
 )

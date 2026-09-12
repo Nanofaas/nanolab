@@ -410,12 +410,13 @@ def _resolve_with_prebuilt_images(
         resolve_function(config, key, source_root=repo_root, tool_root=tool_root)
         for key in config.functions
     )
-    prebuilt = prebuilt_control_plane_image is not None or (
-        prebuilt_function_images is not None
-    )
-    if prebuilt:
-        if prebuilt_function_images is None:
-            raise ValueError("prebuilt function images are required in prebuilt mode")
+    # The two halves are independent, and coupling them breaks the container backend:
+    # there the control plane validates a function image by pulling it from the run's
+    # own registry, so functions declared prebuilt but never pushed leave that registry
+    # empty and every registration fails. A caller may therefore supply a control-plane
+    # image and still let the functions be built and pushed.
+    functions_prebuilt = prebuilt_function_images is not None
+    if functions_prebuilt and prebuilt_function_images is not None:
         missing = [
             function.key
             for function in resolved
@@ -427,7 +428,7 @@ def _resolve_with_prebuilt_images(
             replace(function, image=prebuilt_function_images[function.key])
             for function in resolved
         )
-    return resolved, prebuilt
+    return resolved, functions_prebuilt
 
 
 def _resolve_functions(
@@ -442,7 +443,7 @@ def _resolve_functions(
     function_concurrency: int | None = None,
     function_queue_size: int | None = None,
 ) -> tuple[tuple[Any, ...], bool]:
-    resolved, prebuilt = _resolve_with_prebuilt_images(
+    resolved, functions_prebuilt = _resolve_with_prebuilt_images(
         config,
         repo_root,
         tool_root,
@@ -483,7 +484,7 @@ def _resolve_functions(
             )
             for function in functions
         )
-    return functions, prebuilt
+    return functions, functions_prebuilt
 
 
 def _additional_modules(
@@ -610,7 +611,7 @@ def _build_platform_request(
     build: Build,
     functions: tuple[Any, ...],
     additional_modules: tuple[str, ...],
-    prebuilt: bool,
+    functions_prebuilt: bool,
     prebuilt_control_plane_image: str | None,
     root: Path,
     remote_repo_root: Path | None,
@@ -623,9 +624,11 @@ def _build_platform_request(
         build=build,
         functions=functions,
         additional_modules=additional_modules,
-        build_images=not prebuilt,
+        # Building and pushing follow the FUNCTION images, not the control plane's:
+        # a prebuilt control plane says nothing about whether the functions exist yet.
+        build_images=functions_prebuilt is False,
         build_control_plane=backend == "k8s",
-        push_function_images=backend == "container" and not prebuilt,
+        push_function_images=backend == "container" and functions_prebuilt is False,
         control_plane_image=prebuilt_control_plane_image,
         source_fingerprint=source_fingerprint(root),
         helm_chart=(
@@ -729,6 +732,7 @@ def _build_platform_requires(
     cpuset: str = "",
     budget: str = "",
     native_control_plane: bool = False,
+    control_plane_image: str | None = None,
 ) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
@@ -742,8 +746,16 @@ def _build_platform_requires(
             "NANOFAAS_CONTAINER_LOCAL_CPUSET": cpuset,
             "NANOFAAS_CONCURRENCY_CONTROL_TOTAL_BUDGET": budget,
         }
-        if native_control_plane:
-            env["NANOFAAS_CONTROL_PLANE_IMAGE"] = NATIVE_CONTROL_PLANE_IMAGE
+        # An image named by the caller is used as it is, exactly as a native one is.
+        # Compose declares both `image:` and `build:`, so leaving the build on would
+        # recompile from the Dockerfile and tag the result with the given name — and in
+        # prebuilt mode the jar that Dockerfile copies was deliberately never built, so
+        # the container starts and dies instead of merely measuring the wrong artefact.
+        prebuilt_image = (
+            NATIVE_CONTROL_PLANE_IMAGE if native_control_plane else control_plane_image
+        )
+        if prebuilt_image is not None:
+            env["NANOFAAS_CONTROL_PLANE_IMAGE"] = prebuilt_image
         compose = docker_compose_resource(
             DockerComposeProject(
                 name="nanofaas-loadtest",
@@ -754,7 +766,7 @@ def _build_platform_requires(
                 # is: the compose service declares both `image:` and `build:`,
                 # so `--build` would rebuild from the Dockerfile and tag the JVM
                 # result with the native image's name.
-                build=not native_control_plane,
+                build=prebuilt_image is None,
             ),
             executor=executor,
             cwd=root,
@@ -1463,7 +1475,7 @@ def build_loadtest_plan(
     hpa, replica_floor, scaling_config = _autoscaling_setup(config)
     scaling_config = scaling_config or _concurrency_control_setup(config)
     root = repo_root or Path.cwd()
-    functions, prebuilt = _resolve_functions(
+    functions, functions_prebuilt = _resolve_functions(
         config,
         repo_root,
         tool_root,
@@ -1510,7 +1522,7 @@ def build_loadtest_plan(
         build=config.build,
         functions=functions,
         additional_modules=additional_modules,
-        prebuilt=prebuilt,
+        functions_prebuilt=functions_prebuilt,
         prebuilt_control_plane_image=prebuilt_control_plane_image,
         root=root,
         remote_repo_root=remote_repo_root,
@@ -1528,6 +1540,7 @@ def build_loadtest_plan(
         shared_cpuset(config),
         concurrency_budget(config),
         config.control_plane_runtime == "native",
+        control_plane_image=prebuilt_control_plane_image,
     )
     run_k6 = _build_run_k6(
         executor=executor,

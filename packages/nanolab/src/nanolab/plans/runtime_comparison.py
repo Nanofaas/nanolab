@@ -187,10 +187,22 @@ def build_runtime_comparison_plan(
         tool_root=tool_root,
         stages=NO_STAGES,
         prebuilt_control_plane_image=image,
+        # Pinned for the Kubernetes matrix, where the cells share one VM registry that
+        # the matrix populated beforehand and a per-cell rebuild would let base-image
+        # drift arrive as a difference between variants. NOT pinned on the container
+        # backend: there each run creates its own empty registry, and the control plane
+        # validates a function image by pulling from it, so pinning without pushing
+        # leaves that registry empty and every registration fails. Building them per run
+        # from one checkout gives the same images across arms, which is what a
+        # comparison needs.
         prebuilt_function_images=(
             prebuilt_function_images
             if prebuilt_function_images is not None
-            else pinned_functions(config, repo_root=repo_root, tool_root=tool_root)
+            else (
+                None
+                if config.backend == "container"
+                else pinned_functions(config, repo_root=repo_root, tool_root=tool_root)
+            )
         ),
         script_name=script_for(config),
         k6_env_overrides=comparison_k6_environment(config),

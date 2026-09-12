@@ -234,7 +234,7 @@ def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
             ),
         ),
         additional_modules=(),
-        prebuilt=True,
+        functions_prebuilt=True,
         prebuilt_control_plane_image="cp:jvm",
         root=_Path("/repo"),
         remote_repo_root=root,
