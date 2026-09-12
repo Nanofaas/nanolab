@@ -1217,12 +1217,14 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
 def _sampler(config: ScenarioConfig, run_dir: Path, inner: Any) -> Any:
     """Wrap the run's sampler so container memory and CPU get sampled too.
 
-    Only for concurrency runs, which are the ones whose report has somewhere to
-    put it. Wrapped rather than added as a second slot because `RunK6Task` has
+    For concurrency runs, whose report has somewhere to put it, and for a soak,
+    whose whole subject is what each container still holds as time passes — and
+    which on this backend has no other source, since cAdvisor was rejected here on
+    evidence. Wrapped rather than added as a second slot because `RunK6Task` has
     one start/stop bracket, and both samplers have to cover exactly the window
     the load ran in.
     """
-    if not config.concurrency_control:
+    if not config.concurrency_control and config.soak_minutes is None:
         return inner
     return ResourceWatcherGroup(
         watcher=ResourceWatcher(DockerEngineProbe()),

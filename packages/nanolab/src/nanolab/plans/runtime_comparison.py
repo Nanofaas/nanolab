@@ -209,7 +209,13 @@ def build_runtime_comparison_plan(
         # The only profile that needs them, and it cannot be read without them:
         # a natively compiled control plane publishes no JVM memory gauges, so
         # cAdvisor is the one source that prices every build on the same terms.
-        container_metrics=True,
+        # Kubernetes only. There the kubelet already exports cAdvisor and it is the
+        # right source. On the container backend it is not: this repository tried it
+        # and rejected it on evidence — under Docker Desktop it enumerates only the
+        # cgroup roots and reports nothing per container (see tasks/loadtest/
+        # resources.py). That backend is priced from the Docker Engine API instead,
+        # by the resource watcher, which is the same data `docker stats` reads.
+        container_metrics=config.backend != "container",
         observed_modules=COMPARISON_MODULES,
         # No reaching back before the load started: every cell redeploys the
         # control plane, so anything before k6 belongs to the build the previous
