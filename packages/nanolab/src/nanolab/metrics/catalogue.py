@@ -137,6 +137,45 @@ def core_queries(function_name: str) -> Queries:
             "idempotency_keys_held", f"idempotency_keys_held{CONTROL_PLANE_SELECTOR}"
         ),
         PrometheusQuery(
+            "idempotency_key_budget_rejections_total",
+            f"idempotency_key_budget_rejections_total{CONTROL_PLANE_SELECTOR}",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_entries",
+            f"replica_snapshot_entries{CONTROL_PLANE_SELECTOR}",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_observation_age_seconds_max",
+            f"replica_snapshot_observation_age_seconds_max{CONTROL_PLANE_SELECTOR}",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_refresh_queue_depth",
+            "sum(replica_snapshot_refresh_queue_depth"
+            f"{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_refresh_active",
+            f"sum(replica_snapshot_refresh_active{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_refresh_rejected_total",
+            "sum(replica_snapshot_refresh_rejected_total"
+            f"{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_refresh_failed_total",
+            "sum(replica_snapshot_refresh_failed_total"
+            f"{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_refresh_count",
+            f"sum(replica_snapshot_refresh_seconds_count{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
+            "replica_snapshot_refresh_sum",
+            f"sum(replica_snapshot_refresh_seconds_sum{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
             "function_warm_start_total", f"function_warm_start_total{function}"
         ),
         PrometheusQuery(

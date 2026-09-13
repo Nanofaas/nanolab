@@ -114,3 +114,5 @@ Bumping the pin used by CI means updating both the `ref:` in
 `.github/actions/setup-workspace/action.yml` and the commit noted in this
 README; `test_readme_quotes_the_nanofaas_commit_ci_actually_pins` fails if you
 change one and forget the other.
+
+Single-version memory soak: see the [operator guide](docs/soak.md) for presets, required policy, and current readiness limits.

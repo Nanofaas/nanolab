@@ -22,6 +22,7 @@ from nanolab.cli.product import (
     _workflow_observers,
 )
 from nanolab.cli.provisioning import provision_environment
+from nanolab.cli.soak import terminal_status, unique_soak_run_dir
 from nanolab.tui.workflow_controller import TuiWorkflowController
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
@@ -87,6 +88,21 @@ CLI_MENU = [
 LOADTEST_MENU = [
     Choice("Run load test", "run", "Run the current k6 and autoscaling workflow."),
     Choice(
+        "Memory soak smoke",
+        "soak-smoke",
+        "Build one version and run a short smoke, not P24 acceptance.",
+    ),
+    Choice(
+        "Memory soak JVM",
+        "soak-jvm",
+        "Run the single-version P24 profile with an explicit memory policy.",
+    ),
+    Choice(
+        "Memory soak native",
+        "soak-native",
+        "Run the native P24 profile with verified diagnostic capabilities.",
+    ),
+    Choice(
         "Offload load test",
         "offload",
         "Run mixed-policy k6 traffic against edge and cloud control planes.",
@@ -117,6 +133,8 @@ _SCENARIO_FILES = {
     ("cli", "kubernetes"): "cli-contract-k8s.yaml",
     ("loadtest", "run"): "autoscaling-cycle-k8s.yaml",
     ("loadtest", "offload"): "edge-cloud-offload-policy.yaml",
+    ("loadtest", "soak-smoke"): "memory-soak-smoke-container.yaml",
+    ("loadtest", "soak-jvm"): "memory-soak-sync-container.yaml",
 }
 _SCENARIO_TITLES = {
     scenario_name: _SECTION_TITLES[section]
@@ -527,6 +545,20 @@ class NanofaasTUI:
         scenario_path: Path,
         keep: bool,
     ) -> Any:
+        if scenario.workflow == "soak":
+            if environment.provider != "local":
+                raise ValueError(
+                    "soak currently requires a local container environment"
+                )
+            run_dir = unique_soak_run_dir(default_tool_paths().runs_dir)
+            workflow = _workflow(scenario, environment, run_dir=run_dir)
+            workflow.keep = keep
+            observers = _workflow_observers(scenario_path)
+            result = workflow.run(observers=observers) if observers else workflow.run()
+            status = terminal_status(run_dir)
+            if status != "PASS":
+                raise RuntimeError(f"Soak {status}: {run_dir}")
+            return result
         if (
             scenario.workflow != "release"
             and environment.provider != "local"
@@ -560,6 +592,8 @@ class NanofaasTUI:
         *,
         dry_run: bool,
     ) -> Any:
+        if scenario.workflow == "soak":
+            return _workflow(scenario, environment, dry_run=dry_run)
         if scenario.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment,

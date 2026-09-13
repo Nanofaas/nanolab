@@ -1,53 +1,123 @@
-# The soak the lifecycle-memory campaign exists to run: does anything the control
-# plane holds keep growing under demand that never changes?
-#
-# Held flat on purpose. The other load scenarios ramp, because they ask what the tail
-# does as demand moves; a retention question needs the opposite, so that a population
-# which grows can only be the system and not the load. `soakMinutes` replaces the
-# ramping shape with one constant stage, and `drainMinutes` keeps observing after the
-# traffic stops — retention is only visible once demand is gone, because under load
-# every population is legitimately non-empty and a leak looks like a busy system.
-#
-# The drain has to outlast the retention windows under test. The control plane's
-# documented bounds are 30 seconds, 5 minutes and 30 minutes, so a drain that stopped
-# earlier would read a population still inside its own TTL as a leak.
-#
-# Unkeyed SYNC, which is the original RAM question: with both shares at zero the mixed
-# generator is the purely synchronous one, so this arm and every other arm of the
-# comparison are driven by the same generator code rather than by two scripts that
-# could differ in more than their workload.
-#
-# Container backend, not Kubernetes: both arms then run on identical local
-# infrastructure with no VM between the measurement and the process, and the control
-# plane's own management port is readable without a proxy the observer does not own.
-#
-# No governor and no autoscaler. Either would move the concurrency limits underneath a
-# comparison whose subject is memory, and a limit that changed between arms would put a
-# second moving part in it.
-workflow: loadtest
+# Single source snapshot; build every application role before measurement.
+# See docs/soak.md for readiness limits and the required operator policy.
+# P24 intentionally cannot validate until the operator supplies criteria.
+workflow: soak
 backend: container
-loadProfile: mixed
-# Named by the caller, one arm per revision. The comparison profile pins the function
-# images to fixed tags and skips their build, so the two arms differ in the control
-# plane alone — which matters here because the function SDKs changed between the
-# revisions under comparison and are compiled into those images.
-controlPlaneImage: 127.0.0.1:5000/nanofaas/control-plane:soak-candidate
-asyncShare: 0.0
-idemShare: 0.0
-soakMinutes: 90
-drainMinutes: 35
-# Declared rather than inherited, because every one of these is a term in the memory
-# question and a chart default that changed later would silently change the experiment.
-resources:
-  control-plane:
-    limits:
-      cpu: 2
-      memoryMiB: 1024
+soakPolicyFile: ./memory-soak-policy.yaml
 functions:
   - word-stats-java
   - word-stats-javascript
-# Moderate, as the question was asked: enough sustained work to fill the retention
-# windows many times over, well below the measured saturation point so the arms are
-# compared serving the same offered load rather than at two different refusal rates.
-loadScale: 1.0
-loadVus: 200
+resources:
+  control-plane:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-java:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-javascript:
+    limits: {cpu: 1, memoryMiB: 512}
+soak:
+  purpose: p24
+  phases:
+    warmup_s: 120
+    baseline_drain_s: 2100
+    baseline_window_s: 120
+    steady_s: 5400
+    drain_s: 2100
+    cleanup_margin_s: 300
+  # Intended owner settings from NanoFaaS outcome/idempotency policy.
+  # Effective runtime values must be observed; this mapping does not set them.
+  retention_s:
+    unkeyed-sync-outcome: 30
+    terminal-key-and-readable-outcome: 300
+    live-key-and-execution: 1800
+  roles:
+    control-plane:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
+      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine, prometheus]
+    word-stats-java:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
+      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine, prometheus]
+    word-stats-javascript:
+      runtime: node
+      expected_cpu: 1
+      memory_limit_bytes: 536870912
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
+      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine]
+  images:
+    control-plane:
+      mode: build
+      variant: jvm
+      platform: linux/amd64
+      modules: [container-deployment-provider, async-queue, build-metadata]
+      build_options: {}
+    word-stats-java:
+      mode: build
+      variant: jvm
+      platform: linux/amd64
+      modules: []
+      build_options: {}
+    word-stats-javascript:
+      mode: build
+      variant: default
+      platform: linux/amd64
+      modules: []
+      build_options: {}
+  criteria: []
+  diagnostics:
+    # Required operations are not proof of available, compatible helpers.
+    # Native deliberately has no implicit JVM command or invented helper image.
+    operations:
+      control-plane: [gc, heap_dump]
+      word-stats-java: [gc, heap_dump]
+      word-stats-javascript: [gc, heap_dump]
+    timeout_s: 120
+    max_dumps: 3
+    max_dump_bytes: 3221225472
+    helper_images: {}
+    executables:
+      control-plane: [jcmd]
+      word-stats-java: [jcmd]
+    gc_completion_evidence:
+      control-plane: jvm-full-gc-event
+      word-stats-java: jvm-full-gc-event
+      word-stats-javascript: node-full-gc-event
+  prerequisites:
+    mode: run
+    required_coverage:
+      - sync
+      - error-timeout-cancellation
+      - async-late-callback
+      - idempotent-replay
+      - function-name-churn
+    relevant_config_keys:
+      sync: [images, roles, retention_s, workload]
+      error-timeout-cancellation: [images, roles, retention_s, workload]
+      async-late-callback: [images, roles, retention_s, workload]
+      idempotent-replay: [images, roles, retention_s, workload]
+      function-name-churn: [images, roles, retention_s, workload]
+    receipts: {}
+  sample_interval_s: 10
+  scrape_timeout_s: 3
+  max_observation_gap_s: 30
+  artifact_limit_bytes: 8589934592
+  cancellation_timeout_s: 30
+  workload:
+    # Explicit initial rates; validate actual offered work and capacity in preflight.
+    rates:
+      word-stats-java: 20
+      word-stats-javascript: 20
+    preallocated_vus: 200
+    max_vus: 200
+    max_error_ratio: 0
+    max_dropped_iterations: 0

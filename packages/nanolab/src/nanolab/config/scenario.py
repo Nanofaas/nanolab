@@ -12,8 +12,10 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from nanolab.config.soak import SoakConfig
+
 WorkflowName = Literal[
-    "validate", "cli", "loadtest", "offload", "offload-loadtest", "release"
+    "validate", "cli", "loadtest", "offload", "offload-loadtest", "release", "soak"
 ]
 BackendName = Literal["container", "k8s"]
 BuildStrategy = Literal["docker", "buildpack"]
@@ -198,7 +200,15 @@ class ScenarioConfig(BaseModel):
     # An explicit image, for the comparison a variant key cannot express: two builds of
     # DIFFERENT revisions. A variant names a way of building one source, so tagging a
     # second revision with a variant key would label it as something it is not.
-    # Function images need no such field: the comparison profile already pins them to
+    # Function images to use as they are, instead of building them from this checkout.
+    # An earlier version of this file did without: while every arm built its own
+    # functions, naming them changed nothing. A natively compiled function is the case
+    # that needs it — building would produce a JVM image from source under the same tag,
+    # which is the one thing such an arm is not measuring.
+    function_images: dict[str, str] = Field(
+        default_factory=dict, alias="functionImages"
+    )
+    # The comparison profile also pins them to
     # the tags the prepare phase produces and skips their build, so every arm reuses
     # one set of function images — which a revision comparison depends on, since the
     # function SDKs are compiled into them.
@@ -220,6 +230,7 @@ class ScenarioConfig(BaseModel):
     # 100% of their pool, which makes "VUs used" a floor rather than a demand.
     load_vus: int | None = Field(default=None, alias="loadVus", gt=0)
     release: ReleaseConfig | None = None
+    soak: SoakConfig | None = None
 
     @model_validator(mode="after")
     def validate_workflow(
@@ -231,6 +242,53 @@ class ScenarioConfig(BaseModel):
         concurrency governor and the load profile against what each supports,
         and returns the instance unchanged once every rule holds.
         """
+        if self.workflow == "soak":
+            if self.soak is None:
+                raise ValueError("soak workflow requires its protocol block")
+            if self.backend != "container":
+                raise ValueError("soak currently requires the container backend")
+            unexpected = self.model_fields_set - {
+                "workflow",
+                "backend",
+                "functions",
+                "resources",
+                "soak",
+            }
+            if unexpected:
+                raise ValueError(
+                    "soak does not consume legacy workload options: "
+                    + ", ".join(sorted(unexpected))
+                )
+            self.soak.validate_functions(self.functions)
+            if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
+                raise ValueError(
+                    "resources must refer to selected functions or control-plane"
+                )
+            for name, resource in self.resources.items():
+                role = self.soak.roles[name]
+                if resource.limits is not None:
+                    limits = resource.limits
+                    if (limits.cpu is not None and limits.cpu != role.expected_cpu) or (
+                        limits.memory_mib is not None
+                        and limits.memory_mib * 1024 * 1024 != role.memory_limit_bytes
+                    ):
+                        raise ValueError(
+                            "resource limits disagree with the soak role policy"
+                        )
+                if resource.requests is not None:
+                    requests = resource.requests
+                    if (
+                        requests.cpu is not None and requests.cpu > role.expected_cpu
+                    ) or (
+                        requests.memory_mib is not None
+                        and requests.memory_mib * 1024 * 1024 > role.memory_limit_bytes
+                    ):
+                        raise ValueError(
+                            "resource requests exceed the soak role limits"
+                        )
+            return self
+        if self.soak is not None:
+            raise ValueError("soak protocol belongs only to the soak workflow")
         if self.workflow in ("validate", "cli") and self.backend is None:
             raise ValueError(f"backend is required for {self.workflow} workflow")
         if self.workflow == "offload" and self.backend is not None:

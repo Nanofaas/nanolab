@@ -624,11 +624,16 @@ def _build_platform_request(
         build=build,
         functions=functions,
         additional_modules=additional_modules,
-        # Building and pushing follow the FUNCTION images, not the control plane's:
-        # a prebuilt control plane says nothing about whether the functions exist yet.
+        # Building follows the FUNCTION images, not the control plane's: a prebuilt
+        # control plane says nothing about whether the functions exist yet.
         build_images=functions_prebuilt is False,
         build_control_plane=backend == "k8s",
-        push_function_images=backend == "container" and functions_prebuilt is False,
+        # Pushing does not follow building. On the container backend the control plane
+        # validates a function image by pulling it from the run's own registry, which is
+        # created empty every time, so an image that was built elsewhere still has to be
+        # put there — otherwise naming a prebuilt function is the same as
+        # naming one that does not exist.
+        push_function_images=backend == "container",
         control_plane_image=prebuilt_control_plane_image,
         source_fingerprint=source_fingerprint(root),
         helm_chart=(
@@ -777,7 +782,6 @@ def _build_platform_requires(
             compose,
         )
     return platform_requires
-
 
 
 def drain_checkpoints(drain_minutes: int) -> tuple[int, ...]:

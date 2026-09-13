@@ -40,6 +40,16 @@ from nanolab.cli.execution import (
 )
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
+from nanolab.cli.soak import (
+    install_soak_commands,
+    load_soak_policy,
+    require_unused_run_dir,
+    soak_exit_code,
+    soak_metadata_status,
+    terminal_status,
+    unique_soak_run_dir,
+    validate_soak_selection,
+)
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.plans.cli import build_cli_plan
@@ -88,7 +98,14 @@ def _read(path: Path) -> dict[str, object]:
 
 
 def _scenario(path: Path) -> ScenarioConfig:
-    return ScenarioConfig.model_validate(_read(path))
+    data = _read(path)
+    if data.get("workflow") == "soak" or "soakPolicyFile" in data:
+        resolved, receipt = load_soak_policy(data, path)
+        config = ScenarioConfig.model_validate(resolved)
+        if receipt is not None:
+            object.__setattr__(config, "_soak_policy_receipt", receipt)
+        return config
+    return ScenarioConfig.model_validate(data)
 
 
 def _environment(path: Path | None) -> EnvironmentConfig:
@@ -159,6 +176,19 @@ def _workflow(
 ):
     bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
+    if scenario.workflow == "soak":
+        from nanolab.plans.soak import build_soak_plan
+
+        if environment.provider != "local":
+            raise ValueError("soak currently requires a local container environment")
+        return build_soak_plan(
+            scenario,
+            environment,
+            bindings,
+            run_dir=run_dir or unique_soak_run_dir(paths.runs_dir),
+            repo_root=paths.nanofaas_root,
+            tool_root=paths.tool_root,
+        )
     if scenario.workflow == "validate":
         return build_validate_plan(
             scenario,
@@ -413,6 +443,8 @@ def _write_run_metadata(
 def _default_run_dir(
     run_dir: Path | None, workflow: str, runs_dir: Path
 ) -> Path | None:
+    if run_dir is None and workflow == "soak":
+        return unique_soak_run_dir(runs_dir)
     if run_dir is None and workflow in ("loadtest", "offload-loadtest"):
         return runs_dir / "latest"
     return run_dir
@@ -700,7 +732,13 @@ def _write_failure_metadata(
         with suppress(OSError):
             _write_run_metadata(
                 effective_run_dir,
-                status="failed",
+                status=(
+                    soak_metadata_status(
+                        effective_run_dir, aborted=isinstance(exc, KeyboardInterrupt)
+                    )
+                    if scenario.workflow == "soak"
+                    else "failed"
+                ),
                 error=str(exc),
                 started_at=started_at,
                 scenario_path=scenario_path,
@@ -726,7 +764,11 @@ def _write_success_metadata(
     if effective_run_dir is not None:
         _write_run_metadata(
             effective_run_dir,
-            status="passed",
+            status=(
+                soak_metadata_status(effective_run_dir)
+                if scenario.workflow == "soak"
+                else "passed"
+            ),
             error=None,
             started_at=started_at,
             scenario_path=scenario_path,
@@ -745,6 +787,7 @@ def install_product_commands(
 
     Those are `run`, `plan`, `list`, `workflow`, `inspect` and `doctor`.
     """
+    install_soak_commands(app)
 
     @app.command("run")
     # Typer's documented parameter API takes the spec as the default; ruff flags
@@ -796,6 +839,45 @@ def install_product_commands(
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
         release = scenario_config.workflow == "release"
+        if scenario_config.workflow == "soak":
+            try:
+                validate_soak_selection(
+                    resume=resume, only=only, start=start, until=until
+                )
+                if environment_config.provider != "local":
+                    raise ValueError(
+                        "soak currently requires a local container environment"
+                    )
+                if control_plane_url is not None or prometheus_url is not None:
+                    raise ValueError(
+                        "soak owns its endpoints; external URL overrides are "
+                        "unsupported"
+                    )
+                if teardown:
+                    if keep or run_dir is None:
+                        raise ValueError(
+                            "soak teardown requires --run-dir and cannot use --keep"
+                        )
+                    from nanolab.plans.soak import teardown_soak_run
+
+                    paths = default_tool_paths()
+                    bindings, _fetcher = build_role_bindings(environment_config)
+                    teardown_soak_run(
+                        scenario_config,
+                        environment_config,
+                        bindings,
+                        run_dir=run_dir,
+                        repo_root=paths.nanofaas_root,
+                        tool_root=paths.tool_root,
+                    )
+                    return
+                missing = diagnostics.missing_executables(("docker", "k6"))
+                if missing:
+                    raise ValueError(
+                        "soak requires local executables: " + ", ".join(missing)
+                    )
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from None
         if release and environment is None:
             raise typer.BadParameter("release workflow requires --environment")
         if teardown:
@@ -824,6 +906,11 @@ def install_product_commands(
         effective_run_dir = _default_run_dir(
             run_dir, scenario_config.workflow, paths.runs_dir
         )
+        if scenario_config.workflow == "soak" and effective_run_dir is not None:
+            try:
+                require_unused_run_dir(effective_run_dir)
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from None
         # The extracted tree is throwaway, but the `finally` below only closes
         # it once the whole release run finishes, so it is held (~15 MB) for
         # the run's entire duration, not just through workflow compilation.
@@ -894,6 +981,14 @@ def install_product_commands(
                 sink=sink,
                 provenance=provenance,
             )
+            if scenario_config.workflow == "soak":
+                status = (
+                    "ABORTED"
+                    if isinstance(exc, KeyboardInterrupt)
+                    else terminal_status(effective_run_dir)
+                )
+                typer.echo(f"{status}: {exc}", err=True)
+                raise typer.Exit(soak_exit_code(status)) from exc
             raise
         else:
             _write_success_metadata(
@@ -906,6 +1001,11 @@ def install_product_commands(
                 sink=sink,
                 provenance=provenance,
             )
+            if scenario_config.workflow == "soak":
+                status = terminal_status(effective_run_dir)
+                typer.echo(f"{status}: {effective_run_dir}")
+                if status != "PASS":
+                    raise typer.Exit(soak_exit_code(status))
         finally:
             lifetime.close()
 
@@ -951,6 +1051,22 @@ def install_product_commands(
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
         _validate_cli_container_options(scenario_config, environment_config)
+        if scenario_config.workflow == "soak":
+            try:
+                validate_soak_selection(
+                    resume=False, only=only, start=start, until=until
+                )
+                if environment_config.provider != "local":
+                    raise ValueError(
+                        "soak currently requires a local container environment"
+                    )
+                if control_plane_url is not None or prometheus_url is not None:
+                    raise ValueError(
+                        "soak owns its endpoints; external URL overrides are "
+                        "unsupported"
+                    )
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from None
         _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         if scenario_config.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(

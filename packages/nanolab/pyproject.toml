@@ -126,6 +126,20 @@ known-first-party = ["nanolab"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/nanolab/tui/app.py" = ["SLF001"]
+# Not library code: this file is copied into the diagnostic helper image and is
+# its entrypoint. It reads /proc and juggles descriptors through the os module
+# on purpose, and it keeps its imports to the standard library the pinned image
+# ships, so the pathlib preferences do not apply to it.
+"assets/soak/diagnostic-worker.py" = ["PTH", "D103", "D101", "D102", "D107"]
+# Embeds a Gradle init script and a Node preload as source strings. Their
+# lines are Groovy and JavaScript, not Python: they cannot carry a "# noqa"
+# without it ending up in the generated build script, and rewrapping them
+# would change the code the build actually runs.
+"src/nanolab/tasks/soak/build_observation.py" = ["E501"]
+# Both embed the fixture source they drive: a Gradle init script and the Node
+# preload. Same reason as build_observation.py above.
+"tests/soak/test_build_observation.py" = ["E501"]
+"tests/soak/test_diagnostic_helper_node.py" = ["E501"]
 # Test functions are documented by their name; requiring a docstring on every
 # one of them is noise, not documentation. Style rules (D2xx/D4xx) still apply.
 "tests/**/*.py" = [

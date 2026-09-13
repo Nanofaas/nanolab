@@ -118,8 +118,10 @@ def test_only_the_container_backend_claims_an_unproxied_management_url() -> None
     """A Kubernetes run needs a port-forward this observer does not own."""
     from nanolab.plans.loadtest import management_url_for
 
-    assert (management_url_for("container", "http://127.0.0.1:8080")
-            == "http://127.0.0.1:8081")
+    assert (
+        management_url_for("container", "http://127.0.0.1:8080")
+        == "http://127.0.0.1:8081"
+    )
     assert management_url_for("k8s", "http://127.0.0.1:30080") is None
 
 
@@ -183,6 +185,4 @@ def test_a_backend_without_a_readable_endpoint_gets_no_drain_step(
         management_url=None,
     )
 
-    assert "Observe drain" not in [
-        getattr(t, "title", type(t).__name__) for t in steps
-    ]
+    assert "Observe drain" not in [getattr(t, "title", type(t).__name__) for t in steps]

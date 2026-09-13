@@ -77,6 +77,7 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
         "doctor",
         "tui",
         "compare",
+        "soak-evaluate",
     }
 
 

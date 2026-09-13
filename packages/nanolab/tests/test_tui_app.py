@@ -282,6 +282,8 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         "cli-contract-k8s.yaml",
         "autoscaling-cycle-k8s.yaml",
         "edge-cloud-offload-policy.yaml",
+        "memory-soak-smoke-container.yaml",
+        "memory-soak-sync-container.yaml",
     ]
     assert loaded_paths == [
         tmp_path / "scenarios-v2" / "deployment-lifecycle-container.yaml"

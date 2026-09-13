@@ -15,6 +15,8 @@ EXPECTED_SCENARIOS = {
     ("cli", "kubernetes"): "cli-contract-k8s.yaml",
     ("loadtest", "run"): "autoscaling-cycle-k8s.yaml",
     ("loadtest", "offload"): "edge-cloud-offload-policy.yaml",
+    ("loadtest", "soak-smoke"): "memory-soak-smoke-container.yaml",
+    ("loadtest", "soak-jvm"): "memory-soak-sync-container.yaml",
 }
 
 

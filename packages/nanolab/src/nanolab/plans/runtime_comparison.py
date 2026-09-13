@@ -198,8 +198,9 @@ def build_runtime_comparison_plan(
         prebuilt_function_images=(
             prebuilt_function_images
             if prebuilt_function_images is not None
+            # What the scenario named, if it named anything; otherwise built here.
             else (
-                None
+                (dict(config.function_images) or None)
                 if config.backend == "container"
                 else pinned_functions(config, repo_root=repo_root, tool_root=tool_root)
             )
