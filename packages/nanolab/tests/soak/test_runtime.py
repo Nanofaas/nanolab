@@ -50,12 +50,24 @@ def inert_scenario():
     )
 
 
-def prepared(tmp_path):
+def prepared(
+    tmp_path,
+    *,
+    metrics_profile=None,
+    scenario="memory-soak-smoke-container.yaml",
+):
     path = (
         Path(__file__).resolve().parents[2]
-        / "scenarios-v2/memory-soak-smoke-container.yaml"
+        / "scenarios-v2"
+        / scenario
     )
-    config = SoakConfig.model_validate(yaml.safe_load(path.read_text())["soak"])
+    raw = yaml.safe_load(path.read_text())["soak"]
+    if not raw["criteria"]:
+        smoke = path.with_name("memory-soak-smoke-container.yaml")
+        raw["criteria"] = yaml.safe_load(smoke.read_text())["soak"]["criteria"]
+    if metrics_profile is not None:
+        raw["metrics_profile"] = metrics_profile
+    config = SoakConfig.model_validate(raw)
     root = tmp_path / "evidence"
     writer = ArtifactWriter(root, config.artifact_limit_bytes)
     writer.write_json("config.json", config.model_dump(mode="json"))
@@ -101,10 +113,18 @@ def prepared(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("scenario", "expected_profile"),
+    [
+        ("memory-soak-sync-container.yaml", "advanced"),
+        ("memory-soak-sync-candidate-diagnostic-container.yaml", "soak"),
+    ],
+)
 def test_local_compose_uses_only_frozen_images_and_private_network(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, scenario, expected_profile
 ):
-    value = prepared(tmp_path)
+    value = prepared(tmp_path, scenario=scenario)
+    value.config.diagnostics.operations = dict.fromkeys(value.config.roles, [])
     leases = []
 
     class Lease:
@@ -133,6 +153,15 @@ def test_local_compose_uses_only_frozen_images_and_private_network(
         for service in document["services"].values()
     )
     assert document["networks"] == {"owned": {}}
+    assert document["services"]["control-plane"]["environment"][
+        "NANOFAAS_METRICS_PROFILE"
+    ] == expected_profile
+    assert document["services"]["function-1"]["environment"][
+        "NANOFAAS_METRICS_PROFILE"
+    ] == expected_profile
+    assert "NANOFAAS_METRICS_PROFILE" not in document["services"]["function-2"][
+        "environment"
+    ]
     assert deployment.ownership.always_release
     deployment.ownership.acquire(TaskInputs.empty())
     assert all(lease.closed for lease in leases)

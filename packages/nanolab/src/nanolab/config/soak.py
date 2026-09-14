@@ -247,6 +247,7 @@ class SoakConfig(_StrictModel):
     """A complete single-version protocol, independent of comparison profiles."""
 
     purpose: Literal["p24", "smoke"]
+    metrics_profile: Literal["advanced", "soak"] = "advanced"
     phases: PhaseConfig
     retention_s: dict[Text, PositiveInt] = Field(min_length=1)
     roles: dict[Text, RolePolicy] = Field(min_length=1)

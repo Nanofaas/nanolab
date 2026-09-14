@@ -625,6 +625,32 @@ def outcome(run, attribution=None):
     return {r.criterion_id: r for r in evaluate_run(run["root"], attribution)}
 
 
+def test_legacy_omitted_profile_normalizes_receipt_and_manifest_for_evaluation(
+    complete_run,
+):
+    from copy import deepcopy
+
+    from nanolab.tasks.soak.prerequisites import normalize_prerequisite_inputs
+
+    root = complete_run["root"]
+    manifest = complete_run["manifest"]
+    persisted = json.loads(
+        (root / manifest["prerequisite_inputs"]["path"]).read_text()
+    )
+    original = deepcopy(persisted)
+    effective = normalize_prerequisite_inputs(persisted)
+    receipt = json.loads((root / manifest["prerequisites"]["path"]).read_text())
+
+    assert "metrics_profile" not in original
+    assert persisted == original
+    assert effective["metrics_profile"] == "advanced"
+    assert receipt["inputs"] == effective
+    assert receipt["fingerprint"] == fingerprint(effective)
+    results = outcome(complete_run)
+    assert results["prerequisite-coverage"].status == "PASS"
+    assert combine_results(tuple(results.values()), False) == "PASS"
+
+
 def test_real_producer_receipts_pass_offline_and_reports_are_immutable(
     complete_run, monkeypatch
 ):

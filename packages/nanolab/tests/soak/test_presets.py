@@ -1,7 +1,7 @@
-"""Shipped soak inputs bind the strict model and the criteria-only policy loader.
+"""Shipped soak inputs bind the strict model and criteria-only policy loader.
 
-Numerical policies created here are synthetic parser/preflight fixtures, never
-operator-approved P24 thresholds. These tests do not build or render workflows.
+P24 tests load the checked-in operator policy. Synthetic policies below are used
+only to exercise resolver rejection and override boundaries.
 """
 
 from copy import deepcopy
@@ -14,7 +14,9 @@ from pydantic import ValidationError
 from nanolab.config.scenario import ScenarioConfig
 
 SCENARIOS = Path(__file__).resolve().parents[2] / "scenarios-v2"
-P24 = ("memory-soak-sync-container.yaml",)
+P24_ADVANCED = ("memory-soak-sync-container.yaml",)
+P24_SOAK = ("memory-soak-sync-candidate-diagnostic-container.yaml",)
+P24 = (*P24_ADVANCED, *P24_SOAK)
 SHORT = (
     "memory-soak-smoke-container.yaml",
     "memory-soak-prerequisites-container.yaml",
@@ -78,17 +80,17 @@ def operator_fixture(tmp_path, name):
 
 
 @pytest.mark.parametrize("name", [*P24, *SHORT])
-def test_all_presets_load_through_resolver_and_strict_model(tmp_path, name):
-    if name in P24:
-        data, path = operator_fixture(tmp_path, name)
-    else:
-        data, path = read_preset(name), SCENARIOS / name
+def test_all_presets_load_through_resolver_and_strict_model(name):
+    data, path = read_preset(name), SCENARIOS / name
     config = ScenarioConfig.model_validate(resolve(data, path))
     assert config.workflow == "soak"
     assert config.backend == "container"
     assert config.soak is not None
     soak = config.soak
     assert soak.purpose == ("p24" if name in P24 else "smoke")
+    expected_profile = "soak" if name in P24_SOAK else "advanced"
+    assert soak.metrics_profile == expected_profile
+    assert soak.model_dump(mode="json")["metrics_profile"] == expected_profile
     assert set(soak.roles) == set(soak.images) == ROLES
     assert set(soak.workload.rates) == set(config.functions)
     assert set(config.resources) == ROLES
@@ -108,6 +110,81 @@ def test_all_presets_load_through_resolver_and_strict_model(tmp_path, name):
         assert soak.images[role].mode == "build"
         assert soak.images[role].digest is None
         assert soak.images[role].provenance_receipt is None
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_profile"),
+    [
+        (P24_ADVANCED[0], "advanced"),
+        (P24_SOAK[0], "soak"),
+    ],
+)
+def test_p24_invocations_bind_profile_specific_owner_requirements(
+    name, expected_profile
+):
+    from nanolab.tasks.soak.prerequisites import _required_populations
+
+    data, path = read_preset(name), SCENARIOS / name
+    soak = ScenarioConfig.model_validate(resolve(data, path)).soak
+    assert soak is not None and soak.metrics_profile == expected_profile
+    required = _required_populations(
+        {role: "sha256:" + "a" * 64 for role in soak.images},
+        frozenset(soak.prerequisites.required_coverage),
+        soak.metrics_profile,
+    )
+    if expected_profile == "advanced":
+        assert required == dict.fromkeys(soak.images, frozenset())
+    else:
+        assert required == {
+            "control-plane": frozenset(
+                {
+                    "execution_records",
+                    "outcomes",
+                    "idempotency_entries",
+                    "logical_executions",
+                    "canonical_input_bytes",
+                    "physical_input_copy_bytes",
+                    "waiters",
+                    "expiry_queue_depth",
+                    "pending_acquisitions",
+                    "replica_snapshots",
+                    "retired_owners",
+                }
+            ),
+            "word-stats-java": frozenset(
+                {"live_executions", "callbacks", "callback_bytes"}
+            ),
+            "word-stats-javascript": frozenset(
+                {
+                    "live_executions",
+                    "input_bytes",
+                    "output_bytes",
+                    "callbacks",
+                    "callback_bytes",
+                    "serialized_callback_bytes",
+                }
+            ),
+        }
+
+
+def test_checked_in_p24_policy_enforces_zero_tolerance_without_metric_series():
+    policy = yaml.safe_load((SCENARIOS / "memory-soak-policy.yaml").read_text())
+
+    assert set(policy) == {"schema", "criteria"}
+    assert policy["schema"] == "nanolab-soak-policy-v1"
+    assert len(policy["criteria"]) == 2 * len(ROLES)
+    assert all(c["metric"] != "metric_series" for c in policy["criteria"])
+    for role in ROLES:
+        criteria = [c for c in policy["criteria"] if c["role"] == role]
+        budget = next(c for c in criteria if c["metric"] == "cgroup_memory_usage_bytes")
+        rss = next(c for c in criteria if c["metric"] == "process_rss_bytes")
+        assert budget["operation"] == "maximum"
+        assert budget["phase"] == "steady"
+        assert rss["operation"] == "return_to_reference"
+        assert rss["phase"] == "drain"
+        assert rss["deadline_s"] == 2100
+        assert rss["absolute_tolerance"] == 0
+        assert rss["relative_tolerance"] == 0
 
 
 @pytest.mark.parametrize("name", P24)
@@ -131,8 +208,8 @@ def test_p24_requires_real_operator_file_even_with_environment_fallback(
 
 
 @pytest.mark.parametrize("name", P24)
-def test_p24_schedule_keeps_full_load_and_cleanup_margin(tmp_path, name):
-    data, path = operator_fixture(tmp_path, name)
+def test_p24_schedule_keeps_full_load_and_cleanup_margin(name):
+    data, path = read_preset(name), SCENARIOS / name
     soak = ScenarioConfig.model_validate(resolve(data, path)).soak
     assert soak is not None
     assert soak.phases.steady_s == 5400

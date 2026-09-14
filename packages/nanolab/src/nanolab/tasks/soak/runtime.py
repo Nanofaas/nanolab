@@ -227,6 +227,10 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
 
     _check_prerequisite_wiring(prepared.config, options)
     frozen = deepcopy(options.prerequisite_inputs)
+    selected_profile = prepared.config.metrics_profile
+    if frozen.get("metrics_profile", selected_profile) != selected_profile:
+        raise ValueError("frozen prerequisite metrics profile differs from policy")
+    frozen["metrics_profile"] = selected_profile
     if "images" in frozen and frozen["images"] != prepared.images:
         raise ValueError("frozen prerequisite images differ from build receipts")
     frozen["images"] = dict(prepared.images)
@@ -825,6 +829,8 @@ def create_local_deployment(
             "MANAGEMENT_ENDPOINT_CONFIGPROPS_ACCESS": "read-only",
             "MANAGEMENT_ENDPOINT_INFO_ACCESS": "read-only",
         }
+        if policy.runtime == "jvm":
+            env["NANOFAAS_METRICS_PROFILE"] = config.metrics_profile
         if policy.runtime == "jvm" and policy.runtime_options:
             env["JAVA_TOOL_OPTIONS"] = " ".join(policy.runtime_options)
         elif policy.runtime == "node" and policy.runtime_options:

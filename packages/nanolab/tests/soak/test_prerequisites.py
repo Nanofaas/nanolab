@@ -11,6 +11,35 @@ import pytest
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact, fingerprint
 
 
+SOAK_POPULATIONS = {
+    "control-plane": {
+        "execution_records",
+        "outcomes",
+        "idempotency_entries",
+        "logical_executions",
+        "canonical_input_bytes",
+        "physical_input_copy_bytes",
+        "waiters",
+        "expiry_queue_depth",
+        "pending_acquisitions",
+        "replica_snapshots",
+    },
+    "java": {
+        "live_executions",
+        "callbacks",
+        "callback_bytes",
+    },
+    "javascript": {
+        "live_executions",
+        "input_bytes",
+        "output_bytes",
+        "callbacks",
+        "callback_bytes",
+        "serialized_callback_bytes",
+    },
+}
+
+
 def api():
     try:
         return import_module("nanolab.tasks.soak.prerequisites")
@@ -30,20 +59,16 @@ def inputs(tmp_path):
             "java": "sha256:" + "b" * 64,
             "javascript": "sha256:" + "c" * 64,
         },
+        "metrics_profile": "soak",
         "relevant_config": {"sync": {"expected_output": {"value": 42}, "retry": 3}},
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
             role: {
                 name: {"limit": 0, "retention_s": 0}
-                for name in (
-                    "live_executions",
-                    "payload_bytes",
-                    "timers",
-                    "pending_http",
-                )
+                for name in populations
             }
-            for role in ("control-plane", "java", "javascript")
+            for role, populations in SOAK_POPULATIONS.items()
         },
     }
 
@@ -200,6 +225,55 @@ def test_legacy_http_500_error_remains_supported():
     assert all(a["status"] == "PASS" for a in assertions)
 
 
+def test_advanced_profile_requires_no_candidate_owner_settlement(inputs):
+    inputs["metrics_profile"] = "advanced"
+    inputs["settlement"] = {role: {} for role in inputs["images"]}
+    assert api()._required_populations(
+        inputs["images"], frozenset({"sync"}), "advanced"
+    ) == {role: frozenset() for role in inputs["images"]}
+    api()._inputs(inputs, frozenset({"sync"}))
+
+
+def test_legacy_inputs_default_and_freeze_advanced_profile(tmp_path, inputs):
+    del inputs["metrics_profile"]
+    inputs["settlement"] = {role: {} for role in inputs["images"]}
+
+    receipt, _ = execute(tmp_path, inputs)
+
+    assert receipt["status"] == "PASS"
+    assert receipt["inputs"]["metrics_profile"] == "advanced"
+    assert receipt["fingerprint"] == fingerprint(receipt["inputs"])
+    assert "metrics_profile" not in inputs
+
+
+def test_soak_role_matrix_and_coverage_additions_are_exact(inputs):
+    coverage = api().SUPPORTED_COVERAGE - {"function-name-churn"}
+    required = api()._required_populations(inputs["images"], coverage, "soak")
+    assert required == {
+        role: frozenset(populations)
+        for role, populations in SOAK_POPULATIONS.items()
+    }
+    assert api()._required_populations(
+        inputs["images"], api().SUPPORTED_COVERAGE, "soak"
+    )["control-plane"] == frozenset(
+        SOAK_POPULATIONS["control-plane"] | {"retired_owners"}
+    )
+    assert not ({"timers", "pending_http", "physical_executions", "metric_series"} & set().union(*required.values()))
+
+
+def test_soak_rejects_missing_applicable_population_only(inputs):
+    del inputs["settlement"]["javascript"]["input_bytes"]
+    with pytest.raises(ValueError, match="required retained-population policies missing"):
+        api()._inputs(inputs, frozenset({"sync"}))
+
+    inputs["settlement"]["javascript"]["input_bytes"] = {
+        "limit": 0,
+        "retention_s": 0,
+    }
+    inputs["settlement"]["java"].pop("callbacks")
+    api()._inputs(inputs, frozenset({"sync"}))
+
+
 def test_positive_receipt_reopens_evidence_and_checks_every_role(tmp_path, inputs):
     receipt, lifetimes = execute(tmp_path, inputs)
     assert (
@@ -320,14 +394,10 @@ def test_independent_profiles_assert_semantics_and_extra_retained_owners(
     inputs["relevant_config"] = {
         name: {"expected_output": {"value": 42}} for name in coverage
     }
-    for policies in inputs["settlement"].values():
-        for name in (
-            "callbacks",
-            "idempotency_entries",
-            "retired_owners",
-            "metric_series",
-        ):
-            policies[name] = {"limit": 0, "retention_s": 0}
+    inputs["settlement"]["control-plane"]["retired_owners"] = {
+        "limit": 0,
+        "retention_s": 0,
+    }
     receipt, lifetimes = execute(tmp_path, inputs, coverage)
     assert (
         api().validate_receipt(receipt, fingerprint(inputs), coverage).status == "PASS"

@@ -9,6 +9,7 @@ import pytest
 
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact, fingerprint
 from nanolab.tasks.soak.prerequisite_runtime import (
+    _DEFAULT_METRICS,
     LivePlatform,
     LiveProfileSession,
     UnsupportedPreflightError,
@@ -17,6 +18,43 @@ from nanolab.tasks.soak.prerequisite_runtime import (
     required_body_budget,
 )
 from nanolab.tasks.soak.prerequisites import run_prerequisites, validate_receipt
+
+
+def test_default_metrics_bind_each_soak_population_to_its_owner():
+    assert _DEFAULT_METRICS == {
+        "control-plane": {
+            "execution_records": ("execution_in_flight_records",),
+            "outcomes": ("execution_store_size",),
+            "idempotency_entries": ("idempotency_keys_held",),
+            "logical_executions": ("invocation_execution_reservations",),
+            "canonical_input_bytes": ("invocation_canonical_input_bytes",),
+            "physical_input_copy_bytes": (
+                "invocation_physical_input_copy_bytes",
+            ),
+            "waiters": ("execution_waiters_retained",),
+            "expiry_queue_depth": ("execution_expiry_queue_depth",),
+            "pending_acquisitions": (
+                "nanofaas_http_pool_pending_acquisitions",
+            ),
+            "replica_snapshots": ("replica_snapshot_entries",),
+            "retired_owners": ("function_capacity_retired_generations",),
+        },
+        "java": {
+            "live_executions": ("runtime_active_handlers",),
+            "callbacks": ("runtime_pending_callbacks",),
+            "callback_bytes": ("runtime_pending_callback_bytes",),
+        },
+        "javascript": {
+            "live_executions": ("runtime_active_handlers",),
+            "input_bytes": ("runtime_input_bytes",),
+            "output_bytes": ("runtime_output_bytes",),
+            "callbacks": ("runtime_pending_callbacks",),
+            "callback_bytes": ("runtime_pending_callback_bytes",),
+            "serialized_callback_bytes": (
+                "runtime_serialized_callback_bytes",
+            ),
+        },
+    }
 
 
 @pytest.fixture
@@ -30,6 +68,7 @@ def frozen(tmp_path):
             "control-plane": "sha256:" + "a" * 64,
             "javascript": "sha256:" + "b" * 64,
         },
+        "metrics_profile": "advanced",
         "relevant_config": {
             "sync": {
                 "function": "echo",
@@ -242,18 +281,9 @@ def test_real_current_gaps_are_preflight_errors_before_any_invocation(frozen):
 
 
 @pytest.mark.parametrize("coverage", ["sync", "async", "idempotent-replay"])
-def test_actual_http_outputs_and_counter_deltas(frozen, coverage):
+def test_actual_http_outputs_and_replay_identity(frozen, coverage):
     server = Server()
     set_profile(frozen, coverage)
-    if coverage == "idempotent-replay":
-        frozen["population_metrics"] = {
-            "javascript": {
-                "physical_executions": [{"metric": "test_handler_starts_total"}]
-            }
-        }
-        frozen["population_semantics"] = {
-            "javascript": {"physical_executions": "handler-starts"}
-        }
 
     async def exercise():
         async with platform(frozen, server) as live:
@@ -262,7 +292,6 @@ def test_actual_http_outputs_and_counter_deltas(frozen, coverage):
             )
             if coverage == "idempotent-replay":
                 assert observed["execution_ids"] == ["execution-1"] * 2
-                assert observed["physical_executions"] == 1
                 assert observed["outputs"] == [{"value": 42}] * 2
             else:
                 assert observed["output"] == {"value": 42}
@@ -564,7 +593,7 @@ def test_http_200_error_receipt_requires_matching_terminal_code(
         ("test_handler_starts_total", None),
     ],
 )
-def test_request_counter_never_establishes_physical_replay(frozen, binding, semantics):
+def test_request_counter_never_establishes_physical_execution(frozen, binding, semantics):
     server = Server()
     set_profile(frozen, "idempotent-replay")
     if binding:
@@ -579,8 +608,8 @@ def test_request_counter_never_establishes_physical_replay(frozen, binding, sema
     async def exercise():
         async with platform(frozen, server) as live:
             with pytest.raises(UnsupportedPreflightError, match="javascript"):
-                await LiveProfileSession(live, frozen, "idempotent-replay").exercise(
-                    "idempotent-replay"
+                await LiveProfileSession(live, frozen, "idempotent-replay")._population(
+                    "javascript", "physical_executions"
                 )
             assert server.count == 0
 

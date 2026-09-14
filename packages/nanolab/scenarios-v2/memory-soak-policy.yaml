@@ -1,0 +1,68 @@
+schema: nanolab-soak-policy-v1
+criteria:
+  - id: control-plane.p24-cgroup-budget
+    role: control-plane
+    metric: cgroup_memory_usage_bytes
+    label_selector: {}
+    unit: bytes
+    operation: maximum
+    phase: steady
+    window_s: 5400
+    threshold: 1073741824
+    rationale: The control plane must remain within its declared 1 GiB cgroup limit.
+  - id: control-plane.p24-rss-return
+    role: control-plane
+    metric: process_rss_bytes
+    label_selector: {}
+    unit: bytes
+    operation: return_to_reference
+    phase: drain
+    window_s: 120
+    deadline_s: 2100
+    absolute_tolerance: 0
+    relative_tolerance: 0
+    rationale: Post-drain RSS must return to or below this run's baseline without tolerance.
+  - id: word-stats-java.p24-cgroup-budget
+    role: word-stats-java
+    metric: cgroup_memory_usage_bytes
+    label_selector: {}
+    unit: bytes
+    operation: maximum
+    phase: steady
+    window_s: 5400
+    threshold: 1073741824
+    rationale: The Java function must remain within its declared 1 GiB cgroup limit.
+  - id: word-stats-java.p24-rss-return
+    role: word-stats-java
+    metric: process_rss_bytes
+    label_selector: {}
+    unit: bytes
+    operation: return_to_reference
+    phase: drain
+    window_s: 120
+    deadline_s: 2100
+    absolute_tolerance: 0
+    relative_tolerance: 0
+    rationale: Post-drain RSS must return to or below this run's baseline without tolerance.
+  - id: word-stats-javascript.p24-cgroup-budget
+    role: word-stats-javascript
+    metric: cgroup_memory_usage_bytes
+    label_selector: {}
+    unit: bytes
+    operation: maximum
+    phase: steady
+    window_s: 5400
+    threshold: 536870912
+    rationale: The JavaScript function must remain within its declared 512 MiB cgroup limit.
+  - id: word-stats-javascript.p24-rss-return
+    role: word-stats-javascript
+    metric: process_rss_bytes
+    label_selector: {}
+    unit: bytes
+    operation: return_to_reference
+    phase: drain
+    window_s: 120
+    deadline_s: 2100
+    absolute_tolerance: 0
+    relative_tolerance: 0
+    rationale: Post-drain RSS must return to or below this run's baseline without tolerance.

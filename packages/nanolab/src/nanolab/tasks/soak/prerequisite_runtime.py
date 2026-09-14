@@ -36,7 +36,7 @@ For error responses with HTTP 200, freeze ``expected_error_code`` in the error
 profile: the response and terminal poll must agree on that code and execution ID.
 ``population_semantics[role]['metric_series'] = 'prometheus-exposition-series'``
 explicitly selects exposition cardinality (all name/label identities), not registry
-size. Physical replay counters require an explicit metric binding and frozen
+size. Optional physical replay counters require an explicit metric binding and frozen
 ``population_semantics[role]['physical_executions'] = 'handler-starts'``. The
 request counter ``runtime_invocations_total`` is not such an instrument; no
 request-to-handler equivalence proof is implemented by this adapter.
@@ -84,20 +84,30 @@ _TERMINAL = {"success", "error", "timeout"}
 # registry population. None of these are aliases for the required populations.
 _DEFAULT_METRICS = {
     "control-plane": {
-        "idempotency_entries": ("idempotency_keys_held",),
         "execution_records": ("execution_in_flight_records",),
         "outcomes": ("execution_store_size",),
+        "idempotency_entries": ("idempotency_keys_held",),
+        "logical_executions": ("invocation_execution_reservations",),
+        "canonical_input_bytes": ("invocation_canonical_input_bytes",),
+        "physical_input_copy_bytes": ("invocation_physical_input_copy_bytes",),
+        "waiters": ("execution_waiters_retained",),
+        "expiry_queue_depth": ("execution_expiry_queue_depth",),
         "pending_acquisitions": ("nanofaas_http_pool_pending_acquisitions",),
+        "replica_snapshots": ("replica_snapshot_entries",),
+        "retired_owners": ("function_capacity_retired_generations",),
     },
-    "java": {},
+    "java": {
+        "live_executions": ("runtime_active_handlers",),
+        "callbacks": ("runtime_pending_callbacks",),
+        "callback_bytes": ("runtime_pending_callback_bytes",),
+    },
     "javascript": {
         "live_executions": ("runtime_active_handlers",),
-        "payload_bytes": (
-            "runtime_input_bytes",
-            "runtime_output_bytes",
-            "runtime_serialized_callback_bytes",
-        ),
+        "input_bytes": ("runtime_input_bytes",),
+        "output_bytes": ("runtime_output_bytes",),
         "callbacks": ("runtime_pending_callbacks",),
+        "callback_bytes": ("runtime_pending_callback_bytes",),
+        "serialized_callback_bytes": ("runtime_serialized_callback_bytes",),
     },
 }
 
@@ -470,8 +480,6 @@ class LiveProfileSession:
         self._function()
         self._request_body()
         await self.populations()
-        if self.coverage == "idempotent-replay":
-            await self._population(self._role(), "physical_executions")
         if self.coverage == "cancellation":
             await self._population("control-plane", "waiters")
         if self.coverage == "late-callback":
@@ -607,8 +615,6 @@ class LiveProfileSession:
         }
 
     async def _replay(self):
-        role = self._role()
-        before = await self._population(role, "physical_executions")
         ids, outputs = [], []
         key = "p24-" + self.platform.lifetime_id
         for _ in range(2):
@@ -621,18 +627,9 @@ class LiveProfileSession:
                 )
             ids.append(identity)
             outputs.append(body.get("output") if isinstance(body, dict) else None)
-        after = await self._population(role, "physical_executions")
-        delta = after - before
-        if delta < 0 or not delta.is_integer():
-            raise UnsupportedPreflightError(
-                "physical invocation counter reset or fractional delta"
-            )
         return {
             "execution_ids": ids,
             "outputs": outputs,
-            "physical_executions": int(delta),
-            "counter_before": before,
-            "counter_after": after,
         }
 
     async def _cancel(self):

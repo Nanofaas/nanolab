@@ -1,4 +1,4 @@
-# Historical comparison arm: one NanoFaaS version with advanced metrics.
+# Candidate-only diagnostic: one NanoFaaS version with SOAK ownership metrics.
 # Single source snapshot; build every application role before measurement.
 # The checked-in criteria-only policy freezes the approved P24 RSS contract.
 # Profile-aware prerequisite settlement supplies only applicable owner gates.
@@ -17,7 +17,7 @@ resources:
     limits: {cpu: 1, memoryMiB: 512}
 soak:
   purpose: p24
-  metrics_profile: advanced
+  metrics_profile: soak
   phases:
     warmup_s: 120
     baseline_drain_s: 2100

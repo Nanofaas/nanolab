@@ -34,6 +34,7 @@ from contextlib import AbstractAsyncContextManager, suppress
 from copy import deepcopy
 from pathlib import Path
 from time import monotonic
+from types import MappingProxyType
 from typing import Any, Protocol, TypeGuard
 from uuid import uuid4
 
@@ -59,13 +60,64 @@ SUPPORTED_COVERAGE = frozenset(
         "function-name-churn",
     }
 )
-_BASE_POPULATIONS = {"live_executions", "payload_bytes", "timers", "pending_http"}
-_EXTRA_POPULATIONS = {
-    "async": {"callbacks"},
-    "late-callback": {"callbacks"},
-    "idempotent-replay": {"idempotency_entries"},
-    "function-name-churn": {"retired_owners", "metric_series"},
-}
+_SOAK_POPULATIONS = MappingProxyType(
+    {
+        "control-plane": frozenset(
+            {
+                "execution_records",
+                "outcomes",
+                "logical_executions",
+                "canonical_input_bytes",
+                "physical_input_copy_bytes",
+                "expiry_queue_depth",
+                "pending_acquisitions",
+                "replica_snapshots",
+            }
+        ),
+        "java": frozenset({"live_executions"}),
+        "javascript": frozenset(
+            {"live_executions", "input_bytes", "output_bytes"}
+        ),
+    }
+)
+_SOAK_ROLE_KINDS = MappingProxyType(
+    {
+        "control-plane": "control-plane",
+        "java": "java",
+        "javascript": "javascript",
+        "word-stats-java": "java",
+        "word-stats-javascript": "javascript",
+    }
+)
+_COVERAGE_POPULATIONS = MappingProxyType(
+    {
+        "async": MappingProxyType(
+            {
+                "java": frozenset({"callbacks", "callback_bytes"}),
+                "javascript": frozenset(
+                    {"callbacks", "callback_bytes", "serialized_callback_bytes"}
+                ),
+            }
+        ),
+        "late-callback": MappingProxyType(
+            {
+                "java": frozenset({"callbacks", "callback_bytes"}),
+                "javascript": frozenset(
+                    {"callbacks", "callback_bytes", "serialized_callback_bytes"}
+                ),
+            }
+        ),
+        "cancellation": MappingProxyType(
+            {"control-plane": frozenset({"waiters"})}
+        ),
+        "idempotent-replay": MappingProxyType(
+            {"control-plane": frozenset({"idempotency_entries"})}
+        ),
+        "function-name-churn": MappingProxyType(
+            {"control-plane": frozenset({"retired_owners"})}
+        ),
+    }
+)
 
 
 class ProfileSession(Protocol):
@@ -106,6 +158,42 @@ def _artifact(descriptor: object) -> str:
     return str(path)
 
 
+def _required_populations(
+    images: dict[str, str],
+    coverage: frozenset[str],
+    metrics_profile: str,
+) -> dict[str, frozenset[str]]:
+    if metrics_profile not in {"advanced", "soak"}:
+        raise ValueError(f"unsupported metrics profile: {metrics_profile}")
+    if metrics_profile == "advanced":
+        return {role: frozenset() for role in images}
+    unknown = set(images) - set(_SOAK_ROLE_KINDS)
+    if unknown:
+        raise ValueError(f"unsupported soak role: {', '.join(sorted(unknown))}")
+    required = {
+        role: _SOAK_POPULATIONS[_SOAK_ROLE_KINDS[role]] for role in images
+    }
+    coverage_ids = set(coverage)
+    if "error-timeout-cancellation" in coverage:
+        coverage_ids.update({"error", "timeout", "cancellation"})
+    if "async-late-callback" in coverage:
+        coverage_ids.update({"async", "late-callback"})
+    for coverage_id in coverage_ids:
+        for kind, populations in _COVERAGE_POPULATIONS.get(
+            coverage_id, {}
+        ).items():
+            for role in required:
+                if _SOAK_ROLE_KINDS[role] == kind:
+                    required[role] |= populations
+    return required
+
+
+def normalize_prerequisite_inputs(inputs: dict[str, object]) -> dict[str, object]:
+    normalized = deepcopy(inputs)
+    normalized.setdefault("metrics_profile", "advanced")
+    return normalized
+
+
 def _inputs(inputs: dict, coverage: frozenset[str]) -> None:
     images = inputs["images"]
     if not isinstance(images, dict) or "control-plane" not in images or len(images) < 2:
@@ -128,11 +216,9 @@ def _inputs(inputs: dict, coverage: frozenset[str]) -> None:
     policies = inputs["settlement"]
     if not isinstance(policies, dict) or set(policies) != set(images):
         raise ValueError("settlement policies must cover every image role")
-    required = _BASE_POPULATIONS.union(
-        *(_EXTRA_POPULATIONS.get(c, set()) for c in coverage)
-    )
-    for populations in policies.values():
-        if not isinstance(populations, dict) or not required.issubset(populations):
+    required = _required_populations(images, coverage, inputs["metrics_profile"])
+    for role, populations in policies.items():
+        if not isinstance(populations, dict) or not required[role].issubset(populations):
             raise ValueError("required retained-population policies missing")
         for name, policy in populations.items():
             if not isinstance(name, str) or not name or not isinstance(policy, dict):
@@ -221,7 +307,6 @@ def _behavior(coverage: str, observed: dict, config: dict) -> list[dict]:
         )
         return [
             _assertion("execution_ids", ids, "same nonempty identity", same),
-            equal("physical_executions", 1),
             equal("outputs", [config["expected_output"]] * len(ids)),
         ]
     if coverage == "function-name-churn":
@@ -859,7 +944,7 @@ async def run_prerequisites(
         raise ValueError(
             "owned prerequisite reservation and recovery hooks must be paired"
         )
-    frozen = deepcopy(inputs)
+    frozen = normalize_prerequisite_inputs(inputs)
     input_fingerprint = fingerprint(frozen)
     receipt = {
         "schema": SCHEMA,

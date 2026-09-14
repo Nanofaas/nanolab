@@ -68,7 +68,10 @@ from nanolab.tasks.soak.diagnostics import validate_attribution
 from nanolab.tasks.soak.images import build_key
 from nanolab.tasks.soak.models import CriterionResult, Target
 from nanolab.tasks.soak.preflight import preflight
-from nanolab.tasks.soak.prerequisites import validate_receipt
+from nanolab.tasks.soak.prerequisites import (
+    normalize_prerequisite_inputs,
+    validate_receipt,
+)
 from nanolab.tasks.soak.sources import SourceEntry, SourceSnapshot, verify_snapshot
 from nanolab.tasks.soak.workload import allocate_vus, constant_arrival_options
 
@@ -1231,9 +1234,13 @@ def evaluate_acceptance(
                 "prerequisite exemption is allowed only by explicit smoke policy",
             )
             return "smoke explicitly requires no prerequisite profiles"
-        expected = _json(
-            _reference(
-                root, manifest["prerequisite_inputs"], config.artifact_limit_bytes
+        expected = normalize_prerequisite_inputs(
+            _json(
+                _reference(
+                    root,
+                    manifest["prerequisite_inputs"],
+                    config.artifact_limit_bytes,
+                )
             )
         )
         _require(
