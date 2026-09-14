@@ -108,12 +108,8 @@ _NOT_COLLECTED: dict[str, str] = {
     "function_capacity_retired_generations": (
         "sampled by the soak population collector"
     ),
-    "invocation_canonical_input_bytes": (
-        "sampled by the soak population collector"
-    ),
-    "invocation_execution_reservations": (
-        "sampled by the soak population collector"
-    ),
+    "invocation_canonical_input_bytes": ("sampled by the soak population collector"),
+    "invocation_execution_reservations": ("sampled by the soak population collector"),
     "invocation_physical_input_copy_bytes": (
         "sampled by the soak population collector"
     ),

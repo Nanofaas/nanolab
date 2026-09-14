@@ -84,6 +84,7 @@ Status = Literal["PASS", "FAIL", "INCONCLUSIVE", "ABORTED"]
 Availability = Literal["observed", "unavailable", "not_applicable"]
 Phase = Literal["preflight", "warmup", "baseline", "steady", "drain", "diagnostic"]
 
+
 @dataclass(frozen=True)
 class Target:
     role: str
@@ -92,6 +93,7 @@ class Target:
     process_started_at: str
     image_digest: str
     runtime: str
+
 
 @dataclass(frozen=True)
 class Sample:
@@ -107,6 +109,7 @@ class Sample:
     availability: Availability
     source: str
     reason: str | None
+
 
 @dataclass(frozen=True)
 class CriterionResult:
@@ -143,9 +146,11 @@ Required `SoakConfig` fields: `purpose` (`p24` or `smoke`), `phases`, `retention
 import pytest
 from nanolab.config.soak import validate_schedule
 
+
 def test_p24_drain_must_include_cleanup_margin():
     with pytest.raises(ValueError, match="drain"):
         validate_schedule(5400, 1800, (30, 300, 1800), 300)
+
 
 def test_historical_schedule_covers_three_cycles():
     validate_schedule(5400, 2100, (30, 300, 1800), 300)
@@ -178,6 +183,7 @@ if drain_s < longest + cleanup_margin_s:
 import json
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 
+
 def test_events_exist_before_writer_close(tmp_path):
     writer = ArtifactWriter(tmp_path, limit_bytes=4096)
     writer.append("events", {"phase": "drain"})
@@ -207,6 +213,7 @@ return hashlib.sha256(body.encode("utf-8")).hexdigest()
 ```python
 from nanolab.tasks.soak.preflight import check_limits
 
+
 def test_unlimited_container_does_not_satisfy_one_gib_limit():
     result = check_limits(
         {"memory_bytes": 1073741824.0, "cpu": 2.0},
@@ -233,11 +240,15 @@ def test_unlimited_container_does_not_satisfy_one_gib_limit():
 from nanolab.tasks.soak.probes import parse_exposition
 from nanolab.tasks.soak.observer import sample_deadlines
 
+
 def test_heap_and_nonheap_are_not_collapsed():
-    rows = parse_exposition('jvm_memory_used_bytes{area="heap"} 10\n'
-                            'jvm_memory_used_bytes{area="nonheap"} 20\n')
+    rows = parse_exposition(
+        'jvm_memory_used_bytes{area="heap"} 10\n'
+        'jvm_memory_used_bytes{area="nonheap"} 20\n'
+    )
     assert len(rows) == 2
     assert rows[0][1] != rows[1][1]
+
 
 def test_schedule_does_not_accumulate_scrape_duration():
     assert list(sample_deadlines(100, 130, 10)) == [100, 110, 120, 130]
@@ -259,6 +270,7 @@ def test_schedule_does_not_accumulate_scrape_duration():
 
 ```python
 from nanolab.tasks.soak.diagnostics import gc_completed
+
 
 def test_successful_gc_command_is_not_observed_collection():
     assert not gc_completed(4, 4, True)
@@ -285,9 +297,12 @@ def test_successful_gc_command_is_not_observed_collection():
 from nanolab.tasks.soak.models import CriterionResult
 from nanolab.tasks.soak.evaluate import combine_results
 
+
 def test_known_failure_is_not_hidden_by_missing_metrics():
     results = (
-        CriterionResult("retention", "FAIL", "expired payload retained", ("samples.jsonl",)),
+        CriterionResult(
+            "retention", "FAIL", "expired payload retained", ("samples.jsonl",)
+        ),
         CriterionResult("rss", "INCONCLUSIVE", "missing sample", ()),
     )
     assert combine_results(results, aborted=False) == "FAIL"
@@ -324,6 +339,7 @@ return "PASS"
 ```python
 from nanolab.tasks.soak.workload import constant_arrival_options
 
+
 def test_soak_is_constant_arrival_not_closed_loop():
     options = constant_arrival_options(100, 5400, 200)
     assert options["executor"] == "constant-arrival-rate"
@@ -348,10 +364,12 @@ def test_soak_is_constant_arrival_not_closed_loop():
 ```python
 from nanolab.tasks.soak.prerequisites import validate_receipt
 
+
 def test_old_image_receipt_does_not_unlock_p24():
     result = validate_receipt(
         {"fingerprint": "old", "status": "PASS", "coverage": ["sync"]},
-        "current", frozenset({"sync"}),
+        "current",
+        frozenset({"sync"}),
     )
     assert result.status == "INCONCLUSIVE"
 ```
@@ -372,6 +390,7 @@ def test_old_image_receipt_does_not_unlock_p24():
 
 ```python
 from nanolab.tasks.soak.workflow import phase_order
+
 
 def test_final_evidence_precedes_teardown():
     order = phase_order()
@@ -398,9 +417,16 @@ def test_final_evidence_precedes_teardown():
 import pytest
 from nanolab.cli.soak import soak_exit_code
 
-@pytest.mark.parametrize("status,expected", [
-    ("PASS", 0), ("FAIL", 1), ("INCONCLUSIVE", 2), ("ABORTED", 130),
-])
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ("PASS", 0),
+        ("FAIL", 1),
+        ("INCONCLUSIVE", 2),
+        ("ABORTED", 130),
+    ],
+)
 def test_exit_code_preserves_outcome(status, expected):
     assert soak_exit_code(status) == expected
 ```
@@ -494,6 +520,7 @@ Minimum independent build-key regression:
 
 ```python
 from nanolab.tasks.soak.images import build_key
+
 
 def test_build_key_does_not_reuse_a_different_sdk_snapshot():
     before = build_key("source-sdk-before", "javascript-recipe", "linux/amd64")
