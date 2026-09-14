@@ -73,9 +73,9 @@ def make_lifecycle(tmp_path, events, failure=None):
     )
     return SoakLifecycle(
         config,
-        observer=Observer(),
-        clock=clock,
-        driver_factory=Driver,
+        observer=Observer(),  # pyright: ignore[reportArgumentType]
+        clock=clock,  # pyright: ignore[reportArgumentType]
+        driver_factory=Driver,  # pyright: ignore[reportArgumentType]
         hooks=hooks,
         run_dir=tmp_path,
     )

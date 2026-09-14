@@ -10,7 +10,6 @@ import pytest
 
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact, fingerprint
 
-
 SOAK_POPULATIONS = {
     "control-plane": {
         "execution_records",
@@ -64,10 +63,7 @@ def inputs(tmp_path):
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
-            role: {
-                name: {"limit": 0, "retention_s": 0}
-                for name in populations
-            }
+            role: {name: {"limit": 0, "retention_s": 0} for name in populations}
             for role, populations in SOAK_POPULATIONS.items()
         },
     }
@@ -250,20 +246,24 @@ def test_soak_role_matrix_and_coverage_additions_are_exact(inputs):
     coverage = api().SUPPORTED_COVERAGE - {"function-name-churn"}
     required = api()._required_populations(inputs["images"], coverage, "soak")
     assert required == {
-        role: frozenset(populations)
-        for role, populations in SOAK_POPULATIONS.items()
+        role: frozenset(populations) for role, populations in SOAK_POPULATIONS.items()
     }
     assert api()._required_populations(
         inputs["images"], api().SUPPORTED_COVERAGE, "soak"
     )["control-plane"] == frozenset(
         SOAK_POPULATIONS["control-plane"] | {"retired_owners"}
     )
-    assert not ({"timers", "pending_http", "physical_executions", "metric_series"} & set().union(*required.values()))
+    assert not (
+        {"timers", "pending_http", "physical_executions", "metric_series"}
+        & set().union(*required.values())
+    )
 
 
 def test_soak_rejects_missing_applicable_population_only(inputs):
     del inputs["settlement"]["javascript"]["input_bytes"]
-    with pytest.raises(ValueError, match="required retained-population policies missing"):
+    with pytest.raises(
+        ValueError, match="required retained-population policies missing"
+    ):
         api()._inputs(inputs, frozenset({"sync"}))
 
     inputs["settlement"]["javascript"]["input_bytes"] = {

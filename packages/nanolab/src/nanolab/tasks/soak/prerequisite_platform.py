@@ -39,7 +39,7 @@ from threading import Event, Thread
 from uuid import uuid4
 
 import httpx
-from sonata_engine import JournalConfig, Task, TaskOutcome
+from sonata_engine import JournalConfig, Task, TaskInputs, TaskOutcome
 
 from nanolab.plans.soak import compose_frozen_soak_workflow
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact, fingerprint
@@ -192,6 +192,8 @@ class PrerequisitePlatformFactory:
     workflow threads are never interpreted as stopped Docker resources.
     """
 
+    _lifetime_budgets: dict[str, tuple[int, int]]
+
     def __init__(
         self,
         *,
@@ -239,6 +241,7 @@ class PrerequisitePlatformFactory:
         self.release_timeout_s = release_timeout_s
         self.parent_pid = os.getpid()
         self.token = uuid4().hex
+        self._lifetime_budgets = {}
 
     def validate_inputs(self, inputs: dict) -> None:
         """Validate frozen expectations; no resource or observation is fabricated."""
@@ -294,6 +297,31 @@ class PrerequisitePlatformFactory:
             raise ValueError("prerequisite ownership path contains a symlink")
         return directory
 
+    def assign_lifetime_budget(
+        self,
+        lifetime_id: str,
+        *,
+        artifact_limit_bytes: int,
+        recovery_limit_bytes: int,
+    ) -> None:
+        """Reserve bounded artifact and recovery storage for one lifetime."""
+        if not lifetime_id:
+            raise ValueError("lifetime_id must not be empty")
+        limits = (artifact_limit_bytes, recovery_limit_bytes)
+        if any(
+            isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0
+            for limit in limits
+        ):
+            raise ValueError("lifetime budgets must be positive integers")
+        global_limit = self.prepared.config.artifact_limit_bytes
+        if any(limit > global_limit for limit in limits):
+            raise ValueError(
+                "lifetime budgets must not exceed the global artifact limit"
+            )
+        if lifetime_id in self._lifetime_budgets:
+            raise ValueError(f"budget already assigned for lifetime {lifetime_id!r}")
+        self._lifetime_budgets[lifetime_id] = limits
+
     @asynccontextmanager
     async def __call__(self, coverage_id: str, lifetime_id: str, inputs: dict):
         """Acquire and release one isolated platform for a frozen profile."""
@@ -317,7 +345,14 @@ class PrerequisitePlatformFactory:
         }
         _publish(directory / "intent.json", intent)
         writer = ArtifactWriter(
-            directory / "evidence", self.prepared.config.artifact_limit_bytes
+            directory / "evidence",
+            self._lifetime_budgets.get(
+                lifetime_id,
+                (
+                    self.prepared.config.artifact_limit_bytes,
+                    8 * _LIMIT,
+                ),
+            )[0],
         )
         isolated = replace(
             self.prepared, run_id=project_name, evidence_dir=writer.root, writer=writer
@@ -360,7 +395,7 @@ class PrerequisitePlatformFactory:
                 def stop_observer(self):
                     """No background measurement observer is created by this task."""
 
-                def run(self, task_inputs):
+                def run(self, inputs):
                     _publish(directory / "acquired.json", intent)
                     ready.set()
                     finish.wait()
@@ -517,7 +552,11 @@ class PrerequisitePlatformFactory:
                 yield LivePlatform(
                     lifetime_id,
                     client,
-                    dict(deployment.metrics_endpoints),
+                    {
+                        role: endpoint
+                        for role, endpoint in deployment.metrics_endpoints.items()
+                        if endpoint is not None
+                    },
                     observe_identities,
                     observe_config,
                     {
@@ -611,9 +650,17 @@ class PrerequisitePlatformFactory:
                         "journal does not establish this exact owned project"
                     )
                 command = LocalCleanupCommands(
-                    directory, timeout_s=10, artifact_limit=8 * _LIMIT
+                    directory,
+                    timeout_s=10,
+                    artifact_limit=self._lifetime_budgets.get(
+                        lifetime_id,
+                        (
+                            self.prepared.config.artifact_limit_bytes,
+                            8 * _LIMIT,
+                        ),
+                    )[1],
                 )
-                TeardownSoakTask(directory, command=command).run(None)
+                TeardownSoakTask(directory, command=command).run(TaskInputs.empty())
                 if read_cleanup_records(directory / "cleanup.jsonl"):
                     raise ValueError("retained resource cleanup remains outstanding")
                 for argv in (

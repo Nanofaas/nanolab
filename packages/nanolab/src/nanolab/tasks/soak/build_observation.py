@@ -585,7 +585,7 @@ class BuildObservationCapture:
 
         record = json.loads(self._read(self.metadata))
         if "containerimage.digest" not in record:
-            assert self.recipe.bake is not None
+            assert self.recipe.bake is not None  # nosec B101 - validated invariant/type narrowing
             target = next(iter(self.recipe.bake["target"]))
             record = record[target]
         digest, build_ref = (

@@ -6,11 +6,17 @@ import math
 import re
 from collections import Counter
 from dataclasses import asdict, replace
-from typing import Any, TypeGuard
+from typing import Any, Protocol, TypeGuard
 
 from nanolab.config.soak import SoakConfig
-from nanolab.tasks.soak.artifacts import ArtifactWriter, fingerprint
+from nanolab.tasks.soak.artifacts import fingerprint
 from nanolab.tasks.soak.models import CriterionResult, Target
+
+
+class _ArtifactSink(Protocol):
+    """Minimal artifact destination required by preflight evaluation."""
+
+    def write_json(self, name: str, value: dict[str, Any]) -> object: ...
 
 
 def _positive(value: object) -> TypeGuard[float]:
@@ -108,7 +114,7 @@ def preflight(
     config: SoakConfig,
     targets: tuple[Target, ...],
     observations: dict[str, Any],
-    writer: ArtifactWriter,
+    writer: _ArtifactSink,
 ) -> tuple[CriterionResult, ...]:
     """Persist readiness checks without claiming the soak or prerequisites passed."""
     results = []

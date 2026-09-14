@@ -51,17 +51,17 @@ def test_all_required_images_have_recipes_without_existing_tags():
     recipes = {recipe.role: recipe for recipe in plan()}
     assert set(recipes) == {"control-plane", "word-stats-java", "word-stats-javascript"}
     cp = recipes["control-plane"]
-    assert (
+    assert (  # pyright: ignore[reportOperatorIssue]
         "-PcontrolPlaneModules=container-deployment-provider,async-queue"
         in cp.prerequisite_argv
     )
-    assert "-PcontrolPlaneModules=all" not in cp.prerequisite_argv
-    assert (
+    assert "-PcontrolPlaneModules=all" not in cp.prerequisite_argv  # pyright: ignore[reportOperatorIssue]
+    assert (  # pyright: ignore[reportOperatorIssue]
         ":functions:java:word-stats:bootJar"
         in recipes["word-stats-java"].prerequisite_argv
     )
     js = recipes["word-stats-javascript"]
-    target = next(iter(js.bake["target"].values()))
+    target = next(iter(js.bake["target"].values()))  # pyright: ignore[reportOptionalSubscript]
     assert target["context"] == "."
     assert target["dockerfile"] == "functions/javascript/word-stats/Dockerfile"
 
@@ -69,7 +69,7 @@ def test_all_required_images_have_recipes_without_existing_tags():
 def test_native_function_is_compiled_not_replaced_with_jvm():
     recipes = {recipe.role: recipe for recipe in plan(native=True)}
     java = recipes["word-stats-java"]
-    target = next(iter(java.bake["target"].values()))
+    target = next(iter(java.bake["target"].values()))  # pyright: ignore[reportOptionalSubscript]
     assert java.prerequisite_argv is None
     assert target["dockerfile"] == "deploy/native-java/Dockerfile"
     assert target["args"]["NATIVE_TASK"] == ":functions:java:word-stats:nativeCompile"
@@ -86,7 +86,7 @@ def test_native_g1_preserves_its_explicit_distribution():
     java = next(
         recipe for recipe in plan(True, images) if recipe.role == "word-stats-java"
     )
-    args = next(iter(java.bake["target"].values()))["args"]
+    args = next(iter(java.bake["target"].values()))["args"]  # pyright: ignore[reportOptionalSubscript]
     assert args["GRAALVM_DISTRIBUTION"] == "oracle"
     assert "-PnativeGc=G1" in args["GRADLE_ARGS"]
 

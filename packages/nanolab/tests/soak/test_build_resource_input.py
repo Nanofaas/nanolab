@@ -24,11 +24,11 @@ def test_build_resolves_declared_snapshot_before_materialization(tmp_path, monke
     monkeypatch.setattr("nanolab.tasks.soak.builds.materialize_snapshot", materialize)
     recipe = SimpleNamespace(role="control-plane", mode="build", bake={})
     task = BuildImagesTask(
-        (recipe,),
-        snapshot=snapshot,
-        executor=None,
+        (recipe,),  # pyright: ignore[reportArgumentType]
+        snapshot=snapshot,  # pyright: ignore[reportArgumentType]
+        executor=None,  # pyright: ignore[reportArgumentType]
         output_dir=tmp_path / "builds",
-        collect=lambda *_args: None,
+        collect=lambda *_args: None,  # pyright: ignore[reportArgumentType]
         artifact_limit_bytes=1024 * 1024,
     )
     workflow = Workflow(workflow_id="build-resource-contract")

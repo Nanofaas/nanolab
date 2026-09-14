@@ -100,6 +100,23 @@ _NOT_COLLECTED: dict[str, str] = {
     "gateway_service_target_load": "read via kube-state-metrics",
     # An info gauge that is always 1; it labels the profile rather than measuring it.
     "nanofaas_metrics_profile_info": "an info gauge, not a measurement",
+    # The soak prerequisite runtime samples these as physical retained
+    # populations. They are exposed only by the soak metrics profile and do not
+    # belong to the general load-test snapshot catalogue.
+    "execution_expiry_queue_depth": "sampled by the soak population collector",
+    "execution_waiters_retained": "sampled by the soak population collector",
+    "function_capacity_retired_generations": (
+        "sampled by the soak population collector"
+    ),
+    "invocation_canonical_input_bytes": (
+        "sampled by the soak population collector"
+    ),
+    "invocation_execution_reservations": (
+        "sampled by the soak population collector"
+    ),
+    "invocation_physical_input_copy_bytes": (
+        "sampled by the soak population collector"
+    ),
     # Registered on a private SimpleMeterRegistry that Prometheus never scrapes:
     # a sink for the meters of deregistered functions, so their samples stop
     # accumulating without the timers becoming null at every call site.

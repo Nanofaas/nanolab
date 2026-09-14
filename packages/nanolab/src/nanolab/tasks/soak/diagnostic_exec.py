@@ -414,7 +414,7 @@ class ProvisionedDiagnosticExecutor:
                                 raise OSError(
                                     "diagnostic helper frame budget exhausted"
                                 )
-                            frame(line, stack)
+                            frame(bytes(line), stack)
                         if len(pending) > _FRAME_LIMIT:
                             raise OSError("diagnostic helper frame budget exhausted")
                 if pending:

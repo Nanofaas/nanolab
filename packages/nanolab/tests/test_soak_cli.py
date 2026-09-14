@@ -99,7 +99,7 @@ def test_soak_routes_before_comparison_and_plan_has_no_side_effects(
 
     calls = []
     module = ModuleType("nanolab.plans.soak")
-    module.build_soak_plan = lambda *args, **kwargs: (
+    module.build_soak_plan = lambda *args, **kwargs: (  # pyright: ignore[reportAttributeAccessIssue]
         calls.append((args, kwargs)) or "soak-plan"
     )
     monkeypatch.setitem(sys.modules, "nanolab.plans.soak", module)
@@ -122,7 +122,7 @@ def test_soak_routes_before_comparison_and_plan_has_no_side_effects(
         SimpleNamespace(workflow="soak"),
         SimpleNamespace(provider="local"),
     )
-    assert product._workflow(scenario, environment, dry_run=True) == "soak-plan"
+    assert product._workflow(scenario, environment, dry_run=True) == "soak-plan"  # pyright: ignore[reportArgumentType]
     assert calls[0][0] == (scenario, environment, "bindings")
     assert not (tmp_path / "runs").exists()
 
@@ -187,12 +187,12 @@ def test_soak_success_metadata_uses_terminal_status(tmp_path, monkeypatch):
     )
     product._write_success_metadata(
         tmp_path,
-        started_at=None,
+        started_at=None,  # pyright: ignore[reportArgumentType]
         scenario_path=Path("scenario.yaml"),
-        scenario=SimpleNamespace(workflow="soak"),
+        scenario=SimpleNamespace(workflow="soak"),  # pyright: ignore[reportArgumentType]
         environment_path=None,
-        environment=None,
-        sink=None,
+        environment=None,  # pyright: ignore[reportArgumentType]
+        sink=None,  # pyright: ignore[reportArgumentType]
         provenance={},
     )
     assert calls[0]["status"] == "inconclusive"

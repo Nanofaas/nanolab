@@ -28,14 +28,10 @@ def test_default_metrics_bind_each_soak_population_to_its_owner():
             "idempotency_entries": ("idempotency_keys_held",),
             "logical_executions": ("invocation_execution_reservations",),
             "canonical_input_bytes": ("invocation_canonical_input_bytes",),
-            "physical_input_copy_bytes": (
-                "invocation_physical_input_copy_bytes",
-            ),
+            "physical_input_copy_bytes": ("invocation_physical_input_copy_bytes",),
             "waiters": ("execution_waiters_retained",),
             "expiry_queue_depth": ("execution_expiry_queue_depth",),
-            "pending_acquisitions": (
-                "nanofaas_http_pool_pending_acquisitions",
-            ),
+            "pending_acquisitions": ("nanofaas_http_pool_pending_acquisitions",),
             "replica_snapshots": ("replica_snapshot_entries",),
             "retired_owners": ("function_capacity_retired_generations",),
         },
@@ -50,9 +46,7 @@ def test_default_metrics_bind_each_soak_population_to_its_owner():
             "output_bytes": ("runtime_output_bytes",),
             "callbacks": ("runtime_pending_callbacks",),
             "callback_bytes": ("runtime_pending_callback_bytes",),
-            "serialized_callback_bytes": (
-                "runtime_serialized_callback_bytes",
-            ),
+            "serialized_callback_bytes": ("runtime_serialized_callback_bytes",),
         },
     }
 
@@ -303,7 +297,7 @@ def test_actual_http_outputs_and_replay_identity(frozen, coverage):
 
 def test_wrong_output_is_returned_as_observed_not_expected(frozen):
     server = Server()
-    server.result = {"value": "wrong"}
+    server.result = {"value": "wrong"}  # pyright: ignore[reportAttributeAccessIssue]
 
     async def exercise():
         async with platform(frozen, server) as live:
@@ -551,11 +545,11 @@ def test_http_200_error_receipt_requires_matching_terminal_code(
     if variant == "success":
         server.terminal = "success"
     elif variant == "response-success":
-        server.response_status = "success"
+        server.response_status = "success"  # pyright: ignore[reportAttributeAccessIssue]
     elif variant == "wrong-code":
         server.response_error_code = "OTHER_ERROR"
     elif variant == "missing-code":
-        server.error_code = None
+        server.error_code = None  # pyright: ignore[reportAttributeAccessIssue]
     elif variant == "unfrozen-code":
         del frozen["relevant_config"]["error"]["expected_error_code"]
 
@@ -593,7 +587,9 @@ def test_http_200_error_receipt_requires_matching_terminal_code(
         ("test_handler_starts_total", None),
     ],
 )
-def test_request_counter_never_establishes_physical_execution(frozen, binding, semantics):
+def test_request_counter_never_establishes_physical_execution(
+    frozen, binding, semantics
+):
     server = Server()
     set_profile(frozen, "idempotent-replay")
     if binding:

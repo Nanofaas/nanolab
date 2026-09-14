@@ -34,7 +34,7 @@ from nanolab.tasks.soak.processes import OwnedCommandRunner
 SCHEMA = "nanolab-soak-diagnostic-helper-v1"
 WORKER = "/opt/nanolab/diagnostic-worker.py"
 PYTHON = "/usr/local/bin/python3"
-NODE_SOCKET = "/tmp/nanolab-diagnostic.sock"
+NODE_SOCKET = "/tmp/nanolab-diagnostic.sock"  # nosec B108 - isolated container path
 GC_SOURCES = {"jvm": "jdk.GarbageCollection", "node": "node:perf_hooks:major-gc"}
 _DIGEST = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 
@@ -117,7 +117,7 @@ class DockerHelperSpec:
             or not Path(self.docker).is_absolute()
             or not self.docker_host.startswith("unix:///")
             or self.architecture not in {"arm64", "amd64"}
-            or not re.fullmatch(r"/tmp/[A-Za-z0-9_.-]+", self.node_socket)
+            or not re.fullmatch(r"/tmp/[A-Za-z0-9_.-]+", self.node_socket)  # nosec B108 - isolated container path
         ):
             raise ValueError(
                 "local Docker, owned output directory and private /tmp socket required"
@@ -251,7 +251,9 @@ def validate_target_tmp_volume(
             "target tmpfs capacity must be page-aligned and within 4 KiB..1 GiB"
         )
     mounts = [
-        item for item in target.get("Mounts", []) if item.get("Destination") == "/tmp"
+        item
+        for item in target.get("Mounts", [])
+        if item.get("Destination") == "/tmp"  # nosec B108 - isolated container path
     ]
     if len(mounts) != 1 or any(
         mounts[0].get(key) != expected
@@ -958,7 +960,7 @@ class LocalDockerDiagnosticProvisioner:
             ):
                 raise ValueError("observed memory helper isolation mismatch")
             owner = _OwnedDockerHelper(spec, commands, helper_id, process)
-            assert commands.deadline is not None
+            assert commands.deadline is not None  # nosec B101 - validated invariant/type narrowing
             remaining = commands.deadline - time.monotonic()
             initial = owner.read_memory(remaining)
             evidence = root / "observations.json"

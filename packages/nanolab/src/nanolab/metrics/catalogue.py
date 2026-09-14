@@ -150,8 +150,7 @@ def core_queries(function_name: str) -> Queries:
         ),
         PrometheusQuery(
             "replica_snapshot_refresh_queue_depth",
-            "sum(replica_snapshot_refresh_queue_depth"
-            f"{CONTROL_PLANE_SELECTOR})",
+            f"sum(replica_snapshot_refresh_queue_depth{CONTROL_PLANE_SELECTOR})",
         ),
         PrometheusQuery(
             "replica_snapshot_refresh_active",
@@ -159,13 +158,11 @@ def core_queries(function_name: str) -> Queries:
         ),
         PrometheusQuery(
             "replica_snapshot_refresh_rejected_total",
-            "sum(replica_snapshot_refresh_rejected_total"
-            f"{CONTROL_PLANE_SELECTOR})",
+            f"sum(replica_snapshot_refresh_rejected_total{CONTROL_PLANE_SELECTOR})",
         ),
         PrometheusQuery(
             "replica_snapshot_refresh_failed_total",
-            "sum(replica_snapshot_refresh_failed_total"
-            f"{CONTROL_PLANE_SELECTOR})",
+            f"sum(replica_snapshot_refresh_failed_total{CONTROL_PLANE_SELECTOR})",
         ),
         PrometheusQuery(
             "replica_snapshot_refresh_count",

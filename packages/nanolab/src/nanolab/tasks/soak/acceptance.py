@@ -440,7 +440,7 @@ def _admitted(
             ),
             "authoritative admission boundary observations unavailable: " + name,
         )
-        assert history is not None
+        assert history is not None  # nosec B101 - validated invariant/type narrowing
         result[name] = int(history[3] - history[1])
         # The counter is read at ticks inside the window, so this much of it
         # lies outside the two readings the delta was taken between.
@@ -617,7 +617,7 @@ def _diagnostic(
         isinstance(artifacts, list) and 1 <= len(artifacts) <= 32,
         "diagnostic artifacts missing",
     )
-    assert isinstance(artifacts, list)
+    assert isinstance(artifacts, list)  # nosec B101 - validated invariant/type narrowing
     paths = [
         _reference(path.parent, ref, config.artifact_limit_bytes) for ref in artifacts
     ]
@@ -807,7 +807,7 @@ def evaluate_acceptance(
         )
         _require(projection is not None, "numerical projection unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert projection is not None
+        assert projection is not None  # nosec B101 - validated invariant/type narrowing
         _require(
             projection["purpose"] == config.purpose
             and projection["sample_interval_s"] == config.sample_interval_s
@@ -840,7 +840,7 @@ def evaluate_acceptance(
     def provenance() -> str:
         _require(config is not None and targets, "frozen source policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         snapshot_path = _reference(
             root, manifest["source"], config.artifact_limit_bytes
         )
@@ -987,7 +987,7 @@ def evaluate_acceptance(
                 isinstance(logs, list) and logs,
                 "build logs/attestation evidence missing",
             )
-            assert isinstance(logs, list)
+            assert isinstance(logs, list)  # nosec B101 - validated invariant/type narrowing
             for ref in logs:
                 _reference(root, ref, config.artifact_limit_bytes)
             actual = observed["build_receipts"][role]
@@ -1022,8 +1022,8 @@ def evaluate_acceptance(
             config is not None and projection is not None, "frozen protocol unavailable"
         )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
-        assert projection is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
+        assert projection is not None  # nosec B101 - validated invariant/type narrowing
         phases = normalize_phase_windows(manifest["phases"])
         manifest["phases"] = phases
         previous = None
@@ -1090,7 +1090,7 @@ def evaluate_acceptance(
     def effective() -> str:
         _require(config is not None and targets, "frozen policy/targets unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         item = receipt("preflight")
         _require(
             item.get("targets") == list(targets.values()),
@@ -1132,7 +1132,7 @@ def evaluate_acceptance(
             config is not None and targets, "frozen correctness inputs unavailable"
         )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         _item, functions, summary = _workload_evidence(root, manifest, config, targets)
         # The known frozen generator counts success only after HTTP/body checks.
         # Independently require the raw named check observations, never infer an
@@ -1167,7 +1167,7 @@ def evaluate_acceptance(
     def workload() -> str:
         _require(config is not None, "workload policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         item, functions, _summary = _workload_evidence(root, manifest, config, targets)
         steady = manifest["phases"]["steady"]
         # The generator records its own start/end; the lifecycle records the
@@ -1226,7 +1226,7 @@ def evaluate_acceptance(
     def prerequisites() -> CriterionResult | str:
         _require(config is not None and targets, "prerequisite policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         item = receipt("prerequisites")
         if item.get("kind") == "prerequisite-exemption":
             _require(
@@ -1288,7 +1288,7 @@ def evaluate_acceptance(
     def diagnostics() -> str:
         _require(config is not None and targets, "diagnostic policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         entries = receipt("diagnostics")["entries"]
         expected = {
             (role, op)
@@ -1334,9 +1334,9 @@ def evaluate_acceptance(
             "indexed observations unavailable",
         )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
-        assert connection is not None
-        assert projection is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
+        assert connection is not None  # nosec B101 - validated invariant/type narrowing
+        assert projection is not None  # nosec B101 - validated invariant/type narrowing
         for role, role_policy in config.roles.items():
             for metric in role_policy.required_metrics:
                 labels = connection.execute(
@@ -1380,7 +1380,7 @@ def evaluate_acceptance(
     def artifacts() -> str:
         _require(config is not None, "artifact policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         item = receipt("artifacts")
         _require(
             item.get("complete") is True and item.get("budget_exhausted") is False,
@@ -1452,7 +1452,7 @@ def evaluate_acceptance(
     def attribution() -> str:
         _require(config is not None, "attribution policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None
+        assert config is not None  # nosec B101 - validated invariant/type narrowing
         pending = {c.id: c for c in config.criteria if c.operation == "growth_review"}
         triggered = {
             r.criterion_id

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,7 +57,10 @@ POPULATION_SERIES: tuple[str, ...] = (
 
 
 def _scrape(url: str, timeout: float) -> str:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("metrics URL must use HTTP(S) and include a hostname")
+    with urllib.request.urlopen(url, timeout=timeout) as response:  # nosec B310
         return response.read().decode("utf-8", "replace")
 
 

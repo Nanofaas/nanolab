@@ -112,7 +112,7 @@ def synthetic_build(
             marker = re.search(
                 r"NANOLAB_BUILD_OBSERVATION_[a-f0-9]+:",
                 "\n".join(path.read_text() for path in scripts),
-            ).group()
+            ).group()  # pyright: ignore[reportOptionalMemberAccess]
 
             def evidence(name, version, **extra):
                 record = {
@@ -291,10 +291,10 @@ def test_build_executor_rejects_prebuilt_fallback(tmp_path):
     with pytest.raises(ValueError, match=r"build execution requires build"):
         BuildImagesTask(
             (recipe,),
-            snapshot=snapshot,
-            executor=None,
+            snapshot=snapshot,  # pyright: ignore[reportArgumentType]
+            executor=None,  # pyright: ignore[reportArgumentType]
             output_dir=tmp_path,
-            collect=lambda *args: None,
+            collect=lambda *args: None,  # pyright: ignore[reportArgumentType]
             artifact_limit_bytes=10000,
         )
 

@@ -187,8 +187,8 @@ def test_probe_accepts_observed_compatible_attachment(tmp_path):
 def worker():
     path = Path(__file__).parents[2] / "assets/soak/diagnostic-worker.py"
     module_spec = importlib.util.spec_from_file_location("diagnostic_worker", path)
-    module = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(module)
+    module = importlib.util.module_from_spec(module_spec)  # pyright: ignore[reportArgumentType]
+    module_spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]
     return module
 
 

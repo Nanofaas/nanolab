@@ -61,7 +61,7 @@ def make_run(tmp_path, *, criteria=None, values=None, omit=(), purpose="smoke"):
             samples.append(
                 Sample(
                     TARGET,
-                    phase,
+                    phase,  # pyright: ignore[reportArgumentType]
                     stamp,
                     stamp,
                     stamp,

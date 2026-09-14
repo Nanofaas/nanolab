@@ -81,7 +81,7 @@ while True: time.sleep(.01)
         env=os.environ,
         log_path=tmp_path / "log",
         timeout_s=10,
-        cancelled=event if failure == "cancel" else CallerError(),
+        cancelled=event if failure == "cancel" else CallerError(),  # pyright: ignore[reportArgumentType]
         output_limit_bytes=1024,
         stop_timeout_s=0.1,
     )

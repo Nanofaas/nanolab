@@ -130,7 +130,7 @@ def test_p24_invocations_bind_profile_specific_owner_requirements(
     soak = ScenarioConfig.model_validate(resolve(data, path)).soak
     assert soak is not None and soak.metrics_profile == expected_profile
     required = _required_populations(
-        {role: "sha256:" + "a" * 64 for role in soak.images},
+        dict.fromkeys(soak.images, "sha256:" + "a" * 64),
         frozenset(soak.prerequisites.required_coverage),
         soak.metrics_profile,
     )

@@ -86,4 +86,4 @@ def test_expired_startup_cancels_and_can_be_joined(tmp_path):
         probe.release.set()
         observer.stop(1)
         writer.close()
-    assert not observer._thread.is_alive()
+    assert not observer._thread.is_alive()  # pyright: ignore[reportOptionalMemberAccess]

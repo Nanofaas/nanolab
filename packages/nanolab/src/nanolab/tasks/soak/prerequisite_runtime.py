@@ -724,6 +724,7 @@ class LiveProfileSession:
                 "exercise coverage differs from owned lifetime"
             )
         async with asyncio.timeout(self.exercise_timeout):
+            observed: dict[str, Any]
             if coverage == "idempotent-replay":
                 observed = await self._replay()
             elif coverage == "cancellation":

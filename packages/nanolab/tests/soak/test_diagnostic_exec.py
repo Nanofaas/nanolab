@@ -158,7 +158,7 @@ def test_helper_timeout_is_bounded(tmp_path):
     executor, target, capture, _ = provision(tmp_path, "time.sleep(30)")
     started = time.monotonic()
     with pytest.raises(TimeoutError, match="diagnostic helper deadline exceeded"):
-        executor.execute(request(target, capture, timeout_s=0.2))
+        executor.execute(request(target, capture, timeout_s=0.2))  # pyright: ignore[reportArgumentType]
     assert time.monotonic() - started < 2
 
 
@@ -270,7 +270,7 @@ def test_detached_descendants_are_reaped_and_unrelated_process_is_preserved(
             ),
         ):
             executor.execute(
-                request(target, capture, timeout_s=0.5 if exit_mode == "timeout" else 3)
+                request(target, capture, timeout_s=0.5 if exit_mode == "timeout" else 3)  # pyright: ignore[reportArgumentType]
             )
         pid = int(pid_path.read_text())
         assert not Path(f"/proc/{pid}").exists(), (

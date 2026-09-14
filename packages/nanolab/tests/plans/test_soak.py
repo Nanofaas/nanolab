@@ -13,8 +13,8 @@ from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 
 def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
     workflow = build_soak_plan(
-        SimpleNamespace(workflow="soak", soak=object()),
-        SimpleNamespace(provider="local"),
+        SimpleNamespace(workflow="soak", soak=object()),  # pyright: ignore[reportArgumentType]
+        SimpleNamespace(provider="local"),  # pyright: ignore[reportArgumentType]
         RoleBindings({"host": _CompileOnlyExecutor()}),
         run_dir=tmp_path / "run",
         repo_root=tmp_path,
@@ -118,7 +118,7 @@ def test_function_registration_uses_api_not_management_readiness(tmp_path, monke
             "http://127.0.0.1:18081/actuator/health/readiness",
             build=False,
         ),
-        measurement=SimpleNamespace(observer=object()),
+        measurement=SimpleNamespace(observer=object()),  # pyright: ignore[reportArgumentType]
         ownership=ownership,
         cwd=tmp_path,
         api_endpoint="http://127.0.0.1:18080",

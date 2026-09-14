@@ -15,9 +15,14 @@ from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
 from nanolab.tasks.soak.models import Status
 from nanolab.tasks.soak.report import write_report
 
-_EXIT_CODES = {"PASS": 0, "FAIL": 1, "INCONCLUSIVE": 2, "ABORTED": 130}
+_EXIT_CODES = {  # nosec B105
+    "PASS": 0,
+    "FAIL": 1,
+    "INCONCLUSIVE": 2,
+    "ABORTED": 130,
+}
 _METADATA = {
-    "PASS": "passed",
+    "PASS": "passed",  # nosec B105 - result status, not a credential
     "FAIL": "failed",
     "INCONCLUSIVE": "inconclusive",
     "ABORTED": "aborted",

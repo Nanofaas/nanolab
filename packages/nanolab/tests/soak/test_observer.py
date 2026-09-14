@@ -114,7 +114,7 @@ def test_fixed_state_with_100000_changing_labels():
 
     clock = FakeClock(100000)
     writer = CountingWriter()
-    observer = Observer(Probe(clock), clock, writer, 1)
+    observer = Observer(Probe(clock), clock, writer, 1)  # pyright: ignore[reportArgumentType]
     observer.start("steady")
     assert clock.finished.wait(15)
     observer.stop(2)

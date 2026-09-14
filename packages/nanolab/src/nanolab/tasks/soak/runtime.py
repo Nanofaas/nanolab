@@ -199,7 +199,7 @@ def _check_prerequisite_wiring(config, options: RuntimeOptions) -> None:
         raise ValueError(
             "automatic prerequisites require explicit parent/lifetime/recovery quotas"
         )
-    assert parent is not None and lifetime is not None and recovery is not None
+    assert parent is not None and lifetime is not None and recovery is not None  # nosec B101 - validated invariant/type narrowing
     count = len(config.prerequisites.required_coverage)
     if parent + count * (lifetime + recovery) > config.artifact_limit_bytes:
         raise ValueError("prerequisite reservations exceed the global artifact budget")
@@ -876,7 +876,7 @@ def create_local_deployment(
                 {
                     "type": "volume",
                     "source": decision["volume_key"],
-                    "target": "/tmp",
+                    "target": "/tmp",  # nosec B108 - isolated container path
                     "volume": {"nocopy": True},
                 }
             )
@@ -1261,7 +1261,8 @@ def create_soak_lifecycle(
                 if target.role not in diagnostic_inputs["roles"]:
                     continue
                 decision = diagnostic_inputs["roles"][target.role]
-                assert memory_transport is not None
+                if memory_transport is None:
+                    raise RuntimeError("memory transport was not initialized")
                 _, helper = memory_transport.helpers[target.role]
                 adapter = helper.adapter(
                     budget=diagnostic_budget,
@@ -1465,7 +1466,8 @@ def create_soak_lifecycle(
                                 "remaining artifact budget cannot reserve "
                                 "diagnostic capture"
                             )
-                        assert memory_transport is not None
+                        if memory_transport is None:
+                            raise RuntimeError("memory transport was not initialized")
                         receipt = _capture_owned_diagnostic(
                             diagnostic_adapters[target.role],
                             memory_transport.helpers[target.role][1],
@@ -1476,7 +1478,8 @@ def create_soak_lifecycle(
                             cancelled,
                         )
                     else:
-                        assert diagnostic_adapter is not None
+                        if diagnostic_adapter is None:
+                            raise RuntimeError("diagnostic adapter was not initialized")
                         receipt = diagnostic_adapter.capture(
                             target, operation, output, remaining
                         )
@@ -1641,7 +1644,7 @@ def create_soak_lifecycle(
         DeferredTerminalLifecycle if defer_terminal else TerminalSoakLifecycle
     )
 
-    class MemoryOwnedLifecycle(lifecycle_type):
+    class MemoryOwnedLifecycle(lifecycle_type):  # pyright: ignore[reportGeneralTypeIssues] - selected by runtime mode
         def _natural(self, phase, duration):
             nonlocal natural_drain_completed
             super()._natural(phase, duration)

@@ -91,7 +91,7 @@ def test_restart_or_wrong_identity_invalidates_entire_scrape(field, value, when)
     rows = probe_for(data).sample(TARGET, "steady", 10)
     assert {r.metric for r in rows} == set(REQUIRED)
     assert all(r.value is None and r.availability == "unavailable" for r in rows)
-    assert all("identity" in r.reason for r in rows)
+    assert all("identity" in r.reason for r in rows)  # pyright: ignore[reportOperatorIssue]
 
 
 @pytest.mark.parametrize("source", ["procfs", "stats", "exposition"])
@@ -142,7 +142,7 @@ def test_all_roles_are_bound_independently():
         replace(TARGET, role=role) for role in ("cp", "java", "javascript", "proxy")
     )
     bindings = tuple(RoleBinding(target, None, REQUIRED) for target in roles)
-    probe = RoleBoundProbe(bindings, object(), timeout_s=1)
+    probe = RoleBoundProbe(bindings, object(), timeout_s=1)  # pyright: ignore[reportArgumentType]
     assert probe.targets() == roles
     with pytest.raises(ValueError, match="target is not bound to this probe"):
         probe.sample(replace(TARGET, role="unknown"), "steady", 0)

@@ -240,8 +240,8 @@ def make_run(
         "input.txt",
         "file",
         (tree / "input.txt").stat().st_mode & 0o777,
-        stat["size_bytes"],
-        stat["sha256"],
+        stat["size_bytes"],  # pyright: ignore[reportArgumentType]
+        stat["sha256"],  # pyright: ignore[reportArgumentType]
     )
     entries = [asdict(entry)]
     source_hash = fingerprint({"entries": entries})
@@ -452,7 +452,7 @@ print("\\n" + marker + ":START\\n" + json.dumps(summary)
             prerequisite_module.run_prerequisites(
                 inputs=expected,
                 required_coverage=frozenset({"sync"}),
-                runner=runner,
+                runner=runner,  # pyright: ignore[reportArgumentType]
                 writer=writer,
                 timeout_s=1,
             )
@@ -634,9 +634,7 @@ def test_legacy_omitted_profile_normalizes_receipt_and_manifest_for_evaluation(
 
     root = complete_run["root"]
     manifest = complete_run["manifest"]
-    persisted = json.loads(
-        (root / manifest["prerequisite_inputs"]["path"]).read_text()
-    )
+    persisted = json.loads((root / manifest["prerequisite_inputs"]["path"]).read_text())
     original = deepcopy(persisted)
     effective = normalize_prerequisite_inputs(persisted)
     receipt = json.loads((root / manifest["prerequisites"]["path"]).read_text())

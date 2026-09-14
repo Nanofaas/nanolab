@@ -154,7 +154,7 @@ def _validate_generated(body: bytes, root: Path, project_name: str) -> None:
         for token in yaml.scan(body)
     ):
         raise ValueError("generated Compose must not contain YAML aliases or tags")
-    value = yaml.load(body, Loader=_GeneratedLoader)
+    value = yaml.load(body, Loader=_GeneratedLoader)  # nosec B506 - loader derives from SafeLoader and rejects aliases/tags
     if not isinstance(value, dict) or set(value) - {"services", "volumes", "networks"}:
         raise ValueError("generated Compose must be self-contained")
     for section in ("volumes", "networks"):
@@ -302,7 +302,7 @@ def _validate_generated(body: bytes, root: Path, project_name: str) -> None:
                         != {
                             "type": "volume",
                             "source": source,
-                            "target": "/tmp",
+                            "target": "/tmp",  # nosec B108 - isolated container path
                             "volume": {"nocopy": True},
                         }
                         or service.get("user") != f"{match.group(2)}:{match.group(3)}"
@@ -313,7 +313,7 @@ def _validate_generated(body: bytes, root: Path, project_name: str) -> None:
                                 if isinstance(m, dict)
                                 else m.split(":")[1]
                             )
-                            == "/tmp"
+                            == "/tmp"  # nosec B108 - isolated container path
                             for m in mounts
                         )
                         != 1

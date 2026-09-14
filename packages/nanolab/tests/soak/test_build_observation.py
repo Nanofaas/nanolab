@@ -129,10 +129,10 @@ def test_preparation_binds_generated_recipe_without_changing_original(tmp_path):
 def test_records_real_transport_result_and_copies_logs_into_evidence_root(tmp_path):
     capture, _, effective, _ = prepare(tmp_path)
     executor = transport(tmp_path, "BUILD SUCCESSFUL\n")
-    capture.record("prerequisite", effective.prerequisite_argv, executor)
+    capture.record("prerequisite", effective.prerequisite_argv, executor)  # pyright: ignore[reportArgumentType]
     item = capture.commands[0]
     assert item["exit_code"] == 0
-    assert item["argv"] == list(effective.prerequisite_argv)
+    assert item["argv"] == list(effective.prerequisite_argv)  # pyright: ignore[reportArgumentType]
     path = capture.metadata.parent / item["log"]["path"]
     assert path.read_bytes() == b"BUILD SUCCESSFUL\n"
     assert item["log"]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
@@ -153,7 +153,7 @@ def test_incomplete_transport_cannot_be_recorded_as_success(tmp_path, changes):
     capture, _, effective, _ = prepare(tmp_path)
     executor = transport(tmp_path, "partial\n", **changes)
     with pytest.raises(ValueError, match=r"owned command did not complete"):
-        capture.record("prerequisite", effective.prerequisite_argv, executor)
+        capture.record("prerequisite", effective.prerequisite_argv, executor)  # pyright: ignore[reportArgumentType]
     assert capture.commands[0]["result"][next(iter(changes))] == next(
         iter(changes.values())
     )
@@ -161,9 +161,12 @@ def test_incomplete_transport_cannot_be_recorded_as_success(tmp_path, changes):
 
 def test_extracts_compiler_evidence_from_prerequisite_log_not_path_java(tmp_path):
     capture, _, effective, _ = prepare(tmp_path)
+    assert effective.prerequisite_argv is not None
     text = frame(capture, "java", 'openjdk version "25.0.1"\n') + "\n"
     capture.record(
-        "prerequisite", effective.prerequisite_argv, transport(tmp_path, text)
+        "prerequisite",
+        effective.prerequisite_argv,
+        transport(tmp_path, text),
     )
     capture.capture_toolchains("prerequisite")
     item = next(item for item in capture.commands if item.get("toolchain") == "java")
@@ -175,12 +178,15 @@ def test_extracts_compiler_evidence_from_prerequisite_log_not_path_java(tmp_path
 
 def test_conflicting_compilers_are_rejected_instead_of_selecting_one(tmp_path):
     capture, _, effective, _ = prepare(tmp_path)
+    assert effective.prerequisite_argv is not None
     text = "\n".join(
         frame(capture, "java", value)
         for value in ['openjdk version "25.0.1"\n', 'openjdk version "26"\n']
     )
     capture.record(
-        "prerequisite", effective.prerequisite_argv, transport(tmp_path, text)
+        "prerequisite",
+        effective.prerequisite_argv,
+        transport(tmp_path, text),
     )
     with pytest.raises(ValueError, match="conflicting actual compiler"):
         capture.capture_toolchains("prerequisite")

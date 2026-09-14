@@ -113,7 +113,7 @@ class FunctionOwnership:
 
 def _http_status(method: str, url: str, timeout_s: float) -> int:
     endpoint = urlsplit(url)
-    assert endpoint.hostname is not None
+    assert endpoint.hostname is not None  # nosec B101 - validated invariant/type narrowing
     connection = HTTPConnection(endpoint.hostname, endpoint.port, timeout=timeout_s)
     try:
         connection.request(method, endpoint.path, headers={"Connection": "close"})

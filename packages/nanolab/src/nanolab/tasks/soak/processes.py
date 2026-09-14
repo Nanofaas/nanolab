@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock
+from typing import Protocol
 
 MIN_STOP_TIMEOUT_S = 0.1
 
@@ -253,6 +254,14 @@ finally:
 """
 
 
+class _Cancellation(Protocol):
+    """Cancellation subset shared by Events and deterministic test doubles."""
+
+    def is_set(self) -> bool: ...
+
+    def wait(self, timeout: float) -> object: ...
+
+
 @dataclass(frozen=True)
 class OwnedCommandResult:
     """Record command outcome, output bounds, and confirmed descendant cleanup."""
@@ -300,7 +309,7 @@ class OwnedCommandRunner:
         env: Mapping[str, str],
         log_path: Path,
         timeout_s: float,
-        cancelled: Event,
+        cancelled: _Cancellation,
         output_limit_bytes: int,
         stop_timeout_s: float = 1.0,
         summary_path: Path | None = None,
@@ -348,7 +357,8 @@ class OwnedCommandRunner:
             if process is None or process.poll() is not None:
                 return
             try:
-                assert process.stdin is not None
+                if process.stdin is None:
+                    raise RuntimeError("command process has no stdin pipe")
                 process.stdin.write(f"{timeout_s:g}\n".encode())
                 process.stdin.flush()
             except BrokenPipeError:
@@ -397,7 +407,8 @@ class OwnedCommandRunner:
                     break
                 self._cancelled.wait(0.01)
             # Only trusted supervisor metadata reaches this pipe, never child output.
-            assert process.stdout is not None
+            if process.stdout is None:
+                raise RuntimeError("command process has no stdout pipe")
             raw = process.stdout.read(8193)
             if len(raw) > 8192:
                 raise RuntimeError("oversized supervisor receipt")
@@ -430,7 +441,7 @@ def run_owned_command(
     env: Mapping[str, str],
     log_path: Path,
     timeout_s: float,
-    cancelled: Event,
+    cancelled: _Cancellation,
     output_limit_bytes: int,
 ) -> OwnedCommandResult:
     """Execute argv locally, retaining bounded combined stdout/stderr in log_path.

@@ -10,8 +10,8 @@ import pytest
 def worker():
     path = Path(__file__).parents[2] / "assets/soak/diagnostic-worker.py"
     spec = importlib.util.spec_from_file_location("jfr_worker", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
+    spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]
     return module
 
 

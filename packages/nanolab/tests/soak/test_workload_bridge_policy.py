@@ -26,7 +26,7 @@ def test_bridge_preserves_fractional_rates_and_distinct_vu_limits(monkeypatch):
     )
     digest = "registry/image@sha256:" + "a" * 64
     factory = make_workload_driver_factory(
-        config,
+        config,  # pyright: ignore[reportArgumentType]
         base_url="http://127.0.0.1:18080",
         payloads={"fn": [{"input": {}, "expected": {}}]},
         image_digests={"control-plane": digest, "fn": digest},

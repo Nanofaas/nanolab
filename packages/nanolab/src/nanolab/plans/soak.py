@@ -2,9 +2,9 @@
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
-from sonata_engine import JournalConfig, Resource, Workflow
+from sonata_engine import JournalConfig, Resource, Task, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.config.environment import EnvironmentConfig
@@ -15,11 +15,16 @@ from nanolab.tasks.soak.owned_functions import (
     journaled_function_resource,
 )
 from nanolab.tasks.soak.retention import CleanupState, journaled_compose_resource
-from nanolab.tasks.soak.workflow import SoakLifecycle
 
 
 class SoakIntegrationUnavailable(ValueError):  # noqa: N818
     """The scenario cannot yet bind a complete executable evidence pipeline."""
+
+
+class _MeasurementControl(Protocol):
+    observer: Any
+
+    def stop_observer(self) -> None: ...
 
 
 def compose_frozen_soak_workflow(
@@ -27,7 +32,7 @@ def compose_frozen_soak_workflow(
     bindings: RoleBindings,
     *,
     project: DockerComposeProject,
-    measurement: SoakLifecycle,
+    measurement: Task[Any],
     api_endpoint: str,
     ownership: Resource[Any],
     cwd: Path,
@@ -115,8 +120,10 @@ def compose_frozen_soak_workflow(
     )
     observer = Resource(
         title="Own continuous soak observer",
-        acquire=lambda inputs: measurement.observer,
-        release=lambda inputs, value: measurement.stop_observer(),
+        acquire=lambda inputs: cast(_MeasurementControl, measurement).observer,
+        release=lambda inputs, value: cast(
+            _MeasurementControl, measurement
+        ).stop_observer(),
         requires=(*platform.resources, *functions),
         always_release=True,
     )

@@ -75,9 +75,7 @@ _SOAK_POPULATIONS = MappingProxyType(
             }
         ),
         "java": frozenset({"live_executions"}),
-        "javascript": frozenset(
-            {"live_executions", "input_bytes", "output_bytes"}
-        ),
+        "javascript": frozenset({"live_executions", "input_bytes", "output_bytes"}),
     }
 )
 _SOAK_ROLE_KINDS = MappingProxyType(
@@ -107,9 +105,7 @@ _COVERAGE_POPULATIONS = MappingProxyType(
                 ),
             }
         ),
-        "cancellation": MappingProxyType(
-            {"control-plane": frozenset({"waiters"})}
-        ),
+        "cancellation": MappingProxyType({"control-plane": frozenset({"waiters"})}),
         "idempotent-replay": MappingProxyType(
             {"control-plane": frozenset({"idempotency_entries"})}
         ),
@@ -170,25 +166,22 @@ def _required_populations(
     unknown = set(images) - set(_SOAK_ROLE_KINDS)
     if unknown:
         raise ValueError(f"unsupported soak role: {', '.join(sorted(unknown))}")
-    required = {
-        role: _SOAK_POPULATIONS[_SOAK_ROLE_KINDS[role]] for role in images
-    }
+    required = {role: _SOAK_POPULATIONS[_SOAK_ROLE_KINDS[role]] for role in images}
     coverage_ids = set(coverage)
     if "error-timeout-cancellation" in coverage:
         coverage_ids.update({"error", "timeout", "cancellation"})
     if "async-late-callback" in coverage:
         coverage_ids.update({"async", "late-callback"})
     for coverage_id in coverage_ids:
-        for kind, populations in _COVERAGE_POPULATIONS.get(
-            coverage_id, {}
-        ).items():
+        for kind, populations in _COVERAGE_POPULATIONS.get(coverage_id, {}).items():
             for role in required:
                 if _SOAK_ROLE_KINDS[role] == kind:
                     required[role] |= populations
     return required
 
 
-def normalize_prerequisite_inputs(inputs: dict[str, object]) -> dict[str, object]:
+def normalize_prerequisite_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Normalize heterogeneous prerequisite inputs for deterministic execution."""
     normalized = deepcopy(inputs)
     normalized.setdefault("metrics_profile", "advanced")
     return normalized
@@ -218,7 +211,9 @@ def _inputs(inputs: dict, coverage: frozenset[str]) -> None:
         raise ValueError("settlement policies must cover every image role")
     required = _required_populations(images, coverage, inputs["metrics_profile"])
     for role, populations in policies.items():
-        if not isinstance(populations, dict) or not required[role].issubset(populations):
+        if not isinstance(populations, dict) or not required[role].issubset(
+            populations
+        ):
             raise ValueError("required retained-population policies missing")
         for name, policy in populations.items():
             if not isinstance(name, str) or not name or not isinstance(policy, dict):

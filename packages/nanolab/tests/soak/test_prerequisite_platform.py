@@ -41,7 +41,7 @@ class Config:
 
 @dataclass
 class Prepared:
-    config: object
+    config: Config
     images: dict
     run_id: str = "soak-measured"
     evidence_dir: Path = Path("/unused")
@@ -398,3 +398,25 @@ def test_recovery_refuses_foreign_intent(case, monkeypatch):
     result = factory.recover("foreign", worker_reaped=True)
     assert not result.cleanup_confirmed
     assert "another factory" in result.reason
+
+
+def test_assigned_lifetime_budget_limits_artifacts(case):
+    factory, inputs, _, deployments = case
+    factory.assign_lifetime_budget(
+        "budgeted",
+        artifact_limit_bytes=512 * 1024,
+        recovery_limit_bytes=768 * 1024,
+    )
+
+    async def run():
+        async with factory("sync", "budgeted", inputs):
+            assert deployments[-1].writer.limit_bytes == 512 * 1024
+
+    asyncio.run(run())
+
+    with pytest.raises(ValueError, match="already assigned"):
+        factory.assign_lifetime_budget(
+            "budgeted",
+            artifact_limit_bytes=512 * 1024,
+            recovery_limit_bytes=768 * 1024,
+        )

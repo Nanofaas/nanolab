@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import cast
 
 from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome
 from sonata_tasks.command import CommandTask
@@ -151,7 +152,10 @@ class BuildImagesTask(Task[tuple[BuildReceipt, ...]]):
                     capture.capture_toolchains("prerequisite")
                     capture.require_toolchains({"java", "gradle"})
                 execute("build", build_argv)
-                capture.complete(execute, self.executor.observe)
+                observe = getattr(self.executor, "observe", None)
+                if not callable(observe):
+                    raise TypeError("build executor must provide an observe callback")
+                capture.complete(execute, cast(Callable[..., bytes], observe))
                 observed = self.collect(recipe, metadata, work)
                 receipt = replace(
                     freeze_build_receipt(
