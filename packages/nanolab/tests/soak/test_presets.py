@@ -110,6 +110,8 @@ def test_all_presets_load_through_resolver_and_strict_model(name):
         assert soak.images[role].mode == "build"
         assert soak.images[role].digest is None
         assert soak.images[role].provenance_receipt is None
+    if name in P24:
+        assert {image.platform for image in soak.images.values()} == {"linux/arm64"}
 
 
 @pytest.mark.parametrize(

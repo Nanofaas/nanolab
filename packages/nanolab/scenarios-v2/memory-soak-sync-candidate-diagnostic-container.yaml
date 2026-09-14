@@ -60,19 +60,19 @@ soak:
     control-plane:
       mode: build
       variant: jvm
-      platform: linux/amd64
+      platform: linux/arm64
       modules: [container-deployment-provider, async-queue, build-metadata]
       build_options: {}
     word-stats-java:
       mode: build
       variant: jvm
-      platform: linux/amd64
+      platform: linux/arm64
       modules: []
       build_options: {}
     word-stats-javascript:
       mode: build
       variant: default
-      platform: linux/amd64
+      platform: linux/arm64
       modules: []
       build_options: {}
   criteria: []
