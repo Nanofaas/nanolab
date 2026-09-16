@@ -86,11 +86,27 @@ running when the supervisor SIGKILLs the `docker` CLI — most likely on the
 `mat_timeout_s` path — survives the run holding its CPU and memory
 reservation with nothing able to find it.
 
-The helper image is `helper_image` in the scenario's `heapAnalysis` block: a
-digest-pinned (`repository@sha256:<64 hex>`) build of
-`assets/soak/diagnostic-helper.Dockerfile` with `MAT_URL`/`MAT_SHA256` supplied
-from `assets/soak/mat.lock.json`. It is never a mutable tag — rebuilding it
-after a `mat.lock.json` bump means resolving and re-pinning a new digest here.
+### The helper image is built per run, not pinned in the scenario
+
+The scenario names no helper image. Every run builds
+`assets/soak/diagnostic-helper.Dockerfile`, publishes it to the same registry
+preparation already pushes the application images to, and freezes the
+`repository@sha256:<64 hex>` digest that build reported. The capture side and
+MAT then use that one digest, so both ends of a run are provably the same
+image.
+
+A digest written into the scenario instead would name bytes that exist only in
+whichever registry produced them: anyone else checking the repository out gets
+a reference nothing can pull, and a `docker image prune` breaks it even for the
+machine that built it. What must stay reproducible is the *input*, and it is —
+the MAT archive in `assets/soak/mat.lock.json` and the base images in
+`assets/soak/helper-bases.lock.json`, all digest-pinned. Bumping either lock
+file changes the next run's helper with no scenario edit.
+
+The cost is a build at the start of each run, which the layer cache absorbs
+after the first. `HeapAnalysisOptions.helper_image` skips it when a digest is
+already published, and `HeapAnalysisOptions.helper_builder` names the buildx
+builder to use (default `nanolab-heap-analysis`).
 
 ## Sensitive artifacts
 

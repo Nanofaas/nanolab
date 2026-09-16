@@ -49,7 +49,8 @@ SAFETY_ORDER = [
     "cleanup-helper",
 ]
 
-DIGEST = "nanolab/heap-helper@sha256:" + "a" * 64
+
+DIGEST = "localhost:5000/nanolab/heap-analysis-helper@sha256:" + "b" * 64
 
 
 def heap_analysis_payload() -> dict[str, Any]:
@@ -112,7 +113,6 @@ def heap_analysis_payload() -> dict[str, Any]:
             "max_error_ratio": 0,
             "max_dropped_iterations": 0,
         },
-        "helper_image": DIGEST,
         "max_dumps": 2,
         "max_dump_bytes": 2147483648,
         "artifact_limit_bytes": 4294967296,
@@ -298,6 +298,7 @@ class Harness:
             session=self.session,
             compose=self.compose,
             analyze=self.analyze,
+            helper_image=DIGEST,
         )
 
 
@@ -534,7 +535,7 @@ def test_deployment_protocol_carries_no_acceptance_policy() -> None:
         },
     )
 
-    protocol = deployment_protocol(config)
+    protocol = deployment_protocol(config, DIGEST)
 
     assert protocol.purpose == "diagnostic"
     assert protocol.criteria == []
@@ -721,7 +722,7 @@ def local_session(
     )
     prepared = PreparedSoak(
         run_id="heap-analysis-test",
-        config=deployment_protocol(protocol),
+        config=deployment_protocol(protocol, DIGEST),
         evidence_dir=tmp_path / "evidence",
         writer=ArtifactWriter(tmp_path / "evidence", 1024 * 1024),
         snapshot=snapshot,
@@ -736,7 +737,7 @@ def local_session(
     )
     deployment = FakeDeployment(diagnostic_inputs)
     return (
-        LocalHeapAnalysisSession(protocol, prepared, deployment),
+        LocalHeapAnalysisSession(protocol, prepared, deployment, helper_image=DIGEST),
         deployment,
     )
 
@@ -985,6 +986,9 @@ def test_local_wiring_declares_the_diagnostic_provider_before_preparing(
         bindings=None,
         run_dir=run_dir,
         repo_root=tmp_path,
+        # An already-published helper digest, so this test exercises the
+        # provider declaration rather than a real buildx build.
+        options=HeapAnalysisOptions(helper_image=DIGEST),
         tool_root=tmp_path,
     )
 

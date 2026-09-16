@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
@@ -33,6 +34,10 @@ from nanolab.config.soak import (
     PhaseConfig,
     PrerequisitePolicy,
     SoakConfig,
+)
+from nanolab.tasks.heap_analysis.helper_image import (
+    HelperImageRequest,
+    build_helper_image,
 )
 from nanolab.tasks.heap_analysis.mat import MatAnalysisRequest, MatAnalyzer
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact
@@ -62,6 +67,8 @@ PASS_MEANING = (  # nosec B105 - prose explaining the PASS status, not a credent
     "were captured, and every required MAT report was produced. It is not a "
     "no-leak verdict and it is not P24 qualification."
 )
+
+_HELPER_DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
 
 # A diagnostic protocol takes three discrete checkpoints instead of a sampled
 # time series, and has no baseline acceptance window. These values exist only
@@ -135,6 +142,7 @@ class HeapAnalysisWiring:
     session: HeapAnalysisSession
     compose: Callable[[Task[Any]], Workflow]
     analyze: Callable[[MatAnalysisRequest], Path]
+    helper_image: str
 
 
 @dataclass(frozen=True)
@@ -144,18 +152,29 @@ class HeapAnalysisOptions:
     preparation: PreparationOptions = field(default_factory=PreparationOptions)
     prepared: PreparedSoak | None = None
     docker_socket: str = "/var/run/docker.sock"
+    helper_builder: str = "nanolab-heap-analysis"
+    # An already-published helper digest, which skips this run's build. The
+    # build is the default: a digest only names anything in the registry that
+    # holds it, so supply one only when it is already there.
+    helper_image: str | None = None
     # Replaces the whole Docker-bound half of a run: preparation, deployment
     # composition, the diagnostic session and MAT.
     wiring: Callable[[Path], HeapAnalysisWiring] | None = None
 
 
-def deployment_protocol(config: HeapAnalysisConfig) -> SoakConfig:
+def deployment_protocol(config: HeapAnalysisConfig, helper_image: str) -> SoakConfig:
     """Describe the deployment heap analysis needs, with no acceptance policy.
 
     `purpose="diagnostic"` states in the type system what this protocol is: it
     deploys and observes but reaches no verdict, so it declares no criteria and
     no retention gates. Only this function builds one.
+
+    `helper_image` is the digest this run's helper build published; it is not a
+    scenario constant, because a digest naming bytes in one machine's registry
+    is unusable anywhere else.
     """
+    if _HELPER_DIGEST.fullmatch(helper_image) is None:
+        raise ValueError("helper_image must be digest-pinned")
     return SoakConfig(
         purpose="diagnostic",
         phases=PhaseConfig(
@@ -173,7 +192,7 @@ def deployment_protocol(config: HeapAnalysisConfig) -> SoakConfig:
             timeout_s=config.diagnostic_timeout_s,
             max_dumps=config.max_dumps,
             max_dump_bytes=config.max_dump_bytes,
-            helper_images={"control-plane": config.helper_image},
+            helper_images={"control-plane": helper_image},
             gc_completion_evidence={"control-plane": GC_SOURCES["jvm"]},
         ),
         prerequisites=PrerequisitePolicy(required_coverage=[], relevant_config_keys={}),
@@ -307,10 +326,12 @@ class _AnalyzeHeapDumps(Task[Path]):
         analyze: Callable[[MatAnalysisRequest], Path],
         holder: dict[str, Any],
         run_dir: Path,
+        helper_image: str,
     ) -> None:
         """Bind the analysis inputs; MAT itself starts only inside run()."""
         self.config, self.analyze = config, analyze
         self.holder, self.run_dir = holder, run_dir
+        self.helper_image = helper_image
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[Path]:
         """Consume the measurement result, never a deployment resource."""
@@ -320,7 +341,7 @@ class _AnalyzeHeapDumps(Task[Path]):
             baseline_hprof=measurement.baseline_dump,
             final_hprof=measurement.final_dump,
             output_dir=self.run_dir.absolute(),
-            helper_image=config.helper_image,
+            helper_image=self.helper_image,
             artifact_limit_bytes=config.artifact_limit_bytes,
             mat_memory_mib=config.mat_memory_mib,
             mat_cpus=config.mat_cpus,
@@ -370,11 +391,13 @@ class LocalHeapAnalysisSession:
         prepared: PreparedSoak,
         deployment: Any,
         *,
+        helper_image: str,
         docker_socket: str = "/var/run/docker.sock",
         generator_command: tuple[str, ...] = ("k6",),
     ) -> None:
         """Freeze the run's inputs without discovering or provisioning anything."""
         self._config = config
+        self._helper_image = helper_image
         self._prepared = prepared
         self._deployment = deployment
         self._root = prepared.evidence_dir
@@ -382,7 +405,7 @@ class LocalHeapAnalysisSession:
         self._docker_socket = docker_socket
         self._cancelled = Event()
         self._drivers = make_workload_driver_factory(
-            deployment_protocol(config),
+            deployment_protocol(config, helper_image),
             base_url=deployment.api_endpoint,
             payloads=prepared.payloads,
             image_digests=prepared.images,
@@ -618,7 +641,13 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
         # its LAST consumer, the measurement — places every deployment release
         # ahead of it. MAT cannot start while the deployment is held.
         workflow.add(
-            _AnalyzeHeapDumps(self.protocol, wiring.analyze, holder, self.run_dir)
+            _AnalyzeHeapDumps(
+                self.protocol,
+                wiring.analyze,
+                holder,
+                self.run_dir,
+                wiring.helper_image,
+            )
         )
         workflow.run(
             journal=JournalConfig(path=self.run_dir / "heap-analysis-journal.jsonl")
@@ -719,8 +748,21 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
         from nanolab.tasks.soak.runtime import create_local_deployment
         from nanolab.tasks.soak.teardown import cleanup_timeout_s
 
-        protocol = deployment_protocol(self.protocol)
         preparation = self.options.preparation
+        # Build the helper first: prepare_soak needs its digest in the
+        # diagnostic policy, and MAT needs the same one later. Freezing it here
+        # keeps both ends of the run on one immutable image without committing
+        # a digest that only exists in the builder's own registry.
+        helper_image = self.options.helper_image or build_helper_image(
+            HelperImageRequest(
+                repo_root=self.repo_root,
+                run_dir=run_dir,
+                run_id=run_dir.name,
+                registry=preparation.registry.split("/", 1)[0] + "/nanolab",
+                builder=self.options.helper_builder,
+            )
+        )
+        protocol = deployment_protocol(self.protocol, helper_image)
         # This local wiring IS the diagnostic provider: it deploys real Docker
         # containers and drives them through the session built below, so it
         # must declare itself available before prepare_soak's support check,
@@ -744,6 +786,7 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
             self.protocol,
             prepared,
             deployment,
+            helper_image=helper_image,
             docker_socket=self.options.docker_socket,
             generator_command=self.options.preparation.generator_command,
         )
@@ -766,4 +809,5 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
             session=session,
             compose=compose,
             analyze=MatAnalyzer().run,
+            helper_image=helper_image,
         )

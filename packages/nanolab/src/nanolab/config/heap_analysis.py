@@ -7,14 +7,11 @@ dump target; the functions driven by `workload` are load, not observations.
 
 from __future__ import annotations
 
-import re
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nanolab.config.soak import ImageBuildSpec, RolePolicy, WorkloadConfig
-
-_DIGEST_PATTERN = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
 
 
 class HeapAnalysisConfig(BaseModel):
@@ -29,7 +26,6 @@ class HeapAnalysisConfig(BaseModel):
     roles: dict[str, RolePolicy]
     images: dict[str, ImageBuildSpec]
     workload: WorkloadConfig
-    helper_image: str
     max_dumps: int = 2
     max_dump_bytes: int = Field(gt=0)
     artifact_limit_bytes: int = Field(gt=0)
@@ -40,13 +36,16 @@ class HeapAnalysisConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope(self) -> Self:
-        """Keep this a control-plane, two-dump protocol with pinned images."""
+        """Keep this a control-plane, two-dump protocol.
+
+        The helper image is deliberately absent: it is built and digest-frozen
+        per run, because a digest names bytes in one registry and travels with
+        nobody.
+        """
         if self.target != "control-plane":
             raise ValueError("target must be control-plane")
         if self.max_dumps != 2:
             raise ValueError("heap analysis captures exactly two dumps")
-        if _DIGEST_PATTERN.fullmatch(self.helper_image) is None:
-            raise ValueError("helper_image must be digest-pinned")
         if set(self.roles) != set(self.images):
             raise ValueError("roles and images must name the same set of keys")
         control_plane = self.roles.get("control-plane")
