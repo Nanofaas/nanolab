@@ -189,6 +189,24 @@ def _workflow(
             repo_root=paths.nanofaas_root,
             tool_root=paths.tool_root,
         )
+    if scenario.workflow == "heap-analysis":
+        from nanolab.plans.heap_analysis import (
+            build_heap_analysis_plan,
+            unique_heap_analysis_run_dir,
+        )
+
+        if environment.provider != "local":
+            raise ValueError(
+                "heap analysis currently requires a local container environment"
+            )
+        return build_heap_analysis_plan(
+            scenario,
+            environment,
+            bindings,
+            run_dir=run_dir or unique_heap_analysis_run_dir(paths.runs_dir),
+            repo_root=paths.nanofaas_root,
+            tool_root=paths.tool_root,
+        )
     if scenario.workflow == "validate":
         return build_validate_plan(
             scenario,
@@ -445,6 +463,10 @@ def _default_run_dir(
 ) -> Path | None:
     if run_dir is None and workflow == "soak":
         return unique_soak_run_dir(runs_dir)
+    if run_dir is None and workflow == "heap-analysis":
+        from nanolab.plans.heap_analysis import unique_heap_analysis_run_dir
+
+        return unique_heap_analysis_run_dir(runs_dir)
     if run_dir is None and workflow in ("loadtest", "offload-loadtest"):
         return runs_dir / "latest"
     return run_dir
@@ -736,7 +758,7 @@ def _write_failure_metadata(
                     soak_metadata_status(
                         effective_run_dir, aborted=isinstance(exc, KeyboardInterrupt)
                     )
-                    if scenario.workflow == "soak"
+                    if scenario.workflow in ("soak", "heap-analysis")
                     else "failed"
                 ),
                 error=str(exc),
@@ -766,7 +788,7 @@ def _write_success_metadata(
             effective_run_dir,
             status=(
                 soak_metadata_status(effective_run_dir)
-                if scenario.workflow == "soak"
+                if scenario.workflow in ("soak", "heap-analysis")
                 else "passed"
             ),
             error=None,
@@ -878,6 +900,37 @@ def install_product_commands(
                     )
             except ValueError as error:
                 raise typer.BadParameter(str(error)) from None
+        if scenario_config.workflow == "heap-analysis":
+            try:
+                if resume or only or start or until:
+                    raise ValueError(
+                        "heap analysis requires its complete uninterrupted "
+                        "lifecycle; partial selection or resume is unsupported"
+                    )
+                if environment_config.provider != "local":
+                    raise ValueError(
+                        "heap analysis currently requires a local container environment"
+                    )
+                if control_plane_url is not None or prometheus_url is not None:
+                    raise ValueError(
+                        "heap analysis owns its endpoints; external URL "
+                        "overrides are unsupported"
+                    )
+                if teardown:
+                    raise ValueError("heap analysis does not support --teardown")
+                if keep:
+                    raise ValueError(
+                        "--keep is not supported for heap analysis; MAT "
+                        "requires the deployment to be released"
+                    )
+                missing = diagnostics.missing_executables(("docker", "k6"))
+                if missing:
+                    raise ValueError(
+                        "heap analysis requires local executables: "
+                        + ", ".join(missing)
+                    )
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from None
         if release and environment is None:
             raise typer.BadParameter("release workflow requires --environment")
         if teardown:
@@ -906,7 +959,10 @@ def install_product_commands(
         effective_run_dir = _default_run_dir(
             run_dir, scenario_config.workflow, paths.runs_dir
         )
-        if scenario_config.workflow == "soak" and effective_run_dir is not None:
+        if (
+            scenario_config.workflow in ("soak", "heap-analysis")
+            and effective_run_dir is not None
+        ):
             try:
                 require_unused_run_dir(effective_run_dir)
             except ValueError as error:
@@ -981,7 +1037,7 @@ def install_product_commands(
                 sink=sink,
                 provenance=provenance,
             )
-            if scenario_config.workflow == "soak":
+            if scenario_config.workflow in ("soak", "heap-analysis"):
                 status = (
                     "ABORTED"
                     if isinstance(exc, KeyboardInterrupt)
@@ -1001,7 +1057,7 @@ def install_product_commands(
                 sink=sink,
                 provenance=provenance,
             )
-            if scenario_config.workflow == "soak":
+            if scenario_config.workflow in ("soak", "heap-analysis"):
                 status = terminal_status(effective_run_dir)
                 typer.echo(f"{status}: {effective_run_dir}")
                 if status != "PASS":
@@ -1064,6 +1120,24 @@ def install_product_commands(
                     raise ValueError(
                         "soak owns its endpoints; external URL overrides are "
                         "unsupported"
+                    )
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from None
+        if scenario_config.workflow == "heap-analysis":
+            try:
+                if only or start or until:
+                    raise ValueError(
+                        "heap analysis requires its complete uninterrupted "
+                        "lifecycle; partial selection is unsupported"
+                    )
+                if environment_config.provider != "local":
+                    raise ValueError(
+                        "heap analysis currently requires a local container environment"
+                    )
+                if control_plane_url is not None or prometheus_url is not None:
+                    raise ValueError(
+                        "heap analysis owns its endpoints; external URL "
+                        "overrides are unsupported"
                     )
             except ValueError as error:
                 raise typer.BadParameter(str(error)) from None

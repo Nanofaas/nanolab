@@ -87,6 +87,7 @@ def setup_adapter(
     natural=True,
     private=True,
     max_dumps=1,
+    natural_phase=None,
 ):
     from nanolab.tasks.soak.diagnostics import (
         DiagnosticBudget,
@@ -130,6 +131,8 @@ def setup_adapter(
         "native": NativeDiagnosticAdapter,
     }[runtime]
     kwargs = {"command_prefix": ("/opt/jdk/bin/jcmd",)} if runtime == "jvm" else {}
+    if natural_phase is not None:
+        kwargs["natural_phase"] = natural_phase
     adapter = cls(
         caps,
         executor,
@@ -180,6 +183,33 @@ def test_natural_checkpoint_must_be_complete_before_intrusive_capture(tmp_path):
     adapter, executor = setup_adapter(tmp_path, natural=False)
     assert capture(adapter, tmp_path)["status"] == "INCONCLUSIVE"
     assert executor.requests == []
+
+
+def test_default_adapter_still_requires_a_drain_checkpoint(tmp_path):
+    adapter, executor = setup_adapter(tmp_path, natural_phase=None)
+    (tmp_path / "natural-checkpoint.json").write_text(
+        (tmp_path / "natural-checkpoint.json")
+        .read_text()
+        .replace('"drain"', '"baseline"')
+    )
+    assert capture(adapter, tmp_path)["status"] == "INCONCLUSIVE"
+    assert executor.requests == []
+
+
+def test_declared_natural_phase_must_match_the_checkpoint(tmp_path):
+    adapter, executor = setup_adapter(tmp_path, natural_phase="baseline")
+    assert capture(adapter, tmp_path)["status"] == "INCONCLUSIVE"
+    assert executor.requests == []
+
+
+def test_declared_baseline_phase_accepts_its_own_checkpoint(tmp_path):
+    adapter, _executor = setup_adapter(tmp_path, natural_phase="baseline")
+    (tmp_path / "natural-checkpoint.json").write_text(
+        (tmp_path / "natural-checkpoint.json")
+        .read_text()
+        .replace('"phase": "drain"', '"phase": "baseline"')
+    )
+    assert capture(adapter, tmp_path)["status"] == "PASS"
 
 
 def test_natural_artifact_corruption_blocks_intrusion(tmp_path):

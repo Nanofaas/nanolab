@@ -246,13 +246,19 @@ class WorkloadConfig(_StrictModel):
 class SoakConfig(_StrictModel):
     """A complete single-version protocol, independent of comparison profiles."""
 
-    purpose: Literal["p24", "smoke"]
+    # "diagnostic" is an internal purpose: a protocol that deploys and observes
+    # but reaches no verdict, so it carries no acceptance criteria and no
+    # retention gates. Only heap analysis constructs one, and it never enters
+    # evaluation, reporting or the soak lifecycle. A soak scenario file cannot
+    # select it (see validate_functions), and "p24" and "smoke" still require
+    # criteria and retention exactly as before.
+    purpose: Literal["p24", "smoke", "diagnostic"]
     metrics_profile: Literal["advanced", "soak"] = "advanced"
     phases: PhaseConfig
-    retention_s: dict[Text, PositiveInt] = Field(min_length=1)
+    retention_s: dict[Text, PositiveInt] = Field(default_factory=dict)
     roles: dict[Text, RolePolicy] = Field(min_length=1)
     images: dict[Text, ImageBuildSpec] = Field(min_length=1)
-    criteria: list[Criterion] = Field(min_length=1)
+    criteria: list[Criterion] = Field(default_factory=list)
     diagnostics: DiagnosticPolicy
     prerequisites: PrerequisitePolicy
     sample_interval_s: PositiveNumber
@@ -265,6 +271,10 @@ class SoakConfig(_StrictModel):
     @model_validator(mode="after")
     def validate_protocol(self) -> Self:
         """Reject incomplete timing, roles and policy before any side effect."""
+        if self.purpose != "diagnostic" and not (self.criteria and self.retention_s):
+            raise ValueError(
+                f"{self.purpose} requires acceptance criteria and retention policy"
+            )
         if self.purpose == "p24":
             validate_schedule(
                 self.phases.steady_s,
@@ -294,7 +304,10 @@ class SoakConfig(_StrictModel):
         if self.diagnostics.max_dump_bytes >= self.artifact_limit_bytes:
             raise ValueError("artifact budget must leave room beyond diagnostic dumps")
         self._validate_roles()
-        self._validate_criteria()
+        # A diagnostic protocol declares no criteria, so the per-role cgroup
+        # budget and RSS residual rules below have nothing to bind to.
+        if self.purpose != "diagnostic":
+            self._validate_criteria()
         return self
 
     def _validate_roles(self) -> None:
@@ -369,7 +382,14 @@ class SoakConfig(_StrictModel):
                 raise ValueError("each role needs an explicit RSS residual policy")
 
     def validate_functions(self, functions: list[str]) -> None:
-        """Bind the protocol to selected functions, with no two-function rule."""
+        """Bind the protocol to selected functions, with no two-function rule.
+
+        This is the public soak scenario's entry point, so it is also where the
+        internal "diagnostic" purpose is refused: a scenario file must never be
+        able to run a soak with no acceptance criteria and no retention gates.
+        """
+        if self.purpose == "diagnostic":
+            raise ValueError("a soak scenario must declare a p24 or smoke purpose")
         _unique(functions, "functions")
         if any(not name or name.strip() != name for name in functions):
             raise ValueError(

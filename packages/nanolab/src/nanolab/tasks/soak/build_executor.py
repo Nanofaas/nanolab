@@ -235,10 +235,21 @@ class OwnedBuildCommandExecutor:
             if failures
             else f"unexpected command exit code {result.returncode}"
         )
+        # Sonata's CommandTask requires status and exit code to agree: a
+        # "failed" result carrying an ACCEPTED exit code is rejected as
+        # incoherent, and the run dies with an unreadable RuntimeError instead
+        # of this reason. That happens whenever the leader exits 0 but the
+        # supervisor still had to reap an adopted stray (forced_stop) - a
+        # routine Gradle outcome. Report no exit code when the supervisor, not
+        # the command, is what failed; `reason` keeps the observed value.
+        code = result.returncode
+        if not accepted and code in options.expected_exit_codes:
+            reason = f"{reason} (observed exit code {code})"
+            code = None
         return TaskResult(
             task.task_id,
             "passed" if accepted else "failed",
-            result.returncode,
+            code,
             options.expected_exit_codes,
             stdout="",
             stderr="" if accepted else f"{reason}; log: {log}",

@@ -1,0 +1,89 @@
+# Diagnostic, not a P24 measurement: a bounded k6 workload around two
+# post-full-GC control-plane heap dumps, then headless Eclipse MAT reports
+# once the deployment is released. No policy, no retention, no prerequisites -
+# `PASS` here means only that the diagnostic receipt is complete.
+workflow: heap-analysis
+backend: container
+functions:
+  - word-stats-java
+  - word-stats-javascript
+resources:
+  control-plane:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-java:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-javascript:
+    limits: {cpu: 1, memoryMiB: 512}
+heapAnalysis:
+  target: control-plane
+  warmup_s: 120
+  steady_s: 900
+  drain_s: 420
+  roles:
+    control-plane:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
+      required_capabilities: [procfs, docker-engine]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine, prometheus]
+    word-stats-java:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
+      required_capabilities: [procfs, docker-engine]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine, prometheus]
+    word-stats-javascript:
+      runtime: node
+      expected_cpu: 1
+      memory_limit_bytes: 536870912
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
+      required_capabilities: [procfs, docker-engine]
+      # heapAnalysis diagnoses only its `target` role (control-plane). The
+      # node preload is provisioned solely for a real diagnostics target;
+      # declaring it here made Node fail to find
+      # /opt/nanolab/node-diagnostic-control.cjs and exit immediately.
+      runtime_options: []
+      collection_sources: [procfs, docker-engine]
+  images:
+    control-plane:
+      mode: build
+      variant: jvm
+      platform: linux/arm64
+      modules: [container-deployment-provider, async-queue, build-metadata]
+      build_options: {}
+    word-stats-java:
+      mode: build
+      variant: jvm
+      platform: linux/arm64
+      modules: []
+      build_options: {}
+    word-stats-javascript:
+      mode: build
+      variant: default
+      platform: linux/arm64
+      modules: []
+      build_options: {}
+  workload:
+    rates:
+      word-stats-java: 100
+      word-stats-javascript: 100
+    preallocated_vus: 200
+    max_vus: 200
+    max_error_ratio: 0
+    max_dropped_iterations: 0
+  # Built from packages/nanolab/assets/soak/diagnostic-helper.Dockerfile with
+  # MAT_URL/MAT_SHA256 read from mat.lock.json (MAT 1.17.0.20260601);
+  # published to the local registry and pinned by RepoDigest.
+  helper_image: localhost:5000/nanolab/heap-analysis-helper@sha256:79e3285e0b5a142bae4db4d1fd92a6f81626ba3633ba3faaa2bdb263387055fd
+  max_dumps: 2
+  # At the helper's 1 GiB volume contract ceiling; see _diagnostic_resource_inputs.
+  max_dump_bytes: 1073741824
+  artifact_limit_bytes: 8589934592
+  diagnostic_timeout_s: 120
+  mat_memory_mib: 2048
+  mat_cpus: 2.0
+  mat_timeout_s: 300

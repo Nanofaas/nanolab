@@ -600,6 +600,7 @@ class PreparedDockerDiagnostics:
         budget: DiagnosticBudget,
         natural_checkpoint: Path,
         max_capture_bytes: int,
+        natural_phase: str = "drain",
     ):
         """Create the existing role adapter with the observed evidence source."""
         if max_capture_bytes < self.quota_bytes:
@@ -610,6 +611,7 @@ class PreparedDockerDiagnostics:
             "natural_checkpoint": natural_checkpoint,
             "max_capture_bytes": max_capture_bytes,
             "full_gc_source": GC_SOURCES[runtime],
+            "natural_phase": natural_phase,
         }
         if runtime == "jvm":
             return JvmDiagnosticAdapter(*args, command_prefix=("jcmd",), **kwargs)
