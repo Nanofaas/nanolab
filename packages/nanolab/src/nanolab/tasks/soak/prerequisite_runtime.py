@@ -65,6 +65,7 @@ from urllib.parse import quote
 import httpx
 
 from nanolab.tasks.soak.artifacts import describe_artifact, fingerprint
+from nanolab.tasks.soak.preflight import applies_declared_options
 from nanolab.tasks.soak.prerequisites import SUPPORTED_COVERAGE, ProfileRunner
 from nanolab.tasks.soak.probes import parse_exposition
 
@@ -222,6 +223,28 @@ def make_live_runner(
     return runner
 
 
+def _matches_effective_configuration(observed: object, expected: dict) -> bool:
+    if not isinstance(observed, dict):
+        return False
+    candidate = deepcopy(observed)
+    try:
+        for coverage, recipe in expected.items():
+            roles = recipe.get("effective_config", {}).get("roles", {})
+            for role, settings in roles.items():
+                declared = settings.get("runtime_options")
+                if declared is None:
+                    continue
+                actual = candidate[coverage]["effective_config"]["roles"][role]
+                if not applies_declared_options(
+                    actual.get("runtime_options"), declared
+                ):
+                    return False
+                actual["runtime_options"] = deepcopy(declared)
+    except (AttributeError, KeyError, TypeError):
+        return False
+    return candidate == expected
+
+
 class LiveProfileSession:
     """Perform bounded HTTP operations and obtain independent physical samples."""
 
@@ -271,7 +294,9 @@ class LiveProfileSession:
         async with asyncio.timeout(self.request_timeout):
             observed = await self.platform.observe_config()
         self._record("configuration", relevant_config=observed)
-        if observed != self.inputs["relevant_config"]:
+        if not _matches_effective_configuration(
+            observed, self.inputs["relevant_config"]
+        ):
             raise UnsupportedPreflightError(
                 "effective configuration differs from frozen settings"
             )

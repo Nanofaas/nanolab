@@ -173,6 +173,21 @@ async def _json(client, url: str) -> dict:
     return result
 
 
+def _matches_owned_function_manifest(observed: dict, manifest: dict) -> bool:
+    mode = manifest.get("executionMode")
+    return all(
+        observed.get(key) == value
+        for key, value in manifest.items()
+        if key != "executionMode"
+    ) and (
+        "executionMode" not in manifest
+        or (
+            observed.get("requestedExecutionMode") == mode
+            and observed.get("effectiveExecutionMode") == mode
+        )
+    )
+
+
 @dataclass(frozen=True)
 class RecoveryResult:
     """Report whether parent recovery confirmed all owned resources absent."""
@@ -522,9 +537,8 @@ class PrerequisitePlatformFactory:
                     for coverage, recipe in frozen["relevant_config"].items():
                         name = recipe["function"]
                         observed = await _json(client, "/v1/functions/" + name)
-                        if any(
-                            observed.get(key) != value
-                            for key, value in manifests[name].items()
+                        if not _matches_owned_function_manifest(
+                            observed, manifests[name]
                         ):
                             raise UnsupportedPreflightError(
                                 f"{coverage}/function: actual manifest differs "

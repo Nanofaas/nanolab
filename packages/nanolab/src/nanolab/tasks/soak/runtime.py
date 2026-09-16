@@ -16,7 +16,7 @@ import shutil
 import socket
 import stat
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -94,9 +94,9 @@ class RuntimeOptions:
     docker_socket: str = "/var/run/docker.sock"
     memory_helper_image: str | None = None
     allow_diagnostic_target_stop_on_cancel: bool = False
-    prerequisite_parent_artifact_bytes: int | None = None
-    prerequisite_lifetime_artifact_bytes: int | None = None
-    prerequisite_recovery_artifact_bytes: int | None = None
+    prerequisite_parent_artifact_bytes: int | None = 32 * 1024 * 1024
+    prerequisite_lifetime_artifact_bytes: int | None = 64 * 1024 * 1024
+    prerequisite_recovery_artifact_bytes: int | None = 32 * 1024 * 1024
     prerequisite_acquire_timeout_s: float = 60
     prerequisite_release_timeout_s: float = 35
 
@@ -129,6 +129,7 @@ class RuntimeOptions:
 _NODE_CONTROLLER = "/opt/nanolab/node-diagnostic-control.cjs"
 _NODE_PRELOAD = "--require=" + _NODE_CONTROLLER
 _DIAGNOSTIC_RECEIPT_BYTES = 65536
+_PREREQUISITE_SETTLEMENT_MARGIN_S = 5.0
 
 
 def _close_all(leases: list[socket.socket]) -> None:
@@ -145,7 +146,7 @@ def _runtime_preparation_options(config, options: RuntimeOptions) -> Preparation
         and config.prerequisites.required_coverage
         and preparation.prerequisite_runner is None
     ):
-        _check_prerequisite_wiring(config, options)
+        _check_prerequisite_resources(config, options)
         preparation = replace(preparation, prerequisite_provider_available=True)
     if (
         not any(config.diagnostics.operations.values())
@@ -175,18 +176,11 @@ def _runtime_preparation_options(config, options: RuntimeOptions) -> Preparation
     return replace(preparation, diagnostic_provider_available=True)
 
 
-def _check_prerequisite_wiring(config, options: RuntimeOptions) -> None:
-    """Check static operational requirements without inferring prerequisite success."""
+def _check_prerequisite_resources(config, options: RuntimeOptions) -> None:
+    """Check bounded provider resources without requiring post-build identities."""
     if options.docker_socket != "/var/run/docker.sock":
         raise ValueError(
             "automatic prerequisites require the local default Docker socket"
-        )
-    if (
-        not isinstance(options.prerequisite_inputs, dict)
-        or not options.prerequisite_inputs
-    ):
-        raise ValueError(
-            "automatic prerequisites require explicit frozen recipe inputs"
         )
     parent, lifetime, recovery = (
         options.prerequisite_parent_artifact_bytes,
@@ -212,6 +206,82 @@ def _check_prerequisite_wiring(config, options: RuntimeOptions) -> None:
         )
 
 
+def _population_retention(config, population: str) -> float:
+    """Map retained owner populations to the declared authoritative lifetime."""
+    if population in {"outcomes", "expiry_queue_depth"}:
+        return (
+            config.retention_s["unkeyed-sync-outcome"]
+            + _PREREQUISITE_SETTLEMENT_MARGIN_S
+        )
+    if population == "idempotency_entries":
+        return (
+            config.retention_s["terminal-key-and-readable-outcome"]
+            + _PREREQUISITE_SETTLEMENT_MARGIN_S
+        )
+    return 0
+
+
+def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
+    """Derive the built-in sync gate only after images and payloads are frozen."""
+    from nanolab.tasks.soak.prerequisites import _inputs, _required_populations
+
+    config = prepared.config
+    coverage = frozenset(config.prerequisites.required_coverage)
+    if coverage != {"sync"}:
+        raise ValueError(
+            "built-in prerequisites support only sync; other profiles require "
+            "explicit fault-capable recipes"
+        )
+    roles = [role for role in config.roles if role != "control-plane"]
+    if not roles:
+        raise ValueError("sync prerequisite requires an SDK function role")
+    role = next(
+        (name for name in roles if config.roles[name].runtime == "jvm"), roles[0]
+    )
+    case = prepared.payloads[role][0]
+    payload = prepared.writer.write_json("prerequisite-payload.json", case["input"])
+    script = prepared.writer.write_json(
+        "prerequisite-script.json",
+        {
+            "schema": "nanolab-soak-prerequisite-script-v1",
+            "implementation": "nanolab.tasks.soak.prerequisite_runtime",
+            "coverage": ["sync"],
+        },
+    )
+    populations = _required_populations(
+        prepared.images, coverage, config.metrics_profile
+    )
+    frozen = {
+        "images": dict(prepared.images),
+        "metrics_profile": config.metrics_profile,
+        "relevant_config": {
+            "sync": {
+                "function": role,
+                "role": role,
+                "request": {"input": deepcopy(case["input"])},
+                "expected_output": deepcopy(case["expected"]),
+                "request_timeout_s": 3,
+                "exercise_timeout_s": 30,
+                "poll_interval_s": 0.05,
+            }
+        },
+        "payload": describe_artifact(payload),
+        "script": describe_artifact(script),
+        "settlement": {
+            owner: {
+                population: {
+                    "limit": 0,
+                    "retention_s": _population_retention(config, population),
+                }
+                for population in sorted(required)
+            }
+            for owner, required in populations.items()
+        },
+    }
+    _inputs(frozen, coverage)
+    return frozen
+
+
 def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
     """Bind the real factory after build, retaining reservations in the parent."""
     # The factory imports runtime and plans: importing it at module scope cycles.
@@ -225,8 +295,16 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
     )
     from nanolab.tasks.soak.prerequisites import _inputs
 
-    _check_prerequisite_wiring(prepared.config, options)
-    frozen = deepcopy(options.prerequisite_inputs)
+    _check_prerequisite_resources(prepared.config, options)
+    frozen = (
+        deepcopy(options.prerequisite_inputs)
+        if options.prerequisite_inputs is not None
+        else _freeze_prerequisite_inputs(prepared)
+    )
+    if not isinstance(frozen, dict) or not frozen:
+        raise ValueError(
+            "automatic prerequisites require explicit frozen recipe inputs"
+        )
     selected_profile = prepared.config.metrics_profile
     if frozen.get("metrics_profile", selected_profile) != selected_profile:
         raise ValueError("frozen prerequisite metrics profile differs from policy")
@@ -254,6 +332,8 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
         prepared=prepared,
         ownership_root=factory_root,
         bindings=bindings,
+        acquire_timeout_s=options.prerequisite_acquire_timeout_s,
+        release_timeout_s=options.prerequisite_release_timeout_s,
     )
     if not callable(getattr(factory, "assign_lifetime_budget", None)) or not callable(
         getattr(factory, "recover", None)
@@ -1299,6 +1379,10 @@ def create_soak_lifecycle(
             role["metrics"] = sorted(
                 {row.metric for row in rows if row.availability == "observed"}
             )
+            role["collection_sources"] = sorted(
+                set(role.get("collection_sources", []))
+                | _observed_collection_sources(rows)
+            )
         for row in samples:
             writer.append(
                 "preflight-samples", {"schema": "nanolab-soak-v1", **asdict(row)}
@@ -1705,6 +1789,7 @@ class RunSingleVersionSoak(Task):
     def run(self, inputs: TaskInputs) -> TaskOutcome:
         """Prepare once, run the owned platform, and persist every terminal exit."""
         from nanolab.plans.soak import compose_frozen_soak_workflow
+        from nanolab.tasks.soak.teardown import cleanup_timeout_s
 
         if self._entered:
             raise RuntimeError("single-version soak cannot resume or restart")
@@ -1803,6 +1888,9 @@ class RunSingleVersionSoak(Task):
                 api_endpoint=deployment.api_endpoint,
                 ownership=deployment.ownership,
                 cwd=self.repo_root,
+                release_timeout_s=cleanup_timeout_s(
+                    prepared.config.cancellation_timeout_s
+                ),
             )
             workflow.keep = self.keep()
             result = workflow.run(
@@ -2082,6 +2170,17 @@ def observe_local_process(target: Target) -> dict[str, Any]:
         "capabilities": ["procfs", "docker-engine"],
         "collection_sources": ["procfs", "docker-engine"],
     }
+
+
+def _observed_collection_sources(rows: Iterable[Any]) -> set[str]:
+    sources = set()
+    for row in rows:
+        if getattr(row, "availability", None) != "observed":
+            continue
+        source = getattr(row, "source", None)
+        if isinstance(source, str) and source:
+            sources.add(source.partition("/")[0])
+    return sources
 
 
 def observe_local_configuration(

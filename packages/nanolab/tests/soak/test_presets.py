@@ -142,28 +142,20 @@ def test_p24_invocations_bind_profile_specific_owner_requirements(
                 {
                     "execution_records",
                     "outcomes",
-                    "idempotency_entries",
                     "logical_executions",
                     "canonical_input_bytes",
                     "physical_input_copy_bytes",
-                    "waiters",
                     "expiry_queue_depth",
                     "pending_acquisitions",
                     "replica_snapshots",
-                    "retired_owners",
                 }
             ),
-            "word-stats-java": frozenset(
-                {"live_executions", "callbacks", "callback_bytes"}
-            ),
+            "word-stats-java": frozenset({"live_executions"}),
             "word-stats-javascript": frozenset(
                 {
                     "live_executions",
                     "input_bytes",
                     "output_bytes",
-                    "callbacks",
-                    "callback_bytes",
-                    "serialized_callback_bytes",
                 }
             ),
         }

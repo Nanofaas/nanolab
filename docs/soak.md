@@ -131,7 +131,7 @@ and 2560 MiB for these three application containers, plus the registry, generato
 observer, host, diagnostic helpers, and build tools. Native compilation has its
 own potentially substantial resource cost outside the measurement interval.
 
-P24 declares 20 requests/second per function and 200 VUs. These are explicit
+P24 declares 100 requests/second per function (200 total) and 200 VUs. These are explicit
 initial workload inputs, not a measured saturation claim. Validate achieved
 offered work, correctness, errors, dropped iterations, and generator capacity.
 The smoke offers 1 request/second per function with 4 preallocated/8 maximum VUs.
@@ -205,9 +205,9 @@ above are satisfied and the resource/diagnostic costs have been approved.
 
 ```bash
 export NANOFAAS_ROOT=/home/michele/Documenti/nanofaas
-./nanolab.sh inspect packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
-./nanolab.sh plan packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
-./nanolab.sh run packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
+./nanolab.sh inspect packages/nanolab/scenarios-v2/memory-soak-sync-candidate-diagnostic-container.yaml
+./nanolab.sh plan packages/nanolab/scenarios-v2/memory-soak-sync-candidate-diagnostic-container.yaml
+./nanolab.sh run packages/nanolab/scenarios-v2/memory-soak-sync-candidate-diagnostic-container.yaml
 ```
 
 For the separately authorized integrated smoke:

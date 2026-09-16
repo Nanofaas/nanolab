@@ -13,6 +13,7 @@ from nanolab.tasks.soak.prerequisite_runtime import (
     LivePlatform,
     LiveProfileSession,
     UnsupportedPreflightError,
+    _matches_effective_configuration,
     expand_coverage,
     make_live_runner,
     required_body_budget,
@@ -49,6 +50,37 @@ def test_default_metrics_bind_each_soak_population_to_its_owner():
             "serialized_callback_bytes": ("runtime_serialized_callback_bytes",),
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "matches"),
+    [("image-options", True), ("cpu", False), ("retention", False)],
+)
+def test_effective_configuration_only_allows_image_runtime_options(mutation, matches):
+    expected = {
+        "sync": {
+            "effective_config": {
+                "roles": {
+                    "control-plane": {
+                        "cpu": 2.0,
+                        "runtime_options": [],
+                    }
+                },
+                "retention_s": {"outcomes": 30},
+            }
+        }
+    }
+    observed = deepcopy(expected)
+    if mutation == "image-options":
+        observed["sync"]["effective_config"]["roles"]["control-plane"][
+            "runtime_options"
+        ] = ["-XX:+UseSerialGC"]
+    elif mutation == "cpu":
+        observed["sync"]["effective_config"]["roles"]["control-plane"]["cpu"] = 1.0
+    else:
+        observed["sync"]["effective_config"]["retention_s"]["outcomes"] = 29
+
+    assert _matches_effective_configuration(observed, expected) is matches
 
 
 @pytest.fixture

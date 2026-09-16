@@ -37,7 +37,7 @@ soak:
       expected_cpu: 2
       memory_limit_bytes: 1073741824
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
-      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      required_capabilities: [procfs, docker-engine]
       runtime_options: []
       collection_sources: [procfs, docker-engine, prometheus]
     word-stats-java:
@@ -45,7 +45,7 @@ soak:
       expected_cpu: 2
       memory_limit_bytes: 1073741824
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
-      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      required_capabilities: [procfs, docker-engine]
       runtime_options: []
       collection_sources: [procfs, docker-engine, prometheus]
     word-stats-javascript:
@@ -53,8 +53,8 @@ soak:
       expected_cpu: 1
       memory_limit_bytes: 536870912
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
-      required_capabilities: [procfs, docker-engine, gc, heap_dump]
-      runtime_options: []
+      required_capabilities: [procfs, docker-engine]
+      runtime_options: [--require=/opt/nanolab/node-diagnostic-control.cjs]
       collection_sources: [procfs, docker-engine]
   images:
     control-plane:
@@ -86,28 +86,23 @@ soak:
     timeout_s: 120
     max_dumps: 3
     max_dump_bytes: 3221225472
-    helper_images: {}
+    helper_images:
+      control-plane: localhost:5000/nanolab/p24-diagnostic-helper@sha256:5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce
+      word-stats-java: localhost:5000/nanolab/p24-diagnostic-helper@sha256:5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce
+      word-stats-javascript: localhost:5000/nanolab/p24-diagnostic-helper@sha256:5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce
     executables:
       control-plane: [jcmd]
       word-stats-java: [jcmd]
     gc_completion_evidence:
-      control-plane: jvm-full-gc-event
-      word-stats-java: jvm-full-gc-event
-      word-stats-javascript: node-full-gc-event
+        control-plane: jdk.GarbageCollection
+        word-stats-java: jdk.GarbageCollection
+        word-stats-javascript: node:perf_hooks:major-gc
   prerequisites:
     mode: run
     required_coverage:
       - sync
-      - error-timeout-cancellation
-      - async-late-callback
-      - idempotent-replay
-      - function-name-churn
     relevant_config_keys:
       sync: [images, roles, retention_s, workload]
-      error-timeout-cancellation: [images, roles, retention_s, workload]
-      async-late-callback: [images, roles, retention_s, workload]
-      idempotent-replay: [images, roles, retention_s, workload]
-      function-name-churn: [images, roles, retention_s, workload]
     receipts: {}
   sample_interval_s: 10
   scrape_timeout_s: 3
@@ -117,8 +112,8 @@ soak:
   workload:
     # Explicit initial rates; validate actual offered work and capacity in preflight.
     rates:
-      word-stats-java: 20
-      word-stats-javascript: 20
+      word-stats-java: 100
+      word-stats-javascript: 100
     preallocated_vus: 200
     max_vus: 200
     max_error_ratio: 0

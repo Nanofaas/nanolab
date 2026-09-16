@@ -37,6 +37,7 @@ def compose_frozen_soak_workflow(
     ownership: Resource[Any],
     cwd: Path,
     workflow_id: str = "soak",
+    release_timeout_s: float = 60.0,
 ) -> Workflow:
     """Compose an already frozen deployment using the real platform resources.
 
@@ -73,7 +74,7 @@ def compose_frozen_soak_workflow(
 
     cleanup_command = LocalCleanupCommands(
         project_file.absolute().parent,
-        timeout_s=10.0,
+        timeout_s=release_timeout_s,
         artifact_limit=8 * 1024 * 1024,
     )
     workflow = Workflow(workflow_id=workflow_id)
