@@ -199,6 +199,32 @@ def test_protocol_rejects_invalid_nested_values(scenario_data, section, key, val
         parse_soak(data)
 
 
+def test_diagnostic_purpose_carries_no_criteria_or_retention(scenario_data):
+    data = scenario_data["soak"]
+    data.update(purpose="diagnostic", criteria=[], retention_s={})
+    protocol = parse_soak(data)
+    assert protocol.criteria == []
+    assert protocol.retention_s == {}
+
+
+def test_soak_scenario_refuses_the_internal_diagnostic_purpose(scenario_data):
+    scenario_data["soak"].update(purpose="diagnostic", criteria=[], retention_s={})
+    with pytest.raises(ValidationError, match="p24 or smoke purpose"):
+        ScenarioConfig.model_validate(scenario_data)
+
+
+@pytest.mark.parametrize("purpose", ["p24", "smoke"])
+@pytest.mark.parametrize("key", ["criteria", "retention_s"])
+def test_measured_purposes_still_require_criteria_and_retention(
+    scenario_data, purpose, key
+):
+    data = scenario_data["soak"]
+    data["purpose"] = purpose
+    data[key] = [] if key == "criteria" else {}
+    with pytest.raises(ValidationError, match="acceptance criteria and retention"):
+        parse_soak(data)
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [

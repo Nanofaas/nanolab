@@ -530,7 +530,8 @@ def test_public_terminal_is_published_only_after_cleanup(
     value = SimpleNamespace(
         writer=SimpleNamespace(close=close_writer),
         config=SimpleNamespace(
-            prerequisites=SimpleNamespace(mode="run", required_coverage=[])
+            prerequisites=SimpleNamespace(mode="run", required_coverage=[]),
+            cancellation_timeout_s=30.0,
         ),
     )
     monkeypatch.setattr(module, "prepare_soak", lambda *a, **k: value)

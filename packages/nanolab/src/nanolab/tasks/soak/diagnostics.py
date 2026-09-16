@@ -191,9 +191,12 @@ class _RuntimeAdapter:
         natural_checkpoint: Path,
         max_capture_bytes: int,
         full_gc_source: str,
+        natural_phase: str = "drain",
     ):
         if type(max_capture_bytes) is not int or max_capture_bytes <= 0:
             raise ValueError("positive diagnostic capture limit required")
+        if not natural_phase:
+            raise ValueError("the declared natural checkpoint phase cannot be empty")
         if not re.fullmatch(r".+@sha256:[a-f0-9]{64}", capabilities.helper_digest):
             raise ValueError("immutable diagnostic helper digest required")
         if capabilities.evidence.is_symlink():
@@ -203,6 +206,7 @@ class _RuntimeAdapter:
         self._executor = executor
         self._budget = budget
         self._natural_checkpoint = natural_checkpoint
+        self._natural_phase = natural_phase
         self._max_bytes = max_capture_bytes
         self._full_gc_source = full_gc_source
 
@@ -225,6 +229,10 @@ class _RuntimeAdapter:
         raise NotImplementedError
 
     def _natural(self, target: Target, started: float) -> dict[str, object]:
+        # The checkpoint must name the phase this adapter was built for: soak's
+        # drain by default, so a capture can never accept a checkpoint taken in
+        # some other phase. A caller that measures a different unperturbed
+        # window declares it instead of loosening the gate.
         path = self._natural_checkpoint
         if path.is_symlink():
             raise ValueError("symlink natural checkpoint is unsupported")
@@ -233,7 +241,7 @@ class _RuntimeAdapter:
             receipt.get("schema") != "nanolab-soak-v1"
             or receipt.get("kind") != "natural_checkpoint"
             or receipt.get("completed") is not True
-            or receipt.get("phase") != "drain"
+            or receipt.get("phase") != self._natural_phase
             or receipt.get("target") != asdict(target)
             or not _finite(receipt.get("ended_s"))
             or receipt["ended_s"] > started

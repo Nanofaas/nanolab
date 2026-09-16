@@ -91,6 +91,12 @@ def case(tmp_path, monkeypatch):
         "executionMode": "EXTERNAL",
         "endpointUrl": "http://function-1:8080/invoke",
     }
+    function_response = {
+        key: value for key, value in manifest.items() if key != "executionMode"
+    }
+    function_response.update(
+        requestedExecutionMode="EXTERNAL", effectiveExecutionMode="EXTERNAL"
+    )
 
     def deploy(isolated, root, **kwargs):
         deployments.append(isolated)
@@ -165,7 +171,7 @@ def case(tmp_path, monkeypatch):
                 },
             )
         if request.url.path == "/v1/functions/echo":
-            return httpx.Response(200, json=manifest)
+            return httpx.Response(200, json=function_response)
         return httpx.Response(200, text="runtime_active_handlers 0\n")
 
     client_type = httpx.AsyncClient
@@ -191,7 +197,8 @@ def test_inert_factory_and_real_observer_projection(case):
     async def run():
         async with factory("sync", "one", inputs) as live:
             assert await live.observe_identities() == inputs["images"]
-            assert await live.observe_config() == inputs["relevant_config"]
+            observed = await asyncio.wait_for(live.observe_config(), timeout=2)
+            assert observed == inputs["relevant_config"]
             assert live.runtime_kinds == {
                 "control-plane": "control-plane",
                 "echo": "javascript",
@@ -201,6 +208,34 @@ def test_inert_factory_and_real_observer_projection(case):
     assert calls.count("acquire") == calls.count("release") == 1
     assert "/actuator/configprops" in calls
     assert deployments[0].run_id != factory.prepared.run_id
+
+
+def test_owned_manifest_matches_current_function_response():
+    manifest = {
+        "name": "echo",
+        "image": "sdk@sha256:" + "b" * 64,
+        "executionMode": "EXTERNAL",
+        "endpointUrl": "http://function-1:8080/invoke",
+    }
+    response = {key: value for key, value in manifest.items() if key != "executionMode"}
+    response.update(
+        requestedExecutionMode="EXTERNAL", effectiveExecutionMode="EXTERNAL"
+    )
+
+    assert platform._matches_owned_function_manifest(response, manifest)
+
+
+@pytest.mark.parametrize("field", ["requestedExecutionMode", "effectiveExecutionMode"])
+def test_owned_manifest_rejects_changed_execution_mode(field):
+    manifest = {"name": "echo", "executionMode": "EXTERNAL"}
+    response = {
+        "name": "echo",
+        "requestedExecutionMode": "EXTERNAL",
+        "effectiveExecutionMode": "EXTERNAL",
+    }
+    response[field] = "LOCAL"
+
+    assert not platform._matches_owned_function_manifest(response, manifest)
 
 
 def test_two_lifetimes_keep_images_settings_but_not_project_or_writer(case):

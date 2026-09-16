@@ -340,3 +340,42 @@ def test_provenance_allowlist_still_requires_digest_and_exact_field(
             1,
         )
     assert not (tmp_path / "logs").exists()
+
+
+def test_forced_stop_after_a_clean_exit_reports_a_readable_failure(
+    tmp_path, monkeypatch
+):
+    """A live heap-analysis run died here with an unreadable RuntimeError.
+
+    Gradle's `--no-daemon` launcher exits 0 while an adopted worker is still
+    alive, so `run_owned_command` SIGKILLs the stray and reports
+    `forced_stop` with `returncode=0`. Sonata's CommandTask requires status
+    and exit code to agree, so a "failed" result carrying an ACCEPTED exit
+    code is rejected as `incoherent status/code ('failed', 0)` and the real
+    reason - the forced stop - never reaches the operator.
+    """
+    from sonata_engine import TaskInputs
+    from sonata_tasks.core.command import CommandTask
+
+    m = module()
+
+    def run(argv, **kwargs):
+        kwargs["log_path"].write_bytes(b"")
+        return replace(successful(), forced_stop=True)
+
+    monkeypatch.setattr(m, "run_owned_command", run)
+    bound = executor(tmp_path)
+    result = bound.run(task())
+    assert result.status == "failed"
+    assert result.return_code is None
+    assert "forced stop" in result.stderr and "observed exit code 0" in result.stderr
+
+    command = CommandTask(
+        title="prerequisite control-plane",
+        argv=(sys.executable, "-c", 'print("hello")'),
+        executor=bound,
+    )
+    with pytest.raises(RuntimeError) as error:
+        command.run(TaskInputs.empty())
+    assert "incoherent status/code" not in str(error.value)
+    assert "forced stop" in str(error.value)

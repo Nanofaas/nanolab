@@ -12,10 +12,18 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from nanolab.config.heap_analysis import HeapAnalysisConfig
 from nanolab.config.soak import SoakConfig
 
 WorkflowName = Literal[
-    "validate", "cli", "loadtest", "offload", "offload-loadtest", "release", "soak"
+    "validate",
+    "cli",
+    "loadtest",
+    "offload",
+    "offload-loadtest",
+    "release",
+    "soak",
+    "heap-analysis",
 ]
 BackendName = Literal["container", "k8s"]
 BuildStrategy = Literal["docker", "buildpack"]
@@ -231,6 +239,7 @@ class ScenarioConfig(BaseModel):
     load_vus: int | None = Field(default=None, alias="loadVus", gt=0)
     release: ReleaseConfig | None = None
     soak: SoakConfig | None = None
+    heap_analysis: HeapAnalysisConfig | None = Field(default=None, alias="heapAnalysis")
 
     @model_validator(mode="after")
     def validate_workflow(
@@ -287,6 +296,68 @@ class ScenarioConfig(BaseModel):
                             "resource requests exceed the soak role limits"
                         )
             return self
+        if self.workflow == "heap-analysis":
+            if self.heap_analysis is None:
+                raise ValueError(
+                    "heap-analysis workflow requires its heapAnalysis block"
+                )
+            if self.backend != "container":
+                raise ValueError(
+                    "heap-analysis currently requires the container backend"
+                )
+            unexpected = self.model_fields_set - {
+                "workflow",
+                "backend",
+                "functions",
+                "resources",
+                "heap_analysis",
+            }
+            if unexpected:
+                raise ValueError(
+                    "heap-analysis does not consume legacy workload options: "
+                    + ", ".join(sorted(unexpected))
+                )
+            if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
+                raise ValueError(
+                    "resources must refer to selected functions or control-plane"
+                )
+            # The same coherence soak enforces above: an incoherent scenario
+            # must fail `inspect`/`plan`, not twenty minutes into a live run.
+            if set(self.functions) != set(self.heap_analysis.workload.rates):
+                raise ValueError(
+                    "workload rates must cover exactly the selected functions"
+                )
+            for name, resource in self.resources.items():
+                role = self.heap_analysis.roles.get(name)
+                if role is None:
+                    raise ValueError(
+                        "resources must refer to a declared heap-analysis role"
+                    )
+                if resource.limits is not None:
+                    limits = resource.limits
+                    if (limits.cpu is not None and limits.cpu != role.expected_cpu) or (
+                        limits.memory_mib is not None
+                        and limits.memory_mib * 1024 * 1024 != role.memory_limit_bytes
+                    ):
+                        raise ValueError(
+                            "resource limits disagree with the heap-analysis role"
+                        )
+                if resource.requests is not None:
+                    requests = resource.requests
+                    if (
+                        requests.cpu is not None and requests.cpu > role.expected_cpu
+                    ) or (
+                        requests.memory_mib is not None
+                        and requests.memory_mib * 1024 * 1024 > role.memory_limit_bytes
+                    ):
+                        raise ValueError(
+                            "resource requests exceed the heap-analysis role limits"
+                        )
+            return self
+        if self.heap_analysis is not None:
+            raise ValueError(
+                "heapAnalysis block belongs only to the heap-analysis workflow"
+            )
         if self.soak is not None:
             raise ValueError("soak protocol belongs only to the soak workflow")
         if self.workflow in ("validate", "cli") and self.backend is None:

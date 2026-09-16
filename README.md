@@ -116,3 +116,5 @@ README; `test_readme_quotes_the_nanofaas_commit_ci_actually_pins` fails if you
 change one and forget the other.
 
 Single-version memory soak: see the [operator guide](docs/soak.md) for presets, required policy, and current readiness limits.
+
+Control-plane heap analysis: see the [operator guide](docs/heap-analysis.md) for the public command, timeline, resource bounds, and how to read the result. It is a diagnostic, not a P24 measurement.
