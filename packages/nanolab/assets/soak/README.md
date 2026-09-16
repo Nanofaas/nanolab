@@ -191,8 +191,10 @@ produces a timeout rather than fabricated data.
 digest-pinned `JDK_BASE` and `PYTHON_BASE` for linux/arm64. The JDK stage must expose
 a glibc-compatible JDK25 at `/opt/java/openjdk`; Python must be 3.12+ at
 `/usr/local/bin/python3`. The final image copies the existing `processes.py`
-supervisor and new worker/JFC assets. Main must resolve/publish the resulting
-RepoDigest, make it locally available, and supply it to prepare. A local tag or
+supervisor and new worker/JFC assets. `tasks/soak/helper_build.py` builds,
+publishes and resolves the RepoDigest once per run and supplies it to prepare,
+so no scenario carries a helper digest; the provisioner is unchanged and still
+only checks local RepoDigests. A local tag or
 image config hash alone does not satisfy the executor's immutable image contract.
 The provisioner checks local RepoDigests, architecture, observed container image
 ID and JDK versions. It does not fetch a registry or build an image.

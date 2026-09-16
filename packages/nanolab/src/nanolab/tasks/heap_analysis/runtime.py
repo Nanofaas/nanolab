@@ -35,10 +35,6 @@ from nanolab.config.soak import (
     PrerequisitePolicy,
     SoakConfig,
 )
-from nanolab.tasks.heap_analysis.helper_image import (
-    HelperImageRequest,
-    build_helper_image,
-)
 from nanolab.tasks.heap_analysis.mat import MatAnalysisRequest, MatAnalyzer
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact
 from nanolab.tasks.soak.diagnostic_helper import (
@@ -47,6 +43,7 @@ from nanolab.tasks.soak.diagnostic_helper import (
     LocalDockerDiagnosticProvisioner,
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget
+from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparationOptions, PreparedSoak
 from nanolab.tasks.soak.workflow import (
@@ -760,6 +757,7 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
                 run_id=run_dir.name,
                 registry=preparation.registry.split("/", 1)[0] + "/nanolab",
                 builder=self.options.helper_builder,
+                image_name="diagnostic-helper",
             )
         )
         protocol = deployment_protocol(self.protocol, helper_image)

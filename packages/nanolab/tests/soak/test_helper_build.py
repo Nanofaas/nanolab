@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from nanolab.tasks.heap_analysis.helper_image import (
+from nanolab.tasks.soak.helper_build import (
     BASES_LOCK,
     MAT_LOCK,
     HelperImageError,
@@ -83,7 +83,7 @@ def test_build_publishes_and_returns_the_digest_it_just_pushed(tmp_path) -> None
 
     resolved = build_helper_image(request)
 
-    assert resolved == f"localhost:5000/nanolab/heap-analysis-helper@{DIGEST}"
+    assert resolved == f"localhost:5000/nanolab/diagnostic-helper@{DIGEST}"
     argv = _argv(tmp_path)
     assert argv[:3] == ["buildx", "build", "--builder"]
     assert "--push" in argv
@@ -142,3 +142,100 @@ def test_request_rejects_a_context_without_the_dockerfile(tmp_path) -> None:
             registry="localhost:5000/nanolab",
             builder="nanolab-heap-analysis",
         )
+
+
+def _soak_config(**diagnostics: object):
+    """Load the checked-in candidate protocol, tweaking its diagnostics block."""
+    import yaml
+
+    from nanolab.config.soak import SoakConfig
+
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "scenarios-v2"
+        / "memory-soak-sync-candidate-diagnostic-container.yaml"
+    )
+    raw = yaml.safe_load(path.read_text())["soak"]
+    if not raw["criteria"]:
+        # The candidate takes its criteria from a policy file, as the existing
+        # soak fixtures do; backfill them so the protocol validates standalone.
+        smoke = path.with_name("memory-soak-smoke-container.yaml")
+        raw["criteria"] = yaml.safe_load(smoke.read_text())["soak"]["criteria"]
+    raw["diagnostics"].update(diagnostics)
+    return SoakConfig.model_validate(raw)
+
+
+def _stamp(tmp_path: Path, config, **options: object):
+    """Run the soak helper stamp with a fake builder, returning the new config."""
+    from nanolab.tasks.soak.runtime import RuntimeOptions, _with_built_helper
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(exist_ok=True)
+    return _with_built_helper(
+        config,
+        run_dir=run_dir,
+        repo_root=_repo(tmp_path),
+        options=RuntimeOptions(**options),  # type: ignore[arg-type]
+    )
+
+
+def test_soak_stamps_the_run_built_digest_into_every_diagnosed_role(
+    tmp_path, monkeypatch
+) -> None:
+    """The checked-in protocol carries no helper, so the run must supply one."""
+    built = "localhost:5000/nanolab/diagnostic-helper@" + DIGEST
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.helper_build.build_helper_image", lambda request: built
+    )
+    config = _soak_config()
+    assert config.diagnostics.helper_images == {}
+
+    stamped = _stamp(tmp_path, config)
+
+    diagnosed = {
+        role for role, operations in config.diagnostics.operations.items() if operations
+    }
+    assert diagnosed
+    assert stamped.diagnostics.helper_images == dict.fromkeys(diagnosed, built)
+
+
+def test_soak_leaves_a_pinned_helper_alone(tmp_path, monkeypatch) -> None:
+    """An operator who pinned one deliberately still gets exactly that one."""
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.helper_build.build_helper_image",
+        lambda request: pytest.fail("a pinned helper must not trigger a build"),
+    )
+    pinned = "localhost:5000/nanolab/p24-diagnostic-helper@" + DIGEST
+    config = _soak_config(helper_images={"control-plane": pinned})
+
+    stamped = _stamp(tmp_path, config)
+
+    assert stamped.diagnostics.helper_images == {"control-plane": pinned}
+
+
+def test_soak_leaves_an_injected_memory_helper_alone(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.helper_build.build_helper_image",
+        lambda request: pytest.fail("an injected helper must not trigger a build"),
+    )
+    config = _soak_config()
+
+    stamped = _stamp(
+        tmp_path,
+        config,
+        memory_helper_image="localhost:5000/nanolab/x@" + DIGEST,
+    )
+
+    assert stamped.diagnostics.helper_images == {}
+
+
+def test_a_protocol_that_diagnoses_nothing_builds_no_helper(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.helper_build.build_helper_image",
+        lambda request: pytest.fail("no diagnostics means no helper to build"),
+    )
+    config = _soak_config(operations={})
+
+    assert _stamp(tmp_path, config).diagnostics.helper_images == {}

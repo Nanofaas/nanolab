@@ -142,8 +142,7 @@ soak:
     timeout_s: 120
     max_dumps: 1
     max_dump_bytes: 1073741824
-    helper_images:
-      control-plane: localhost:5000/nanolab/p24-diagnostic-helper@sha256:5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce
+    # Built per run; see the candidate preset for why no digest lives here.
     executables:
       control-plane: [jcmd]
     gc_completion_evidence:

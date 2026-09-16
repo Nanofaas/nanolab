@@ -179,6 +179,14 @@ Distroless images may lack diagnostic tools. JVM capture requires compatible
 `jcmd`, verified attach/namespace and output-path access, and bounded helper
 execution. Node capture requires private, verified inspector control. Provision
 and identify helpers explicitly; no placeholder helper digest is shipped.
+The helper is built at the start of each run from
+`assets/soak/diagnostic-helper.Dockerfile`, published to the registry
+preparation already uses, and pinned to the digest that build reported. No
+scenario carries one: a digest names bytes in whichever registry built them, so
+it is unpullable elsewhere and a prune breaks it even locally. The inputs stay
+pinned in `assets/soak/mat.lock.json` and `assets/soak/helper-bases.lock.json`.
+A scenario that still sets `helper_images`, or an injected
+`RuntimeOptions.memory_helper_image`, is honoured as-is and skips the build.
 
 P24 requests `gc` and `heap_dump` for all roles, with runtime-specific full-GC
 event evidence. Those source identifiers are required integration bindings,

@@ -12,10 +12,6 @@ from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.prerequisites import _inputs
 
 _DIGEST = "sha256:" + "a" * 64
-_HELPER = (
-    "localhost:5000/nanolab/p24-diagnostic-helper@sha256:"
-    "5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce"
-)
 
 
 class _CompileOnlyExecutor:
@@ -126,7 +122,9 @@ def test_candidate_preset_is_runnable_at_two_hundred_requests_per_second():
 
     assert sum(scenario["soak"]["workload"]["rates"].values()) == 200
     assert scenario["soak"]["prerequisites"]["required_coverage"] == ["sync"]
-    assert set(scenario["soak"]["diagnostics"]["helper_images"].values()) == {_HELPER}
+    # The helper is built per run, so the scenario must name none: a digest
+    # here would be unpullable on any machine but the one that built it.
+    assert "helper_images" not in scenario["soak"]["diagnostics"]
     assert (
         "--require=/opt/nanolab/node-diagnostic-control.cjs"
         in scenario["soak"]["roles"]["word-stats-javascript"]["runtime_options"]

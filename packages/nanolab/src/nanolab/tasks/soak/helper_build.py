@@ -1,4 +1,4 @@
-"""Build the diagnostic/MAT helper image for one run and freeze its digest.
+"""Build the diagnostic helper image for one run and freeze its digest.
 
 The helper is built here rather than pinned in a checked-in scenario. A digest
 resolved on one machine names bytes that exist only in that machine's registry:
@@ -44,6 +44,7 @@ class HelperImageRequest:
     run_id: str
     registry: str
     builder: str
+    image_name: str = "diagnostic-helper"
     timeout_s: float = 1800.0
     docker: str = "/usr/bin/docker"
 
@@ -64,7 +65,7 @@ class HelperImageRequest:
     @property
     def reference(self) -> str:
         """The mutable tag this build publishes; only its digest is ever used."""
-        return f"{self.registry.rstrip('/')}/heap-analysis-helper:{self.run_id}"
+        return f"{self.registry.rstrip('/')}/{self.image_name}:{self.run_id}"
 
 
 def _lock(path: Path, *keys: str) -> dict[str, object]:
