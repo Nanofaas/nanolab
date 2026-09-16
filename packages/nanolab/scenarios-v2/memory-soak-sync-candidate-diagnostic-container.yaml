@@ -86,10 +86,11 @@ soak:
     timeout_s: 120
     max_dumps: 3
     max_dump_bytes: 3221225472
-    helper_images:
-      control-plane: localhost:5000/nanolab/p24-diagnostic-helper@sha256:5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce
-      word-stats-java: localhost:5000/nanolab/p24-diagnostic-helper@sha256:5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce
-      word-stats-javascript: localhost:5000/nanolab/p24-diagnostic-helper@sha256:5ac642accc637de4f0a5621d0804cc5ab784880186f90ea159c1edbd9f7d02ce
+    # No helper_images here on purpose: the helper is built at the start of the
+    # run and pinned to the digest that build published. A digest written here
+    # names bytes in whichever registry built them, so it is unpullable on any
+    # other machine and a prune breaks it even locally. Its inputs stay pinned
+    # in assets/soak/mat.lock.json and assets/soak/helper-bases.lock.json.
     executables:
       control-plane: [jcmd]
       word-stats-java: [jcmd]

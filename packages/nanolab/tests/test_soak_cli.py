@@ -63,7 +63,6 @@ def _heap_analysis_scenario_yaml(tmp_path: Path) -> Path:
                 max_vus: 200
                 max_error_ratio: 0
                 max_dropped_iterations: 0
-              helper_image: nanolab/heap-helper@sha256:DIGEST
               max_dumps: 2
               max_dump_bytes: 1073741824
               artifact_limit_bytes: 4294967296

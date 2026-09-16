@@ -70,7 +70,11 @@ speculative flexibility:
 - two control-plane heap dumps;
 - an explicit total artifact limit and a capture-side per-dump reservation
   (there is no analysis-side dump limit; see "Resource and safety bounds");
-- a digest-pinned diagnostic/MAT helper image.
+- a diagnostic/MAT helper image built per run and pinned by the digest that
+  build published, rather than a digest written into the scenario. Amended
+  after the first runs: a checked-in digest names bytes in one machine's
+  registry, so it is unpullable elsewhere and a prune breaks it locally. The
+  inputs stay pinned in `mat.lock.json` and `helper-bases.lock.json`.
 
 The timing and rate fields use the existing workload configuration types where
 possible. The workflow does not inherit the soak policy file or P24 criteria.

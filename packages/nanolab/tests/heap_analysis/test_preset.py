@@ -43,12 +43,18 @@ def test_preset_has_no_p24_policy_criteria_retention_or_prerequisites():
     assert "prerequisites" not in heap_analysis
 
 
-def test_preset_helper_image_is_digest_pinned_not_a_mutable_tag():
+def test_preset_pins_no_helper_image_because_the_run_builds_one():
+    """A digest here would name bytes in one machine's registry and no other.
+
+    The helper is built and digest-frozen per run instead, so the scenario must
+    not carry one - not even a valid-looking one.
+    """
     config = _load()
     assert config.heap_analysis is not None
-    helper_image = config.heap_analysis.helper_image
-    assert "@sha256:" in helper_image
-    assert ":" not in helper_image.split("@sha256:", 1)[0].split("/")[-1]
+    assert not hasattr(config.heap_analysis, "helper_image")
+    raw = yaml.safe_load(PRESET.read_text(encoding="utf-8"))
+    assert "helper_image" not in raw["heapAnalysis"]
+    assert "@sha256:" not in yaml.safe_dump(raw["heapAnalysis"])
 
 
 def test_preset_max_dump_bytes_is_at_or_below_one_gib():

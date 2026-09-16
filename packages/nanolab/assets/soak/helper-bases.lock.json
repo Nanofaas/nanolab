@@ -1,0 +1,13 @@
+{
+  "jdk_base": {
+    "reference": "eclipse-temurin@sha256:b036575bd50bfc2a5e25709e467a931ff157c99446352db9c8cc7fdf41b42e23",
+    "tag": "eclipse-temurin:25-jdk",
+    "java_version": "25.0.4"
+  },
+  "python_base": {
+    "reference": "python@sha256:581429e3df12d76e6af4be5ab7d0e7fc2013eb57dc23d2de691411c8efdbb970",
+    "tag": "python:3.12-bookworm",
+    "python_version": "3.12.14"
+  },
+  "platform": "linux/arm64"
+}

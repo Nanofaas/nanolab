@@ -27,6 +27,7 @@ from urllib.parse import quote
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_engine.journal import JournalConfig
 
+from nanolab.config.soak import SoakConfig
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.manifest import FunctionManifest
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
@@ -93,6 +94,7 @@ class RuntimeOptions:
     prerequisite_inputs: dict[str, object] | None = None
     docker_socket: str = "/var/run/docker.sock"
     memory_helper_image: str | None = None
+    helper_builder: str = "nanolab-heap-analysis"
     allow_diagnostic_target_stop_on_cancel: bool = False
     prerequisite_parent_artifact_bytes: int | None = 32 * 1024 * 1024
     prerequisite_lifetime_artifact_bytes: int | None = 64 * 1024 * 1024
@@ -566,6 +568,43 @@ def _diagnostic_resource_inputs(prepared, *, allow_target_stop: bool) -> dict:
         "payload_budget_bytes": payload_budget,
         "roles": roles,
     }
+
+
+def _with_built_helper(
+    config: SoakConfig, *, run_dir: Path, repo_root: Path, options: RuntimeOptions
+) -> SoakConfig:
+    """Return the protocol with this run's freshly built helper digest in it.
+
+    A digest written into a scenario names bytes in whichever registry built
+    them, so it is unpullable on any other machine and a prune breaks it even
+    locally. The helper is built per run instead and pinned to the digest that
+    build reported; the inputs stay pinned in assets/soak/*.lock.json.
+
+    A scenario that still pins `helper_images`, or an injected
+    `memory_helper_image`, is honoured as-is and skips the build.
+    """
+    from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
+
+    policy = config.diagnostics
+    roles = [role for role, operations in policy.operations.items() if operations]
+    if not roles or policy.helper_images or options.memory_helper_image is not None:
+        return config
+    digest = build_helper_image(
+        HelperImageRequest(
+            repo_root=repo_root,
+            run_dir=run_dir,
+            run_id=run_dir.name,
+            registry=options.preparation.registry.split("/", 1)[0] + "/nanolab",
+            builder=options.helper_builder,
+        )
+    )
+    return config.model_copy(
+        update={
+            "diagnostics": policy.model_copy(
+                update={"helper_images": dict.fromkeys(roles, digest)}
+            )
+        }
+    )
 
 
 def _validate_memory_helper_image(image: str | None) -> None:
@@ -1800,15 +1839,19 @@ class RunSingleVersionSoak(Task):
         try:
             write_policy_input(self.run_dir, self.config)
             prepared = self.options.prepared
+            soak = _with_built_helper(
+                self.config.soak,
+                run_dir=self.run_dir,
+                repo_root=self.repo_root,
+                options=self.options,
+            )
             if prepared is None:
                 prepared = prepare_soak(
-                    self.config.soak,
+                    soak,
                     run_dir=self.run_dir,
                     repo_root=self.repo_root,
                     tool_root=self.tool_root,
-                    options=_runtime_preparation_options(
-                        self.config.soak, self.options
-                    ),
+                    options=_runtime_preparation_options(soak, self.options),
                 )
             elif (
                 prepared.evidence_dir.absolute()

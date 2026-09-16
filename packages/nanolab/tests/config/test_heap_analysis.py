@@ -76,7 +76,6 @@ def valid_heap_analysis() -> dict:
             "max_error_ratio": 0,
             "max_dropped_iterations": 0,
         },
-        "helper_image": "nanolab/heap-helper@sha256:" + "a" * 64,
         "max_dumps": 2,
         "max_dump_bytes": 2147483648,
         "artifact_limit_bytes": 4294967296,
@@ -101,7 +100,6 @@ def test_control_plane_heap_analysis_is_valid():
     [
         ("target", "word-stats-java", "target must be control-plane"),
         ("max_dumps", 3, "exactly two dumps"),
-        ("helper_image", "nanolab/helper:latest", "digest-pinned"),
     ],
 )
 def test_heap_analysis_rejects_unsupported_scope(field, value, message):
@@ -231,3 +229,15 @@ def test_non_heap_workflow_rejects_heap_analysis_block():
     }
     with pytest.raises(ValidationError, match="belongs only to the heap-analysis"):
         ScenarioConfig.model_validate(data)
+
+
+def test_heap_analysis_rejects_a_scenario_pinned_helper_image():
+    """The helper is built per run, so a scenario may not name one at all.
+
+    A digest written into a scenario names bytes in whichever registry built
+    them; accepting one here would hand other machines an unpullable reference.
+    """
+    raw = valid_heap_analysis()
+    raw["helper_image"] = "nanolab/heap-helper@sha256:" + "a" * 64
+    with pytest.raises(ValidationError, match="helper_image"):
+        HeapAnalysisConfig.model_validate(raw)
