@@ -125,7 +125,10 @@ def memory(cfg):
         "errors": {},
     }
     result["before"] = identity(cfg, require_shared_tmp=False)
-    for name, limit in (("status", 65536), ("smaps_rollup", 262144)):
+    reads = [("status", 65536), ("smaps_rollup", 262144)]
+    if cfg.get("include_smaps"):
+        reads.append(("smaps", 8388608))
+    for name, limit in reads:
         try:
             result[name] = read_proc(Path("/proc/1") / name, limit)
         except (OSError, ValueError) as error:

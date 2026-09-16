@@ -572,6 +572,63 @@ def test_memory_worker_preserves_raw_pss_and_permission_denial(monkeypatch):
     assert result["before"] == result["after"] == observed
 
 
+def test_memory_worker_omits_smaps_unless_requested(monkeypatch):
+    module = worker()
+    observed = probe()
+    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
+    requested = []
+
+    def read(path, limit):
+        requested.append((path.name, limit))
+        return "Name:\tjava\n"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory({"target": asdict(TARGET)})
+    assert requested == [("status", 65536), ("smaps_rollup", 262144)]
+    assert "smaps" not in result
+    assert result["errors"] == {}
+
+
+def test_memory_worker_reads_smaps_when_requested(monkeypatch):
+    module = worker()
+    observed = probe()
+    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
+    requested = []
+
+    def read(path, limit):
+        requested.append((path.name, limit))
+        return "7f00-7f01 rw-p 0 00:00 0\nSize: 4 kB\n"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory({"target": asdict(TARGET), "include_smaps": True})
+    assert requested == [
+        ("status", 65536),
+        ("smaps_rollup", 262144),
+        ("smaps", 8388608),
+    ]
+    assert result["smaps"] == "7f00-7f01 rw-p 0 00:00 0\nSize: 4 kB\n"
+
+
+def test_memory_worker_records_an_over_limit_smaps_without_losing_siblings(
+    monkeypatch,
+):
+    module = worker()
+    observed = probe()
+    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
+
+    def read(path, limit):
+        if path.name == "smaps":
+            raise ValueError("procfs evidence exceeds read bound")
+        return f"{path.name}-body"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory({"target": asdict(TARGET), "include_smaps": True})
+    assert result["smaps"] is None
+    assert "exceeds read bound" in result["errors"]["smaps"]
+    assert result["status"] == "status-body"
+    assert result["smaps_rollup"] == "smaps_rollup-body"
+
+
 def test_proc_reader_rejects_truncation_and_preserves_original_text(tmp_path):
     module = worker()
     data = tmp_path / "smaps_rollup"
