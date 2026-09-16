@@ -3,7 +3,10 @@ import json
 import pytest
 
 from nanolab.tasks.heap_analysis.evidence import native_comparison, persist_native
-from nanolab.tasks.soak.artifacts import ArtifactLimitExceededError
+from nanolab.tasks.soak.artifacts import (
+    MAX_RECORD_BYTES,
+    ArtifactLimitExceededError,
+)
 
 
 def reading():
@@ -50,6 +53,63 @@ def test_missing_source_is_visible_and_not_written(tmp_path):
     assert "artifact" not in block["sources"]["smaps"]
     assert block["sources"]["smaps"]["error"] == "read bound exceeded"
     assert block["residency"]["RssAnon"] == 4096
+
+
+def many_mappings(small=6000, big=2):
+    """Build a smaps body whose parsed summary exceeds half the record budget."""
+    lines = []
+    for index in range(small):
+        start = 0x10000 + index * 0x2000
+        lines.append(
+            f"{start:x}-{start + 0x1000:x} rw-p 0 00:00 0\n"
+            "Size: 4 kB\nRss: 4 kB\nPss: 4 kB\n"
+        )
+    for index in range(big):
+        start = 0x100000000 + index * 0x10000
+        lines.append(
+            f"{start:x}-{start + 0x10000:x} rw-p 0 00:00 0\n"
+            "Size: 65536 kB\nRss: 16384 kB\nPss: 8192 kB\n"
+        )
+    return "".join(lines)
+
+
+def test_persist_native_keeps_the_summary_when_only_detail_exceeds_budget(tmp_path):
+    root = tmp_path / "evidence"
+    raw = reading()
+    raw["smaps"] = many_mappings()
+    block = persist_native(root, "natural-drain", raw, 1048576)
+    smaps = block["smaps"]
+
+    assert len(json.dumps(block).encode("utf-8")) <= MAX_RECORD_BYTES // 2
+    assert "mapping_details" not in smaps
+    # The trim fired, not the last-resort wholesale replacement.
+    assert smaps["available"] is True
+    assert smaps["mappings"] == 6002
+    assert smaps["anonymous"]["size"] == 6000 * 4096 + 2 * 65536 * 1024
+    assert smaps["anonymous"]["rss"] == 6000 * 4096 + 2 * 16384 * 1024
+    assert smaps["file"]["size"] == 0
+    large = smaps["large_anonymous_mappings"]
+    assert large["count"] == 2
+    assert large["size"] == 2 * 65536 * 1024
+    assert large["rss"] == 2 * 16384 * 1024
+    assert large["pss"] == 2 * 8192 * 1024
+    relocated = large["mappings"]
+    assert isinstance(relocated, str)
+    assert "native/natural-drain-smaps.txt" in relocated
+
+    artifact = root / block["sources"]["smaps"]["artifact"]["path"]
+    assert artifact.read_text() == raw["smaps"]
+
+
+def test_raw_evidence_refuses_a_symlinked_native_directory(tmp_path):
+    root = tmp_path / "evidence"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "native").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symbolic link"):
+        persist_native(root, "natural-drain", reading(), 1048576)
+    assert not list(outside.iterdir())
 
 
 def test_comparison_trims_the_per_mapping_detail_the_report_embeds(tmp_path):

@@ -758,6 +758,8 @@ def test_expired_budget_never_launches_jcmd(memory_worker, monkeypatch):
         ("errors", ("runner error",)),
         ("reaped", False),
         ("ended_s", None),
+        # A negative returncode is signal death, not an acknowledged error exit.
+        ("returncode", -9),
     ],
 )
 def test_memory_command_requires_acknowledged_completion(

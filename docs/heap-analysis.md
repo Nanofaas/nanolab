@@ -164,9 +164,15 @@ references. Available sources are retained as:
     evidence/native/<checkpoint>-heap-info.txt
 
 `report.json` compares all three checkpoints and shows missing evidence
-explicitly. Partial or malformed smaps produces no mapping totals; complete
-sibling sources remain usable. Exceptionally large parsed summaries are marked
-unavailable in the checkpoint record, with complete raw evidence retained.
+explicitly. The report carries that comparison only: per-mapping records and
+the large-mapping list are not repeated there, so
+`large_anonymous_mappings.mappings` appears as a pointer string naming the
+checkpoint record, not as a list or a count — do not read that string as a
+count, nor its absence as lost data. Partial or malformed smaps produces no
+mapping totals; complete sibling sources remain usable. Exceptionally large
+parsed summaries are trimmed to their totals in the checkpoint record, with
+complete raw evidence retained; only a block still over budget after that trim
+is marked unavailable.
 
 Committed heap is not resident heap. Stable committed heap does not establish
 that RSS growth is outside Java heap, and net live-set decline can mask growth

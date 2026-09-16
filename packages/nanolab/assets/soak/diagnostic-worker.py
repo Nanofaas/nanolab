@@ -237,6 +237,10 @@ def command(
         or result.cancelled
         or result.timed_out
         or result.quota_exceeded
+        # A negative returncode means the child died from a signal (a killed
+        # helper container, the kernel OOM killer), which is no proof at all
+        # that the in-JVM command finished.
+        or result.returncode < 0
     ):
         raise CommandCompletionUnresolved("remote command completion unresolved")
     if require_completion and result.returncode != 0:
