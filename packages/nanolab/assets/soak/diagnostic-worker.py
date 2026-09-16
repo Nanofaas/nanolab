@@ -116,7 +116,8 @@ def read_proc(path, limit):
 
 
 def memory(cfg):
-    """Read the owned namespace-init process, retaining raw text and errors."""
+    include_heap = bool(cfg.get("include_heap_info"))
+    opt_in = bool(cfg.get("include_smaps") or include_heap)
     result = {
         "schema": "nanolab-soak-memory-helper-v1",
         "target": cfg["target"],
@@ -124,18 +125,68 @@ def memory(cfg):
         "started_s": time.monotonic(),
         "errors": {},
     }
-    result["before"] = identity(cfg, require_shared_tmp=False)
+    deadline = cfg.get("memory_deadline_s", result["started_s"] + 5.0)
+    if opt_in:
+        result["intervals"], result["completion"] = {}, {}
+    result["before"] = identity(cfg, require_shared_tmp=include_heap)
     reads = [("status", 65536), ("smaps_rollup", 262144)]
     if cfg.get("include_smaps"):
         reads.append(("smaps", 8388608))
     for name, limit in reads:
+        begin = time.monotonic() if opt_in else None
+        state = "not_started"
         try:
+            if opt_in and time.monotonic() >= deadline:
+                raise TimeoutError("memory collection deadline exhausted")
+            state = "completed"
             result[name] = read_proc(Path("/proc/1") / name, limit)
         except (OSError, ValueError) as error:
             result[name] = None
-            result["errors"][name] = f"{type(error).__name__}: {error}"
-    result["after"] = identity(cfg, require_shared_tmp=False)
+            message = f"{type(error).__name__}: {error}"
+            result["errors"][name] = message[:1024] if opt_in else message
+        if opt_in:
+            result["completion"][name] = state
+            result["intervals"][name] = {
+                "started_s": begin,
+                "ended_s": time.monotonic(),
+            }
+    if include_heap:
+        begin = time.monotonic()
+        result["heap_info"] = None
+        state = "not_started"
+        try:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("memory collection deadline exhausted")
+            with TemporaryDirectory(dir="/work") as scratch:
+                state = "unresolved"
+                result["heap_info"] = jcmd(
+                    ("GC.heap_info",),
+                    deadline,
+                    Path(scratch),
+                    require_completion=True,
+                )
+                state = "completed"
+        except CommandCompletionUnresolved as error:
+            result["errors"]["heap_info"] = str(error)[:1024]
+        except CommandCompletedError as error:
+            state = "completed"
+            result["errors"]["heap_info"] = str(error)[:1024]
+        except (OSError, ValueError, RuntimeError) as error:
+            # Before launch this is not_started; after launch it remains
+            # unresolved unless jcmd has already acknowledged completion.
+            result["errors"]["heap_info"] = str(error)[:1024]
+        result["completion"]["heap_info"] = state
+        result["intervals"]["heap_info"] = {
+            "started_s": begin,
+            "ended_s": time.monotonic(),
+        }
+    result["after"] = identity(cfg, require_shared_tmp=include_heap)
     result["ended_s"] = time.monotonic()
+    if opt_in:
+        raw_keys = {"status", "smaps_rollup", "smaps", "heap_info"}
+        metadata = {key: value for key, value in result.items() if key not in raw_keys}
+        if len(json.dumps(metadata).encode("utf-8")) > 65536:
+            raise ValueError("memory response metadata exceeds its bound")
     return result
 
 
@@ -151,7 +202,17 @@ def quota(path, maximum, *, mountpoint="/out"):
     return {"type": "tmpfs", "capacity_bytes": capacity}
 
 
-def command(argv, deadline, scratch, limit=2 * 1024 * 1024):
+class CommandCompletionUnresolved(RuntimeError):  # noqa: N818
+    """The command runner cannot acknowledge in-JVM completion."""
+
+
+class CommandCompletedError(RuntimeError):
+    """A normally completed command reported an error."""
+
+
+def command(
+    argv, deadline, scratch, limit=2 * 1024 * 1024, *, require_completion=False
+):
     from processes import OwnedCommandRunner
 
     remaining = deadline - time.monotonic()
@@ -168,6 +229,18 @@ def command(argv, deadline, scratch, limit=2 * 1024 * 1024):
         output_limit_bytes=limit,
         stop_timeout_s=1.0,
     ).run()
+    if require_completion and (
+        not result.reaped
+        or result.ended_s is None
+        or result.forced_stop
+        or result.errors
+        or result.cancelled
+        or result.timed_out
+        or result.quota_exceeded
+    ):
+        raise CommandCompletionUnresolved("remote command completion unresolved")
+    if require_completion and result.returncode != 0:
+        raise CommandCompletedError("remote command exited with an error")
     if (
         result.returncode != 0
         or not result.reaped
@@ -182,8 +255,11 @@ def command(argv, deadline, scratch, limit=2 * 1024 * 1024):
     return log.read_text()
 
 
-def jcmd(args, deadline, scratch):
-    return command(("/opt/java/openjdk/bin/jcmd", "1", *args), deadline, scratch)
+def jcmd(args, deadline, scratch, *, require_completion=False):
+    argv = ("/opt/java/openjdk/bin/jcmd", "1", *args)
+    if require_completion:
+        return command(argv, deadline, scratch, require_completion=True)
+    return command(argv, deadline, scratch)
 
 
 def node_call(cfg, request, deadline):

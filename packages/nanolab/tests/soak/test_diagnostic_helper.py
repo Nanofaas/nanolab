@@ -2,6 +2,8 @@
 
 import importlib.util
 import json
+import tempfile
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -627,6 +629,171 @@ def test_memory_worker_records_an_over_limit_smaps_without_losing_siblings(
     assert "exceeds read bound" in result["errors"]["smaps"]
     assert result["status"] == "status-body"
     assert result["smaps_rollup"] == "smaps_rollup-body"
+
+
+@pytest.fixture
+def memory_worker(monkeypatch, tmp_path):
+    module = worker()
+    checks, order = [], []
+
+    def identity(cfg, **kwargs):
+        checks.append(kwargs.get("require_shared_tmp"))
+        return probe()
+
+    def read(path, limit):
+        order.append(path.name)
+        return path.name + "-body"
+
+    monkeypatch.setattr(module, "identity", identity)
+    monkeypatch.setattr(module, "read_proc", read)
+    monkeypatch.setattr(
+        module,
+        "TemporaryDirectory",
+        lambda **kwargs: tempfile.TemporaryDirectory(dir=tmp_path),
+    )
+    return module, checks, order
+
+
+def test_legacy_memory_response_has_no_new_metadata(memory_worker, monkeypatch):
+    module, checks, order = memory_worker
+    monkeypatch.setattr(
+        module, "jcmd", lambda *a, **k: pytest.fail("unexpected attach")
+    )
+    for options in ({}, {"include_smaps": False, "include_heap_info": False}):
+        result = module.memory({"target": asdict(TARGET), **options})
+        assert set(result) == {
+            "schema",
+            "target",
+            "source",
+            "started_s",
+            "errors",
+            "before",
+            "status",
+            "smaps_rollup",
+            "after",
+            "ended_s",
+        }
+    assert order == ["status", "smaps_rollup"] * 2
+    assert checks == [False] * 4
+
+
+@pytest.mark.parametrize(
+    ("failure", "state"), [(False, "completed"), (True, "completed")]
+)
+def test_heap_info_follows_procfs_and_records_acknowledged_completion(
+    memory_worker,
+    monkeypatch,
+    failure,
+    state,
+):
+    module, checks, order = memory_worker
+
+    def jcmd(args, deadline, scratch, *, require_completion=False):
+        assert args == ("GC.heap_info",)
+        assert deadline > time.monotonic()
+        assert require_completion
+        order.append("heap_info")
+        if failure:
+            raise module.CommandCompletedError("acknowledged command error")
+        return "garbage-first heap total 1024K, used 512K\n"
+
+    monkeypatch.setattr(module, "jcmd", jcmd)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert order == ["status", "smaps_rollup", "smaps", "heap_info"]
+    assert checks == [True, True]
+    assert result["completion"]["heap_info"] == state
+    assert (result["heap_info"] is None) == failure
+    assert set(result["intervals"]) == set(order)
+    for interval in result["intervals"].values():
+        assert interval["ended_s"] >= interval["started_s"]
+
+
+def test_worker_does_not_disguise_unresolved_completion(memory_worker, monkeypatch):
+    module, _, _ = memory_worker
+
+    def unresolved(*args, **kwargs):
+        raise module.CommandCompletionUnresolved("jcmd deadline exceeded")
+
+    monkeypatch.setattr(module, "jcmd", unresolved)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "unresolved"
+    assert result["heap_info"] is None
+    assert result["status"] == "status-body"
+
+
+def test_expired_budget_never_launches_jcmd(memory_worker, monkeypatch):
+    module, _, _ = memory_worker
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("expired attach"))
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() - 1,
+        }
+    )
+    assert result["completion"]["heap_info"] == "not_started"
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("timed_out", True),
+        ("forced_stop", True),
+        ("cancelled", True),
+        ("quota_exceeded", True),
+        ("errors", ("runner error",)),
+        ("reaped", False),
+        ("ended_s", None),
+    ],
+)
+def test_memory_command_requires_acknowledged_completion(
+    monkeypatch, tmp_path, flag, value
+):
+    module = worker()
+    import sys
+    from types import SimpleNamespace
+
+    from nanolab.tasks.soak import processes
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+
+    result = {
+        "returncode": 0,
+        "reaped": True,
+        "ended_s": 1.0,
+        "forced_stop": False,
+        "errors": (),
+        "cancelled": False,
+        "timed_out": False,
+        "quota_exceeded": False,
+    }
+    result[flag] = value
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return SimpleNamespace(**result)
+
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    with pytest.raises(module.CommandCompletionUnresolved):
+        module.command(
+            ("unused",), time.monotonic() + 5, tmp_path, require_completion=True
+        )
 
 
 def test_proc_reader_rejects_truncation_and_preserves_original_text(tmp_path):
