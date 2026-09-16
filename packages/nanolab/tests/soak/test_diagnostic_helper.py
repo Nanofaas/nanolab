@@ -1,5 +1,6 @@
 """Synthetic helper boundaries; no Docker daemon or runtime is contacted."""
 
+import base64
 import importlib.util
 import json
 import tempfile
@@ -886,3 +887,129 @@ def test_memory_api_returns_raw_bound_sample_using_only_remote_read(
     assert result["smaps_rollup"] == "Pss:\t137 kB\n"
     assert result["status"] == "VmRSS:\t512 kB\n"
     assert result["errors"] == {}
+
+
+def memory_owner(monkeypatch, tmp_path, *, smaps=None, completion="completed"):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    cfg = spec(tmp_path)
+    process = {"start_ticks": "314", "ns_pid": 1}
+    calls, cleanup = [], []
+
+    class Commands:
+        deadline = None
+        cleanup_deadline = None
+
+        def run(self, args, **kwargs):
+            calls.append((tuple(args), kwargs))
+            request = json.loads(base64.b64decode(args[-1]))
+            payload = {
+                "schema": "nanolab-soak-memory-helper-v1",
+                "target": asdict(TARGET),
+                "before": probe(),
+                "after": probe(),
+                "status": "VmRSS:\t512 kB\n",
+                "smaps_rollup": "Pss:\t137 kB\n",
+                "errors": {},
+            }
+            if request.get("include_smaps"):
+                payload["smaps"] = smaps
+            if request.get("include_heap_info"):
+                payload["heap_info"] = None
+                payload["completion"] = {"heap_info": completion}
+                payload["errors"]["heap_info"] = "synthetic command error"
+            response = json.dumps(payload)
+            if len(response.encode()) > kwargs.get("limit", 1048576):
+                raise RuntimeError("transport quota exceeded")
+            return response
+
+    owner = helper._OwnedDockerHelper(cfg, Commands(), "e" * 64, process)
+    monkeypatch.setattr(owner, "_check_target", lambda: None)
+    monkeypatch.setattr(owner, "_helper_owned", lambda **kw: {"State": {"Pid": 5678}})
+    monkeypatch.setattr(helper, "_proc_identity", lambda pid: {"ns_pid": 8})
+
+    def close():
+        cleanup.append("close")
+        owner._closed = True
+
+    def cancel_remote():
+        cleanup.append("cancel-target")
+        close()
+
+    monkeypatch.setattr(owner, "close", close)
+    monkeypatch.setattr(owner, "_cancel_remote", cancel_remote)
+    return owner, calls, cleanup
+
+
+def test_read_memory_preserves_legacy_wire_behavior(monkeypatch, tmp_path):
+    owner, calls, cleanup = memory_owner(monkeypatch, tmp_path)
+    owner.read_memory(timeout_s=1)
+    args, kwargs = calls[-1]
+    cfg = json.loads(base64.b64decode(args[-1]))
+    assert set(cfg) == {"target", "target_start_ticks", "helper_pid"}
+    assert kwargs == {}
+    assert cleanup == []
+
+
+@pytest.mark.parametrize("raw", ["x" * 2097152, "\x01" * 8388608])
+def test_read_memory_transports_large_escaped_responses(monkeypatch, tmp_path, raw):
+    owner, calls, cleanup = memory_owner(monkeypatch, tmp_path, smaps=raw)
+    result = owner.read_memory(timeout_s=120, include_smaps=True)
+    args, kwargs = calls[-1]
+    cfg = json.loads(base64.b64decode(args[-1]))
+    assert result["smaps"] == raw
+    assert kwargs["limit"] == 67108864
+    assert 20 < kwargs["timeout_s"] <= 120
+    assert cfg["include_smaps"] is True
+    assert "include_heap_info" not in cfg
+    assert cleanup == []
+
+
+def test_worker_deadline_uses_remaining_host_budget(monkeypatch, tmp_path):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    owner, calls, _ = memory_owner(monkeypatch, tmp_path)
+    now = [100.0]
+    monkeypatch.setattr(helper.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(owner, "_check_target", lambda: now.__setitem__(0, 104.0))
+    owner.read_memory(timeout_s=5, include_heap_info=True)
+    args, kwargs = calls[-1]
+    cfg = json.loads(base64.b64decode(args[-1]))
+    assert kwargs["timeout_s"] == 1.0
+    assert 104.0 < cfg["memory_deadline_s"] < 105.0
+
+
+def test_unresolved_heap_command_cancels_owned_target(monkeypatch, tmp_path):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path, completion="unresolved")
+    with pytest.raises(helper.MemoryCommandUnresolved):
+        owner.read_memory(include_heap_info=True)
+    assert cleanup == ["cancel-target", "close"]
+
+
+def test_completed_source_error_leaves_helper_usable(monkeypatch, tmp_path):
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
+    result = owner.read_memory(include_heap_info=True)
+    assert result["errors"]["heap_info"]
+    assert not owner._closed
+    assert cleanup == []
+    owner.read_memory()  # another operation remains possible
+
+
+@pytest.mark.parametrize("error", [RuntimeError("lost reply"), KeyboardInterrupt()])
+def test_lost_reply_or_cancel_preserves_exception_and_stops_target(
+    monkeypatch,
+    tmp_path,
+    error,
+):
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(owner.commands, "run", fail)
+    with pytest.raises(type(error)) as raised:
+        owner.read_memory(include_heap_info=True)
+    assert raised.value is error
+    assert cleanup == ["cancel-target", "close"]
