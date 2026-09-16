@@ -105,7 +105,12 @@ def persist_native(
 
 
 def native_comparison(root: Path) -> dict:
-    """Return one entry per checkpoint, marking a missing or unreadable one."""
+    """Return one entry per checkpoint, marking a missing or unreadable one.
+
+    The report entry is a comparison, not a mapping dump: the per-mapping
+    records stay in the checkpoint record and its raw artifact, so three
+    embedded blocks cannot exceed the report document's own byte budget.
+    """
     comparison = {}
     for checkpoint, phase in CHECKPOINTS.items():
         entry = {"phase": phase, "available": False}
@@ -117,6 +122,12 @@ def native_comparison(root: Path) -> dict:
         except (OSError, ValueError, TypeError, KeyError) as error:
             entry["error"] = f"{type(error).__name__}: {error}"[:1024]
         else:
+            smaps = block.get("smaps")
+            if isinstance(smaps, dict):
+                smaps.pop("mapping_details", None)
+                large = smaps.get("large_anonymous_mappings")
+                if isinstance(large, dict) and "mappings" in large:
+                    large["mappings"] = f"see evidence/runtime-{checkpoint}.json"
             entry.update(available=True, native=block)
         comparison[checkpoint] = entry
     return comparison

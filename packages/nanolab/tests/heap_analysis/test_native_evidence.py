@@ -52,6 +52,44 @@ def test_missing_source_is_visible_and_not_written(tmp_path):
     assert block["residency"]["RssAnon"] == 4096
 
 
+def test_comparison_trims_the_per_mapping_detail_the_report_embeds(tmp_path):
+    root = tmp_path / "evidence"
+    raw = reading()
+    raw["smaps"] = (
+        "1000-2000 rw-p 0 00:00 0\nSize: 4 kB\nRss: 4 kB\nPss: 4 kB\n"
+        "200000-400000 rw-p 0 00:00 0\n"
+        "Size: 65536 kB\nRss: 16384 kB\nPss: 8192 kB\n"
+    )
+    block = persist_native(root, "natural-drain", raw, 1048576)
+    document = root / "runtime-natural-drain.json"
+    document.write_text(json.dumps({"native": block}))
+
+    embedded = native_comparison(root)["natural-drain"]["native"]
+
+    # report.json carries the comparison, not one JSON record per procfs
+    # mapping: three embedded blocks would otherwise outgrow the report
+    # document's own 1 MiB budget and lose the whole comparison.
+    assert "mapping_details" not in embedded["smaps"]
+    assert embedded["smaps"]["mappings"] == 2
+    assert embedded["smaps"]["anonymous"]["size"] == 4 * 1024 + 65536 * 1024
+    assert embedded["smaps"]["file"]["size"] == 0
+    assert embedded["smaps"]["large_anonymous_mappings"]["count"] == 1
+    relocated = embedded["smaps"]["large_anonymous_mappings"]["mappings"]
+    assert isinstance(relocated, str)
+    assert "runtime-natural-drain.json" in relocated
+    assert embedded["residency"]["RssAnon"] == 4096
+    assert embedded["heap_info"]["heap"]["used"] == 512 * 1024
+    assert embedded["sources"]["smaps"]["artifact"]["path"].endswith(
+        "natural-drain-smaps.txt"
+    )
+    assert embedded["collection"]["ended_s"] == 4.0
+
+    # De-duplication, not data loss: the checkpoint record keeps every record.
+    kept = json.loads(document.read_text())["native"]["smaps"]
+    assert len(kept["mapping_details"]) == 2
+    assert len(kept["large_anonymous_mappings"]["mappings"]) == 1
+
+
 def test_comparison_retains_missing_and_malformed_checkpoints(tmp_path):
     (tmp_path / "runtime-natural-drain.json").write_text("not JSON")
     (tmp_path / "runtime-after-final-gc.json").write_text(
