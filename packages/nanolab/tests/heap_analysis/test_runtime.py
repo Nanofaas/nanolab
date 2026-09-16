@@ -42,8 +42,8 @@ SAFETY_ORDER = [
     "drain",
     "observe:natural-drain",
     "gc:final",
-    "dump:final",
     "observe:after-final-gc",
+    "dump:final",
     "release-deployment",
     "mat",
     "cleanup-helper",
@@ -1005,10 +1005,11 @@ def test_session_refuses_a_deployment_without_diagnostic_inputs(
     with pytest.raises(RuntimeError, match="no control-plane diagnostic inputs"):
         session.observe("before-baseline")
 
-    # The observation itself is published before the helper is ever needed, so
-    # the failure is about provisioning, not about losing the evidence.
+    # The deployment is still asked for its observations first, but a reading
+    # needs the helper: without one there is no native block and therefore no
+    # runtime document, so failed provisioning is the whole outcome.
     assert deployment.observed == 1
-    assert (tmp_path / "evidence" / "runtime-before-baseline.json").is_file()
+    assert not (tmp_path / "evidence" / "runtime-before-baseline.json").exists()
 
 
 def test_session_refuses_diagnostic_inputs_naming_another_role(
@@ -1126,3 +1127,114 @@ def test_failed_report_publication_still_closes_evidence_and_writes_terminal(
     terminal = json.loads((run_dir / "terminal.json").read_text())
     assert terminal["status"] == "INCONCLUSIVE"
     assert harness.writer_closed
+
+
+def fake_session_with_readings(tmp_path, *, response=None, error=None):
+    session, _deployment = local_session(tmp_path)
+
+    class ReadingHelper(FakeHelper):
+        def __init__(self):
+            super().__init__()
+            self.options = []
+
+        def read_memory(self, timeout_s=5.0, **options):
+            self.options.append(options)
+            if error is not None:
+                raise error
+            return response or {
+                "status": "RssAnon: 4 kB\n",
+                "smaps_rollup": "Pss_Anon: 4 kB\n",
+                "smaps": "1000-2000 rw-p 0 00:00 0\nSize: 4 kB\nRss: 4 kB\nPss: 4 kB\n",
+                "heap_info": "garbage-first heap total 1024K, used 512K\n",
+                "intervals": {"status": {"started_s": 1.0, "ended_s": 2.0}},
+                "completion": {"heap_info": "completed"},
+                "errors": {},
+            }
+
+    session._helper = ReadingHelper()
+    session._target = Target(
+        "control-plane",
+        "c" * 64,
+        1,
+        "2026-09-15T00:00:00Z",
+        DIGEST,
+        "jvm",
+    )
+    return session
+
+
+def test_after_final_gc_is_observed_before_the_final_dump(tmp_path):
+    events = []
+    task, _, _ = build(tmp_path, FakeSession(events, evidence(tmp_path)))
+    measure(task)
+    assert events.index("gc:final") < events.index("observe:after-final-gc")
+    assert events.index("observe:after-final-gc") < events.index("dump:final")
+
+
+def test_observation_retains_native_sources_and_intervals(tmp_path):
+    session = fake_session_with_readings(tmp_path)
+    path = session.observe("natural-drain")
+    document = json.loads(path.read_text())
+    native = document["native"]
+    assert native["heap_info"]["heap"]["used"] == 512 * 1024
+    assert native["sources"]["status"]["interval"]["ended_s"] == 2.0
+    for source in native["sources"].values():
+        assert (session._root / source["artifact"]["path"]).is_file()
+    assert session._helper.options == [
+        {"include_smaps": True, "include_heap_info": True}
+    ]
+    natural = json.loads((session._root / "natural-drain.json").read_text())
+    assert natural["completed"] is True
+
+
+def test_completed_optional_error_keeps_session_usable(tmp_path):
+    session = fake_session_with_readings(
+        tmp_path,
+        response={
+            "status": "RssAnon: 4 kB\n",
+            "smaps_rollup": "Pss_Anon: 4 kB\n",
+            "smaps": None,
+            "heap_info": None,
+            "errors": {
+                "smaps": "read bound exceeded",
+                "heap_info": "acknowledged failure",
+            },
+            "completion": {"heap_info": "completed"},
+        },
+    )
+    document = json.loads(session.observe("natural-drain").read_text())
+    assert document["native"]["heap_info"]["available"] is False
+    assert document["native"]["residency"]["RssAnon"] == 4096
+    assert session._helper.closed == 0
+    session.observe("after-final-gc")
+    assert session._helper.closed == 0
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError("cleanup unconfirmed"), KeyboardInterrupt()]
+)
+def test_observation_keeps_cleanup_handle_and_original_exception(tmp_path, error):
+    session = fake_session_with_readings(tmp_path, error=error)
+    helper = session._helper
+    with pytest.raises(type(error)) as raised:
+        session.observe("natural-drain")
+    assert raised.value is error
+    assert session._helper is helper
+    session.close()
+    assert helper.closed == 1
+
+
+def test_report_publishes_three_explicit_checkpoint_entries(tmp_path):
+    events = []
+    task, _, _ = build(tmp_path, FakeSession(events, evidence(tmp_path)))
+    result = measure(task)
+    report = json.loads(result.report.read_text())
+    assert set(report["native"]) == {
+        "before-baseline",
+        "natural-drain",
+        "after-final-gc",
+    }
+    # This FakeSession does not publish native data into wiring.writer.root.
+    # Its absence is visible and does not prevent terminal publication.
+    assert all(entry["available"] is False for entry in report["native"].values())
+    assert result.status == "PASS"

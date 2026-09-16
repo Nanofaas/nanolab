@@ -130,8 +130,10 @@ first checking what the captured functions were processing.
 │   ├── payloads.json            # workload payload fixtures
 │   ├── builds/                  # per-role build output
 │   ├── source/                  # captured source snapshot
-│   ├── runtime-<checkpoint>.json    # runtime-before-baseline / -after-final-gc /
-│   │                                # -natural-drain
+│   ├── runtime-<checkpoint>.json    # runtime-before-baseline / -natural-drain /
+│   │                                # -after-final-gc
+│   ├── native/                      # retained raw readings for the checkpoints
+│   │                                # that have them (optional; see below)
 │   ├── natural-<phase>.json         # natural-baseline.json, natural-drain.json
 │   ├── warmup/, steady/, drain/     # one k6 receipt directory per phase
 │   ├── baseline-gc/, final-gc/      # GC captures (diagnostic.json, events.jsonl)
@@ -144,6 +146,41 @@ first checking what the captured functions were processing.
     ├── docker-run.log            # the MAT container's bounded output
     └── reports/                  # the eight MAT report outputs, flat (see below)
 ```
+
+### Optional memory readings
+
+Heap-analysis collects `GC.heap_info` and full procfs mappings at
+`before-baseline`, `natural-drain`, and `after-final-gc`. The last observation
+is immediately after the verified explicit full GC and before the final dump.
+The dump requests a further full GC, so its effects are outside that reading.
+
+Each `evidence/runtime-<checkpoint>.json` contains a `native` block with parsed
+measurements, source intervals, completion states, errors and raw artifact
+references. Available sources are retained as:
+
+    evidence/native/<checkpoint>-status.txt
+    evidence/native/<checkpoint>-smaps-rollup.txt
+    evidence/native/<checkpoint>-smaps.txt
+    evidence/native/<checkpoint>-heap-info.txt
+
+`report.json` compares all three checkpoints and shows missing evidence
+explicitly. Partial or malformed smaps produces no mapping totals; complete
+sibling sources remain usable. Exceptionally large parsed summaries are marked
+unavailable in the checkpoint record, with complete raw evidence retained.
+
+Committed heap is not resident heap. Stable committed heap does not establish
+that RSS growth is outside Java heap, and net live-set decline can mask growth
+in individual object populations. Large anonymous mappings describe virtual
+regions, not glibc arena counts or allocator ownership. Process residency uses
+the kernel's anonymous, file and shared-memory categories; mapping labels do
+not classify every resident page, including copy-on-write pages.
+
+These are bounded diagnostics with collection overhead: heap-info acquires the
+JVM heap lock. Completed optional reading errors do not themselves change the
+verdict. Unresolved command completion stops further diagnostics and follows
+owned-target cleanup; cancellation remains cancellation. All evidence shares
+the run's artifact budget. The P24 soak and Node default observation paths
+enable neither reading and retain their existing behavior.
 
 ## Interpreting the result
 

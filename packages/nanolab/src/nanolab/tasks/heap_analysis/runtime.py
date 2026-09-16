@@ -35,8 +35,15 @@ from nanolab.config.soak import (
     PrerequisitePolicy,
     SoakConfig,
 )
+from nanolab.tasks.heap_analysis.evidence import native_comparison, persist_native
 from nanolab.tasks.heap_analysis.mat import MatAnalysisRequest, MatAnalyzer
-from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact
+from nanolab.tasks.soak.artifacts import (
+    ArtifactLimitExceededError,
+    ArtifactWriter,
+    describe_artifact,
+    enforce_limit,
+    measure_tree,
+)
 from nanolab.tasks.soak.diagnostic_helper import (
     GC_SOURCES,
     DockerHelperSpec,
@@ -297,8 +304,8 @@ class _MeasureControlPlaneHeap(Task[_Measurement]):
             # collecting first would destroy the reading this step exists for.
             session.observe("natural-drain")
             session.full_gc("final")
-            final = session.heap_dump("final")
             session.observe("after-final-gc")
+            final = session.heap_dump("final")
         except BaseException as error:
             try:
                 session.stop_load(config.diagnostic_timeout_s)
@@ -496,18 +503,40 @@ class LocalHeapAnalysisSession:
             raise KeyboardInterrupt("heap analysis cancelled during natural drain")
 
     def observe(self, checkpoint: str) -> Path:
-        """Record observed runtime evidence and seal its natural checkpoint."""
+        """Record the optional readings and seal the natural checkpoint."""
         targets = self._deployment.discover()
         observed = self._deployment.observations(targets)
-        evidence = self._writer.write_json(
-            f"runtime-{checkpoint}.json",
-            {
-                "schema": "nanolab-soak-v1",
-                "kind": "runtime_observation",
-                "checkpoint": checkpoint,
-                "observed": observed,
-            },
+        _target, helper = self._bind()
+        readings = helper.read_memory(
+            timeout_s=min(self._config.diagnostic_timeout_s, 300),
+            include_smaps=True,
+            include_heap_info=True,
         )
+        native = persist_native(
+            self._root,
+            checkpoint,
+            readings,
+            self._config.artifact_limit_bytes,
+        )
+        document = {
+            "schema": "nanolab-soak-v1",
+            "kind": "runtime_observation",
+            "checkpoint": checkpoint,
+            "observed": observed,
+            "native": native,
+        }
+        # Raw files are outside ArtifactWriter's individual-record accounting.
+        # Check the cumulative run budget before and after the JSON write too.
+        required = len(json.dumps(document).encode("utf-8")) + 1
+        if (
+            measure_tree(self._root.parent) + required + 4096
+            > self._config.artifact_limit_bytes
+        ):
+            raise ArtifactLimitExceededError(
+                "runtime observation exceeds cumulative artifact budget"
+            )
+        evidence = self._writer.write_json(f"runtime-{checkpoint}.json", document)
+        enforce_limit(self._root.parent, self._config.artifact_limit_bytes)
         phase = _CHECKPOINT_PHASES.get(checkpoint)
         if phase is not None:
             target, _helper = self._bind()
@@ -706,6 +735,7 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
                         name: describe_artifact(Path(path))
                         for name, path in dumps.items()
                     },
+                    "native": native_comparison(wiring.writer.root),
                     "analysis_manifest": None if manifest is None else str(manifest),
                     "workload_receipt": (
                         None
