@@ -347,7 +347,9 @@ class _DockerCommands:
         self.deadline: float | None = None
         self.cleanup_deadline: float | None = None
 
-    def run(self, args, timeout_s=20.0, *, cleanup=False, limit=1024 * 1024):
+    def run(
+        self, args, timeout_s=20.0, *, cleanup=False, limit=1024 * 1024, consume=None
+    ):
         deadline = self.cleanup_deadline if cleanup else self.deadline
         if deadline is not None:
             timeout_s = min(timeout_s, deadline - time.monotonic())
@@ -379,7 +381,12 @@ class _DockerCommands:
             or result.quota_exceeded
         ):
             raise RuntimeError(f"owned Docker command failed; evidence: {log}")
-        return log.read_text()
+        text = log.read_text()
+        if consume is None:
+            return text
+        accepted = consume(text)
+        log.unlink(missing_ok=True)
+        return accepted
 
     def inspect(self, identity, *, image=False, cleanup=False):
         value = json.loads(
@@ -536,31 +543,40 @@ class _OwnedDockerHelper:
                     cfg["include_heap_info"] = True
                 options = {"timeout_s": remaining, "limit": _OPT_IN_RESPONSE_BYTES}
             argv = ("exec", self.helper_id, PYTHON, WORKER, "memory", _encoded(cfg))
-            jvm_may_be_running = include_heap_info
-            data = json.loads(self.commands.run(argv, **options))
-            self._check_target()
-            before, after = data.get("before", {}), data.get("after", {})
-            if (
-                data.get("schema") != "nanolab-soak-memory-helper-v1"
-                or data.get("target") != asdict(self.spec.target)
-                or before != after
-                or before.get("target_start_ticks")
-                != self.process_identity["start_ticks"]
-                or before.get("target_pid") != 1
-                or before.get("uid") != self.spec.uid
-                or before.get("target_uid") != self.spec.uid
-                or not before.get("pid_namespace")
-                or before["pid_namespace"] != before.get("target_pid_namespace")
-            ):
-                raise ValueError("memory response process/namespace identity changed")
-            if include_heap_info:
-                state = data.get("completion", {}).get("heap_info")
-                if state not in {"completed", "not_started"}:
-                    raise MemoryCommandUnresolved(
-                        "in-JVM command completion unresolved"
+
+            def accept(text):
+                nonlocal jvm_may_be_running
+                data = json.loads(text)
+                self._check_target()
+                before, after = data.get("before", {}), data.get("after", {})
+                if (
+                    data.get("schema") != "nanolab-soak-memory-helper-v1"
+                    or data.get("target") != asdict(self.spec.target)
+                    or before != after
+                    or before.get("target_start_ticks")
+                    != self.process_identity["start_ticks"]
+                    or before.get("target_pid") != 1
+                    or before.get("uid") != self.spec.uid
+                    or before.get("target_uid") != self.spec.uid
+                    or not before.get("pid_namespace")
+                    or before["pid_namespace"] != before.get("target_pid_namespace")
+                ):
+                    raise ValueError(
+                        "memory response process/namespace identity changed"
                     )
-                jvm_may_be_running = False
-            return data
+                if include_heap_info:
+                    state = data.get("completion", {}).get("heap_info")
+                    if state not in {"completed", "not_started"}:
+                        raise MemoryCommandUnresolved(
+                            "in-JVM command completion unresolved"
+                        )
+                    jvm_may_be_running = False
+                return data
+
+            jvm_may_be_running = include_heap_info
+            if include_smaps or include_heap_info:
+                return self.commands.run(argv, **options, consume=accept)
+            return accept(self.commands.run(argv, **options))
         except BaseException as error:
             try:
                 self.commands.cleanup_deadline = time.monotonic() + 5.0

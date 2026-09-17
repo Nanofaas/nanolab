@@ -923,7 +923,8 @@ def memory_owner(monkeypatch, tmp_path, *, smaps=None, completion="completed"):
             response = json.dumps(payload)
             if len(response.encode()) > kwargs.get("limit", 1048576):
                 raise RuntimeError("transport quota exceeded")
-            return response
+            consume = kwargs.get("consume")
+            return consume(response) if consume is not None else response
 
     owner = helper._OwnedDockerHelper(cfg, Commands(), "e" * 64, process)
     monkeypatch.setattr(owner, "_check_target", lambda: None)
@@ -1072,3 +1073,84 @@ def test_procfs_and_heap_info_share_one_deadline(monkeypatch):
         }
     )
     assert result["completion"]["heap_info"] == "not_started"
+
+
+def logged_memory_owner(monkeypatch, tmp_path, *, raw=None, returncode=0):
+    from threading import Event
+
+    from nanolab.tasks.soak import diagnostic_helper as helper
+    from nanolab.tasks.soak.processes import OwnedCommandResult
+
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
+    payload = (
+        raw
+        if raw is not None
+        else json.dumps(
+            {
+                "schema": "nanolab-soak-memory-helper-v1",
+                "target": asdict(TARGET),
+                "before": probe(),
+                "after": probe(),
+                "errors": {},
+                "status": "VmRSS: 4 kB\n",
+                "smaps_rollup": "Pss: 4 kB\n",
+                "smaps": "body",
+                "heap_info": None,
+                "completion": {"heap_info": "completed"},
+            }
+        )
+    )
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            self.log = kwargs["log_path"]
+
+        def run(self):
+            self.log.write_text(payload)
+            return OwnedCommandResult(returncode, False, True, ended_s=1.0)
+
+    monkeypatch.setattr(helper, "OwnedCommandRunner", Runner)
+    # The genuine transport replaces memory_owner's fake on purpose.
+    owner.commands = helper._DockerCommands(  # pyright: ignore[reportAttributeAccessIssue]
+        owner.spec, tmp_path, Event()
+    )
+    return owner, cleanup
+
+
+def test_accepted_optional_response_removes_duplicate_log(monkeypatch, tmp_path):
+    owner, _ = logged_memory_owner(monkeypatch, tmp_path)
+    assert owner.read_memory(include_smaps=True)["smaps"] == "body"
+    assert not list(tmp_path.glob("docker-*.log"))
+
+
+@pytest.mark.parametrize(
+    ("raw", "returncode"), [("not JSON", 0), ("command failed", 1)]
+)
+def test_rejected_optional_response_keeps_log(monkeypatch, tmp_path, raw, returncode):
+    owner, _ = logged_memory_owner(
+        monkeypatch, tmp_path, raw=raw, returncode=returncode
+    )
+    with pytest.raises((ValueError, RuntimeError)):
+        owner.read_memory(include_smaps=True)
+    assert list(tmp_path.glob("docker-*.log"))
+
+
+def test_unresolved_response_keeps_log_even_with_zero_exit(monkeypatch, tmp_path):
+    payload = {
+        "schema": "nanolab-soak-memory-helper-v1",
+        "target": asdict(TARGET),
+        "before": probe(),
+        "after": probe(),
+        "completion": {"heap_info": "unresolved"},
+    }
+    owner, cleanup = logged_memory_owner(monkeypatch, tmp_path, raw=json.dumps(payload))
+    with pytest.raises(RuntimeError, match="completion unresolved"):
+        owner.read_memory(include_heap_info=True)
+    assert list(tmp_path.glob("docker-*.log"))
+    assert cleanup == ["cancel-target", "close"]
+
+
+def test_legacy_memory_log_is_retained(monkeypatch, tmp_path):
+    owner, _ = logged_memory_owner(monkeypatch, tmp_path)
+    owner.read_memory()
+    assert list(tmp_path.glob("docker-*.log"))
