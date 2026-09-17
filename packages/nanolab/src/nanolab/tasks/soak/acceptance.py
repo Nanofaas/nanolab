@@ -28,9 +28,10 @@ Producer contract (all JSON is nanolab-soak-v1):
   build receipt, recipes maps role to serialized BuildRecipe. All source entries
   and build log artifacts are verified offline.
 * Orchestration receipts diagnostics/artifacts bind schema, run_id, policy_sha256:
-  diagnostics: entries [{role, operation, receipt}]. Referenced diagnostic.json
-    uses the existing runtime adapter format and is checked against the target,
-    declared operation/helper, natural drain and nested artifact checksums.
+  diagnostics: entries [{role, phase, operation, receipt}]. Referenced
+    diagnostic.json uses the existing runtime adapter format and is checked
+    against the target, declared operation/helper, the natural checkpoint of the
+    phase the entry names and nested artifact checksums.
   artifacts: complete, budget_exhausted, entries (references). Inventory must
     include samples.jsonl, evaluation-input.json, config and other top receipts.
 
@@ -76,6 +77,10 @@ from nanolab.tasks.soak.sources import SourceEntry, SourceSnapshot, verify_snaps
 from nanolab.tasks.soak.workload import allocate_vus, constant_arrival_options
 
 SCHEMA = "nanolab-soak-v1"
+# The checkpoints a capture may name, matching the runtime's own list. A
+# diagnostic entry carries the checkpoint it was measured from, and both the
+# coverage gate and the timing bound are read against it.
+_CHECKPOINT_PHASES = ("baseline", "drain")
 GATE_IDS = frozenset(
     {
         "frozen-policy",
@@ -544,6 +549,7 @@ def _diagnostic(
     config: SoakConfig,
     target: dict[str, Any],
     operation: str,
+    phase: str,
     low: float,
     high: float | None = None,
 ) -> dict[str, Any]:
@@ -591,7 +597,10 @@ def _diagnostic(
         natural.get("schema") == SCHEMA
         and natural.get("kind") == "natural_checkpoint"
         and natural.get("target") == target
-        and natural.get("phase") == "drain"
+        # The checkpoint this capture was measured from, not a fixed one: a
+        # reading at the baseline window and one at drain are different
+        # readings, and each must be bound to the window it came from.
+        and natural.get("phase") == phase
         and natural.get("completed") is True
         and _finite(natural.get("ended_s"))
         and natural["ended_s"] <= started,
@@ -1027,22 +1036,28 @@ def evaluate_acceptance(
         phases = normalize_phase_windows(manifest["phases"])
         manifest["phases"] = phases
         previous = None
-        for phase, duration in (
-            ("warmup", config.phases.warmup_s),
-            ("baseline_drain", config.phases.baseline_drain_s),
-            ("baseline", config.phases.baseline_window_s),
-            ("steady", config.phases.steady_s),
-            ("drain", config.phases.drain_s),
+        # The natural phases run for their declared duration; the checkpoint in
+        # between runs for as long as its captures take, which the diagnostic
+        # timeout bounds. Holding it to a sample interval instead would make the
+        # gate pass or fail on how long a capture happened to take.
+        natural_slack = config.cancellation_timeout_s + config.max_observation_gap_s
+        for phase, duration, slack in (
+            ("warmup", config.phases.warmup_s, natural_slack),
+            ("baseline_drain", config.phases.baseline_drain_s, natural_slack),
+            ("baseline", config.phases.baseline_window_s, natural_slack),
+            (
+                "baseline_diagnostics",
+                0,
+                config.diagnostics.timeout_s,
+            ),
+            ("steady", config.phases.steady_s, natural_slack),
+            ("drain", config.phases.drain_s, natural_slack),
         ):
             start, end = phases[phase]["start_s"], phases[phase]["end_s"]
             _require(
                 _finite(start)
                 and _finite(end)
-                and duration
-                <= end - start
-                <= duration
-                + config.cancellation_timeout_s
-                + config.max_observation_gap_s
+                and duration <= end - start <= duration + slack
                 and (
                     previous is None
                     or phases_are_contiguous(
@@ -1290,9 +1305,16 @@ def evaluate_acceptance(
         # Narrowed by the _require above; the check itself is not the assert.
         assert config is not None  # nosec B101 - validated invariant/type narrowing
         entries = receipt("diagnostics")["entries"]
+        # Coverage is per checkpoint. The same reading declared at both is how a
+        # difference is measured, so the pair is no longer the unit and one
+        # capture per declared triple is what the length check still means.
         expected = {
-            (role, op)
-            for role, ops in config.diagnostics.operations.items()
+            (role, phase, op)
+            for phase, declared in (
+                ("baseline", config.diagnostics.baseline_operations),
+                ("drain", config.diagnostics.operations),
+            )
+            for role, ops in declared.items()
             for op in ops
         }
         _require(
@@ -1300,19 +1322,24 @@ def evaluate_acceptance(
             "invalid diagnostic entries",
         )
         _require(
-            {(e["role"], e["operation"]) for e in entries} == expected
+            {(e["role"], e.get("phase"), e["operation"]) for e in entries} == expected
             and len(entries) == len(expected),
             "required diagnostic coverage missing or duplicate",
         )
         dumps, dump_bytes = 0, 0
         for entry in entries:
+            _require(
+                entry.get("phase") in _CHECKPOINT_PHASES,
+                "invalid diagnostic checkpoint phase",
+            )
             item = _diagnostic(
                 root,
                 entry["receipt"],
                 config,
                 targets[entry["role"]],
                 entry["operation"],
-                manifest["phases"]["drain"]["end_s"],
+                entry["phase"],
+                manifest["phases"][entry["phase"]]["end_s"],
             )
             if entry["operation"] == "heap_dump":
                 dumps += 1
@@ -1591,6 +1618,8 @@ def evaluate_acceptance(
                     config,
                     targets[criterion.role],
                     "gc",
+                    # The diagnostic protocol's own checkpoint is its final one.
+                    "drain",
                     low,
                     high,
                 )

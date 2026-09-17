@@ -67,6 +67,7 @@ def make_lifecycle(tmp_path, events, failure=None):
     hooks = LifecycleHooks(
         preflight=lambda: action("preflight"),
         prerequisites=lambda: action("prerequisites"),
+        baseline_capture=lambda state, timeout: action("baseline-capture"),
         final_capture=lambda state, timeout: action("capture"),
         evaluate=lambda state: action("evaluate"),
         report=lambda state: (action("report"), tmp_path / "report.json")[1],

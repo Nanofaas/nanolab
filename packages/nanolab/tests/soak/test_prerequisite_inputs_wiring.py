@@ -25,7 +25,7 @@ class _CompileOnlyExecutor:
 def _soak_config():
     return SimpleNamespace(
         prerequisites=SimpleNamespace(mode="run", required_coverage=["sync"]),
-        diagnostics=SimpleNamespace(operations={}),
+        diagnostics=SimpleNamespace(operations={}, baseline_operations={}),
         artifact_limit_bytes=8 * 1024 * 1024 * 1024,
     )
 

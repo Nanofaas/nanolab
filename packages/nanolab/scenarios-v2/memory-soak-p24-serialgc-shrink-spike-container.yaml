@@ -138,9 +138,14 @@ soak:
       rationale: Preserve the strict natural-recovery observation during the spike.
   diagnostics:
     operations:
-      # `native_memory` is why this spike exists: the flag above only produces a
-      # reading if something requests `VM.native_memory summary` at a checkpoint.
-      control-plane: [gc, native_memory]
+      # Order is meaning here: operations run as declared, so reading the diff
+      # after `gc` would include that full GC's own reclamation in the delta and
+      # it would no longer be the growth over steady + drain.
+      control-plane: [native_memory_diff, native_memory, gc]
+    # The mark the diff is measured from, taken once the baseline window closed.
+    # Read Native Memory Tracking where the flag above actually produces it.
+    baseline_operations:
+      control-plane: [native_memory_baseline]
     timeout_s: 120
     max_dumps: 1
     max_dump_bytes: 1073741824
