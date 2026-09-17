@@ -36,17 +36,20 @@ def _request(tmp_path: Path, **overrides: object) -> HelperImageRequest:
 
 
 def _fake_docker(tmp_path: Path, *, digest: str | None = DIGEST, code: int = 0) -> Path:
-    """Stand in for docker: record argv and write a build's metadata file."""
+    """Stand in for docker: record argv, write build metadata, accept a pull."""
     script = tmp_path / "docker"
     payload = json.dumps({"containerimage.digest": digest} if digest else {})
     script.write_text(
         "#!/usr/bin/env python3\n"
         "import json, sys, pathlib\n"
-        f"pathlib.Path({str(tmp_path / 'argv.json')!r}).write_text("
-        "json.dumps(sys.argv[1:]))\n"
         "argv = sys.argv[1:]\n"
-        "meta = argv[argv.index('--metadata-file') + 1]\n"
-        f"pathlib.Path(meta).write_text({payload!r})\n"
+        f"here = pathlib.Path({str(tmp_path)!r})\n"
+        "if 'buildx' in argv:\n"
+        "    (here / 'argv.json').write_text(json.dumps(argv))\n"
+        "    meta = argv[argv.index('--metadata-file') + 1]\n"
+        f"    pathlib.Path(meta).write_text({payload!r})\n"
+        "else:\n"
+        "    (here / 'pull-argv.json').write_text(json.dumps(argv))\n"
         f"sys.exit({code})\n"
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
@@ -253,3 +256,22 @@ def test_request_rejects_a_context_without_the_dockerfile(
     monkeypatch.setattr(helper_build, "BUILD_CONTEXT", tmp_path)
     with pytest.raises(ValueError, match="Dockerfile is missing"):
         _request(tmp_path)
+
+
+def test_the_pushed_helper_is_adopted_into_the_local_daemon(tmp_path) -> None:
+    """A buildx build leaves the image in the registry, not in the daemon.
+
+    The helper container is created with `--pull=never`, so it must already be
+    in the local daemon -- and a `docker-container` builder, the only driver
+    that publishes the required attestations, never puts it there. The first
+    real heap-analysis run died here: it built and pushed the image, then the
+    create answered "No such image" for the digest it had just published.
+    """
+    docker = _fake_docker(tmp_path)
+    request = _request(tmp_path, docker=str(docker))
+    built = f"localhost:5000/nanolab/diagnostic-helper@{DIGEST}"
+
+    assert build_helper_image(request) == built
+
+    pull = json.loads((tmp_path / "pull-argv.json").read_text())
+    assert pull == ["pull", built]

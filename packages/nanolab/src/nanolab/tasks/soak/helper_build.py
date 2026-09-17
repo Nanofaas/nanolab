@@ -122,6 +122,46 @@ def _resolve(metadata: Path, reference: str) -> str:
     return resolved
 
 
+def _adopt_into_the_local_daemon(
+    request: HelperImageRequest, resolved: str, cancelled: Event | None
+) -> None:
+    """Pull the pushed image into the local daemon, which is where it is needed.
+
+    The helper container is created with `--pull=never` (see
+    `helper_create_argv`), which is deliberate: the target-side container must
+    come from an image this run already resolved, never from whatever a registry
+    answers with later. But the build above pushes through a `docker-container`
+    buildx builder -- the only driver that publishes the attestations this
+    build is required to carry, and the one the run documentation prescribes --
+    and such a builder leaves the result in the registry, NOT in the host
+    daemon. Without this the create fails with "No such image". The pull is from
+    this run's own registry, not from the network.
+    """
+    argv = [request.docker, "pull", resolved]
+    result = run_owned_command(
+        argv,
+        cwd=BUILD_CONTEXT,
+        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "DOCKER_BUILDKIT": "1"},
+        log_path=(request.run_dir / "helper-image-pull.log").absolute(),
+        timeout_s=request.timeout_s,
+        cancelled=cancelled or Event(),
+        output_limit_bytes=_LOG_BYTES,
+    )
+    if (
+        result.returncode != 0
+        or not result.reaped
+        or result.errors
+        or result.cancelled
+        or result.timed_out
+        or result.forced_stop
+        or result.quota_exceeded
+    ):
+        raise HelperImageError(
+            "helper image was not adopted into the local daemon; see "
+            f"helper-image-pull.log (exit {result.returncode})"
+        )
+
+
 def build_helper_image(
     request: HelperImageRequest, *, cancelled: Event | None = None
 ) -> str:
@@ -175,4 +215,6 @@ def build_helper_image(
             "helper image build did not complete cleanly; see "
             f"helper-image-build.log (exit {result.returncode})"
         )
-    return _resolve(metadata, request.reference)
+    resolved = _resolve(metadata, request.reference)
+    _adopt_into_the_local_daemon(request, resolved, cancelled)
+    return resolved
