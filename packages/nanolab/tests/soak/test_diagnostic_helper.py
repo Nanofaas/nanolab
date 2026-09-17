@@ -991,6 +991,16 @@ def test_unresolved_heap_command_cancels_owned_target(monkeypatch, tmp_path):
     assert cleanup == ["cancel-target", "close"]
 
 
+def test_not_started_heap_command_leaves_the_owned_target_alone(monkeypatch, tmp_path):
+    """Only a possibly-running JVM command justifies killing the measured target."""
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path, completion="not_started")
+    result = owner.read_memory(include_heap_info=True)
+    assert result["completion"]["heap_info"] == "not_started"
+    assert cleanup == []
+    assert not owner._closed
+    owner.read_memory()  # another operation remains possible
+
+
 def test_completed_source_error_leaves_helper_usable(monkeypatch, tmp_path):
     owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
     result = owner.read_memory(include_heap_info=True)
@@ -1259,3 +1269,133 @@ def test_command_exit_code_preserves_completion_semantics(
             module.command(
                 ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
             )
+
+
+def test_runner_failure_before_launch_is_not_started(memory_worker, monkeypatch):
+    """A failure without a launched child leaves the target untouched.
+
+    Reported as unresolved, the host would SIGKILL the measured container for a
+    command that never reached the JVM.
+    """
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module, _, _ = memory_worker
+
+    class Runner:
+        launched = False
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            raise OSError("cannot create the owned log directory")
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "not_started"
+    assert result["heap_info"] is None
+    assert "OSError" in result["errors"]["heap_info"]
+
+
+def test_runner_failure_after_launch_stays_unresolved(memory_worker, monkeypatch):
+    """A launched child means the in-JVM command may still be running."""
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module, _, _ = memory_worker
+
+    class Runner:
+        launched = True
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            raise OSError("supervisor receipt was lost after launch")
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "unresolved"
+    assert result["heap_info"] is None
+
+
+def test_expired_command_deadline_never_starts_the_target(tmp_path, monkeypatch):
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module = worker()
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    with pytest.raises(module.CommandNotStartedError, match="deadline exhausted"):
+        module.command(
+            ("unused",), time.monotonic() - 1, tmp_path, require_completion=True
+        )
+
+
+def test_acknowledged_error_carries_a_bounded_log_excerpt(
+    memory_worker, monkeypatch, tmp_path
+):
+    """A failed jcmd must say why somewhere in the published evidence."""
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module, _, _ = memory_worker
+    excerpt = "Attach refused: the target JVM does not respond"
+    outcome = processes.OwnedCommandResult(
+        returncode=1,
+        forced_stop=False,
+        reaped=True,
+        ended_s=1.0,
+    )
+
+    class Runner:
+        launched = True
+
+        def __init__(self, *args, **kwargs):
+            kwargs["log_path"].write_text(excerpt + "\n" + "x" * 4096)
+
+        def run(self):
+            return outcome
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    with pytest.raises(module.CommandCompletedError) as caught:
+        module.command(
+            ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+        )
+    message = str(caught.value)
+    assert excerpt in message
+    assert len(message) <= 1024 + len("remote command exited with an error: ")
+
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "completed"
+    assert result["heap_info"] is None
+    assert excerpt in result["errors"]["heap_info"]
+    assert len(result["errors"]["heap_info"]) <= 1024

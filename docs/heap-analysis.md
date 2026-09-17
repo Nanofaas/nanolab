@@ -174,6 +174,14 @@ parsed summaries are trimmed to their totals in the checkpoint record, with
 complete raw evidence retained; only a block still over budget after that trim
 is marked unavailable.
 
+Paths inside that comparison keep the base they were produced with. In
+`report.json`, `native.<checkpoint>.sources.<key>.artifact.path` is relative to
+the run's `evidence/` directory (`native/before-baseline-status.txt`), whereas
+the trim pointer string (`see evidence/native/<checkpoint>-smaps.txt`) only
+resolves from the run root. The report's other path fields
+(`dumps.<name>`, `analysis_manifest`, `workload_receipt`) are run-root paths,
+absolute for a CLI run.
+
 Committed heap is not resident heap. Stable committed heap does not establish
 that RSS growth is outside Java heap, and net live-set decline can mask growth
 in individual object populations. Large anonymous mappings describe virtual

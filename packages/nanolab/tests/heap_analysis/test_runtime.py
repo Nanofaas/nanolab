@@ -1257,3 +1257,50 @@ def test_cleanup_note_survives_cancellation_receipt(tmp_path):
     assert terminal["status"] == "ABORTED"
     assert "cleanup unconfirmed" in json.dumps(terminal)
     assert any("cleanup unconfirmed" in reason for reason in report["reasons"])
+
+
+def test_failure_reason_keeps_the_failure_behind_long_cleanup_notes() -> None:
+    """Cleanup notes come first, but must never be the whole recorded reason."""
+    from nanolab.tasks.heap_analysis.runtime import _failure_reason
+
+    error = KeyboardInterrupt("the workload was cancelled")
+    for index in range(3):
+        error.add_note(
+            f"memory cleanup unconfirmed: owned Docker log {index} " + "x" * 900
+        )
+
+    reason = _failure_reason(error)
+
+    assert len(reason) <= 1024
+    assert "KeyboardInterrupt: the workload was cancelled" in reason
+    assert reason.startswith("memory cleanup unconfirmed")
+
+
+def test_failure_reason_without_notes_is_just_the_failure() -> None:
+    from nanolab.tasks.heap_analysis.runtime import _failure_reason
+
+    assert _failure_reason(RuntimeError("no helper")) == "RuntimeError: no helper"
+
+
+def test_observation_budget_precheck_measures_the_published_encoding(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A document the writer would accept is never refused by the pre-check.
+
+    The pre-check used the looser `json.dumps` defaults while `write_json`
+    publishes the compact, sort-keyed encoding, so it charged ~10% more than
+    the bytes it was guarding and refused documents that fit.
+    """
+    from nanolab.tasks.heap_analysis import runtime as runtime_module
+
+    published = fake_session_with_readings(tmp_path / "one").observe("natural-drain")
+    payload = published.stat().st_size
+    loose = len(json.dumps(json.loads(published.read_text())).encode("utf-8")) + 1
+    # The two encodings differ by enough to tell them apart at the boundary.
+    assert loose > payload + 64
+
+    monkeypatch.setattr(runtime_module, "measure_tree", lambda root: 500_000)
+    session = fake_session_with_readings(tmp_path / "two")
+    session._config.artifact_limit_bytes = 500_000 + payload + 4096 + 64
+
+    assert session.observe("natural-drain").is_file()

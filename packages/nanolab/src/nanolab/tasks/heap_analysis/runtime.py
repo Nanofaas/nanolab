@@ -38,9 +38,11 @@ from nanolab.config.soak import (
 from nanolab.tasks.heap_analysis.evidence import native_comparison, persist_native
 from nanolab.tasks.heap_analysis.mat import MatAnalysisRequest, MatAnalyzer
 from nanolab.tasks.soak.artifacts import (
+    TERMINAL_RESERVE,
     ArtifactLimitExceededError,
     ArtifactWriter,
     describe_artifact,
+    encode_record,
     enforce_limit,
     measure_tree,
 )
@@ -524,9 +526,11 @@ class LocalHeapAnalysisSession:
         }
         # Raw blobs are charged to the writer without its JSON-record cap.
         # The cumulative run check also includes artifacts from other producers.
-        required = len(json.dumps(document).encode("utf-8")) + 1
+        # Measured with the exact bytes `write_json` publishes, so a document
+        # the writer would accept is never refused here.
+        required = len(encode_record(document))
         if (
-            measure_tree(self._root.parent) + required + 4096
+            measure_tree(self._root.parent) + required + TERMINAL_RESERVE
             > self._config.artifact_limit_bytes
         ):
             raise ArtifactLimitExceededError(
@@ -597,11 +601,26 @@ class LocalHeapAnalysisSession:
 
 
 def _failure_reason(error: BaseException) -> str:
-    """Keep cleanup uncertainty visible without changing exception identity."""
+    """Keep cleanup uncertainty visible without displacing the actual failure.
+
+    Cleanup notes stay first, but their share of the 1024-character reason is
+    bounded by what the failure's own segment and the separators leave, so a
+    long owned-Docker log path in a note cannot truncate the failure away.
+    """
     notes = [str(note) for note in getattr(error, "__notes__", ())]
     cleanup = [note for note in notes if "cleanup unconfirmed" in note]
     other = [note for note in notes if "cleanup unconfirmed" not in note]
-    parts = [*cleanup, f"{type(error).__name__}: {error}", *other]
+    # The separators and the failure's own segment are reserved before the notes
+    # get their share, so the sum of the parts stays within the 1024-character
+    # reason and the failure itself is never what gets cut off.
+    reserved = 2 * len(notes)
+    summary = f"{type(error).__name__}: {error}"[: max(1, 1024 - reserved)]
+    share = (1024 - len(summary) - reserved) // max(1, len(notes))
+    parts = [
+        *(note[:share] for note in cleanup),
+        summary,
+        *(note[:share] for note in other),
+    ]
     return "; ".join(parts)[:1024]
 
 

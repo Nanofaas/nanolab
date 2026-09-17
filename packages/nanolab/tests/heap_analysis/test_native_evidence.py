@@ -261,3 +261,24 @@ def test_published_raw_stays_charged_when_later_hashing_fails(monkeypatch, tmp_p
         _write_raw(writer, "natural-drain-smaps.txt", b"body", 1 << 20)
     assert writer._used_bytes == 4
     assert (writer.root / "native/natural-drain-smaps.txt").read_bytes() == b"body"
+
+
+def test_persist_native_still_replaces_an_untrimmable_over_budget_summary(tmp_path):
+    """The last-resort replacement must survive the single-serialization path.
+
+    Untrimmable here means the over-budget part is not the mapping detail, so
+    the trim changes nothing and the block is still over budget when it is
+    measured a second time.
+    """
+    writer = ArtifactWriter(tmp_path / "evidence", 1048576)
+    raw = reading()
+    raw["smaps"] = None
+    raw["errors"]["smaps"] = "read bound exceeded"
+    raw["before"] = {"padding": "x" * (MAX_RECORD_BYTES // 2)}
+
+    block = persist_native(writer, "natural-drain", raw, 1048576)
+
+    assert block["smaps"]["available"] is False
+    assert "exceeds checkpoint record budget" in block["smaps"]["error"]
+    assert block["sources"]["smaps"]["error"] == "read bound exceeded"
+    assert block["collection"]["before"]["padding"]

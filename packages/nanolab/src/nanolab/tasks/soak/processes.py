@@ -348,6 +348,15 @@ class OwnedCommandRunner:
         self._process: subprocess.Popen | None = None
         self._used = False
 
+    @property
+    def launched(self) -> bool:
+        """Whether `run` reached a child process.
+
+        A failure while this is false provably occurred before the supervised
+        command was started, so nothing of the caller's was ever touched.
+        """
+        return self._process is not None
+
     def stop(self, timeout_s: float) -> None:
         """Request bounded graceful stop and adoption-based escalation."""
         _stop_budget(timeout_s)

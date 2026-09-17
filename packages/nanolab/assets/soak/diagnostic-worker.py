@@ -172,9 +172,16 @@ def memory(cfg):
         except CommandCompletedError as error:
             state = "completed"
             result["errors"]["heap_info"] = str(error)[:1024]
+        except CommandNotStartedError as error:
+            # The runner failed before launching anything: the target is
+            # untouched, so this is not_started and the host must not treat it
+            # as an unacknowledged in-JVM command.
+            state = "not_started"
+            result["errors"]["heap_info"] = str(error)[:1024]
         except (OSError, ValueError, RuntimeError) as error:
-            # Before launch this is not_started; after launch it remains
-            # unresolved unless jcmd has already acknowledged completion.
+            # A failure before the scratch directory exists leaves this
+            # not_started; once a command was launched it stays unresolved,
+            # unless jcmd has already acknowledged completion.
             result["errors"]["heap_info"] = str(error)[:1024]
         result["completion"]["heap_info"] = state
         result["intervals"]["heap_info"] = {
@@ -207,6 +214,10 @@ class CommandCompletionUnresolved(RuntimeError):  # noqa: N818
     """The command runner cannot acknowledge in-JVM completion."""
 
 
+class CommandNotStartedError(RuntimeError):
+    """The runner failed before any command reached the target process."""
+
+
 class CommandCompletedError(RuntimeError):
     """A normally completed command reported an error."""
 
@@ -218,18 +229,30 @@ def command(
 
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise TimeoutError("remote operation deadline exhausted")
+        raise CommandNotStartedError("remote operation deadline exhausted")
     log = scratch / (uuid4().hex + ".log")
-    result = OwnedCommandRunner(
-        argv,
-        cwd=scratch,
-        env=dict(os.environ),
-        log_path=log,
-        timeout_s=remaining,
-        cancelled=Event(),
-        output_limit_bytes=limit,
-        stop_timeout_s=1.0,
-    ).run()
+    runner: OwnedCommandRunner | None = None
+    try:
+        runner = OwnedCommandRunner(
+            argv,
+            cwd=scratch,
+            env=dict(os.environ),
+            log_path=log,
+            timeout_s=remaining,
+            cancelled=Event(),
+            output_limit_bytes=limit,
+            stop_timeout_s=1.0,
+        )
+        result = runner.run()
+    except (OSError, ValueError, RuntimeError) as error:
+        # The launch point is the owned runner's own child: a failure without
+        # one provably left the target untouched, so it is not_started rather
+        # than an unresolved in-JVM command. Never inferred from message text.
+        if runner is not None and runner.launched:
+            raise
+        raise CommandNotStartedError(
+            f"{type(error).__name__}: {error}"[:1024]
+        ) from error
     if require_completion and (
         not result.reaped
         or result.ended_s is None
@@ -248,7 +271,12 @@ def command(
     ):
         raise CommandCompletionUnresolved("remote command completion unresolved")
     if require_completion and result.returncode != 0:
-        raise CommandCompletedError("remote command exited with an error")
+        # Same bounded excerpt as the sibling failure below: an acknowledged
+        # error exit and a bare constant tell an operator nothing about why.
+        raise CommandCompletedError(
+            "remote command exited with an error: "
+            + log.read_text(errors="replace")[:1024]
+        )
     if (
         result.returncode != 0
         or not result.reaped

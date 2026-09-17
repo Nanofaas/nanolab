@@ -220,6 +220,27 @@ def test_measure_tree_counts_every_file_but_not_build_workspaces(tmp_path):
     assert measure_tree(tmp_path) == 60
 
 
+def test_measure_tree_prunes_excluded_directories_and_ignores_symlinks(tmp_path):
+    from nanolab.tasks.soak.artifacts import measure_tree
+
+    kept = tmp_path / "kept"
+    (kept / "nested").mkdir(parents=True)
+    (kept / "a.bin").write_bytes(b"a" * 7)
+    (kept / "nested" / "b.bin").write_bytes(b"b" * 11)
+    workspace = kept / "workspace-build"
+    (workspace / "deep").mkdir(parents=True)
+    (workspace / "deep" / "huge.bin").write_bytes(b"c" * 1000)
+    dot = tmp_path / ".cache"
+    dot.mkdir()
+    (dot / "huge.bin").write_bytes(b"d" * 1000)
+    (tmp_path / "link").symlink_to(kept, target_is_directory=True)
+    (tmp_path / "empty").mkdir()
+
+    # The symlinked tree is not walked, and neither excluded directory's files
+    # are counted: pruning must not change the total.
+    assert measure_tree(tmp_path) == 18
+
+
 def test_enforce_limit_returns_the_measured_total_when_it_fits(tmp_path):
     from nanolab.tasks.soak.artifacts import ArtifactLimitExceededError, enforce_limit
 

@@ -7,6 +7,7 @@ from typing import Any
 from nanolab.tasks.heap_analysis.native import summarize
 from nanolab.tasks.soak.artifacts import (
     MAX_RECORD_BYTES,
+    TERMINAL_RESERVE,
     ArtifactLimitExceededError,
     ArtifactWriter,
     describe_artifact,
@@ -24,18 +25,19 @@ _RAW = {
     "smaps": ("smaps.txt", 8388608),
     "heap_info": ("heap-info.txt", 2097152),
 }
-_TERMINAL_RESERVE = 4096
 
 
 def _write_raw(writer: ArtifactWriter, name: str, body: bytes, run_limit: int) -> dict:
     root = writer.root
     used = enforce_limit(root.parent, run_limit)
-    if used + len(body) + _TERMINAL_RESERVE > run_limit:
+    if used + len(body) + TERMINAL_RESERVE > run_limit:
         raise ArtifactLimitExceededError(
             "native evidence exceeds cumulative run budget"
         )
     target = writer.write_blob("native", name, body)
     enforce_limit(root.parent, run_limit)
+    # Relative to the evidence root (`native/<checkpoint>-<source>.txt`), unlike
+    # the run-root-relative trim pointers; see docs/heap-analysis.md.
     return {**describe_artifact(target), "path": str(target.relative_to(root))}
 
 
@@ -95,12 +97,14 @@ def persist_native(
     }
     # Leave room in the existing 1 MiB runtime JSON record for ordinary
     # observations. Full raw mappings stay available even if the summary is huge.
-    if len(json.dumps(block).encode("utf-8")) > MAX_RECORD_BYTES // 2:
-        smaps = block.get("smaps")
-        if isinstance(smaps, dict):
-            _trim_unbounded_smaps(smaps, f"see evidence/native/{checkpoint}-smaps.txt")
+    # Serialized once, and re-measured only when the trim below changed the block.
+    size = len(json.dumps(block).encode("utf-8"))
+    smaps = block.get("smaps")
+    if size > MAX_RECORD_BYTES // 2 and isinstance(smaps, dict):
+        _trim_unbounded_smaps(smaps, f"see evidence/native/{checkpoint}-smaps.txt")
+        size = len(json.dumps(block).encode("utf-8"))
     # Only a block still over budget after that trim loses the summary itself.
-    if len(json.dumps(block).encode("utf-8")) > MAX_RECORD_BYTES // 2:
+    if size > MAX_RECORD_BYTES // 2:
         block["smaps"] = {
             "available": False,
             "error": (
@@ -117,6 +121,9 @@ def native_comparison(root: Path) -> dict:
     The report entry is a comparison, not a mapping dump: the per-mapping
     records stay in the checkpoint record and its raw artifact, so three
     embedded blocks cannot exceed the report document's own byte budget.
+    Paths inside an embedded block keep their own bases: `sources.<key>.artifact.path`
+    is relative to the run's `evidence/` directory, while the trim pointer
+    string is run-root relative; see docs/heap-analysis.md.
     """
     comparison = {}
     for checkpoint, phase in CHECKPOINTS.items():

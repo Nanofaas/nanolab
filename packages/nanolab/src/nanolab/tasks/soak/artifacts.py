@@ -24,7 +24,14 @@ class ArtifactCorruptionError(ValueError):
     """A complete evidence record is malformed and cannot be silently discarded."""
 
 
-def _encode(value: dict[str, object]) -> bytes:
+# The terminal-report space a producer must keep clear of its own writes. It is
+# deliberately not the writer's own reserve, which is `min(TERMINAL_RESERVE,
+# limit_bytes // 8)` and therefore smaller for limits under 32768 bytes.
+TERMINAL_RESERVE = 4096
+
+
+def encode_record(value: dict[str, object]) -> bytes:
+    """Encode one record exactly as `ArtifactWriter` publishes it, newline included."""
     return (
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
     ).encode("utf-8")
@@ -51,18 +58,23 @@ def measure_tree(root: Path) -> int:
     """Measure every generated file under ``root``, not only owned evidence.
 
     Build workspaces and dot-files are excluded, matching what the run actually
-    retains: the same exclusion the acceptance inventory uses.
+    retains: the same exclusion the acceptance inventory uses. Excluded
+    directories are pruned during the walk, so a build workspace costs one
+    directory entry rather than one `stat` per file beneath it, and the walk
+    never follows a symbolic link (as `Path.rglob` does not).
     """
-    return sum(
-        path.stat().st_size
-        for path in root.rglob("*")
-        if path.is_file()
-        and not path.is_symlink()
-        and not any(
-            part.startswith(("workspace-", "."))
-            for part in path.relative_to(root).parts
-        )
-    )
+    total = 0
+    pending = [str(root)]
+    while pending:
+        with os.scandir(pending.pop()) as entries:
+            for entry in entries:
+                if entry.name.startswith(("workspace-", ".")):
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(entry.path)
+                elif entry.is_file() and not entry.is_symlink():
+                    total += entry.stat().st_size
+    return total
 
 
 def enforce_limit(root: Path, limit_bytes: int) -> int:
@@ -98,7 +110,7 @@ class ArtifactWriter:
         os.close(descriptor)
         self.root = root
         self.limit_bytes = limit_bytes
-        self._reserve = min(4096, limit_bytes // 8)
+        self._reserve = min(TERMINAL_RESERVE, limit_bytes // 8)
         self._used_bytes = 0
         self._closed = False
         self._lock = Lock()
@@ -130,7 +142,7 @@ class ArtifactWriter:
         """Append one complete JSONL record, accounting for partial writes."""
         target = self._target(stream)
         target = target.with_name(target.name + ".jsonl")
-        payload = _encode(record)
+        payload = encode_record(record)
         with self._lock:
             self._check_write(len(payload))
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
@@ -154,7 +166,7 @@ class ArtifactWriter:
         target = self._target(name)
         if target.suffix != ".json":
             raise ValueError("complete JSON artifact names must end with .json")
-        payload = _encode(value)
+        payload = encode_record(value)
         with self._lock:
             self._check_write(len(payload), terminal=name == "terminal.json")
             descriptor, filename = tempfile.mkstemp(prefix=".pending-", dir=self.root)
