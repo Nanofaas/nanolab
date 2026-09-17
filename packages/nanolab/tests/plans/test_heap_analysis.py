@@ -26,9 +26,16 @@ def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
         repo_root=tmp_path,
         tool_root=tmp_path,
     )
-    tasks = workflow.compile().tasks
-    assert len(tasks) == 1
-    assert "Capture and analyze control-plane heap dumps" in tasks[0].task.title
+    titles = [task.task.title for task in workflow.compile().tasks]
+    measure = next(
+        i for i, title in enumerate(titles) if "Capture and analyze" in title
+    )
+    # Acquired before the run and released after it: preparation pushes the
+    # application images and the helper build pushes the helper, neither of which
+    # has happened yet when the workflow is compiled and both of which happen once
+    # the measuring task starts.
+    assert any("Acquire local registry" in title for title in titles[:measure])
+    assert any("Release local registry" in title for title in titles[measure + 1 :])
     assert not (tmp_path / "run").exists()
 
 

@@ -6,10 +6,12 @@ from typing import Any, Protocol, cast
 
 from sonata_engine import JournalConfig, Resource, Task, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resource
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
 from nanolab.tasks.platform import PlatformRequest, add_platform
 from nanolab.tasks.soak.owned_functions import (
     journaled_function_resource,
@@ -153,6 +155,21 @@ def build_soak_plan(
     from nanolab.tasks.soak.runtime import RunSingleVersionSoak, RuntimeOptions
 
     workflow = Workflow(workflow_id="soak")
+    # Both are acquired before the task runs, because preparation and the helper
+    # build push into the registry and build with the builder -- acquiring them
+    # inside the frozen deployment's own resources would be too late.
+    #
+    # The registry resource removes only what it created and leaves a container
+    # it found running alone, so an operator's own registry is never torn down by
+    # a run. The builder is deliberately not acquired here: a builder that can
+    # push to a local registry needs `--driver-opt network=host` at creation, and
+    # the pinned `buildx_builder_resource` passes no driver options, so it would
+    # create one that cannot publish. That stays an operator precondition.
+    registry = docker_registry_resource(
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        role="host",
+        container=REGISTRY_CONTAINER_NAME,
+    )
     workflow.add(
         RunSingleVersionSoak(
             config,
@@ -166,7 +183,8 @@ def build_soak_plan(
             if runtime_options is not None
             else RuntimeOptions(allow_diagnostic_target_stop_on_cancel=True),
             keep=lambda: workflow.keep,
-        )
+        ),
+        requires=(registry,),
     )
     return workflow
 

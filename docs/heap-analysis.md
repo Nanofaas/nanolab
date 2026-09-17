@@ -24,12 +24,16 @@ building anything, or making a network call:
 ./nanolab.sh plan packages/nanolab/scenarios-v2/memory-heap-analysis-control-plane-container.yaml
 ```
 
-`run` requires a local container environment, `docker` and `k6` on the host,
-and a `docker buildx` builder whose driver supports BuildKit attestations
-(`docker-container`, not the plain `docker` driver) reachable at
-`localhost:5000` — the build step publishes `--provenance=mode=max`, which
-the `docker` driver rejects outright, and the builder needs `network=host`
-(or an equivalent bridge) to push to the local registry. It owns its own
+`run` requires a local container environment, `docker` and `k6` on the host, and
+a `docker buildx` builder whose driver supports BuildKit attestations
+(`docker-container`, not the plain `docker` driver) and which can reach
+`localhost:5000` — the build step publishes `--provenance=mode=max`, which the
+`docker` driver rejects outright, and a `docker-container` builder has a
+`localhost` of its own, so it needs `network=host` or an equivalent bridge at
+the moment it is created. The run acquires the registry itself, and removes it
+again only if it was the run that started it; the builder stays yours, because
+creating one with the right network mode needs a driver option nanolab does not
+pass. It owns its own
 endpoints: `--environment`, `--control-plane-url` and
 `--prometheus-url` overrides are rejected, as is `--resume`/`--only`/`--from`/
 `--until` partial selection. There is no `--teardown` mode and no `--keep`:

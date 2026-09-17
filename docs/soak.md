@@ -135,6 +135,10 @@ not proof of workload capacity or acceptable retained memory. Allow up to 5 CPU
 and 2560 MiB for these three application containers, plus the registry, generator,
 observer, host, diagnostic helpers, and build tools. Native compilation has its
 own potentially substantial resource cost outside the measurement interval.
+The registry is acquired by the run under the name
+`nanofaas-e2e-registry` and published on `0.0.0.0:5000`; if you keep a registry
+of your own running, stop it before a run — a different container already bound
+to that port makes the run's own creation fail rather than adopt yours.
 
 P24 declares 100 requests/second per function (200 total) and 200 VUs. These are explicit
 initial workload inputs, not a measured saturation claim. Validate achieved
@@ -185,8 +189,9 @@ Distroless images may lack diagnostic tools. JVM capture requires compatible
 execution. Node capture requires private, verified inspector control. Provision
 and identify helpers explicitly; no placeholder helper digest is shipped.
 The helper is built at the start of each run from
-`assets/soak/diagnostic-helper.Dockerfile`, published to the registry
-preparation already uses, and pinned to the digest that build reported. No
+`assets/soak/diagnostic-helper.Dockerfile`, published to the run's own registry
+— acquired before the run and, if the run started it, removed again when it ends
+— and pinned to the digest that build reported. No
 scenario carries one: a digest names bytes in whichever registry built them, so
 it is unpullable elsewhere and a prune breaks it even locally. The inputs stay
 pinned in `assets/soak/mat.lock.json` and `assets/soak/helper-bases.lock.json`.
