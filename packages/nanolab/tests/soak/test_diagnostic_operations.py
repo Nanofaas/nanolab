@@ -7,6 +7,13 @@ Every test of them drove a hand-written fake helper, so no test ever crossed the
 production gate -- the same shape as the six blockers the first real run found.
 These tests tie the declarations together, and hold the text-reading validators
 against real JDK 25 output.
+
+The fixtures below are host captures, which is what these validators can be
+tested against here. Both readings were also confirmed through the real
+provisioner and the pinned helper against a container JVM as PID 1:
+`native_memory` captured categories with the flag and reported
+"is not a complete reading" with the flag absent, and `histogram` captured
+105 KB of real rows. That harness is scratch, not checked in.
 """
 
 from __future__ import annotations
