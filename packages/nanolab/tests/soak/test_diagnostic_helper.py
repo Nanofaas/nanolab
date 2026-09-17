@@ -1190,3 +1190,72 @@ def test_cleanup_failure_keeps_the_original_interrupt(monkeypatch, tmp_path):
         owner.read_memory(include_heap_info=True)
     assert raised.value is interrupted
     assert any("cleanup unconfirmed" in note for note in interrupted.__notes__)
+
+
+def test_failed_procfs_read_has_a_distinct_state(monkeypatch):
+    module = worker()
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+
+    def read(path, limit):
+        if path.name == "smaps":
+            raise ValueError("procfs evidence exceeds read bound")
+        return "body"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "memory_deadline_s": time.monotonic() + 30,
+        }
+    )
+    assert result["completion"]["smaps"] == "failed"
+    assert result["completion"]["status"] == "completed"
+    assert "exceeds read bound" in result["errors"]["smaps"]
+
+
+@pytest.mark.parametrize(
+    ("code", "exception_name"),
+    [
+        (None, "CommandCompletionUnresolved"),
+        (-9, "CommandCompletionUnresolved"),
+        (1, "CommandCompletedError"),
+        (0, None),
+    ],
+)
+def test_command_exit_code_preserves_completion_semantics(
+    monkeypatch, tmp_path, code, exception_name
+):
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module = worker()
+    result = processes.OwnedCommandResult(
+        returncode=code,
+        forced_stop=False,
+        reaped=True,
+        ended_s=1.0,
+    )
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            kwargs["log_path"].write_text("acknowledged output")
+
+        def run(self):
+            return result
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    if exception_name is None:
+        assert (
+            module.command(
+                ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+            )
+            == "acknowledged output"
+        )
+    else:
+        with pytest.raises(getattr(module, exception_name)):
+            module.command(
+                ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+            )

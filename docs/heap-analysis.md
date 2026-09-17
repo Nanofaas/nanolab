@@ -196,6 +196,13 @@ The host deadline remains the outer bound; a late worker may return missing
 readings or be interrupted, and unresolved JVM completion follows owned-target
 cleanup. No timeout representation alone guarantees timely acknowledgement.
 
+For procfs sources, `not_started` means the deadline prevented the attempt,
+`failed` means the attempted read raised an error, and `completed` means the
+read returned. Source availability and parsing errors are reported separately.
+For JVM commands, completion acknowledges the command lifetime: an ordinary
+positive error exit can be completed with an error; a missing or signal exit
+does not establish completion.
+
 ## Interpreting the result
 
 Three different things can each independently look like "something is wrong,"

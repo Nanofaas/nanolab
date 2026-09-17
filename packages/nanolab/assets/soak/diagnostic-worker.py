@@ -138,8 +138,9 @@ def memory(cfg):
         try:
             if opt_in and time.monotonic() >= deadline:
                 raise TimeoutError("memory collection deadline exhausted")
-            state = "completed"
+            state = "failed"
             result[name] = read_proc(Path("/proc/1") / name, limit)
+            state = "completed"
         except (OSError, ValueError) as error:
             result[name] = None
             message = f"{type(error).__name__}: {error}"
@@ -237,6 +238,9 @@ def command(
         or result.cancelled
         or result.timed_out
         or result.quota_exceeded
+        # A missing returncode means the child never reported an exit status,
+        # which is no proof that the in-JVM command finished.
+        or result.returncode is None
         # A negative returncode means the child died from a signal (a killed
         # helper container, the kernel OOM killer), which is no proof at all
         # that the in-JVM command finished.
