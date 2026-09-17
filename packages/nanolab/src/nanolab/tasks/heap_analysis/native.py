@@ -15,16 +15,28 @@ from typing import Any
 LARGE_MAPPING_BYTES = 33554432
 
 _KB = re.compile(r"^(\w+):\s+(\d+) kB$", re.MULTILINE)
-# JDK 25 G1, the collector this role actually runs (runtime_options is empty
-# and the helper is eclipse-temurin:25-jdk, which diagnostic_helper refuses
-# out of unless both versions start with "25."). Real output, from
-# `jcmd <pid> GC.heap_info` on 25.0.4:
+# `GC.heap_info` prints a different shape per collector, and the collector is
+# chosen by the IMAGE's JVM_TUNING, not by the scenario: control-plane variants
+# default to `-XX:+UseSerialGC -XX:TieredStopAtLevel=1` and others build with
+# G1 (see nanolab/images/control_plane_variants.py). A host capture cannot tell
+# you what the image runs -- the first real heap-analysis run recorded Serial,
+# which a G1-only pattern matched on the host and not in the container. Both
+# shapes below are real JDK 25.0.4 captures.
+#
+# G1 prints one summary line with an explicit commitment:
 #   garbage-first heap   total reserved 1048576K, committed 264192K, used 27268K [...]
 # `total reserved` is a reservation, not a commitment, so it is deliberately
 # not read: committed is reported only when the output says `committed`.
 _HEAP = re.compile(
     r"garbage-first heap\s+total reserved \d+K,\s+committed\s+(\d+)K,"
     r"\s+used\s+(\d+)K"
+)
+# Serial prints one line per generation, where `total` is that space's
+# committed capacity -- the quantity G1 spells `committed`:
+#   DefNew     total 20992K, used 2955K [...]
+#   Tenured    total 46480K, used 31915K [...]
+_SERIAL_SPACES = re.compile(
+    r"^(DefNew|Tenured)\s+total (\d+)K,\s+used (\d+)K", re.MULTILINE
 )
 # Verified on JDK 25.0.4 (build 25.0.4+7-1-24.04-Ubuntu): no collector's
 # GC.heap_info output carries a Metaspace line (`grep -c Metaspace` is 0 for
@@ -47,16 +59,30 @@ def _kilobytes(value: str) -> int:
     return int(value) * 1024
 
 
+def _heap_committed_used(text: str) -> dict[str, int] | None:
+    """Read committed and used whichever shape this collector prints, or nothing.
+
+    A shape that is not recognized yields nothing rather than a partial total:
+    for Serial both generations are required, so a read cut mid-output cannot
+    publish a heap figure that looks complete.
+    """
+    summary = _HEAP.search(text)
+    if summary:
+        return {"committed": _kilobytes(summary[1]), "used": _kilobytes(summary[2])}
+    spaces = _SERIAL_SPACES.findall(text)
+    if len(spaces) != 2:
+        return None
+    return {
+        "committed": sum(_kilobytes(total) for _, total, _ in spaces),
+        "used": sum(_kilobytes(used) for _, _, used in spaces),
+    }
+
+
 def parse_heap_info(text: str) -> dict[str, dict[str, int] | None]:
     """Normalize committed/used to bytes; unrecognized output stays unavailable."""
-    heap = _HEAP.search(text)
     metaspace = _METASPACE.search(text)
     return {
-        "heap": (
-            {"committed": _kilobytes(heap[1]), "used": _kilobytes(heap[2])}
-            if heap
-            else None
-        ),
+        "heap": _heap_committed_used(text),
         "metaspace": (
             {
                 "committed": _kilobytes(metaspace[2]),

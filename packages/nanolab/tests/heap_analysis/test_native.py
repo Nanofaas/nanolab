@@ -9,13 +9,13 @@ from nanolab.tasks.heap_analysis.native import (
 )
 
 # Real capture: `jcmd <pid> GC.heap_info` on JDK 25.0.4 (build
-# 25.0.4+7-1-24.04-Ubuntu), G1 at -Xms256m -Xmx1g. This is the production
-# shape: the role sets runtime_options: [] and G1 is the JVM default, and the
-# helper runs eclipse-temurin:25-jdk. Reproduce it with a single-file Java
-# program that sleeps, run as
-# `java -Xms256m -Xmx1g -XX:+UseG1GC Prog.java`, then `jcmd <pid> GC.heap_info`
-# against it. Never hand-write this text: an invented fixture is what let a
-# parser that matched no real JDK 25 output pass review.
+# 25.0.4+7-1-24.04-Ubuntu), G1 at -Xms256m -Xmx1g. G1 is what some
+# control-plane variants build with; Serial below is the default. Which one
+# applies is decided by the IMAGE's JVM_TUNING, never by the scenario, so both
+# shapes need covering. Reproduce this one with a single-file Java program that
+# sleeps, run as `java -Xms256m -Xmx1g -XX:+UseG1GC Prog.java`, then
+# `jcmd <pid> GC.heap_info` against it. Never hand-write this text: an invented
+# fixture is what let a parser matching no real JDK 25 output pass review.
 HEAP_INFO = (
     "garbage-first heap   total reserved 1048576K, committed 264192K, "
     "used 27268K [0x00000000c0000000, 0x0000000100000000)\n"
@@ -26,22 +26,44 @@ HEAP_INFO = (
 # before the heap line, and the worker returns the child's stdout verbatim.
 WORKER_HEAP_INFO = "1:\n" + HEAP_INFO
 
-# Real capture: `jcmd <pid> GC.heap_info` on the same JDK with -XX:+UseSerialGC.
-# No `garbage-first heap` line exists in it, so nothing parses. This is the
-# shape a changed format would take.
+# Real capture, and the shape production actually produces. The control-plane
+# image is built with `-XX:+UseSerialGC -XX:TieredStopAtLevel=1`
+# (nanolab/images/control_plane_variants.py), so its GC.heap_info prints one
+# line per generation instead of a G1 summary. Taken verbatim from a real run's
+# evidence/native/before-baseline-heap-info.txt, pid header included because
+# that header is what the worker returns.
 SERIAL_HEAP_INFO = (
-    "DefNew     total 78656K, used 28022K "
-    "[0x00000000c0000000, 0x00000000c5550000, 0x00000000d5550000)\n"
-    " eden space 69952K,  40% used "
-    "[0x00000000c0000000, 0x00000000c1b5d810, 0x00000000c4450000)\n"
-    " from space 8704K,   0% used "
-    "[0x00000000c4450000, 0x00000000c4450000, 0x00000000c4cd0000)\n"
-    " to   space 8704K,   0% used "
-    "[0x00000000c4cd0000, 0x00000000c4cd0000, 0x00000000c5550000)\n"
-    "Tenured    total 174784K, used 1156K "
-    "[0x00000000d5550000, 0x00000000e0000000, 0x0000000100000000)\n"
-    " the  space 174784K,   0% used "
-    "[0x00000000d5550000, 0x00000000d5671178, 0x00000000e0000000)\n"
+    "1:\n"
+    "DefNew     total 20992K, used 2955K "
+    "[0x00000000d3200000, 0x00000000d48c0000, 0x00000000e2150000)\n"
+    " eden space 18688K,   3% used "
+    "[0x00000000d3200000, 0x00000000d32a2c88, 0x00000000d4440000)\n"
+    " from space 2304K, 100% used "
+    "[0x00000000d4440000, 0x00000000d4680000, 0x00000000d4680000)\n"
+    " to   space 2304K,   0% used "
+    "[0x00000000d4680000, 0x00000000d4680000, 0x00000000d48c0000)\n"
+    "Tenured    total 46480K, used 31915K "
+    "[0x00000000e2150000, 0x00000000e4eb4000, 0x0000000100000000)\n"
+    " the  space 46480K,  68% used "
+    "[0x00000000e2150000, 0x00000000e407af28, 0x00000000e4eb4000)\n"
+)
+
+# Real capture: the same JDK with -XX:+UseParallelGC. It has neither a
+# `garbage-first heap` line nor a DefNew/Tenured pair, so nothing parses. This
+# is the shape a collector this code does not know would take.
+PARALLEL_HEAP_INFO = (
+    "PSYoungGen      total 76288K, used 31570K "
+    "[0x00000000eab00000, 0x00000000f0000000, 0x0000000100000000)\n"
+    " eden space 65536K, 48% used "
+    "[0x00000000eab00000,0x00000000ec9d49c8,0x00000000eeb00000)\n"
+    " from space 10752K, 0% used "
+    "[0x00000000ef580000,0x00000000ef580000,0x00000000f0000000)\n"
+    " to   space 10752K, 0% used "
+    "[0x00000000eeb00000,0x00000000eeb00000,0x00000000ef580000)\n"
+    "ParOldGen       total 175104K, used 1156K "
+    "[0x00000000c0000000, 0x00000000cab00000, 0x00000000eab00000)\n"
+    " object space 175104K, 0% used "
+    "[0x00000000c0000000,0x00000000c0121178,0x00000000cab00000)\n"
 )
 
 SMAPS = """\
@@ -85,11 +107,35 @@ def test_heap_info_marks_unrecognized_output_unavailable_instead_of_zero():
 
 def test_present_but_unrecognized_heap_info_publishes_an_error():
     """A format change must be visible, not a silent unavailable."""
-    block = summarize({"heap_info": SERIAL_HEAP_INFO, "errors": {}})["heap_info"]
+    block = summarize({"heap_info": PARALLEL_HEAP_INFO, "errors": {}})["heap_info"]
     assert block["available"] is False
     assert "unrecognized" in block["error"]
     assert "heap" not in block
     assert block.get("metaspace") is None
+
+
+def test_real_serial_capture_round_trips_to_available_bytes():
+    """SerialGC is the control-plane default, so this is the production shape.
+
+    Both generations are summed, and `total` is each space's committed
+    capacity -- the quantity G1 spells `committed`. The first real run recorded
+    Serial and published an "unrecognized" error, because only G1 was matched.
+    """
+    block = summarize({"heap_info": SERIAL_HEAP_INFO, "errors": {}})["heap_info"]
+
+    assert block["available"] is True
+    assert block["heap"]["committed"] == (20992 + 46480) * 1024
+    assert block["heap"]["used"] == (2955 + 31915) * 1024
+    assert block["metaspace"] is None
+
+
+@pytest.mark.parametrize("missing", ["DefNew", "Tenured"])
+def test_a_partial_serial_capture_publishes_no_heap_total(missing):
+    """Half the generations is an incomplete reading, not half a heap."""
+    text = "\n".join(
+        line for line in SERIAL_HEAP_INFO.splitlines() if not line.startswith(missing)
+    )
+    assert parse_heap_info(text)["heap"] is None
 
 
 def test_smaps_reports_each_mapping_and_keeps_categories_separate():
