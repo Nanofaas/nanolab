@@ -15,7 +15,7 @@ from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskEx
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.tasks.soak.local_resources import (
+from nanolab.tasks.local_resources import (
     helper_builder_resource,
     local_registry_resource,
 )

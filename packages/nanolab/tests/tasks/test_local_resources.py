@@ -13,7 +13,7 @@ from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import TaskResult
 
 from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
-from nanolab.tasks.soak.local_resources import (
+from nanolab.tasks.local_resources import (
     HELPER_BUILDER,
     helper_builder_resource,
     local_registry_resource,

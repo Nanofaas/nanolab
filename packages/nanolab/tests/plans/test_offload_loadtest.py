@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import yaml
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.environment import EnvironmentConfig
@@ -17,6 +16,7 @@ from nanolab.plans.offload_loadtest import (
     EvaluateOffloadConservation,
     build_offload_loadtest_plan,
 )
+from nanolab.tasks.local_resources import local_registry_resource
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -104,8 +104,8 @@ def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         offload_loadtest_plan,
-        "docker_registry_resource",
-        lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),
+        "local_registry_resource",
+        lambda **kwargs: local_registry_resource(**kwargs, ready=lambda: True),
     )
 
 

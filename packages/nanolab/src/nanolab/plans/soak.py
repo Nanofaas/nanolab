@@ -10,12 +10,12 @@ from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskEx
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resource
-from nanolab.tasks.platform import PlatformRequest, add_platform
-from nanolab.tasks.soak.local_resources import (
+from nanolab.tasks.local_resources import (
     HELPER_BUILDER,
     helper_builder_resource,
     local_registry_resource,
 )
+from nanolab.tasks.platform import PlatformRequest, add_platform
 from nanolab.tasks.soak.owned_functions import (
     journaled_function_resource,
 )

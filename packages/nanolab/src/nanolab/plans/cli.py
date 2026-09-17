@@ -19,7 +19,6 @@ from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskEx
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
-from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.vm.ssh import find_ssh_private_key_path
 
 from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
@@ -57,6 +56,7 @@ from nanolab.tasks.deployment import (
     REGISTRY_CONTAINER_NAME,
 )
 from nanolab.tasks.execution import ExecutionRole
+from nanolab.tasks.local_resources import local_registry_resource
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 from nanolab.tasks.vm.sync import repo_sync_ssh_rsh
@@ -450,7 +450,7 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
         runtime_config_namespace=RUNTIME_CONFIG_NAMESPACE if local else None,
     )
     registry = (
-        docker_registry_resource(
+        local_registry_resource(
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="host",
             container=REGISTRY_CONTAINER_NAME,

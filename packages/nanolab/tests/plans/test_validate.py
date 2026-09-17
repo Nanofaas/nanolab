@@ -5,13 +5,13 @@ import pytest
 import yaml
 from sonata_engine import Workflow
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import list_functions
 from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.plans.validate import build_validate_plan
+from nanolab.tasks.local_resources import local_registry_resource
 
 DEPLOYMENT_PAYLOAD = '{"spec":{"template":{"spec":{"containers":[{"resources":{}}]}}}}'
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -411,8 +411,8 @@ def test_container_validation_owns_an_isolated_compose_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nanolab.plans.validate.docker_registry_resource",
-        lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),
+        "nanolab.plans.validate.local_registry_resource",
+        lambda **kwargs: local_registry_resource(**kwargs, ready=lambda: True),
     )
     host = RecordingExecutor()
     plan = build_validate_plan(
@@ -440,8 +440,8 @@ def test_async_load_enables_async_modules_on_the_compose_control_plane(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        "nanolab.plans.validate.docker_registry_resource",
-        lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),
+        "nanolab.plans.validate.local_registry_resource",
+        lambda **kwargs: local_registry_resource(**kwargs, ready=lambda: True),
     )
     # A checkout with no payloads/ directory keeps the run offline-friendly:
     # async_load still enables the modules on the control plane, but there is

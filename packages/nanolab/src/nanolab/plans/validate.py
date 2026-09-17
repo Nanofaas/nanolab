@@ -12,7 +12,6 @@ from pathlib import Path
 
 from sonata_engine import Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -25,6 +24,7 @@ from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_ar
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.http_function import HttpFunctionExpectation
+from nanolab.tasks.local_resources import local_registry_resource
 from nanolab.tasks.validate import (
     AsyncCheck,
     EnvelopeCheck,
@@ -307,7 +307,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         )
     requires = ()
     if not kubernetes:
-        registry = docker_registry_resource(
+        registry = local_registry_resource(
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="host",
             container=REGISTRY_CONTAINER_NAME,
