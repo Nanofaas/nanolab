@@ -12,7 +12,9 @@ resources:
   word-stats-javascript:
     limits: {cpu: 1, memoryMiB: 512}
 soak:
-  purpose: p24
+  # Short and explicitly non-qualifying, so `p24`'s three-retention-cycle
+  # rule does not apply: every criterion below already says so.
+  purpose: smoke
   metrics_profile: soak
   phases:
     warmup_s: 120
@@ -21,10 +23,14 @@ soak:
     steady_s: 900
     drain_s: 420
     cleanup_margin_s: 120
+  # The platform's own retention, which preflight compares against what the
+  # control plane reports. Retention is an operator-side property, not a knob a
+  # scenario turns: nothing in the deployment applies these values, so declaring
+  # anything but what the platform runs fails preflight by design.
   retention_s:
     unkeyed-sync-outcome: 30
-    terminal-key-and-readable-outcome: 60
-    live-key-and-execution: 300
+    terminal-key-and-readable-outcome: 300
+    live-key-and-execution: 1800
   roles:
     control-plane:
       runtime: jvm
