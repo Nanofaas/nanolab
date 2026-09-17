@@ -1696,6 +1696,42 @@ def test_the_shipped_nmt_spikes_provision_and_reserve(tmp_path, monkeypatch, sce
     value.writer.close()
 
 
+def test_the_first_prerequisite_reservation_precedes_its_ownership_root(tmp_path):
+    """The reservation hook runs before the factory creates what it owns.
+
+    Both owned subtrees are charged at their full reservation rather than their
+    actual use, so the hook subtracts them from the run total. Before the first
+    lifetime is acquired neither may exist: the factory creates its ownership
+    root inside `__call__`, which is the acquisition the hook precedes. Measuring
+    an absent subtree is what made every soak run fail at prerequisites.
+    """
+    import nanolab.tasks.soak.runtime as module
+
+    value = prepared(tmp_path, scenario="memory-soak-p24-nmt-spike-container.yaml")
+    options = module.RuntimeOptions(
+        prerequisite_inputs=module._freeze_prerequisite_inputs(value)
+    )
+    _, _, supervision = module._make_runtime_prerequisites(
+        value, options, host_bindings(), tmp_path
+    )
+    owned = value.evidence_dir / "prerequisite-platforms"
+    parent = value.evidence_dir / "prerequisites"
+    assert not owned.exists()
+
+    supervision["before_fork"](
+        "71374cc5bfd048038e9a2f5ee50b9ee4",
+        ArtifactWriter(parent, supervision["parent_artifact_bytes"]),
+    )
+
+    reservation = json.loads(
+        (parent / "reservation-71374cc5bfd048038e9a2f5ee50b9ee4.json").read_text()
+    )
+    assert reservation["schema"] == "nanolab-soak-prerequisite-reservation-v1"
+    assert reservation["other_run_artifact_bytes"] >= 0
+    assert not owned.exists()
+    value.writer.close()
+
+
 @pytest.mark.parametrize("kind", ["interrupt", "event"])
 def test_capture_abort_cancels_exact_remote_helper(kind):
     from threading import Event

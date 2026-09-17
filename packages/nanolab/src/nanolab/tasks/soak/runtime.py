@@ -380,8 +380,8 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
         # already charged at their FULL reservations, never actual-use/refunded.
         other = (
             _artifact_bytes(run_dir)
-            - _artifact_bytes(factory_root)
-            - _artifact_bytes(parent_root)
+            - _owned_bytes(factory_root)
+            - _owned_bytes(parent_root)
         )
         next_reserved = reserved + lifetime_quota + recovery_quota
         if other + parent_quota + next_reserved > prepared.config.artifact_limit_bytes:
@@ -494,6 +494,18 @@ def _validate_natural_samples(config, target: Target, rows, phase: str) -> None:
 
 
 _artifact_bytes = measure_tree
+
+
+def _owned_bytes(root: Path) -> int:
+    """Measure an owned subtree, which is absent until its first lifetime.
+
+    The reservation hook runs before the factory's first acquisition creates its
+    ownership root, and a run directory that has not had a prerequisite yet has
+    no parent subtree either. A missing subtree contributes nothing to the run
+    total, so charging it zero is what the subtraction above means.
+    """
+    return 0 if not root.exists() else _artifact_bytes(root)
+
 
 # The natural checkpoints a run freezes and reads from, in the order they happen.
 # Each one names both the window its samples were taken over and the phase its
