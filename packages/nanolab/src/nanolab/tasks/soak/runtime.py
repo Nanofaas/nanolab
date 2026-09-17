@@ -571,7 +571,7 @@ def _diagnostic_resource_inputs(prepared, *, allow_target_stop: bool) -> dict:
 
 
 def _with_built_helper(
-    config: SoakConfig, *, run_dir: Path, repo_root: Path, options: RuntimeOptions
+    config: SoakConfig, *, run_dir: Path, options: RuntimeOptions
 ) -> SoakConfig:
     """Return the protocol with this run's freshly built helper digest in it.
 
@@ -591,7 +591,6 @@ def _with_built_helper(
         return config
     digest = build_helper_image(
         HelperImageRequest(
-            repo_root=repo_root,
             run_dir=run_dir,
             run_id=run_dir.name,
             registry=options.preparation.registry.split("/", 1)[0] + "/nanolab",
@@ -1842,7 +1841,6 @@ class RunSingleVersionSoak(Task):
             soak = _with_built_helper(
                 self.config.soak,
                 run_dir=self.run_dir,
-                repo_root=self.repo_root,
                 options=self.options,
             )
             if prepared is None:

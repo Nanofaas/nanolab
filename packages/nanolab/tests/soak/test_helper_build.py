@@ -10,6 +10,8 @@ import pytest
 
 from nanolab.tasks.soak.helper_build import (
     BASES_LOCK,
+    BUILD_CONTEXT,
+    DOCKERFILE,
     MAT_LOCK,
     HelperImageError,
     HelperImageRequest,
@@ -20,18 +22,10 @@ from nanolab.tasks.soak.helper_build import (
 DIGEST = "sha256:" + "c" * 64
 
 
-def _repo(tmp_path: Path) -> Path:
-    context = tmp_path / "packages" / "nanolab" / "assets" / "soak"
-    context.mkdir(parents=True)
-    (context / "diagnostic-helper.Dockerfile").write_text("FROM scratch\n")
-    return tmp_path
-
-
 def _request(tmp_path: Path, **overrides: object) -> HelperImageRequest:
     run_dir = tmp_path / "run"
     run_dir.mkdir(exist_ok=True)
     fields: dict[str, object] = {
-        "repo_root": _repo(tmp_path),
         "run_dir": run_dir,
         "run_id": "heap-analysis-abc123",
         "registry": "localhost:5000/nanolab",
@@ -131,17 +125,20 @@ def test_request_rejects_unusable_inputs(tmp_path, field, value, message) -> Non
         _request(tmp_path, **{field: value})
 
 
-def test_request_rejects_a_context_without_the_dockerfile(tmp_path) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    with pytest.raises(ValueError, match="Dockerfile is missing"):
-        HelperImageRequest(
-            repo_root=tmp_path,
-            run_dir=run_dir,
-            run_id="heap-analysis-abc123",
-            registry="localhost:5000/nanolab",
-            builder="nanolab-heap-analysis",
-        )
+def test_the_build_context_resolves_from_this_package(tmp_path) -> None:
+    """The context must be nanolab's own package, wherever it is checked out.
+
+    nanolab was once a subdirectory of the nanoFaaS checkout, so a
+    caller-supplied repo_root was correct then. Extraction to a standalone
+    workspace left that root naming a path with no `packages/nanolab` in it,
+    and every test in this file still passed because each one built its own
+    fake context -- so the production path was never the path under test. A
+    real `run` is what found it. This pins the real, derived context instead.
+    """
+    _request(tmp_path)  # raises if the derived context has no Dockerfile
+
+    assert (BUILD_CONTEXT / DOCKERFILE).is_file()
+    assert BUILD_CONTEXT.parts[-2:] == ("packages", "nanolab")
 
 
 def _soak_config(**diagnostics: object):
@@ -174,7 +171,6 @@ def _stamp(tmp_path: Path, config, **options: object):
     return _with_built_helper(
         config,
         run_dir=run_dir,
-        repo_root=_repo(tmp_path),
         options=RuntimeOptions(**options),  # type: ignore[arg-type]
     )
 

@@ -807,7 +807,6 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
         # a digest that only exists in the builder's own registry.
         helper_image = self.options.helper_image or build_helper_image(
             HelperImageRequest(
-                repo_root=self.repo_root,
                 run_dir=run_dir,
                 run_id=run_dir.name,
                 registry=preparation.registry.split("/", 1)[0] + "/nanolab",

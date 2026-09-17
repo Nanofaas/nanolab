@@ -23,8 +23,14 @@ from threading import Event
 from nanolab.tasks.soak.processes import run_owned_command
 
 _DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
-# Same repo-relative asset lookup mat.py uses for its own lock file.
-_ASSETS = Path(__file__).resolve().parents[4] / "assets" / "soak"
+# The helper is built from this package, resolved from this file rather than
+# from a caller-supplied checkout root. nanolab once lived at
+# `packages/nanolab` *inside* the nanoFaaS checkout, where a repo_root-relative
+# lookup was correct; after the extraction to a standalone workspace that path
+# exists only under nanolab's own root, and nothing noticed until a real `run`
+# tried to build. Same derivation the asset lookup below already uses.
+BUILD_CONTEXT = Path(__file__).resolve().parents[4]
+_ASSETS = BUILD_CONTEXT / "assets" / "soak"
 MAT_LOCK = _ASSETS / "mat.lock.json"
 BASES_LOCK = _ASSETS / "helper-bases.lock.json"
 DOCKERFILE = "assets/soak/diagnostic-helper.Dockerfile"
@@ -39,7 +45,6 @@ class HelperImageError(RuntimeError):
 class HelperImageRequest:
     """One run's helper build: where to publish it and what to build it from."""
 
-    repo_root: Path
     run_dir: Path
     run_id: str
     registry: str
@@ -56,9 +61,8 @@ class HelperImageRequest:
             raise ValueError("run_id must be a tag-safe identifier")
         if not self.registry or re.search(r"\s|@|://", self.registry):
             raise ValueError("registry must be an image repository prefix, not a URL")
-        context = self.repo_root / "packages" / "nanolab"
-        if not (context / DOCKERFILE).is_file():
-            raise ValueError(f"helper Dockerfile is missing under {context}")
+        if not (BUILD_CONTEXT / DOCKERFILE).is_file():
+            raise ValueError(f"helper Dockerfile is missing under {BUILD_CONTEXT}")
         if not self.run_dir.is_dir():
             raise ValueError("run_dir must be an existing directory")
 
@@ -151,7 +155,7 @@ def build_helper_image(
     argv.append(".")
     result = run_owned_command(
         argv,
-        cwd=request.repo_root / "packages" / "nanolab",
+        cwd=BUILD_CONTEXT,
         env={"PATH": "/usr/bin:/bin:/usr/local/bin", "DOCKER_BUILDKIT": "1"},
         log_path=(request.run_dir / "helper-image-build.log").absolute(),
         timeout_s=request.timeout_s,
