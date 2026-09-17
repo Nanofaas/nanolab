@@ -44,6 +44,7 @@ remaining = cfg['output_limit_bytes']
 stop_at = None
 kill_at = None
 cleanup_at = None
+descendants_at = None
 final_window_s = cfg['stop_timeout_s'] * .3
 sent_interrupt = False
 
@@ -188,10 +189,20 @@ try:
                 result['returncode'] = code
                 if cleanup_at is None:
                     cleanup_at = now + cfg['stop_timeout_s'] * .55
-                # After the leader exits, all remaining directly adopted children
-                # belong to this command, regardless of session/process group.
-                for pid in children():
-                    result['forced_stop'] |= owned_signal(pid, signal.SIGKILL)
+                if descendants_at is None:
+                    # This supervisor is a subreaper, so `children()` here holds
+                    # whatever the leader orphaned -- including a single-use
+                    # helper that is *designed* to stop once the leader exits
+                    # (Gradle's `--no-daemon` daemon announces exactly that).
+                    # SIGKILLing it in the same iteration the leader exits calls
+                    # a clean build a forced stop. Give adopted children a
+                    # bounded grace to leave on their own; whatever is still
+                    # alive after it is killed and confirmed as before, so
+                    # `forced_stop` keeps meaning something had to be forced.
+                    descendants_at = now + cfg['stop_timeout_s'] * .3
+                elif now >= descendants_at:
+                    for pid in children():
+                        result['forced_stop'] |= owned_signal(pid, signal.SIGKILL)
             elif now >= deadline and stop_at is None:
                 result['timed_out'] = True
                 begin_stop(cfg['stop_timeout_s'])
