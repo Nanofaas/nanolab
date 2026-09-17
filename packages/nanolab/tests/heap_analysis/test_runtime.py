@@ -1311,3 +1311,40 @@ def test_observation_budget_precheck_measures_the_published_encoding(
     session._config.artifact_limit_bytes = 500_000 + payload + 4096 + 64
 
     assert session.observe("natural-drain").is_file()
+
+
+def test_local_wiring_creates_the_run_root_before_building_the_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The helper build writes into the run root, so the root must exist first.
+
+    A real `run` failed here: nothing created the run directory before the
+    build, and every test of this wiring injected `helper_image`, which skips
+    the build entirely -- so the ordering was never the thing under test. This
+    asks the build what it actually saw.
+    """
+    import nanolab.tasks.heap_analysis.runtime as heap_runtime
+
+    observed: list[tuple[Path, bool]] = []
+
+    def stop_at_the_build(request: Any) -> str:
+        observed.append((request.run_dir, request.run_dir.is_dir()))
+        raise RuntimeError("stop here: the build's own inputs are not the subject")
+
+    monkeypatch.setattr(heap_runtime, "build_helper_image", stop_at_the_build)
+    run_dir = tmp_path / "run"  # deliberately NOT created
+
+    task = RunControlPlaneHeapAnalysis(
+        three_role_scenario(),
+        bindings=None,
+        run_dir=run_dir,
+        repo_root=tmp_path,
+        tool_root=tmp_path,
+        options=HeapAnalysisOptions(),
+    )
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        task._local_wiring(run_dir)
+
+    assert observed == [(run_dir, True)]
+    assert run_dir.is_dir()

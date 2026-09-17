@@ -800,6 +800,11 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
         from nanolab.tasks.soak.runtime import create_local_deployment
         from nanolab.tasks.soak.teardown import cleanup_timeout_s
 
+        # The helper build writes its log and metadata into the run root, and it
+        # runs before prepare_soak does anything that would create it. The CLI's
+        # preflight already admitted this root (an empty directory passes
+        # require_unused_run_dir), so creating it here cannot mask a collision.
+        run_dir.mkdir(parents=True, exist_ok=True)
         preparation = self.options.preparation
         # Build the helper first: prepare_soak needs its digest in the
         # diagnostic policy, and MAT needs the same one later. Freezing it here
