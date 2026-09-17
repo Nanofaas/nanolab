@@ -26,7 +26,15 @@ _RECEIPT_BYTES = 65536
 # Membership means "a scenario may declare this name", not "a run can execute
 # it" -- LOCAL_HELPER_OPERATIONS is the latter.
 OPERATION_VOCABULARY = frozenset(
-    ("gc", "histogram", "heap_dump", "jfr", "native_memory")
+    (
+        "gc",
+        "histogram",
+        "heap_dump",
+        "jfr",
+        "native_memory",
+        "native_memory_baseline",
+        "native_memory_diff",
+    )
 )
 # What the pinned local helper can actually dispatch, per runtime, and the one
 # declaration the provisioner receipt, the runtime gate and the worker all
@@ -39,7 +47,16 @@ OPERATION_VOCABULARY = frozenset(
 # advertising it here would provision a run that fails at its first capture.
 # `histogram` and `native_memory` are text readings of the target JVM.
 LOCAL_HELPER_OPERATIONS: Mapping[str, frozenset[str]] = {
-    "jvm": frozenset(("gc", "histogram", "heap_dump", "native_memory")),
+    "jvm": frozenset(
+        (
+            "gc",
+            "histogram",
+            "heap_dump",
+            "native_memory",
+            "native_memory_baseline",
+            "native_memory_diff",
+        )
+    ),
     "node": frozenset(("gc", "heap_dump")),
 }
 
@@ -511,6 +528,12 @@ class JvmDiagnosticAdapter(_RuntimeAdapter):
             # what the worker dispatches, and `summary` is what reads without a
             # baseline.
             "native_memory": ("VM.native_memory", "summary"),
+            # The mark the diff is measured from lives inside the target JVM, so
+            # this one is only useful taken at the baseline checkpoint and the
+            # diff only meaningful in the same incarnation -- which the target's
+            # process_started_at pins for the whole run.
+            "native_memory_baseline": ("VM.native_memory", "baseline"),
+            "native_memory_diff": ("VM.native_memory", "summary.diff"),
             "heap_dump": ("GC.heap_dump", str(output / "capture.hprof")),
             "jfr": (
                 "JFR.dump",

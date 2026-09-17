@@ -15,7 +15,15 @@ MetricOperation = Literal[
     "maximum", "return_to_reference", "growth_review", "expected_zero"
 ]
 CriterionPhase = Literal["baseline", "steady", "drain", "diagnostic"]
-DiagnosticOperation = Literal["gc", "histogram", "heap_dump", "jfr", "native_memory"]
+DiagnosticOperation = Literal[
+    "gc",
+    "histogram",
+    "heap_dump",
+    "jfr",
+    "native_memory",
+    "native_memory_baseline",
+    "native_memory_diff",
+]
 
 
 class _StrictModel(BaseModel):
@@ -171,9 +179,18 @@ class Criterion(_StrictModel):
 
 
 class DiagnosticPolicy(_StrictModel):
-    """Bound diagnostic work and declare how collection completion is observed."""
+    """Bound diagnostic work and declare how collection completion is observed.
+
+    Two checkpoints declare operations: the baseline window, and the final
+    drain. The second is where a difference is measured from the first, so the
+    same reading declared in both is the point of the split rather than a
+    duplication. Their budgets are shared and run-wide.
+    """
 
     operations: dict[Text, list[DiagnosticOperation]]
+    baseline_operations: dict[Text, list[DiagnosticOperation]] = Field(
+        default_factory=dict
+    )
     timeout_s: PositiveNumber
     max_dumps: Annotated[int, Field(ge=0)]
     max_dump_bytes: Annotated[int, Field(ge=0)]
@@ -183,17 +200,22 @@ class DiagnosticPolicy(_StrictModel):
 
     @model_validator(mode="after")
     def validate_operations(self) -> Self:
-        """Require named completion evidence: a command exiting proves nothing."""
-        for role, operations in self.operations.items():
-            _unique(list(operations), "diagnostic operations")
-            if "gc" in operations and role not in self.gc_completion_evidence:
-                raise ValueError(
-                    "gc requires explicit completion evidence for its role"
-                )
-            if "heap_dump" in operations and (
-                self.max_dumps == 0 or self.max_dump_bytes == 0
-            ):
-                raise ValueError("heap_dump requires a positive dump budget")
+        """Require named completion evidence: a command exiting proves nothing.
+
+        Uniqueness is per checkpoint: which checkpoint declares an operation
+        changes nothing about what proves it completed.
+        """
+        for checkpoint in (self.operations, self.baseline_operations):
+            for role, operations in checkpoint.items():
+                _unique(list(operations), "diagnostic operations")
+                if "gc" in operations and role not in self.gc_completion_evidence:
+                    raise ValueError(
+                        "gc requires explicit completion evidence for its role"
+                    )
+                if "heap_dump" in operations and (
+                    self.max_dumps == 0 or self.max_dump_bytes == 0
+                ):
+                    raise ValueError("heap_dump requires a positive dump budget")
         for argv in self.executables.values():
             if not argv:
                 raise ValueError("diagnostic executable argv cannot be empty")

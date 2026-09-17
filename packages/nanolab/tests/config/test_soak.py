@@ -271,6 +271,8 @@ def test_protocol_rejects_unmeasurable_policy(scenario_data, key, value):
         "extra_field",
         "blank_rationale",
         "duplicate_capability",
+        "duplicate_baseline_operation",
+        "baseline_gc_without_evidence",
     ],
 )
 def test_cross_field_contract_cannot_hide_missing_evidence(scenario_data, change):
@@ -322,8 +324,56 @@ def test_cross_field_contract_cannot_hide_missing_evidence(scenario_data, change
         data["criteria"][0]["rationale"] = "  "
     elif change == "duplicate_capability":
         data["roles"]["control-plane"]["required_capabilities"].append("rss")
+    elif change == "duplicate_baseline_operation":
+        data["diagnostics"]["baseline_operations"] = {
+            "control-plane": ["native_memory", "native_memory"]
+        }
+    elif change == "baseline_gc_without_evidence":
+        data["diagnostics"]["operations"] = {"control-plane": ["histogram"]}
+        del data["diagnostics"]["gc_completion_evidence"]["control-plane"]
+        data["diagnostics"]["baseline_operations"] = {"control-plane": ["gc"]}
     with pytest.raises(ValidationError, match="validation error for ScenarioConfig"):
         ScenarioConfig.model_validate(scenario_data)
+
+
+def test_baseline_operations_owe_the_same_evidence_as_the_drain_ones(scenario_data):
+    """The second checkpoint is not the weaker one.
+
+    A reading taken at the baseline window is complete for the same reason the
+    same reading taken at drain is, so the rules guarding the first map guard
+    the second. Uniqueness is per checkpoint: declaring one operation at both is
+    how a difference gets measured, not a duplication.
+    """
+    data = scenario_data["soak"]
+    role = "control-plane"
+
+    assert parse_soak(data).diagnostics.baseline_operations == {}
+
+    data["diagnostics"]["baseline_operations"] = {role: ["native_memory"]}
+    assert parse_soak(data).diagnostics.baseline_operations == {role: ["native_memory"]}
+
+    data["diagnostics"]["baseline_operations"] = {
+        role: ["native_memory", "native_memory"]
+    }
+    with pytest.raises(ValidationError, match="must not contain duplicates"):
+        parse_soak(data)
+
+    # The drain map keeps no gc, so the missing evidence can only be the
+    # baseline map's complaint.
+    data["diagnostics"]["operations"] = {role: ["histogram"]}
+    del data["diagnostics"]["gc_completion_evidence"][role]
+    data["diagnostics"]["baseline_operations"] = {role: ["gc"]}
+    with pytest.raises(
+        ValidationError, match="gc requires explicit completion evidence"
+    ):
+        parse_soak(data)
+
+    data["diagnostics"]["baseline_operations"] = {role: ["heap_dump"]}
+    data["diagnostics"]["max_dumps"] = 0
+    with pytest.raises(
+        ValidationError, match="heap_dump requires a positive dump budget"
+    ):
+        parse_soak(data)
 
 
 def test_smoke_is_explicitly_short_and_not_p24(scenario_data):

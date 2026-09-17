@@ -81,11 +81,49 @@ def native_memory_completed(output):
     )
 
 
+def native_memory_baseline_taken(output):
+    """Report that the baseline mark the diff is measured from was set.
+
+    Only the acknowledgement is required, because that is all this command
+    prints; a JVM started without the flag answers "Native memory tracking is
+    not enabled" and exits 0, which cannot carry the ack.
+    """
+    return re.search(r"(?m)^Baseline taken\b", output) is not None
+
+
+def native_memory_diff_completed(output):
+    """Report a real comparison against a baseline, deltas or not.
+
+    The delta suffixes are optional on purpose. A JVM with nothing to report
+    omits them, and "nothing grew" is the reading that matters most here -- it
+    must not be recorded as an unreadable capture. What is required is the
+    report header and a total, and neither the no-baseline answer ("No baseline
+    for comparison") nor the not-enabled one carries either, both exiting 0.
+    """
+    return (
+        re.search(r"(?m)^Native Memory Tracking:$", output) is not None
+        and re.search(
+            r"(?m)^Total: reserved=\d+KB?(?: \+\d+KB?)?,"
+            r" committed=\d+KB?(?: \+\d+KB?)?$",
+            output,
+        )
+        is not None
+    )
+
+
 # Text readings of the target JVM: one jcmd call whose stdout is the artifact and
 # whose content, not its exit status, is the completion evidence.
 TEXT_READINGS = {
     "histogram": (("GC.class_histogram",), histogram_completed),
     "native_memory": (("VM.native_memory", "summary"), native_memory_completed),
+    "native_memory_baseline": (
+        ("VM.native_memory", "baseline"),
+        native_memory_baseline_taken,
+    ),
+    "native_memory_diff": (
+        ("VM.native_memory", "summary.diff"),
+        native_memory_diff_completed,
+    ),
 }
 # Must equal nanolab's LOCAL_HELPER_OPERATIONS: the runtime gate admits a run
 # from that set, so a name missing here provisions a helper that rejects its own

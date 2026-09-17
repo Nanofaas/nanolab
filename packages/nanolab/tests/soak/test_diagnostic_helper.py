@@ -551,10 +551,8 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
     )
     assert isinstance(adapter, JvmDiagnosticAdapter)
     # `jfr` is the one name the adapter holds back, because this fixture named no
-    # recording to dump; everything else the helper dispatches is on offer.
-    assert adapter.capabilities(TARGET) == frozenset(
-        {"gc", "histogram", "heap_dump", "native_memory"}
-    )
+    # recording to dump -- and the provider's own set is what the adapter offers.
+    assert adapter.capabilities(TARGET) == supported_operations("jvm")
 
 
 def test_memory_only_helper_supports_native_without_target_stop_permission(tmp_path):
