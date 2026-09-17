@@ -11,14 +11,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from sonata_engine import Workflow
+from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.tasks.local_resources import (
-    helper_builder_resource,
-    local_registry_resource,
-)
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.tasks.soak.helper_build import HELPER_BUILDER
 
 
 def unique_heap_analysis_run_dir(runs_dir: Path) -> Path:
@@ -48,13 +48,19 @@ def build_heap_analysis_plan(
     # the registry and the second through the builder. Each removes only what it
     # created and leaves what it found running alone, so an operator's own
     # registry or builder is never torn down by a run.
-    registry = local_registry_resource(
+    registry = docker_registry_resource(
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
+        container=REGISTRY_CONTAINER_NAME,
     )
-    builder = helper_builder_resource(
+    builder = buildx_builder_resource(
+        # The run builds through this name, and `HeapAnalysisOptions` defaults to
+        # the same constant, so a plan cannot acquire a different builder than the
+        # one the build uses.
+        name=HELPER_BUILDER,
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
+        driver_options=("network=host",),
     )
     workflow.add(
         RunControlPlaneHeapAnalysis(

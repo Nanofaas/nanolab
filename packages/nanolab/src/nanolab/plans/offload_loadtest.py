@@ -20,6 +20,7 @@ from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.vm.multipass import resolve_connection_host
 
 from nanolab.config.environment import EnvironmentConfig
@@ -35,7 +36,6 @@ from nanolab.tasks.loadtest.models import K6Config
 from nanolab.tasks.loadtest.offload_conservation import evaluate_conservation
 from nanolab.tasks.loadtest.ports import RemoteFileFetcher
 from nanolab.tasks.loadtest.tasks import FetchVmResults
-from nanolab.tasks.local_resources import local_registry_resource
 from nanolab.tasks.offload_loadtest import (
     EvaluateConservationTask,
     OffloadLoadtestRequest,
@@ -261,7 +261,7 @@ def _local_requirements(
     requirements: tuple[Any, ...] = ()
     if not local:
         return requirements
-    registry = local_registry_resource(
+    registry = docker_registry_resource(
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
         container=REGISTRY_CONTAINER_NAME,

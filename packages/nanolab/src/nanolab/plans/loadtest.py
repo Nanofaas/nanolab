@@ -20,6 +20,7 @@ from sonata_tasks.execution.bindings import (
     RoleBoundCommandTaskExecutor,
 )
 from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.cli.vm_provider import vm_request_for_role
@@ -82,7 +83,6 @@ from nanolab.tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from nanolab.tasks.local_resources import local_registry_resource
 from nanolab.tasks.platform import Backend, Build, PlatformRequest
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
@@ -741,7 +741,7 @@ def _build_platform_requires(
 ) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
-        registry = local_registry_resource(
+        registry = docker_registry_resource(
             executor=executor, role="host", container=REGISTRY_CONTAINER_NAME
         )
         env = {

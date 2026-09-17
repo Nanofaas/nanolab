@@ -30,7 +30,6 @@ from sonata_engine.journal import JournalConfig
 
 from nanolab.config.soak import SoakConfig
 from nanolab.tasks.compose import DockerComposeProject
-from nanolab.tasks.local_resources import HELPER_BUILDER
 from nanolab.tasks.manifest import FunctionManifest
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from nanolab.tasks.soak.adapters import RoleBinding, RoleBoundProbe, SubprocessTransport
@@ -47,6 +46,7 @@ from nanolab.tasks.soak.diagnostic_helper import (
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
+from nanolab.tasks.soak.helper_build import HELPER_BUILDER
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.observer import Observer, SystemClock
 from nanolab.tasks.soak.preflight import preflight

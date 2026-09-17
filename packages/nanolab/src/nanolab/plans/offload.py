@@ -8,6 +8,7 @@ from typing import Any
 from sonata_engine import Resource, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.functions import resolve_function
@@ -16,7 +17,6 @@ from nanolab.tasks.deployment import (
     LOCAL_CONTROL_PLANE_MANAGEMENT_PORT,
     REGISTRY_CONTAINER_NAME,
 )
-from nanolab.tasks.local_resources import local_registry_resource
 from nanolab.tasks.offload import (
     OffloadFunction,
     OffloadWorkflowRequest,
@@ -129,7 +129,7 @@ def build_offload_plan(
         edge_endpoint=EDGE_ENDPOINT,
         edge_management=EDGE_MANAGEMENT,
     )
-    registry = local_registry_resource(
+    registry = docker_registry_resource(
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
         container=REGISTRY_CONTAINER_NAME,

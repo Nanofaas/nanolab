@@ -715,7 +715,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.8" },
     { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0" },
     { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=ba8e02b097943202e5d09b89ae0a3b692cebe278" },
-    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=ba8e02b097943202e5d09b89ae0a3b692cebe278" },
+    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=c904fcb878ab1c0bb2fa4c4e630d458794f05769" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
@@ -1373,7 +1373,7 @@ source = { git = "https://github.com/miciav/sonata.git?rev=ba8e02b097943202e5d09
 [[package]]
 name = "sonata-tasks"
 version = "0.2.0"
-source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=ba8e02b097943202e5d09b89ae0a3b692cebe278#ba8e02b097943202e5d09b89ae0a3b692cebe278" }
+source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=c904fcb878ab1c0bb2fa4c4e630d458794f05769#c904fcb878ab1c0bb2fa4c4e630d458794f05769" }
 dependencies = [
     { name = "sonata-engine" },
 ]

@@ -36,6 +36,11 @@ BASES_LOCK = _ASSETS / "helper-bases.lock.json"
 DOCKERFILE = "assets/soak/diagnostic-helper.Dockerfile"
 _LOG_BYTES = 4 * 1024 * 1024
 
+# The builder a run looks for when nothing overrides it. One home, because the
+# plan acquires a builder and the run builds through one: two literals drifting
+# apart means a run building with a builder nothing acquired.
+HELPER_BUILDER = "nanolab-heap-analysis"
+
 
 class HelperImageError(RuntimeError):
     """The helper image could not be built, published or resolved."""

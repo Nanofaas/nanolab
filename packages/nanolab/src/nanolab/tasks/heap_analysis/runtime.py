@@ -37,7 +37,6 @@ from nanolab.config.soak import (
 )
 from nanolab.tasks.heap_analysis.evidence import native_comparison, persist_native
 from nanolab.tasks.heap_analysis.mat import MatAnalysisRequest, MatAnalyzer
-from nanolab.tasks.local_resources import HELPER_BUILDER
 from nanolab.tasks.soak.artifacts import (
     TERMINAL_RESERVE,
     ArtifactLimitExceededError,
@@ -53,7 +52,11 @@ from nanolab.tasks.soak.diagnostic_helper import (
     LocalDockerDiagnosticProvisioner,
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget
-from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
+from nanolab.tasks.soak.helper_build import (
+    HELPER_BUILDER,
+    HelperImageRequest,
+    build_helper_image,
+)
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparationOptions, PreparedSoak
 from nanolab.tasks.soak.workflow import (
