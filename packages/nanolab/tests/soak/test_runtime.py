@@ -1442,7 +1442,8 @@ def test_capture_only_after_completed_owned_natural_drain(
     with pytest.raises(RuntimeError, match="effective preflight INCONCLUSIVE"):
         lifecycle.hooks.preflight()
     # Direct hook test, not a synthetic claim that the public workflow passed.
-    lifecycle.observer.set_phase = lambda phase: None
+    labels: list[str] = []
+    lifecycle.observer.set_phase = lambda phase: labels.append(phase)
     start = lifecycle.clock.monotonic()
     if state_kind != "partial":
         lifecycle._natural("drain", value.config.phases.drain_s)
@@ -1453,16 +1454,55 @@ def test_capture_only_after_completed_owned_natural_drain(
         lifecycle.cancelled.set()
     if state_kind == "complete":
         lifecycle.hooks.final_capture(lifecycle.state, 30)
+        # The capture relabels the observer, so the ticks it perturbs are not
+        # written with the drain label past the drain window's end.
+        assert labels == ["drain", "diagnostic"]
         assert len(events) == 4
         index = json.loads((value.evidence_dir / "diagnostics.json").read_text())
         assert len(index["entries"]) == 4
     else:
         with pytest.raises(RuntimeError, match=r"completed owned natural final"):
             lifecycle.hooks.final_capture(lifecycle.state, 30)
+        # The guard refuses before the first perturbing read, so a capture that
+        # never runs never claims to have perturbed anything.
+        assert "diagnostic" not in labels
         assert events == []
         assert not list(value.evidence_dir.glob("natural-*.json"))
     lifecycle.stop_observer()
     assert all(helper.closed == 1 for helper in helpers)
+    value.writer.close()
+
+
+def test_a_capture_survives_an_observer_that_is_no_longer_running(
+    tmp_path, monkeypatch
+):
+    """A dead observer must not cost the run its diagnostics.
+
+    The label only changes how the ticks taken during a capture are judged; it
+    decides nothing about whether the capture happens. `Observer.set_phase`
+    raises when the sampler is not running, so the label is best-effort.
+    """
+    _, value, lifecycle, _, events, _, _, _ = diagnostic_environment(
+        tmp_path, monkeypatch
+    )
+    with pytest.raises(RuntimeError, match="effective preflight INCONCLUSIVE"):
+        lifecycle.hooks.preflight()
+
+    def set_phase(phase):
+        if phase == "diagnostic":
+            raise RuntimeError("observer is not running")
+
+    lifecycle.observer.set_phase = set_phase
+    start = lifecycle.clock.monotonic()
+    lifecycle._natural("drain", value.config.phases.drain_s)
+    lifecycle.state.windows["drain"] = (start, lifecycle.clock.monotonic())
+
+    lifecycle.hooks.final_capture(lifecycle.state, 30)
+
+    assert len(events) == 4
+    index = json.loads((value.evidence_dir / "diagnostics.json").read_text())
+    assert len(index["entries"]) == 4
+    lifecycle.stop_observer()
     value.writer.close()
 
 

@@ -17,6 +17,7 @@ import socket
 import stat
 import time
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -1363,10 +1364,23 @@ def create_soak_lifecycle(
         def set_phase(self, phase):
             observer.set_phase(phase)
 
+        def label_diagnostic(self):
+            """Label the samples a capture perturbs, when the observer is live.
+
+            Through `set_phase` so a caller that owns phase transitions still
+            does. A run whose observer already died still gets its diagnostics:
+            this label changes how those ticks are judged, never whether the
+            capture runs.
+            """
+            with suppress(RuntimeError):
+                self.set_phase("diagnostic")
+
         def stop(self, timeout_s):
             nonlocal observed_end
             observer.stop(timeout_s)
             observed_end = clock.monotonic()
+
+    timed_observer = TimedObserver()
 
     def check():
         actual = (observations or deployment.observations)(targets)
@@ -1507,6 +1521,12 @@ def create_soak_lifecycle(
                 raise RuntimeError(
                     "completed owned natural final checkpoint unavailable"
                 )
+            # Relabel before the first perturbing read. Without this every tick
+            # taken here keeps the drain label with a timestamp past the drain
+            # window's end, and `evaluate` judges each one a boundary crossing --
+            # so a run passed or failed by whether a tick happened to land in a
+            # capture that takes far longer than one sample interval.
+            timed_observer.label_diagnostic()
             deadline = time.monotonic() + timeout_s
             checkpoints = []
 
@@ -1795,7 +1815,7 @@ def create_soak_lifecycle(
 
     return MemoryOwnedLifecycle(
         config,
-        observer=TimedObserver(),
+        observer=timed_observer,
         clock=clock,
         driver_factory=driver_factory,
         hooks=LifecycleHooks(check, prerequisites, final_capture, evaluate, report),
