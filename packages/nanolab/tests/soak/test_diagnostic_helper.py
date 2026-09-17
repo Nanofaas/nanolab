@@ -696,7 +696,12 @@ def test_heap_info_follows_procfs_and_records_acknowledged_completion(
         order.append("heap_info")
         if failure:
             raise module.CommandCompletedError("acknowledged command error")
-        return "garbage-first heap total 1024K, used 512K\n"
+        # Real JDK 25.0.4 G1 capture from `jcmd <pid> GC.heap_info`.
+        return (
+            "garbage-first heap   total reserved 1048576K, committed 264192K, "
+            "used 27268K [0x00000000c0000000, 0x0000000100000000)\n"
+            " region size 1024K, 26 young (26624K), 0 survivors (0K)\n"
+        )
 
     monkeypatch.setattr(module, "jcmd", jcmd)
     result = module.memory(

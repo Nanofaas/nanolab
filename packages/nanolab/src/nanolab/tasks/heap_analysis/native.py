@@ -15,7 +15,24 @@ from typing import Any
 LARGE_MAPPING_BYTES = 33554432
 
 _KB = re.compile(r"^(\w+):\s+(\d+) kB$", re.MULTILINE)
-_HEAP = re.compile(r"garbage-first heap\s+total (\d+)K, used (\d+)K")
+# JDK 25 G1, the collector this role actually runs (runtime_options is empty
+# and the helper is eclipse-temurin:25-jdk, which diagnostic_helper refuses
+# out of unless both versions start with "25."). Real output, from
+# `jcmd <pid> GC.heap_info` on 25.0.4:
+#   garbage-first heap   total reserved 1048576K, committed 264192K, used 27268K [...]
+# `total reserved` is a reservation, not a commitment, so it is deliberately
+# not read: committed is reported only when the output says `committed`.
+_HEAP = re.compile(
+    r"garbage-first heap\s+total reserved \d+K,\s+committed\s+(\d+)K,"
+    r"\s+used\s+(\d+)K"
+)
+# Verified on JDK 25.0.4 (build 25.0.4+7-1-24.04-Ubuntu): no collector's
+# GC.heap_info output carries a Metaspace line (`grep -c Metaspace` is 0 for
+# G1, Serial and Parallel), so this cannot match a real capture today and the
+# spec's "the same pair for metaspace" from heap_info is unreachable through
+# this command -- metaspace needs VM.metaspace or NMT, and NMT is excluded.
+# Kept for a future JDK or flag that does print it; on JDK 25 metaspace stays
+# absent, never zero.
 _METASPACE = re.compile(r"Metaspace\s+used (\d+)K, committed (\d+)K")
 _HEADER = re.compile(
     r"^([0-9a-f]+)-([0-9a-f]+)[ \t]+([rwxps-]{4})[ \t]+"
@@ -153,7 +170,17 @@ def summarize(response: dict) -> dict[str, Any]:
                 recognized = name != "heap_info" or any(
                     value is not None for value in parsed.values()
                 )
-                block[name] = {"available": recognized, **parsed}
+                if recognized:
+                    block[name] = {"available": True, **parsed}
+                elif name == "heap_info" and response[name].strip():
+                    # Present but nothing parsed: say so. A silently
+                    # unavailable reading is how a format change hides.
+                    block[name] = {
+                        "available": False,
+                        "error": "unrecognized GC.heap_info output",
+                    }
+                else:
+                    block[name] = {"available": False, **parsed}
         elif error is not None:
             block[name] = {"available": False, "error": error}
         else:

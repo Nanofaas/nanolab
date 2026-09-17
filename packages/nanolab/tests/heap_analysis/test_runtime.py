@@ -1145,7 +1145,13 @@ def fake_session_with_readings(tmp_path, *, response=None, error=None):
                 "status": "RssAnon: 4 kB\n",
                 "smaps_rollup": "Pss_Anon: 4 kB\n",
                 "smaps": "1000-2000 rw-p 0 00:00 0\nSize: 4 kB\nRss: 4 kB\nPss: 4 kB\n",
-                "heap_info": "garbage-first heap total 1024K, used 512K\n",
+                # Real JDK 25.0.4 G1 capture from `jcmd <pid> GC.heap_info`.
+                "heap_info": (
+                    "garbage-first heap   total reserved 1048576K, "
+                    "committed 264192K, used 27268K "
+                    "[0x00000000c0000000, 0x0000000100000000)\n"
+                    " region size 1024K, 26 young (26624K), 0 survivors (0K)\n"
+                ),
                 "intervals": {"status": {"started_s": 1.0, "ended_s": 2.0}},
                 "completion": {"heap_info": "completed"},
                 "errors": {},
@@ -1176,7 +1182,8 @@ def test_observation_retains_native_sources_and_intervals(tmp_path):
     path = session.observe("natural-drain")
     document = json.loads(path.read_text())
     native = document["native"]
-    assert native["heap_info"]["heap"]["used"] == 512 * 1024
+    assert native["heap_info"]["heap"]["used"] == 27268 * 1024
+    assert native["heap_info"]["heap"]["committed"] == 264192 * 1024
     assert native["sources"]["status"]["interval"]["ended_s"] == 2.0
     for source in native["sources"].values():
         assert (session._root / source["artifact"]["path"]).is_file()
