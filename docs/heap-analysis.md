@@ -188,6 +188,14 @@ owned-target cleanup; cancellation remains cancellation. All evidence shares
 the run's artifact budget. The P24 soak and Node default observation paths
 enable neither reading and retain their existing behavior.
 
+The diagnostic helper uses the local Linux Docker backend and validates target
+PIDs through the host's `/proc`. Its absolute monotonic deadline assumes this
+supported shared clock domain and includes exec startup delay. A forwarded
+Docker socket or a daemon in another kernel is not supported by this protocol.
+The host deadline remains the outer bound; a late worker may return missing
+readings or be interrupted, and unresolved JVM completion follows owned-target
+cleanup. No timeout representation alone guarantees timely acknowledgement.
+
 ## Interpreting the result
 
 Three different things can each independently look like "something is wrong,"

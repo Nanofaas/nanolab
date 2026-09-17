@@ -1015,3 +1015,60 @@ def test_lost_reply_or_cancel_preserves_exception_and_stops_target(
         owner.read_memory(include_heap_info=True)
     assert raised.value is error
     assert cleanup == ["cancel-target", "close"]
+
+
+def test_local_memory_request_keeps_the_remaining_absolute_deadline(
+    monkeypatch, tmp_path
+):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    owner, calls, _ = memory_owner(monkeypatch, tmp_path)
+    now = [100.0]
+    monkeypatch.setattr(helper.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(owner, "_check_target", lambda: now.__setitem__(0, 104.0))
+    owner.read_memory(timeout_s=5, include_smaps=True)
+    argv, options = calls[-1]
+    cfg = json.loads(base64.b64decode(argv[-1]))
+    assert "memory_budget_s" not in cfg
+    assert 104.0 < cfg["memory_deadline_s"] < 105.0
+    assert options["timeout_s"] == 1.0
+
+
+def test_late_worker_does_not_restart_the_collection_budget(monkeypatch):
+    module = worker()
+    monkeypatch.setattr(module.time, "monotonic", lambda: 112.0)
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+    monkeypatch.setattr(module, "read_proc", lambda *a: pytest.fail("expired read"))
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("expired attach"))
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": 109.0,
+        }
+    )
+    assert all(value == "not_started" for value in result["completion"].values())
+    assert result["heap_info"] is None
+
+
+def test_procfs_and_heap_info_share_one_deadline(monkeypatch):
+    module = worker()
+    now = [100.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+
+    def read(path, limit):
+        now[0] += 3.0
+        return "body"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("late attach"))
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_heap_info": True,
+            "memory_deadline_s": 105.0,
+        }
+    )
+    assert result["completion"]["heap_info"] == "not_started"
