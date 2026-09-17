@@ -1154,3 +1154,39 @@ def test_legacy_memory_log_is_retained(monkeypatch, tmp_path):
     owner, _ = logged_memory_owner(monkeypatch, tmp_path)
     owner.read_memory()
     assert list(tmp_path.glob("docker-*.log"))
+
+
+def test_unresolved_memory_cleanup_receives_ten_seconds(monkeypatch, tmp_path):
+    from nanolab.tasks.soak import diagnostic_helper as helper
+
+    owner, _, _ = memory_owner(monkeypatch, tmp_path, completion="unresolved")
+    monkeypatch.setattr(helper.time, "monotonic", lambda: 100.0)
+    budgets = []
+
+    def record_budget():
+        deadline = owner.commands.cleanup_deadline
+        assert deadline is not None
+        budgets.append(deadline - 100.0)
+
+    monkeypatch.setattr(owner, "_cancel_remote", record_budget)
+    with pytest.raises(helper.MemoryCommandUnresolved):
+        owner.read_memory(include_heap_info=True)
+    assert budgets == [10.0]
+
+
+def test_cleanup_failure_keeps_the_original_interrupt(monkeypatch, tmp_path):
+    owner, _, _ = memory_owner(monkeypatch, tmp_path)
+    interrupted = KeyboardInterrupt("user cancelled")
+
+    def fail_read(*args, **kwargs):
+        raise interrupted
+
+    def fail_cleanup():
+        raise RuntimeError("daemon unavailable")
+
+    monkeypatch.setattr(owner.commands, "run", fail_read)
+    monkeypatch.setattr(owner, "_cancel_remote", fail_cleanup)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        owner.read_memory(include_heap_info=True)
+    assert raised.value is interrupted
+    assert any("cleanup unconfirmed" in note for note in interrupted.__notes__)

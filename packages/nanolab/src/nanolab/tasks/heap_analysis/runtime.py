@@ -599,6 +599,15 @@ class LocalHeapAnalysisSession:
             self._helper.close()
 
 
+def _failure_reason(error: BaseException) -> str:
+    """Keep cleanup uncertainty visible without changing exception identity."""
+    notes = [str(note) for note in getattr(error, "__notes__", ())]
+    cleanup = [note for note in notes if "cleanup unconfirmed" in note]
+    other = [note for note in notes if "cleanup unconfirmed" not in note]
+    parts = [*cleanup, f"{type(error).__name__}: {error}", *other]
+    return "; ".join(parts)[:1024]
+
+
 class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
     """An indivisible deferred workflow; every terminal path cleans up."""
 
@@ -638,10 +647,10 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
             wiring = factory(self.run_dir)
             self._execute(wiring, holder)
         except Exception as error:
-            reasons.append(f"{type(error).__name__}: {str(error)[:1024]}")
+            reasons.append(_failure_reason(error))
         except BaseException as error:
             interrupted = error
-            reasons.append(f"{type(error).__name__}: {str(error)[:1024]}")
+            reasons.append(_failure_reason(error))
         finally:
             if wiring is not None:
                 try:

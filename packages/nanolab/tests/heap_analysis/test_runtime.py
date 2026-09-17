@@ -1238,3 +1238,22 @@ def test_report_publishes_three_explicit_checkpoint_entries(tmp_path):
     # Its absence is visible and does not prevent terminal publication.
     assert all(entry["available"] is False for entry in report["native"].values())
     assert result.status == "PASS"
+
+
+def test_cleanup_note_survives_cancellation_receipt(tmp_path):
+    class Interrupted(FakeSession):
+        def load(self, phase, duration_s):
+            if phase == "steady":
+                error = KeyboardInterrupt("user cancelled")
+                error.add_note("memory cleanup unconfirmed: daemon unavailable")
+                raise error
+            return super().load(phase, duration_s)
+
+    task, _, run_dir = build(tmp_path, Interrupted([], evidence(tmp_path)))
+    with pytest.raises(KeyboardInterrupt):
+        measure(task)
+    terminal = json.loads((run_dir / "terminal.json").read_text())
+    report = json.loads((run_dir / "report.json").read_text())
+    assert terminal["status"] == "ABORTED"
+    assert "cleanup unconfirmed" in json.dumps(terminal)
+    assert any("cleanup unconfirmed" in reason for reason in report["reasons"])

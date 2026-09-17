@@ -579,7 +579,9 @@ class _OwnedDockerHelper:
             return accept(self.commands.run(argv, **options))
         except BaseException as error:
             try:
-                self.commands.cleanup_deadline = time.monotonic() + 5.0
+                self.commands.cleanup_deadline = time.monotonic() + (
+                    10.0 if jvm_may_be_running else 5.0
+                )
                 if jvm_may_be_running:
                     # This validates ownership, stops the exact target, confirms
                     # it stopped, then removes the helper. close() alone is not enough.
