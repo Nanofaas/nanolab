@@ -163,9 +163,11 @@ produces a timeout rather than fabricated data.
   target-written bytes into `/out` for framed transport. Start/stop/summary
   outputs are retained in probe evidence; invalid files report the stop output.
   No full GC is invented or forced merely to make the provisioning probe pass.
-  This worker change requires rebuilding/publishing the helper image. The
-  standalone validation script now requires `--helper-image <new-repo@sha256>`
-  rather than silently selecting the previous image.
+  A worker change requires rebuilding/publishing the helper image, which every
+  run does for itself; `scripts/validate-diagnostic-helper.py` exists to prove a
+  change to this worker or to a reading reaches a real target, and it takes
+  `--helper-image <repo@sha256>` to validate a specific published digest instead
+  of building one.
 - JVM text readings (`histogram`, `native_memory`, `native_memory_baseline`,
   `native_memory_diff`) are one `jcmd` call whose stdout is the artifact, and the
   content is the completion evidence. Every one of those NMT commands exits 0 on

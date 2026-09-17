@@ -88,6 +88,27 @@ NMT_DIFF = (
 # Real capture: the same command on a JVM that never took one. Exits 0.
 NMT_DIFF_NO_BASELINE = "415190:\nNo baseline for comparison\n"
 
+# Real capture, taken by the validation script through the helper: the same
+# command after a baseline, on a JVM that had released memory since. NMT signs
+# the delta, so a validator accepting only `+N` refuses exactly the reading a
+# shrink spike exists to find.
+NMT_DIFF_RELEASED = (
+    "1:\n"
+    "\n"
+    "Native Memory Tracking:\n"
+    "\n"
+    "(Omitting categories weighting less than 1KB)\n"
+    "\n"
+    "Total: reserved=32801434KB -6631KB, committed=2056834KB -6631KB\n"
+    "\n"
+    "malloc=22546KB -6631KB #50045 -196\n"
+    "\n"
+    "mmap: reserved=32778888KB, committed=2034288KB\n"
+    "\n"
+    "-                 Java Heap (reserved=31455232KB, committed=1994752KB)\n"
+    "                            (mmap: reserved=31455232KB, committed=1994752KB)\n"
+)
+
 # Real capture: `VM.native_memory baseline` without the flag. Exits 0.
 NMT_BASELINE_DISABLED = "418041:\nNative memory tracking is not enabled\n"
 
@@ -214,6 +235,16 @@ def test_a_diff_without_a_baseline_is_never_a_reading():
     assert worker().native_memory_diff_completed(NMT_DIFF_NO_BASELINE) is False
 
 
+def test_a_diff_that_released_memory_is_still_a_reading():
+    """A signed delta is the answer, not a malformed line.
+
+    The validation script caught this one: the first real diff taken through the
+    helper reported `-6631KB`, and a validator written around the growth case
+    refused it as unreadable.
+    """
+    assert worker().native_memory_diff_completed(NMT_DIFF_RELEASED) is True
+
+
 def test_a_diff_with_nothing_to_report_is_still_a_reading():
     """The deltas are optional, and their absence is the answer worth having.
 
@@ -226,9 +257,9 @@ def test_a_diff_with_nothing_to_report_is_still_a_reading():
     nothing to report drops both, so this fixture drops both.
     """
     no_deltas = "\n".join(
-        re.sub(r" \+\d+(?:KB?)?", "", line) for line in NMT_DIFF.splitlines()
+        re.sub(r" [+-]\d+(?:KB?)?", "", line) for line in NMT_DIFF.splitlines()
     )
-    assert " +" not in no_deltas  # the fixture actually lost its deltas
+    assert " +" not in no_deltas and " -" not in no_deltas
     assert worker().native_memory_diff_completed(no_deltas) is True
 
 

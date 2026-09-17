@@ -96,18 +96,19 @@ def native_memory_diff_completed(output):
 
     The delta suffixes are optional on purpose. A JVM with nothing to report
     omits them, and "nothing grew" is the reading that matters most here -- it
-    must not be recorded as an unreadable capture. What is required is the
+    must not be recorded as an unreadable capture. They are also signed: NMT
+    reports released memory as `-N`, which is the answer a shrink spike exists to
+    find, so accepting only `+N` discards exactly that. What is required is the
     report header and a total, and neither the no-baseline answer ("No baseline
     for comparison") nor the not-enabled one carries either, both exiting 0.
     """
+    delta = r"(?: [+-]\d+KB?)?"
+    total = (
+        r"(?m)^Total: reserved=\d+KB?" + delta + r", committed=\d+KB?" + delta + r"$"
+    )
     return (
         re.search(r"(?m)^Native Memory Tracking:$", output) is not None
-        and re.search(
-            r"(?m)^Total: reserved=\d+KB?(?: \+\d+KB?)?,"
-            r" committed=\d+KB?(?: \+\d+KB?)?$",
-            output,
-        )
-        is not None
+        and re.search(total, output) is not None
     )
 
 
