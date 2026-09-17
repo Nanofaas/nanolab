@@ -431,7 +431,11 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
     tmp_path, monkeypatch
 ):
     from nanolab.tasks.soak import diagnostic_helper as helper
-    from nanolab.tasks.soak.diagnostics import DiagnosticBudget, JvmDiagnosticAdapter
+    from nanolab.tasks.soak.diagnostics import (
+        DiagnosticBudget,
+        JvmDiagnosticAdapter,
+        supported_operations,
+    )
 
     cli = tmp_path / "never-executed-cli"
     cli.write_bytes(b"synthetic identity only")
@@ -530,7 +534,13 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
     prepared = helper.LocalDockerDiagnosticProvisioner(assets_dir=assets).prepare(
         config
     )
-    assert prepared.executor.capabilities().operations == frozenset({"gc", "heap_dump"})
+    # The receipt carries the helper's own capability claim, which is what the
+    # adapter and the runtime gate read -- so it is the runtime's supported set,
+    # not the handful of operations this fixture happens to request.
+    assert prepared.executor.capabilities().operations == supported_operations("jvm")
+    assert json.loads(prepared.receipt.read_text())["operations"] == sorted(
+        supported_operations("jvm")
+    )
     receipt = json.loads(prepared.receipt.read_text())
     assert receipt["file_output_quota_bytes"] == 16777216
     assert (prepared.receipt.parent / "observations.json").is_file()
@@ -540,7 +550,11 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
         max_capture_bytes=16777216,
     )
     assert isinstance(adapter, JvmDiagnosticAdapter)
-    assert adapter.capabilities(TARGET) == frozenset({"gc", "heap_dump"})
+    # `jfr` is the one name the adapter holds back, because this fixture named no
+    # recording to dump; everything else the helper dispatches is on offer.
+    assert adapter.capabilities(TARGET) == frozenset(
+        {"gc", "histogram", "heap_dump", "native_memory"}
+    )
 
 
 def test_memory_only_helper_supports_native_without_target_stop_permission(tmp_path):

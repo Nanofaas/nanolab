@@ -86,8 +86,10 @@ The Sonata workflow executes these owned phases in order:
 1. Capture source provenance, build all application images, freeze their
    digests, and deploy one NanoFaaS version using existing primitives.
 2. Register the two workload functions and run the 120-second warm-up.
-3. Record control-plane RSS, PSS, cgroup memory, `GC.heap_info`, effective JVM
-   flags, and Native Memory Tracking output when NMT is enabled.
+3. Record control-plane RSS, PSS, cgroup memory, `GC.heap_info`, and effective
+   JVM flags. Native Memory Tracking is not read here: its output needs
+   `-XX:NativeMemoryTracking`, and the reading is captured by the soak
+   diagnostic operation `native_memory` for scenarios that set that flag.
 4. Request a control-plane full GC and verify its completion using the existing
    JVM diagnostic evidence contract.
 5. Capture `baseline/control-plane.hprof`, validate its size, and hash it.

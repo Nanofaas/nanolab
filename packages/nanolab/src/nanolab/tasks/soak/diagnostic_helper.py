@@ -27,6 +27,7 @@ from nanolab.tasks.soak.diagnostics import (
     DiagnosticBudget,
     JvmDiagnosticAdapter,
     NodeDiagnosticAdapter,
+    supported_operations,
 )
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.processes import OwnedCommandRunner
@@ -908,7 +909,10 @@ class LocalDockerDiagnosticProvisioner:
                 "target": asdict(spec.target),
                 "command": list(command),
                 "helper_digest": spec.helper_image,
-                "operations": ["gc", "heap_dump"],
+                # The helper's own capability claim, not an echo of the request:
+                # the adapter and the runtime gate both read it. Sorted for a
+                # stable receipt and for comparison against supported_operations.
+                "operations": sorted(supported_operations(spec.target.runtime)),
                 "attach_verified": True,
                 "runtime_compatible": True,
                 "bounded_execution": True,

@@ -138,7 +138,9 @@ soak:
       rationale: Preserve the strict natural-recovery observation during the spike.
   diagnostics:
     operations:
-      control-plane: [gc]
+      # `native_memory` is why this spike exists: the flag above only produces a
+      # reading if something requests `VM.native_memory summary` at a checkpoint.
+      control-plane: [gc, native_memory]
     timeout_s: 120
     max_dumps: 1
     max_dump_bytes: 1073741824

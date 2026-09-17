@@ -166,6 +166,16 @@ produces a timeout rather than fabricated data.
   This worker change requires rebuilding/publishing the helper image. The
   standalone validation script now requires `--helper-image <new-repo@sha256>`
   rather than silently selecting the previous image.
+- JVM text readings (`histogram`, `native_memory`) are one `jcmd` call whose
+  stdout is the artifact, and the content is the completion evidence: `jcmd
+  VM.native_memory summary` exits 0 on a JVM started without
+  `-XX:NativeMemoryTracking=summary` and answers "Native memory tracking is not
+  enabled", so exit status alone would record a passing receipt and a useless
+  artifact for the exact case the flag exists to enable. The same validator
+  rejects a truncated read. `native_memory` therefore needs the flag set in the
+  role's `runtime_options`; it is a reading, never an enabled state this helper
+  establishes. The request budget bounds the read, so an output larger than the
+  reservation is an unresolved reading rather than a truncated artifact.
 - The owned host evidence directory is mounted read-only into the helper at its
   same absolute path. Device/inode observations establish this alias, satisfying
   the existing framed executor's namespace contract. Only the host executor

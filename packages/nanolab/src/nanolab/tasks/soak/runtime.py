@@ -43,7 +43,7 @@ from nanolab.tasks.soak.diagnostic_helper import (
     DockerHelperSpec,
     LocalDockerDiagnosticProvisioner,
 )
-from nanolab.tasks.soak.diagnostics import DiagnosticBudget
+from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.observer import Observer, SystemClock
@@ -498,10 +498,8 @@ def _diagnostic_resource_inputs(prepared, *, allow_target_stop: bool) -> dict:
         if role not in requested:
             continue
         operations = requested[role]
-        if application.runtime not in {"jvm", "node"} or set(operations) - {
-            "gc",
-            "heap_dump",
-        }:
+        supported = supported_operations(application.runtime)
+        if application.runtime not in {"jvm", "node"} or set(operations) - supported:
             raise ValueError(
                 "local diagnostic helper does not support requested operations"
             )

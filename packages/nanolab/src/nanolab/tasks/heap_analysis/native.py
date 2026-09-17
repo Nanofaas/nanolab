@@ -42,7 +42,9 @@ _SERIAL_SPACES = re.compile(
 # GC.heap_info output carries a Metaspace line (`grep -c Metaspace` is 0 for
 # G1, Serial and Parallel), so this cannot match a real capture today and the
 # spec's "the same pair for metaspace" from heap_info is unreachable through
-# this command -- metaspace needs VM.metaspace or NMT, and NMT is excluded.
+# this command -- metaspace needs VM.metaspace or NMT, and NMT is not read here
+# (the soak operation `native_memory` captures VM.native_memory for scenarios
+# that set the flag).
 # Kept for a future JDK or flag that does print it; on JDK 25 metaspace stays
 # absent, never zero.
 _METASPACE = re.compile(r"Metaspace\s+used (\d+)K, committed (\d+)K")

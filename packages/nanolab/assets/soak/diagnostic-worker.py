@@ -55,6 +55,44 @@ def heap_dump_completed(output):
     )
 
 
+def histogram_completed(output):
+    """Report a complete histogram: a cut read has no Total line."""
+    return (
+        re.search(r"(?m)^ num\s+#instances\s+#bytes\s+class name", output) is not None
+        and re.search(r"(?m)^Total\s+\d+\s+\d+$", output) is not None
+    )
+
+
+def native_memory_completed(output):
+    """NMT disabled exits 0 and says so, so exit status alone is not a reading.
+
+    `jcmd <pid> VM.native_memory summary` answers "Native memory tracking is not
+    enabled" and exits 0 on a JVM started without the flag. A capture trusting
+    the exit status would record a passing receipt and a useless artifact for
+    the exact case the flag exists to enable, so the content decides.
+
+    JDK 25 spells the unit `KB`; the optional `B` also accepts the `K` an older
+    JDK prints, since the total line is the only terminator this reading has.
+    """
+    return (
+        re.search(r"(?m)^Native Memory Tracking:$", output) is not None
+        and re.search(r"(?m)^Total: reserved=\d+KB?, committed=\d+KB?$", output)
+        is not None
+    )
+
+
+# Text readings of the target JVM: one jcmd call whose stdout is the artifact and
+# whose content, not its exit status, is the completion evidence.
+TEXT_READINGS = {
+    "histogram": (("GC.class_histogram",), histogram_completed),
+    "native_memory": (("VM.native_memory", "summary"), native_memory_completed),
+}
+# Must equal nanolab's LOCAL_HELPER_OPERATIONS: the runtime gate admits a run
+# from that set, so a name missing here provisions a helper that rejects its own
+# first capture, and a name extra here is one the host can never request.
+SUPPORTED_OPERATIONS = frozenset({"gc", "heap_dump", *TEXT_READINGS})
+
+
 def validate_request(message):
     """Only fixed diagnostic methods are dispatchable, never caller argv."""
     if message.get("kind") not in {"inspect", "execute"}:
@@ -62,7 +100,7 @@ def validate_request(message):
     if message["kind"] == "inspect":
         return
     if (
-        message.get("operation") not in {"gc", "heap_dump"}
+        message.get("operation") not in SUPPORTED_OPERATIONS
         or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", message.get("request_id", ""))
         or type(message.get("max_bytes")) is not int
         or message["max_bytes"] <= 0
@@ -291,11 +329,11 @@ def command(
     return log.read_text()
 
 
-def jcmd(args, deadline, scratch, *, require_completion=False):
+def jcmd(args, deadline, scratch, *, limit=2 * 1024 * 1024, require_completion=False):
     argv = ("/opt/java/openjdk/bin/jcmd", "1", *args)
     if require_completion:
-        return command(argv, deadline, scratch, require_completion=True)
-    return command(argv, deadline, scratch)
+        return command(argv, deadline, scratch, limit, require_completion=True)
+    return command(argv, deadline, scratch, limit)
 
 
 def node_call(cfg, request, deadline):
@@ -584,6 +622,23 @@ def gc_node(cfg, output, deadline):
     }
 
 
+def capture_text_jvm(cfg, request, output, deadline, scratch):
+    """Capture one complete text reading of the target JVM as the artifact.
+
+    The request budget bounds the read itself, so an output larger than the
+    reservation is an unresolved reading rather than a truncated artifact the
+    host would have to notice.
+    """
+    operation = request["operation"]
+    args, completed = TEXT_READINGS[operation]
+    identity(cfg)
+    maximum = min(cfg["quota_bytes"], request["max_bytes"])
+    text = jcmd(args, deadline, scratch, limit=maximum, require_completion=True)
+    if not completed(text):
+        raise ValueError(f"{operation} is not a complete reading: " + text[:1024])
+    (output / f"{operation}.txt").write_text(text)
+
+
 def emit(value):
     sys.stdout.write(json.dumps(value, allow_nan=False, separators=(",", ":")) + "\n")
     sys.stdout.flush()
@@ -650,6 +705,10 @@ def exchange(cfg, request):
                     **observed,
                 }
                 (output / "full-gc.json").write_text(json.dumps(event))
+            elif operation in TEXT_READINGS:
+                if runtime != "jvm":
+                    raise ValueError("text readings require a JVM target")
+                capture_text_jvm(cfg, request, output, deadline, scratch)
             elif runtime == "jvm":
                 emitted_bytes = dump_heap_jvm(cfg, request, output, deadline, scratch)
             else:

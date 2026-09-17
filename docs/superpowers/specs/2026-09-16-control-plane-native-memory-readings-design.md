@@ -38,7 +38,9 @@ The report presents these measurements together without a causal verdict.
 ## Non-goals
 
 - No Native Memory Tracking. It needs a JVM startup flag and a new diagnostic
-  operation; it is a separate sub-project.
+  operation; it is a separate sub-project. That sub-project later landed as the
+  soak diagnostic operation `native_memory`, for scenarios that set
+  `-XX:NativeMemoryTracking` — not as an additional reading of this workflow.
 - No `MALLOC_ARENA_MAX` A/B spike. It needs an `env` field on `RolePolicy`;
   also a separate sub-project.
 - No allocator profiling (jemalloc/tcmalloc via `LD_PRELOAD`). Excluded by the
@@ -285,8 +287,10 @@ or whether the observation window reproduces the RSS drift.
 
 ## Deferred work
 
-Native Memory Tracking, the `MALLOC_ARENA_MAX` A/B spike, and extending these
-readings to the soak path remain separate sub-projects. Choose follow-up work
+Native Memory Tracking has since landed as the soak diagnostic operation
+`native_memory`, which is where a scenario's `-XX:NativeMemoryTracking` flag now
+produces evidence. The `MALLOC_ARENA_MAX` A/B spike, and extending these
+readings to the soak path, remain separate sub-projects. Choose follow-up work
 from the combined evidence and its limitations, not a committed-versus-used
 decision rule that claims to identify the source of RSS growth.
 

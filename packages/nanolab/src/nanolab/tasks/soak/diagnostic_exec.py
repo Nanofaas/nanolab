@@ -32,6 +32,7 @@ from threading import Event, Thread
 from typing import Any
 
 from nanolab.tasks.soak.diagnostics import (
+    OPERATION_VOCABULARY,
     DiagnosticCapabilities,
     DiagnosticOutcome,
     DiagnosticRequest,
@@ -42,7 +43,7 @@ from nanolab.tasks.soak.processes import OwnedCommandRunner
 _SCHEMA = "nanolab-soak-diagnostic-helper-v1"
 _FRAME_LIMIT = 256 * 1024
 _RECEIPT_LIMIT = 1024 * 1024
-_OPERATIONS = frozenset({"gc", "histogram", "heap_dump", "jfr"})
+
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 
 # This bridge execs the pinned helper inside OwnedCommandRunner's subreaper
@@ -167,7 +168,7 @@ class ProvisionedDiagnosticExecutor:
             or not operations
             or any(not isinstance(op, str) for op in operations)
             or len(set(operations)) != len(operations)
-            or not set(operations).issubset(_OPERATIONS)
+            or not set(operations).issubset(OPERATION_VOCABULARY)
         ):
             raise ValueError("unsupported provisioned diagnostic operations")
         root = receipt.get("host_output_root")

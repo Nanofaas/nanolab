@@ -22,7 +22,31 @@ from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact
 from nanolab.tasks.soak.models import Availability, CriterionResult, Target
 
 _RECEIPT_BYTES = 65536
-_OPERATIONS = frozenset(("gc", "histogram", "heap_dump", "jfr"))
+# The operation vocabulary: every name this system knows, in any runtime.
+# Membership means "a scenario may declare this name", not "a run can execute
+# it" -- LOCAL_HELPER_OPERATIONS is the latter.
+OPERATION_VOCABULARY = frozenset(
+    ("gc", "histogram", "heap_dump", "jfr", "native_memory")
+)
+# What the pinned local helper can actually dispatch, per runtime, and the one
+# declaration the provisioner receipt, the runtime gate and the worker all
+# answer to. Five independent copies of this set is how `histogram` and `jfr`
+# came to be names the type system accepted while no run path could reach them;
+# every copy lives here now.
+#
+# `jfr` is deliberately absent: the adapter names a recording and the worker
+# dumps one for the full-GC probe, but no request path reaches a JFR capture, so
+# advertising it here would provision a run that fails at its first capture.
+# `histogram` and `native_memory` are text readings of the target JVM.
+LOCAL_HELPER_OPERATIONS: Mapping[str, frozenset[str]] = {
+    "jvm": frozenset(("gc", "histogram", "heap_dump", "native_memory")),
+    "node": frozenset(("gc", "heap_dump")),
+}
+
+
+def supported_operations(runtime: str) -> frozenset[str]:
+    """Return the operations the local helper dispatches, if it supports any."""
+    return LOCAL_HELPER_OPERATIONS.get(runtime, frozenset())
 
 
 def gc_completed(
@@ -350,8 +374,9 @@ class _RuntimeAdapter:
                     "at_s": started,
                 },
             )
-            if checkpoint not in _OPERATIONS or checkpoint not in self.capabilities(
-                target
+            if (
+                checkpoint not in OPERATION_VOCABULARY
+                or checkpoint not in self.capabilities(target)
             ):
                 raise ValueError(
                     "required diagnostic capability unavailable for this runtime/target"
@@ -454,7 +479,7 @@ class JvmDiagnosticAdapter(_RuntimeAdapter):
     """Drive jcmd against a JVM target with an explicit executable."""
 
     runtime = "jvm"
-    supported = _OPERATIONS
+    supported = OPERATION_VOCABULARY
 
     def __init__(
         self,
@@ -481,6 +506,11 @@ class JvmDiagnosticAdapter(_RuntimeAdapter):
         commands = {
             "gc": ("GC.run",),
             "histogram": ("GC.class_histogram",),
+            # `summary`, not the default: a bare VM.native_memory prints the
+            # same summary, but naming the mode keeps the recorded argv equal to
+            # what the worker dispatches, and `summary` is what reads without a
+            # baseline.
+            "native_memory": ("VM.native_memory", "summary"),
             "heap_dump": ("GC.heap_dump", str(output / "capture.hprof")),
             "jfr": (
                 "JFR.dump",
@@ -525,7 +555,9 @@ class NativeDiagnosticAdapter(_RuntimeAdapter):
         super().__init__(*args, **kwargs)
         self._commands = dict(commands or {})
         if any(
-            name not in _OPERATIONS or not argv or any(not part for part in argv)
+            name not in OPERATION_VOCABULARY
+            or not argv
+            or any(not part for part in argv)
             for name, argv in self._commands.items()
         ):
             raise ValueError("invalid explicitly supported native diagnostic command")

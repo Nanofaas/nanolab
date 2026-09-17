@@ -2,288 +2,401 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix the eight findings the code review raised against PR #39, without changing what the readings measure or what the P24 soak path does.
+**Goal:** Resolve the native-memory review findings without regressing valid large readings, optional-error handling, cancellation, or the default P24 observation path.
 
-**Architecture:** Five tasks grouped so each one is independently reviewable: the cross-clock deadline, the duplicated raw storage, the cleanup budget and its lost signal, two worker-side correctness slips, and two evidence-module slips. Nothing here changes the opt-in contract, the artifact tree or the summary's content.
+**Architecture:** Five tasks cover deadline scope, response-log lifetime, cleanup and receipts, worker states, and evidence accounting. Keep the absolute deadline for the supported local backend; a relative duration would restart the budget after exec startup. Delete response logs only after decoding and validation. Publish raw bytes through the existing artifact writer with a cumulative budget distinct from its JSON-record limit.
 
-**Tech Stack:** Python 3.12, pytest. No Docker is needed by any test in this plan.
+**Tech Stack:** Python 3.12, pytest. Tests use controlled clocks, temporary files and fake command runners; no Docker is required.
 
 **Spec:** `docs/superpowers/specs/2026-09-16-control-plane-native-memory-readings-design.md`
 
+Run commands from `/home/michele/Documenti/nanolab`. This is an implementation plan; editing it does not apply the feature changes below.
+
 ## Global Constraints
 
-- Preserve the default P24 soak request, response and collection behavior: no new reads, commands, fields or output limits when options are absent.
-- Unavailable optional readings do not themselves change the run's status; existing target-identity and diagnostic completion requirements still apply.
-- Killing `jcmd` is not proof that the command inside the JVM has completed. Do not issue a later diagnostic while command completion is unresolved.
-- Truncation or an over-limit smaps is marked explicitly as partial/unavailable. Publish no totals derived from incomplete smaps.
-- Report measurements and missing evidence without recommending a cause or tuning change.
-- Every existing test must keep passing. These are corrections, not redesigns: if a fix requires changing an existing assertion, say so in the task report and explain why the old assertion was wrong.
-
----
+- Preserve the default P24 request, response, command sequence, transport limits and retained logs.
+- Keep optional source errors separate from unresolved command completion and infrastructure failure.
+- Never issue another diagnostic while JVM command completion is unresolved.
+- Preserve `KeyboardInterrupt`/cancellation even if cleanup fails; the receipt must also retain cleanup uncertainty.
+- A positive, normally completed command exit remains `CommandCompletedError`. A missing or negative exit code means unresolved completion when completion is required.
+- Raw caps remain 8 MiB for smaps and 2 MiB for heap-info. The 1 MiB JSON-record limit must not apply to raw blobs.
+- Apply cumulative evidence accounting before publication, under the writer lock, preserving terminal space and accounting for already-published files on failure.
+- Keep existing assertions about behavior. Update test call sites only for the explicit writer API change and the response consumer added below; document those updates.
+- No change to `_OPERATIONS`, `capture()`, checkpoint ordering, metric interpretation or the artifact tree.
 
 ## File map
 
-- Modify `packages/nanolab/assets/soak/diagnostic-worker.py`: anchor the deadline locally (#3), set the completion state after the read (#5), order the `returncode` comparison None-safely (#8).
-- Modify `packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py`: send a relative budget (#3), stop retaining the duplicated response log (#4), restore the cleanup budget (#2) and the unconfirmed-cleanup signal (#6).
-- Modify `packages/nanolab/src/nanolab/tasks/heap_analysis/evidence.py`: keep the already-trimmed pointer (#1), account raw writes against the writer (#7).
-- Modify `packages/nanolab/tests/soak/test_diagnostic_helper.py`: tests for #2, #3, #4, #5, #6, #8.
-- Modify `packages/nanolab/tests/heap_analysis/test_evidence.py`: tests for #1 and #7. Create it if the implementation put these tests elsewhere; in that case add them to the file that already covers `evidence.py`.
+- `packages/nanolab/assets/soak/diagnostic-worker.py`: failed/not-started read states; None-safe exit-code handling.
+- `packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py`: response consumer and log lifetime; 10-second owned-target cleanup budget.
+- `packages/nanolab/src/nanolab/tasks/soak/artifacts.py`: cumulative-budget check and locked immutable raw publication.
+- `packages/nanolab/src/nanolab/tasks/heap_analysis/evidence.py`: writer-backed raw publication and preserved trimmed pointers.
+- `packages/nanolab/src/nanolab/tasks/heap_analysis/runtime.py`: note-aware failure rendering and passing the writer to `persist_native`.
+- `packages/nanolab/tests/soak/test_diagnostic_helper.py`: deadline, log, cleanup and worker regressions.
+- `packages/nanolab/tests/heap_analysis/test_native_evidence.py`: raw accounting, publication failure and pointer tests. This is the existing test file; do not create a parallel `test_evidence.py`.
+- `packages/nanolab/tests/heap_analysis/test_runtime.py`: cancellation receipt and existing session integration.
+- `docs/heap-analysis.md`: local-clock scope and explicit source-state semantics.
 
 ---
 
-### Task 1: Anchor the collection deadline inside the container (#3)
+### Task 1: Bound the supported local-clock contract (#3)
 
 **Files:**
-- Modify: `packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py:532`
-- Modify: `packages/nanolab/assets/soak/diagnostic-worker.py` (the `memory` function, around lines 137-141 and the `heap_info` block)
 - Test: `packages/nanolab/tests/soak/test_diagnostic_helper.py`
+- Modify: `docs/heap-analysis.md`
 
-**Interfaces:**
-- Consumes: nothing from other tasks.
-- Produces: request key `memory_budget_s` (a duration in seconds) replacing `memory_deadline_s` (an absolute host timestamp). Tasks 2-5 do not touch it.
+**Interfaces:** Keep `memory_deadline_s`, the absolute deadline computed after host identity checks; no `memory_budget_s` protocol change. The same deadline covers procfs and jcmd. This task establishes regression tests and documents supported scope rather than claiming cross-kernel Docker support.
 
-The host currently sends an absolute `time.monotonic()` value:
+The current helper requires a local `unix:///` Docker socket and verifies Docker PIDs through local `/proc`. A forwarded socket or VM-backed daemon is not made supported by changing a timeout field. Cross-clock support would require a separate transport/identity design. For the supported same-clock backend, the current absolute deadline correctly consumes exec startup delay. Sending `remaining - margin` and starting it again in the worker would lose that property.
 
-```python
-                cfg["memory_deadline_s"] = self.commands.deadline - margin
-```
+- [ ] **Step 1: Add delayed-start and shared-deadline regression tests**
 
-and the worker compares it against its own clock:
+The existing test file defines `worker()`, `probe()`, `TARGET`, and `memory_owner(monkeypatch, tmp_path, ...)`, which returns `(owner, calls, cleanup)`. Use the real signature and return shape:
 
 ```python
-            if opt_in and time.monotonic() >= deadline:
-```
+def test_local_memory_request_keeps_the_remaining_absolute_deadline(
+    monkeypatch, tmp_path
+):
+    import nanolab.tasks.soak.diagnostic_helper as helper
 
-Every other worker subcommand anchors its deadline locally — `deadline = time.monotonic() + cfg.get("timeout_s", 40)` and `deadline = started + request["timeout_s"]` — so this is the only place a monotonic value crosses the process boundary. Two processes share `CLOCK_MONOTONIC` only when they share a kernel; under a VM-backed Docker or a remote `docker_host` the comparison is meaningless. Ahead, every read times out and the run still passes with all sources `not_started`; behind, `jcmd` can outlive the exec timeout while `jvm_may_be_running` stays true, and the measured control plane is killed mid-run.
+    owner, calls, _ = memory_owner(monkeypatch, tmp_path)
+    now = [100.0]
+    monkeypatch.setattr(helper.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(owner, "_check_target", lambda: now.__setitem__(0, 104.0))
+    owner.read_memory(timeout_s=5, include_smaps=True)
+    argv, options = calls[-1]
+    cfg = json.loads(base64.b64decode(argv[-1]))
+    assert "memory_budget_s" not in cfg
+    assert 104.0 < cfg["memory_deadline_s"] < 105.0
+    assert options["timeout_s"] == 1.0
 
-- [ ] **Step 1: Write the failing tests**
 
-```python
-def test_memory_request_sends_a_relative_budget_not_a_host_timestamp(monkeypatch):
-    owner, calls = memory_owner(monkeypatch)
-    owner.read_memory(timeout_s=10, include_smaps=True)
-    cfg = json.loads(base64.b64decode(calls[-1][0][-1]))
-    assert "memory_deadline_s" not in cfg
-    assert 0 < cfg["memory_budget_s"] <= 10
-
-
-def test_worker_anchors_the_budget_on_its_own_clock(monkeypatch):
+def test_late_worker_does_not_restart_the_collection_budget(monkeypatch):
     module = worker()
-    observed = probe()
-    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
-    monkeypatch.setattr(module, "read_proc", lambda path, limit: "body")
-    # A host clock far behind the container's would have expired a deadline
-    # sent as an absolute value; a relative budget is immune to the offset.
+    monkeypatch.setattr(module.time, "monotonic", lambda: 112.0)
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+    monkeypatch.setattr(module, "read_proc", lambda *a: pytest.fail("expired read"))
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("expired attach"))
     result = module.memory(
         {
             "target": asdict(TARGET),
             "include_smaps": True,
-            "memory_budget_s": 30.0,
+            "include_heap_info": True,
+            "memory_deadline_s": 109.0,
         }
     )
-    assert result["smaps"] == "body"
-    assert result["errors"] == {}
+    assert all(value == "not_started" for value in result["completion"].values())
+    assert result["heap_info"] is None
 
 
-def test_worker_still_refuses_to_start_once_its_own_budget_is_gone(monkeypatch):
+def test_procfs_and_heap_info_share_one_deadline(monkeypatch):
     module = worker()
-    observed = probe()
-    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
-    monkeypatch.setattr(module, "read_proc", lambda path, limit: "body")
+    now = [100.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+
+    def read(path, limit):
+        now[0] += 3.0
+        return "body"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("late attach"))
     result = module.memory(
         {
             "target": asdict(TARGET),
-            "include_smaps": True,
-            "memory_budget_s": 0.0,
+            "include_heap_info": True,
+            "memory_deadline_s": 105.0,
         }
     )
-    assert result["smaps"] is None
-    assert "deadline exhausted" in result["errors"]["smaps"]
+    assert result["completion"]["heap_info"] == "not_started"
 ```
 
-- [ ] **Step 2: Run the tests and confirm RED**
+- [ ] **Step 2: Run the regressions against the existing implementation**
 
 ```bash
-cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -k "relative_budget or anchors_the_budget or own_budget_is_gone" -q --no-cov
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -k 'remaining_absolute_deadline or late_worker or share_one_deadline' -q --no-cov
 ```
 
-Expected: failures on the missing `memory_budget_s` key.
+Expected: PASS already. These establish the behavior to preserve; they are not evidence that a new relative-budget implementation fixes anything. Do not manufacture a RED stage for this scope clarification.
 
-- [ ] **Step 3: Send a duration from the host**
+- [ ] **Step 3: Document the clock-domain limit**
 
-```python
-                cfg["memory_budget_s"] = remaining - margin
+Add to `docs/heap-analysis.md`:
+
+```markdown
+The diagnostic helper uses the local Linux Docker backend and validates target
+PIDs through the host's `/proc`. Its absolute monotonic deadline assumes this
+supported shared clock domain and includes exec startup delay. A forwarded
+Docker socket or a daemon in another kernel is not supported by this protocol.
+The host deadline remains the outer bound; a late worker may return missing
+readings or be interrupted, and unresolved JVM completion follows owned-target
+cleanup. No timeout representation alone guarantees timely acknowledgement.
 ```
 
-Keep the surrounding `remaining`/`margin` computation exactly as it is; only the key and the value's meaning change.
-
-- [ ] **Step 4: Anchor it in the worker**
-
-Where the worker currently reads `cfg["memory_deadline_s"]` into `deadline`, replace it with a locally anchored value computed once, before the read loop:
-
-```python
-    deadline = time.monotonic() + cfg["memory_budget_s"] if opt_in else None
-```
-
-Use that same `deadline` for the `heap_info` block instead of `cfg["heap_info_deadline_s"]` if the implementation introduced a second absolute value there; a single locally anchored deadline covers the whole collection, which is what the spec's "all reads and the command share one overall collection budget" asks for.
-
-- [ ] **Step 5: Run the tests and confirm GREEN**
-
-Run the Step 2 command, then the whole file:
+- [ ] **Step 4: Commit the scope and regression coverage**
 
 ```bash
-cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -q --no-cov
-```
-
-`test_expired_budget_never_launches_jcmd` pins the expired-budget response. It should still pass; if it asserted the old key, update it and say so in the report.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add packages/nanolab/assets/soak/diagnostic-worker.py \
-  packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py \
-  packages/nanolab/tests/soak/test_diagnostic_helper.py
-git commit -m "Anchor the memory collection budget on the container clock"
+git add docs/heap-analysis.md packages/nanolab/tests/soak/test_diagnostic_helper.py
+git commit -m "Document local deadline scope and cover delayed helper startup"
 ```
 
 ---
 
-### Task 2: Stop retaining the duplicated response log (#4)
+### Task 2: Delete response logs only after acceptance (#4)
 
 **Files:**
-- Modify: `packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py` (`_DockerCommands.run` around line 356, and the opt-in read around line 537)
+- Modify: `packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py`
 - Test: `packages/nanolab/tests/soak/test_diagnostic_helper.py`
 
-**Interfaces:**
-- Consumes: nothing from other tasks.
-- Produces: `_DockerCommands.run(..., retain_log=True)`, defaulting to today's behaviour. Only the opt-in memory read passes `False`.
+**Interfaces:** `_DockerCommands.run(..., consume=None)` retains the existing string result and log when `consume` is absent. When present, it passes the text to the consumer, removes the log only after successful acceptance, and returns the consumer's result. `_OwnedDockerHelper.read_memory` uses the consumer only for opt-in requests. Preserve `options["timeout_s"]` and the 64 MiB limit.
 
-`run` writes the command's whole output to `self.root / ("docker-" + uuid4().hex + ".log")` and never removes it. For heap analysis `output_root` is the evidence directory, and `measure_tree` excludes only `workspace-*` and dot-prefixed parts, so those logs count against `artifact_limit_bytes`. Every opt-in reading is therefore stored twice: once in the log and once republished under `evidence/native/`. With the escaping headroom the existing tests exercise, three checkpoints can add over a hundred megabytes of pure duplication and fail `enforce_limit` before the run finishes.
+Do not unlink before `log.read_text()`. A zero Docker exit is not enough: JSON decoding, identity validation and JVM completion validation must also succeed. A failed command or failed consumer retains its log. Accepted source errors remain in the returned structured evidence and are published by the session.
 
-The raw content is republished as evidence on success, so the log adds nothing there. On failure it is the only record, so it stays.
+- [ ] **Step 1: Add tests using the real `_DockerCommands.run`**
 
-- [ ] **Step 1: Write the failing test**
+Add this complete helper beside `memory_owner`; it reuses the existing owner identity stubs but replaces the transport with the genuine run method. `spec`, `probe`, `TARGET`, `asdict`, `json` and `pytest` already exist in this test module.
 
 ```python
-def test_opt_in_read_leaves_no_duplicate_response_log(monkeypatch, tmp_path):
-    owner, _calls = memory_owner(monkeypatch, smaps="x" * 4096, root=tmp_path)
-    owner.read_memory(timeout_s=10, include_smaps=True)
-    assert list(tmp_path.glob("docker-*.log")) == []
+def logged_memory_owner(monkeypatch, tmp_path, *, raw=None, returncode=0):
+    from threading import Event
+    from nanolab.tasks.soak import diagnostic_helper as helper
+    from nanolab.tasks.soak.processes import OwnedCommandResult
+
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
+    payload = (
+        raw
+        if raw is not None
+        else json.dumps(
+            {
+                "schema": "nanolab-soak-memory-helper-v1",
+                "target": asdict(TARGET),
+                "before": probe(),
+                "after": probe(),
+                "errors": {},
+                "status": "VmRSS: 4 kB\n",
+                "smaps_rollup": "Pss: 4 kB\n",
+                "smaps": "body",
+                "heap_info": None,
+                "completion": {"heap_info": "completed"},
+            }
+        )
+    )
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            self.log = kwargs["log_path"]
+
+        def run(self):
+            self.log.write_text(payload)
+            return OwnedCommandResult(returncode, False, True, ended_s=1.0)
+
+    monkeypatch.setattr(helper, "OwnedCommandRunner", Runner)
+    owner.commands = helper._DockerCommands(owner.spec, tmp_path, Event())
+    return owner, cleanup
 
 
-def test_a_failed_opt_in_read_keeps_its_log_for_forensics(monkeypatch, tmp_path):
-    owner, _calls = memory_owner(monkeypatch, fail=True, root=tmp_path)
-    with pytest.raises(BaseException):
-        owner.read_memory(timeout_s=10, include_smaps=True)
+def test_accepted_optional_response_removes_duplicate_log(monkeypatch, tmp_path):
+    owner, _ = logged_memory_owner(monkeypatch, tmp_path)
+    assert owner.read_memory(include_smaps=True)["smaps"] == "body"
+    assert not list(tmp_path.glob("docker-*.log"))
+
+
+@pytest.mark.parametrize("raw,returncode", [("not JSON", 0), ("command failed", 1)])
+def test_rejected_optional_response_keeps_log(monkeypatch, tmp_path, raw, returncode):
+    owner, _ = logged_memory_owner(
+        monkeypatch, tmp_path, raw=raw, returncode=returncode
+    )
+    with pytest.raises((ValueError, RuntimeError)):
+        owner.read_memory(include_smaps=True)
     assert list(tmp_path.glob("docker-*.log"))
 
 
-def test_legacy_read_keeps_its_log_unchanged(monkeypatch, tmp_path):
-    owner, _calls = memory_owner(monkeypatch, root=tmp_path)
-    owner.read_memory(timeout_s=10)
+def test_unresolved_response_keeps_log_even_with_zero_exit(monkeypatch, tmp_path):
+    payload = {
+        "schema": "nanolab-soak-memory-helper-v1",
+        "target": asdict(TARGET),
+        "before": probe(),
+        "after": probe(),
+        "completion": {"heap_info": "unresolved"},
+    }
+    owner, cleanup = logged_memory_owner(monkeypatch, tmp_path, raw=json.dumps(payload))
+    with pytest.raises(RuntimeError, match="completion unresolved"):
+        owner.read_memory(include_heap_info=True)
+    assert list(tmp_path.glob("docker-*.log"))
+    assert cleanup == ["cancel-target", "close"]
+
+
+def test_legacy_memory_log_is_retained(monkeypatch, tmp_path):
+    owner, _ = logged_memory_owner(monkeypatch, tmp_path)
+    owner.read_memory()
     assert list(tmp_path.glob("docker-*.log"))
 ```
 
-Extend the `memory_owner` helper so it writes a real log file through the genuine `run` path rather than replacing it wholesale, and accepts `root` and `fail`. If the existing helper fakes `run` entirely, add a second helper that exercises the real `_DockerCommands.run` against a fake `docker` executable, following the pattern the file already uses for command execution.
-
-- [ ] **Step 2: Run the tests and confirm RED**
+- [ ] **Step 2: Run the log tests and confirm the accepted-response test fails**
 
 ```bash
-cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -k "duplicate_response_log or keeps_its_log" -q --no-cov
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -k 'duplicate_log or keeps_log or memory_log_is_retained' -q --no-cov
 ```
 
-Expected: the first test fails because the log survives.
+- [ ] **Step 3: Add the consumer without changing default calls**
 
-- [ ] **Step 3: Let the caller opt out of retaining the log**
-
-In `_DockerCommands.run`, add the keyword and unlink on success:
+Extend the run signature:
 
 ```python
-    def run(
-        self,
-        args,
-        timeout_s=20.0,
-        *,
-        cleanup=False,
-        limit=1024 * 1024,
-        retain_log=True,
+    def run(self, args, timeout_s=20.0, *, cleanup=False, limit=1024 * 1024, consume=None):
+```
+
+Replace its final `return log.read_text()` with:
+
+```python
+        text = log.read_text()
+        if consume is None:
+            return text
+        accepted = consume(text)
+        log.unlink(missing_ok=True)
+        return accepted
+```
+
+Keep all command failure checks before this block. The callback decodes and validates this response, including the existing target inspection; final artifacts are published later by the session.
+
+- [ ] **Step 4: Consume the opt-in response after validation**
+
+Inside `_OwnedDockerHelper.read_memory`, replace the current block from `jvm_may_be_running = include_heap_info` through `return data` with:
+
+```python
+def accept(text):
+    nonlocal jvm_may_be_running
+    data = json.loads(text)
+    self._check_target()
+    before, after = data.get("before", {}), data.get("after", {})
+    if (
+        data.get("schema") != "nanolab-soak-memory-helper-v1"
+        or data.get("target") != asdict(self.spec.target)
+        or before != after
+        or before.get("target_start_ticks") != self.process_identity["start_ticks"]
+        or before.get("target_pid") != 1
+        or before.get("uid") != self.spec.uid
+        or before.get("target_uid") != self.spec.uid
+        or not before.get("pid_namespace")
+        or before["pid_namespace"] != before.get("target_pid_namespace")
     ):
+        raise ValueError("memory response process/namespace identity changed")
+    if include_heap_info:
+        state = data.get("completion", {}).get("heap_info")
+        if state not in {"completed", "not_started"}:
+            raise MemoryCommandUnresolved("in-JVM command completion unresolved")
+        jvm_may_be_running = False
+    return data
+
+
+jvm_may_be_running = include_heap_info
+if include_smaps or include_heap_info:
+    return self.commands.run(argv, **options, consume=accept)
+return accept(self.commands.run(argv, **options))
 ```
 
-and, at the point where `run` is about to return its output:
+`_check_target()` uses Docker inspection, so preserve its existing position relative to validation but do not recursively use the same response consumer: those inspection calls use default `run` and retain their logs. The consumer applies only to the memory exec response. If any inspection/validation fails, the memory response log remains.
+
+Update the existing `memory_owner` fake's final return to execute the callback when present; this is a test-double API adjustment, not a weakened assertion:
 
 ```python
-        if not retain_log:
-            # The caller republishes this payload as its own evidence, so the
-            # log is pure duplication inside the artifact budget. A failure
-            # returns before this point and keeps the log.
-            log.unlink(missing_ok=True)
+            consume = kwargs.get("consume")
+            return consume(response) if consume is not None else response
 ```
 
-- [ ] **Step 4: Use it from the opt-in read only**
+Keep its JSON-size check before these lines, and keep all existing default-wire/timeout assertions.
 
-```python
-            limits = {"limit": _OPT_IN_RESPONSE_BYTES, "retain_log": False} if ... else {}
-```
-
-Keep the legacy branch passing nothing, so its log behaviour is untouched.
-
-- [ ] **Step 5: Run the tests and confirm GREEN**
-
-Run the Step 2 command, then the whole file.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Run helper tests and commit**
 
 ```bash
-git add packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py \
-  packages/nanolab/tests/soak/test_diagnostic_helper.py
-git commit -m "Stop storing every optional reading twice in the artifact tree"
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -q --no-cov
+git add packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py packages/nanolab/tests/soak/test_diagnostic_helper.py
+git commit -m "Discard memory response logs after validation succeeds"
 ```
 
 ---
 
-### Task 3: Restore the cleanup budget and the unconfirmed-cleanup signal (#2, #6)
+### Task 3: Preserve cancellation and expose cleanup uncertainty (#2, #6)
 
 **Files:**
-- Modify: `packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py:566` and `:575`
+- Modify: `packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py`
+- Modify: `packages/nanolab/src/nanolab/tasks/heap_analysis/runtime.py`
 - Test: `packages/nanolab/tests/soak/test_diagnostic_helper.py`
+- Test: `packages/nanolab/tests/heap_analysis/test_runtime.py`
 
-**Interfaces:**
-- Consumes: nothing from other tasks.
-- Produces: no new names; the raised exception's `str()` regains the cleanup-unconfirmed text.
+**Interfaces:** No exception-type change. Keep the original opt-in exception and its cleanup note. Add `_failure_reason(error: BaseException) -> str` in the heap-analysis runtime to render notes in the receipt; `RunControlPlaneHeapAnalysis.run` must still distinguish `Exception` from cancellation.
 
-Two independent slips in the same `except` block.
+- [ ] **Step 1: Add deterministic budget and cancellation tests**
 
-The budget: this path sets `cleanup_deadline = time.monotonic() + 5.0`, but when `jvm_may_be_running` it calls `_cancel_remote()`, which makes three or more Docker calls. `cancel_remote()` grants `10.0` for the same work, and the 5 s budget elsewhere covers a shorter sequence. On a busy daemon the deadline expires inside `run`, cleanup is unconfirmed, the helper leaks, and whether the target was stopped is unknown.
-
-The signal: the opt-in branch calls `error.add_note(...)` and re-raises the original error, while the legacy branch raises a `RuntimeError` whose message carries the text. `_publish` records failures as `f"{type(error).__name__}: {str(error)[:1024]}"`, and `str()` does not render notes — so on the higher-risk path, where the target may still be running a `jcmd`, `report.json` shows only the bare unresolved-completion message.
-
-- [ ] **Step 1: Write the failing tests**
+In `test_diagnostic_helper.py`:
 
 ```python
-def test_opt_in_cleanup_gets_the_same_budget_as_cancel_remote(monkeypatch):
-    owner, budgets = memory_owner_recording_cleanup_budget(monkeypatch)
-    with pytest.raises(BaseException):
-        owner.read_memory(timeout_s=10, include_heap_info=True)
-    assert budgets and min(budgets) >= 10.0
+def test_unresolved_memory_cleanup_receives_ten_seconds(monkeypatch, tmp_path):
+    from nanolab.tasks.soak import diagnostic_helper as helper
+
+    owner, _, _ = memory_owner(monkeypatch, tmp_path, completion="unresolved")
+    monkeypatch.setattr(helper.time, "monotonic", lambda: 100.0)
+    budgets = []
+    monkeypatch.setattr(
+        owner,
+        "_cancel_remote",
+        lambda: budgets.append(owner.commands.cleanup_deadline - 100.0),
+    )
+    with pytest.raises(helper.MemoryCommandUnresolved):
+        owner.read_memory(include_heap_info=True)
+    assert budgets == [10.0]
 
 
-def test_unconfirmed_cleanup_survives_str_for_the_receipt(monkeypatch):
-    owner = memory_owner_with_failing_cleanup(monkeypatch)
-    with pytest.raises(BaseException) as raised:
-        owner.read_memory(timeout_s=10, include_heap_info=True)
-    assert "cleanup unconfirmed" in str(raised.value)
+def test_cleanup_failure_keeps_the_original_interrupt(monkeypatch, tmp_path):
+    owner, _, _ = memory_owner(monkeypatch, tmp_path)
+    interrupted = KeyboardInterrupt("user cancelled")
+
+    def fail_read(*args, **kwargs):
+        raise interrupted
+
+    def fail_cleanup():
+        raise RuntimeError("daemon unavailable")
+
+    monkeypatch.setattr(owner.commands, "run", fail_read)
+    monkeypatch.setattr(owner, "_cancel_remote", fail_cleanup)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        owner.read_memory(include_heap_info=True)
+    assert raised.value is interrupted
+    assert any("cleanup unconfirmed" in note for note in interrupted.__notes__)
 ```
 
-Build the two helpers beside the existing fakes: the first records the value assigned to `commands.cleanup_deadline` relative to `time.monotonic()`; the second makes `_cancel_remote` raise.
+In `test_runtime.py`, use its existing `FakeSession`, `build`, `measure` and `evidence` helpers:
 
-- [ ] **Step 2: Run the tests and confirm RED**
+```python
+def test_cleanup_note_survives_cancellation_receipt(tmp_path):
+    class Interrupted(FakeSession):
+        def load(self, phase, duration_s):
+            if phase == "steady":
+                error = KeyboardInterrupt("user cancelled")
+                error.add_note("memory cleanup unconfirmed: daemon unavailable")
+                raise error
+            return super().load(phase, duration_s)
+
+    task, _, run_dir = build(tmp_path, Interrupted([], evidence(tmp_path)))
+    with pytest.raises(KeyboardInterrupt):
+        measure(task)
+    terminal = json.loads((run_dir / "terminal.json").read_text())
+    report = json.loads((run_dir / "report.json").read_text())
+    assert terminal["status"] == "ABORTED"
+    assert "cleanup unconfirmed" in json.dumps(terminal)
+    assert any("cleanup unconfirmed" in reason for reason in report["reasons"])
+```
+
+- [ ] **Step 2: Run the tests and confirm budget/receipt failures**
 
 ```bash
-cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -k "cleanup_budget or cleanup_survives_str" -q --no-cov
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py packages/nanolab/tests/heap_analysis/test_runtime.py -k 'receives_ten_seconds or original_interrupt or cancellation_receipt' -q --no-cov
 ```
 
-- [ ] **Step 3: Give the cancellation path the budget its work needs**
+The original-interrupt assertion should already pass. Preserve it while fixing the other failures.
+
+- [ ] **Step 3: Match the owned-target cancellation budget**
+
+In the `read_memory` exception handler:
 
 ```python
                 self.commands.cleanup_deadline = time.monotonic() + (
@@ -291,55 +404,59 @@ cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-group
                 )
 ```
 
-The procfs-only case keeps 5 s, which is what it has always had for a shorter sequence.
+Keep the existing opt-in `error.add_note(...)` and `raise error from cleanup_error`. Do not wrap `KeyboardInterrupt` in `RuntimeError`; chaining retains a cause but does not retain catch behavior.
 
-- [ ] **Step 4: Put the text back in the message**
+- [ ] **Step 4: Render cleanup notes at the receipt boundary**
+
+Add to the heap-analysis runtime:
 
 ```python
-            except BaseException as cleanup_error:
-                raise RuntimeError(
-                    "memory read failed; remote reader cleanup unconfirmed: "
-                    f"{cleanup_error}"
-                ) from error
+def _failure_reason(error: BaseException) -> str:
+    """Keep cleanup uncertainty visible without changing exception identity."""
+    notes = [str(note) for note in getattr(error, "__notes__", ())]
+    cleanup = [note for note in notes if "cleanup unconfirmed" in note]
+    other = [note for note in notes if "cleanup unconfirmed" not in note]
+    parts = cleanup + [f"{type(error).__name__}: {error}"] + other
+    return "; ".join(parts)[:1024]
 ```
 
-Use the same message on both branches: a receipt that renders `str(error)` must show it, and the opt-in path is the one where it matters most. If the implementation needs the original exception type preserved for a caller, chain it rather than annotate it.
+Replace only the two failure-formatting branches in `RunControlPlaneHeapAnalysis.run`:
 
-- [ ] **Step 5: Run the tests and confirm GREEN**
+```python
+        except Exception as error:
+            reasons.append(_failure_reason(error))
+        except BaseException as error:
+            interrupted = error
+            reasons.append(_failure_reason(error))
+```
 
-Run the Step 2 command, then the whole file.
+Keep the existing final re-raise and `aborted=interrupted is not None` behavior unchanged. No shared soak receipt changes are needed.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Verify and commit**
 
 ```bash
-git add packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py \
-  packages/nanolab/tests/soak/test_diagnostic_helper.py
-git commit -m "Give optional-read cleanup its full budget and keep its signal"
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py packages/nanolab/tests/heap_analysis/test_runtime.py -q --no-cov
+git add packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py packages/nanolab/src/nanolab/tasks/heap_analysis/runtime.py packages/nanolab/tests/soak/test_diagnostic_helper.py packages/nanolab/tests/heap_analysis/test_runtime.py
+git commit -m "Preserve cancellation and report unconfirmed memory cleanup"
 ```
 
 ---
 
-### Task 4: Two worker correctness slips (#5, #8)
+### Task 4: Distinguish failed reads and acknowledged command errors (#5, #8)
 
 **Files:**
-- Modify: `packages/nanolab/assets/soak/diagnostic-worker.py:141` and `:243`
+- Modify: `packages/nanolab/assets/soak/diagnostic-worker.py`
 - Test: `packages/nanolab/tests/soak/test_diagnostic_helper.py`
+- Modify: `docs/heap-analysis.md`
 
-**Interfaces:**
-- Consumes: nothing from other tasks.
-- Produces: no new names.
+**Interfaces:** Procfs completion states are `not_started` (deadline prevented the attempt), `failed` (attempt raised), and `completed` (read returned). This does not redefine heap-info command completion: a positive acknowledged exit remains completed with an error. Missing/negative exit codes remain unresolved when `require_completion=True`.
 
-`state = "completed"` is assigned before `read_proc` runs, so a read that raises is still published as completed — `evidence.py` surfaces that as `sources["smaps"]["completion"]`, contradicting the error recorded beside it.
-
-`result.returncode < 0` is evaluated before any `!= 0` comparison, and `OwnedCommandResult.returncode` is `int | None`. The preceding terms should make `None` unreachable, but every other site in this codebase puts the None-safe comparison first, and a `TypeError` here is outside the caller's `except (OSError, ValueError, RuntimeError)`: it would escape `memory()`, fail the worker, and through `jvm_may_be_running` kill the measured target.
-
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Add tests that reach the actual comparison**
 
 ```python
-def test_a_failed_read_is_not_reported_as_completed(monkeypatch):
+def test_failed_procfs_read_has_a_distinct_state(monkeypatch):
     module = worker()
-    observed = probe()
-    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
 
     def read(path, limit):
         if path.name == "smaps":
@@ -348,205 +465,387 @@ def test_a_failed_read_is_not_reported_as_completed(monkeypatch):
 
     monkeypatch.setattr(module, "read_proc", read)
     result = module.memory(
-        {"target": asdict(TARGET), "include_smaps": True, "memory_budget_s": 30.0}
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "memory_deadline_s": time.monotonic() + 30,
+        }
     )
-    assert result["completion"]["smaps"] != "completed"
-    assert "exceeds read bound" in result["errors"]["smaps"]
+    assert result["completion"]["smaps"] == "failed"
     assert result["completion"]["status"] == "completed"
+    assert "exceeds read bound" in result["errors"]["smaps"]
 
 
-def test_command_tolerates_a_missing_return_code(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "code,exception_name",
+    [
+        (None, "CommandCompletionUnresolved"),
+        (-9, "CommandCompletionUnresolved"),
+        (1, "CommandCompletedError"),
+        (0, None),
+    ],
+)
+def test_command_exit_code_preserves_completion_semantics(
+    monkeypatch, tmp_path, code, exception_name
+):
+    import sys
+    from nanolab.tasks.soak import processes
+
     module = worker()
-    from processes import OwnedCommandResult
-
-    result = OwnedCommandResult(returncode=None, forced_stop=True, reaped=True)
-    monkeypatch.setattr(
-        module, "OwnedCommandRunner", lambda *a, **k: _Runner(result)
+    result = processes.OwnedCommandResult(
+        returncode=code,
+        forced_stop=False,
+        reaped=True,
+        ended_s=1.0,
     )
-    with pytest.raises(module.CommandCompletionUnresolved):
-        module.command(("/bin/true",), time.monotonic() + 30, tmp_path)
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            kwargs["log_path"].write_text("acknowledged output")
+
+        def run(self):
+            return result
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    if exception_name is None:
+        assert (
+            module.command(
+                ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+            )
+            == "acknowledged output"
+        )
+    else:
+        with pytest.raises(getattr(module, exception_name)):
+            module.command(
+                ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+            )
 ```
 
-The check lives in `command(argv, deadline, scratch, limit=2 * 1024 * 1024, *, require_completion=False)` at `diagnostic-worker.py:213`, which imports `OwnedCommandRunner` from `processes` inside the function body — so monkeypatching the module attribute is not enough on its own; patch `processes.OwnedCommandRunner` or inject through the module the way the file's existing command tests do. `OwnedCommandResult` (`processes.py:266`) takes `returncode: int | None`, `forced_stop`, `reaped`, then keyword defaults; `errors` is not a field, so build it as shown. `_Runner` is a two-line stand-in whose `run()` returns the prepared result.
+The None case sets `forced_stop=False`, `reaped=True`, and a non-None `ended_s`, so it reaches the comparison. `OwnedCommandResult` does have an `errors` field; its default is empty. Do not patch a nonexistent worker-level `OwnedCommandRunner`: `command` imports it from `processes` inside the function.
 
-- [ ] **Step 2: Run the tests and confirm RED**
+- [ ] **Step 2: Run and confirm the None/state cases fail**
 
 ```bash
-cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -k "not_reported_as_completed or missing_return_code" -q --no-cov
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -k 'distinct_state or exit_code_preserves' -q --no-cov
 ```
 
-- [ ] **Step 3: Set the completion state after the read succeeds**
+- [ ] **Step 3: Set read states around the actual attempt**
+
+Replace the start of the procfs loop's try block with:
 
 ```python
         state = "not_started"
         try:
             if opt_in and time.monotonic() >= deadline:
                 raise TimeoutError("memory collection deadline exhausted")
+            state = "failed"
             result[name] = read_proc(Path("/proc/1") / name, limit)
             state = "completed"
 ```
 
-- [ ] **Step 4: Order the return-code comparison None-safely**
+Keep the existing catch and interval publication. Legacy responses still publish neither completion nor intervals.
+
+- [ ] **Step 4: Guard None without absorbing positive exit codes**
+
+Replace the negative-return-code term in the completion-required condition with:
 
 ```python
-        or result.returncode != 0
-        # A negative returncode means the child died from a signal (a killed
-        # helper container, the kernel OOM killer), which is no proof at all
-        # that the in-JVM command finished.
+        or result.returncode is None
         or result.returncode < 0
 ```
 
-Putting the `!= 0` term first short-circuits `None` before the ordering comparison, matching `command()` and `_DockerCommands.run`. Check the surrounding boolean: if `!= 0` changes the outcome for a legitimately non-zero-but-completed case, keep the ordering fix but guard with `result.returncode is None or ...` instead, and say which you chose and why in the report.
+Keep the following `if require_completion and result.returncode != 0: raise CommandCompletedError(...)` unchanged. Do not put `!= 0` in the unresolved condition.
 
-- [ ] **Step 5: Run the tests and confirm GREEN**
+- [ ] **Step 5: Document the states, verify and commit**
 
-Run the Step 2 command, then the whole file.
+Add to `docs/heap-analysis.md`:
 
-- [ ] **Step 6: Commit**
+```markdown
+For procfs sources, `not_started` means the deadline prevented the attempt,
+`failed` means the attempted read raised an error, and `completed` means the
+read returned. Source availability and parsing errors are reported separately.
+For JVM commands, completion acknowledges the command lifetime: an ordinary
+positive error exit can be completed with an error; a missing or signal exit
+does not establish completion.
+```
 
 ```bash
-git add packages/nanolab/assets/soak/diagnostic-worker.py \
-  packages/nanolab/tests/soak/test_diagnostic_helper.py
-git commit -m "Report a failed read as failed and tolerate a missing exit code"
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/soak/test_diagnostic_helper.py -q --no-cov
+git add packages/nanolab/assets/soak/diagnostic-worker.py packages/nanolab/tests/soak/test_diagnostic_helper.py docs/heap-analysis.md
+git commit -m "Distinguish failed reads from unresolved JVM commands"
 ```
 
 ---
 
-### Task 5: Two evidence slips (#1, #7)
+### Task 5: Account raw publication before writing and preserve pointers (#1, #7)
 
 **Files:**
-- Modify: `packages/nanolab/src/nanolab/tasks/heap_analysis/evidence.py:31` and `:155`
-- Test: the file that already covers `evidence.py`; create `packages/nanolab/tests/heap_analysis/test_evidence.py` if there is none.
+- Modify: `packages/nanolab/src/nanolab/tasks/soak/artifacts.py`
+- Modify: `packages/nanolab/src/nanolab/tasks/heap_analysis/evidence.py`
+- Modify: `packages/nanolab/src/nanolab/tasks/heap_analysis/runtime.py`
+- Test: `packages/nanolab/tests/heap_analysis/test_native_evidence.py`
+- Test: `packages/nanolab/tests/heap_analysis/test_runtime.py`
 
-**Interfaces:**
-- Consumes: nothing from other tasks.
-- Produces: no new names.
+**Interfaces:** Add `ArtifactWriter.write_blob(directory, name, body) -> Path` for raw evidence, with locked cumulative accounting but no JSON-record cap. Change `_write_raw` and `persist_native` to receive `ArtifactWriter`. `native_comparison(root)` remains path-based. No after-the-fact `charge_external` method is added.
 
-`native_comparison` re-points the trimmed mappings unconditionally:
+- [ ] **Step 1: Add pointer and raw-accounting tests**
 
-```python
-            smaps = block.get("smaps")
-            if isinstance(smaps, dict):
-                _trim_unbounded_smaps(smaps, f"see evidence/runtime-{checkpoint}.json")
-```
-
-When `persist_native` already trimmed the block, the stored value is the string `"see evidence/native/<checkpoint>-smaps.txt"` — the correct pointer — and this overwrites it with a pointer to `runtime-<checkpoint>.json`, the file whose mappings were removed. The reader is sent to a dead end in exactly the case where the trim was needed.
-
-`_write_raw` publishes into `writer.root/native/` directly. It does enforce the run budget itself, but `ArtifactWriter._used_bytes` never learns about those bytes, so every later `write_json` — the natural checkpoint, the terminal receipt — checks its per-record limit and terminal reserve against a figure that can be tens of megabytes too low.
-
-- [ ] **Step 1: Write the failing tests**
+Add imports for `ArtifactWriter` and `_write_raw` to the existing evidence test module:
 
 ```python
-def test_comparison_keeps_a_pointer_that_was_already_trimmed(tmp_path):
-    block = {
-        "smaps": {
-            "available": True,
-            "large_anonymous_mappings": {
-                "count": 2,
-                "mappings": "see evidence/native/natural-drain-smaps.txt",
+def write_one_record(root, checkpoint, block):
+    (root / f"runtime-{checkpoint}.json").write_text(json.dumps({"native": block}))
+    return root
+
+
+@pytest.mark.parametrize(
+    "mappings,expected",
+    [
+        (
+            "see evidence/native/natural-drain-smaps.txt",
+            "see evidence/native/natural-drain-smaps.txt",
+        ),
+        ([{"size": 1}], "see evidence/runtime-natural-drain.json"),
+    ],
+)
+def test_comparison_preserves_existing_pointer(tmp_path, mappings, expected):
+    root = write_one_record(
+        tmp_path,
+        "natural-drain",
+        {
+            "smaps": {
+                "available": True,
+                "large_anonymous_mappings": {"count": 1, "mappings": mappings},
             },
-        }
-    }
-    root = write_one_record(tmp_path, "natural-drain", block)
-    entry = native_comparison(root)["natural-drain"]
-    pointer = entry["native"]["smaps"]["large_anonymous_mappings"]["mappings"]
-    assert pointer == "see evidence/native/natural-drain-smaps.txt"
+        },
+    )
+    block = native_comparison(root)["natural-drain"]["native"]
+    assert block["smaps"]["large_anonymous_mappings"]["mappings"] == expected
 
 
-def test_comparison_repoints_a_list_that_is_still_inline(tmp_path):
-    block = {
-        "smaps": {
-            "available": True,
-            "large_anonymous_mappings": {"count": 1, "mappings": [{"size": 1}]},
-        }
-    }
-    root = write_one_record(tmp_path, "natural-drain", block)
-    entry = native_comparison(root)["natural-drain"]
-    pointer = entry["native"]["smaps"]["large_anonymous_mappings"]["mappings"]
-    assert pointer == "see evidence/runtime-natural-drain.json"
+def test_valid_large_raw_is_charged_without_json_record_cap(tmp_path):
+    writer = ArtifactWriter(tmp_path / "evidence", 16 * 1024 * 1024)
+    body = b"x" * (2 * 1024 * 1024)
+    receipt = _write_raw(writer, "natural-drain-smaps.txt", body, 16 * 1024 * 1024)
+    assert (writer.root / receipt["path"]).read_bytes() == body
+    assert writer._used_bytes == len(body)
+    with pytest.raises(ArtifactLimitExceededError, match="individual evidence record"):
+        writer.write_json("too-large.json", {"data": "x" * (2 * 1024 * 1024)})
 
 
-def test_raw_writes_are_charged_to_the_artifact_writer(tmp_path):
-    writer = ArtifactWriter(tmp_path, 4096)
-    before = writer._used_bytes
-    _write_raw(writer.root, "natural-drain-smaps.txt", b"x" * 1024, 1 << 20)
-    assert writer._used_bytes >= before + 1024
+def test_writer_refuses_raw_before_publication_when_budget_is_exhausted(tmp_path):
+    writer = ArtifactWriter(tmp_path / "evidence", 4096)
+    with pytest.raises(ArtifactLimitExceededError):
+        _write_raw(writer, "natural-drain-smaps.txt", b"x" * 4096, 1 << 20)
+    assert writer._used_bytes == 0
+    assert not list(writer.root.rglob("*.txt"))
+
+
+def test_raw_bytes_reduce_the_budget_for_later_json(tmp_path):
+    writer = ArtifactWriter(tmp_path / "evidence", 8192)
+    _write_raw(writer, "natural-drain-smaps.txt", b"x" * 6500, 1 << 20)
+    with pytest.raises(ArtifactLimitExceededError, match="budget exhausted"):
+        writer.write_json("next.json", {"data": "x" * 1000})
+    assert not (writer.root / "next.json").exists()
+
+
+def test_failed_raw_publication_does_not_charge_missing_bytes(monkeypatch, tmp_path):
+    from nanolab.tasks.soak import artifacts
+
+    writer = ArtifactWriter(tmp_path / "evidence", 1 << 20)
+
+    def fail_link(*args, **kwargs):
+        raise OSError("synthetic publication failure")
+
+    monkeypatch.setattr(artifacts.os, "link", fail_link)
+    with pytest.raises(OSError, match="publication failure"):
+        _write_raw(writer, "natural-drain-smaps.txt", b"body", 1 << 20)
+    assert writer._used_bytes == 0
+    assert not list(writer.root.rglob("*.txt"))
+    assert not list(writer.root.rglob(".pending-*"))
+
+
+def test_published_raw_stays_charged_when_later_hashing_fails(monkeypatch, tmp_path):
+    from nanolab.tasks.heap_analysis import evidence
+
+    writer = ArtifactWriter(tmp_path / "evidence", 1 << 20)
+
+    def fail_hash(path):
+        raise OSError("synthetic hashing failure")
+
+    monkeypatch.setattr(evidence, "describe_artifact", fail_hash)
+    with pytest.raises(OSError, match="hashing failure"):
+        _write_raw(writer, "natural-drain-smaps.txt", b"body", 1 << 20)
+    assert writer._used_bytes == 4
+    assert (writer.root / "native/natural-drain-smaps.txt").read_bytes() == b"body"
 ```
 
-`native_comparison(root: Path) -> dict` (`evidence.py:133`) takes a directory and returns one entry per checkpoint, so both tests need a written record to read. `write_one_record` is a three-line local helper that writes `{"native": block}` to `root / "runtime-<checkpoint>.json"` and returns `root`. `_write_raw(root: Path, name: str, body: bytes, run_limit: int) -> dict` is at `evidence.py:31`, and the writer's counter is `ArtifactWriter._used_bytes` (`artifacts.py:102`). Both tests take `tmp_path`.
-
-- [ ] **Step 2: Run the tests and confirm RED**
+- [ ] **Step 2: Run the new tests and confirm failures on missing blob support/pointer preservation**
 
 ```bash
-cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/heap_analysis -k "already_trimmed or still_inline or charged_to_the_artifact_writer" -q --no-cov
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/heap_analysis/test_native_evidence.py -k 'existing_pointer or large_raw or refuses_raw or raw_bytes_reduce or raw_publication or published_raw' -q --no-cov
 ```
 
-- [ ] **Step 3: Only re-point a pointer that is still a list**
+- [ ] **Step 3: Separate cumulative budget checks from JSON-record checks**
+
+In `ArtifactWriter`, add `_check_budget` and replace `_check_write` with:
 
 ```python
-            smaps = block.get("smaps")
-            if isinstance(smaps, dict):
-                large = smaps.get("large_anonymous_mappings")
-                # persist_native may already have trimmed this to a pointer at
-                # the raw file. That pointer is the useful one: runtime-*.json
-                # is precisely the record the mappings were removed from.
-                if isinstance(large, dict) and isinstance(large.get("mappings"), list):
-                    _trim_unbounded_smaps(
-                        smaps, f"see evidence/runtime-{checkpoint}.json"
-                    )
+def _check_budget(self, size: int, *, terminal: bool = False) -> None:
+    if self._closed:
+        raise RuntimeError("artifact writer is closed")
+    budget = self.limit_bytes if terminal else self.limit_bytes - self._reserve
+    if self._used_bytes + size > budget:
+        raise ArtifactLimitExceededError(
+            "artifact budget exhausted; terminal space is reserved"
+        )
+
+
+def _check_write(self, size: int, *, terminal: bool = False) -> None:
+    if self._closed:
+        raise RuntimeError("artifact writer is closed")
+    if size > MAX_RECORD_BYTES:
+        raise ArtifactLimitExceededError(
+            "individual evidence record exceeds its size limit"
+        )
+    self._check_budget(size, terminal=terminal)
 ```
 
-- [ ] **Step 4: Charge raw writes to the writer**
+JSON append/write behavior, exception order and messages stay unchanged. The new blob path calls only `_check_budget`.
 
-`ArtifactWriter` has no public way to record a write it did not make: `_used_bytes` is set at `artifacts.py:102` and updated only inside its own write paths (lines 143 and 165). Add one method beside `write_json` that charges an external write and applies the same budget check `write_json` already applies at line 119:
+- [ ] **Step 4: Publish and account raw bytes under one writer lock**
+
+Add this method beside `write_json`. Existing imports already provide `Path`, `os`, `tempfile`, and `_NAME`.
 
 ```python
-    def charge_external(self, size: int) -> None:
-        """Account bytes this writer owns but did not write itself."""
-        self._check_write(size, terminal=False)
-        self._used_bytes += size
+    def write_blob(self, directory: str, name: str, body: bytes) -> Path:
+        """Publish immutable raw evidence without imposing the JSON-record cap."""
+        parent = self._target(directory)
+        if _NAME.fullmatch(name) is None:
+            raise ValueError("artifact name must be a single safe path component")
+        target = parent / name
+        with self._lock:
+            self._check_budget(len(body))
+            if parent.is_symlink():
+                raise ValueError("raw evidence directory cannot be a symbolic link")
+            parent.mkdir(exist_ok=True, mode=0o700)
+            fd, filename = tempfile.mkstemp(prefix=".pending-", dir=parent)
+            temporary = Path(filename)
+            published = False
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(body)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.link(temporary, target)
+                published = True
+            finally:
+                # A later cleanup error must not leave a published file uncharged.
+                if published:
+                    self._used_bytes += len(body)
+                temporary.unlink(missing_ok=True)
+        return target
 ```
 
-Then give `_write_raw` the writer instead of the bare root and call `writer.charge_external(len(body))` after the file lands. `_write_raw` keeps its own `enforce_limit` call: that one bounds the whole run tree, this one keeps the writer's own figure honest. Do not change `write_json`'s behaviour.
+Do not call `write_json` from inside this lock. Existing methods retain their locking and defaults. Source-specific raw caps remain enforced by `persist_native`.
 
-- [ ] **Step 5: Run the tests and confirm GREEN**
+- [ ] **Step 5: Pass the writer through the complete call chain**
 
-Run the Step 2 command, then the whole heap-analysis suite:
+Import `ArtifactWriter` in `heap_analysis/evidence.py`, then replace `_write_raw` with:
 
-```bash
-cd /home/michele/Documenti/nanolab && uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/heap_analysis -q --no-cov
+```python
+def _write_raw(writer: ArtifactWriter, name: str, body: bytes, run_limit: int) -> dict:
+    root = writer.root
+    used = enforce_limit(root.parent, run_limit)
+    if used + len(body) + _TERMINAL_RESERVE > run_limit:
+        raise ArtifactLimitExceededError(
+            "native evidence exceeds cumulative run budget"
+        )
+    target = writer.write_blob("native", name, body)
+    enforce_limit(root.parent, run_limit)
+    return {**describe_artifact(target), "path": str(target.relative_to(root))}
 ```
 
-- [ ] **Step 6: Run everything and the checks**
+Remove now-unused `os` and `tempfile` imports from this evidence module. Change the start of `persist_native` to:
 
-```bash
-cd /home/michele/Documenti/nanolab && NANOFAAS_ROOT=/home/michele/Documenti/nanofaas uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -q
-uv run --frozen ruff check packages && uv run --frozen ruff format --check packages
-uv run --frozen --all-packages --all-groups basedpyright --project packages/nanolab
-uv run --frozen --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
-uv run pre-commit run --all-files
+```python
+def persist_native(
+    writer: ArtifactWriter, checkpoint: str, response: dict, artifact_limit_bytes: int
+) -> dict:
+    if checkpoint not in CHECKPOINTS:
+        raise ValueError("unknown memory checkpoint")
 ```
 
-- [ ] **Step 7: Commit**
+Remove the old `root.mkdir(...)` line. Keep the rest of its source-cap, parsing and summary logic, but call `_write_raw(writer, ...)` instead of `_write_raw(root, ...)`. The writer already owns its directory; do not construct another writer inside this function.
+
+In `LocalHeapAnalysisSession.observe`, change only this argument:
+
+```python
+native = persist_native(
+    self._writer,
+    checkpoint,
+    readings,
+    self._config.artifact_limit_bytes,
+)
+```
+
+Keep its cumulative checks around the runtime JSON: the writer accounts its own outputs, while `enforce_limit` also counts other run artifacts. Replace the stale comment above those checks with:
+
+```python
+        # Raw blobs are charged to the writer without its JSON-record cap.
+        # The cumulative run check also includes artifacts from other producers.
+```
+
+Update every existing `persist_native` test to create one writer before adding files or symlinks under its root, and pass that writer. The exact conversion pattern is:
+
+```python
+    root = tmp_path / "evidence"
+    writer = ArtifactWriter(root, 1048576)
+    block = persist_native(writer, "natural-drain", raw, 1048576)
+```
+
+For the cumulative-budget test use `ArtifactWriter(root, 1024 + 4096)` before creating the sibling `other-artifact`; keep the original low run limit. For the symlink test create the writer before `root/native` is linked. Reuse the same writer across checkpoints. Keep the existing retained-content, symlink, summary-size and category assertions unchanged. The runtime integration test continues to construct its writer through `local_session`.
+
+- [ ] **Step 6: Preserve an existing raw pointer while removing inline details**
+
+Change `_trim_unbounded_smaps`, not just its caller:
+
+```python
+    smaps.pop("mapping_details", None)
+    large = smaps.get("large_anonymous_mappings")
+    if isinstance(large, dict) and isinstance(large.get("mappings"), list):
+        large["mappings"] = pointer
+```
+
+Both callers can keep invoking it unconditionally on a smaps dictionary. Existing string pointers remain intact and any remaining inline `mapping_details` is still removed.
+
+- [ ] **Step 7: Run evidence, runtime and shared-writer tests**
 
 ```bash
-git add packages/nanolab/src/nanolab/tasks/heap_analysis/evidence.py \
-  packages/nanolab/src/nanolab/tasks/soak/artifacts.py \
-  packages/nanolab/tests/heap_analysis
-git commit -m "Keep the trimmed pointer and charge raw writes to the writer"
+uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/heap_analysis packages/nanolab/tests/soak -q --no-cov
+```
+
+- [ ] **Step 8: Commit the complete API change**
+
+```bash
+git add packages/nanolab/src/nanolab/tasks/soak/artifacts.py packages/nanolab/src/nanolab/tasks/heap_analysis/evidence.py packages/nanolab/src/nanolab/tasks/heap_analysis/runtime.py packages/nanolab/tests/heap_analysis/test_native_evidence.py packages/nanolab/tests/heap_analysis/test_runtime.py
+git commit -m "Account raw evidence before publication and preserve trimmed pointers"
 ```
 
 ---
 
 ## Completion gate
 
-Before claiming completion:
-
 ```bash
-cd /home/michele/Documenti/nanolab && NANOFAAS_ROOT=/home/michele/Documenti/nanofaas uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -q
+NANOFAAS_ROOT=/home/michele/Documenti/nanofaas uv run --frozen --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -q
+uv run --frozen ruff check packages
+uv run --frozen ruff format --check packages
+uv run --frozen --all-packages --all-groups basedpyright --project packages/nanolab
+uv run --frozen --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
 uv run pre-commit run --all-files
 ```
 
-The soak suites must pass with no edits to `tests/soak/` beyond the tests these tasks add, which is the evidence that the P24 path is still unchanged.
+Before claiming implementation complete, confirm: 2–8 MiB raw evidence remains valid; later JSON sees those charged bytes; failed publication has consistent accounting; accepted response logs disappear while rejected-response logs remain; exit code 1 never becomes unresolved solely because it is nonzero; cancellation remains `ABORTED` with cleanup uncertainty visible; failed reads are not labeled `not_started`; already-trimmed pointers still reach the raw artifact.
 
-Findings #3 and #4 are the two that change the outcome of a real run — a killed control plane and a budget failure at the second or third checkpoint. Neither is reproducible on plain Linux Docker with a small heap, so the suite cannot prove them fixed; the next real heap-analysis run is the check that the collection still completes end to end.
+No dedicated live run is added. These synthetic regressions can establish the logic fixes on plain Linux; the next real heap-analysis run checks deployment integration and operational timing. Do not claim support for another clock domain or infer unchanged wire behavior solely from old suite results.

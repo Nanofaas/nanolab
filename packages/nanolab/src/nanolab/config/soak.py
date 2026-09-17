@@ -15,7 +15,7 @@ MetricOperation = Literal[
     "maximum", "return_to_reference", "growth_review", "expected_zero"
 ]
 CriterionPhase = Literal["baseline", "steady", "drain", "diagnostic"]
-DiagnosticOperation = Literal["gc", "histogram", "heap_dump", "jfr"]
+DiagnosticOperation = Literal["gc", "histogram", "heap_dump", "jfr", "native_memory"]
 
 
 class _StrictModel(BaseModel):
