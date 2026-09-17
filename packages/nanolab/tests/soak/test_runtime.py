@@ -21,6 +21,7 @@ from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparedSoak
+from nanolab.tasks.soak.prerequisites import select_relevant_config
 from nanolab.tasks.soak.runtime import (
     RunSingleVersionSoak,
     RuntimeDeployment,
@@ -1711,9 +1712,21 @@ def test_the_first_prerequisite_reservation_precedes_its_ownership_root(tmp_path
     options = module.RuntimeOptions(
         prerequisite_inputs=module._freeze_prerequisite_inputs(value)
     )
-    _, _, supervision = module._make_runtime_prerequisites(
+    _, frozen, supervision = module._make_runtime_prerequisites(
         value, options, host_bindings(), tmp_path
     )
+
+    # The acceptance gate compares each declared projection against the live
+    # policy. Spell both sides here exactly as they are spelled there, on the
+    # profile the production freeze just built for a shipped scenario.
+    normalized = value.config.model_dump(mode="json")
+    declared = value.config.prerequisites.relevant_config_keys["sync"]
+    assert declared == ["images", "roles", "retention_s", "workload"]
+    for key in declared:
+        assert frozen["relevant_config"]["sync"][key] == select_relevant_config(
+            normalized, key
+        )
+
     owned = value.evidence_dir / "prerequisite-platforms"
     parent = value.evidence_dir / "prerequisites"
     assert not owned.exists()

@@ -239,7 +239,11 @@ def _population_retention(config, population: str) -> float:
 
 def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
     """Derive the built-in sync gate only after images and payloads are frozen."""
-    from nanolab.tasks.soak.prerequisites import _inputs, _required_populations
+    from nanolab.tasks.soak.prerequisites import (
+        _inputs,
+        _required_populations,
+        select_relevant_config,
+    )
 
     config = prepared.config
     coverage = frozenset(config.prerequisites.required_coverage)
@@ -267,20 +271,27 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
     populations = _required_populations(
         prepared.images, coverage, config.metrics_profile
     )
+    profile: dict[str, Any] = {
+        "function": role,
+        "role": role,
+        "request": {"input": deepcopy(case["input"])},
+        "expected_output": deepcopy(case["expected"]),
+        "request_timeout_s": 3,
+        "exercise_timeout_s": 30,
+        "poll_interval_s": 0.05,
+    }
+    # The scenario declares which configuration the prerequisite run had to be
+    # frozen against, and acceptance compares each of those projections against
+    # the live policy. A profile that carries none of them cannot pass that gate,
+    # so the sections are copied here, at the only place the built-in sync recipe
+    # is derived.
+    normalized = config.model_dump(mode="json")
+    for key in config.prerequisites.relevant_config_keys["sync"]:
+        profile[key] = select_relevant_config(normalized, key)
     frozen = {
         "images": dict(prepared.images),
         "metrics_profile": config.metrics_profile,
-        "relevant_config": {
-            "sync": {
-                "function": role,
-                "role": role,
-                "request": {"input": deepcopy(case["input"])},
-                "expected_output": deepcopy(case["expected"]),
-                "request_timeout_s": 3,
-                "exercise_timeout_s": 30,
-                "poll_interval_s": 0.05,
-            }
-        },
+        "relevant_config": {"sync": profile},
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {

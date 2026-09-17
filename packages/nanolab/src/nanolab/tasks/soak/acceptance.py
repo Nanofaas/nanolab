@@ -71,6 +71,7 @@ from nanolab.tasks.soak.models import CriterionResult, Target
 from nanolab.tasks.soak.preflight import preflight
 from nanolab.tasks.soak.prerequisites import (
     normalize_prerequisite_inputs,
+    select_relevant_config,
     validate_receipt,
 )
 from nanolab.tasks.soak.sources import SourceEntry, SourceSnapshot, verify_snapshot
@@ -527,13 +528,6 @@ def _bound(document: dict[str, Any], manifest: dict[str, Any]) -> None:
         and document.get("policy_sha256") == manifest["policy_sha256"],
         "receipt schema/run/frozen-policy binding mismatch",
     )
-
-
-def _select(config: dict[str, Any], key: str) -> Any:
-    value = config
-    for part in key.split("."):
-        value = value[part]
-    return value
 
 
 class _OfflineSink:
@@ -1276,7 +1270,7 @@ def evaluate_acceptance(
             relevant = expected["relevant_config"][name]
             for key in config.prerequisites.relevant_config_keys[name]:
                 _require(
-                    relevant.get(key) == _select(normalized, key),
+                    relevant.get(key) == select_relevant_config(normalized, key),
                     "prerequisite relevant configuration differs: " + key,
                 )
         for key in ("payload", "script"):

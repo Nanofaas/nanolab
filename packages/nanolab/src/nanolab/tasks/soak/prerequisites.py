@@ -29,7 +29,7 @@ import multiprocessing
 import os
 import re
 import signal
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager, suppress
 from copy import deepcopy
 from pathlib import Path
@@ -185,6 +185,19 @@ def normalize_prerequisite_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(inputs)
     normalized.setdefault("metrics_profile", "advanced")
     return normalized
+
+
+def select_relevant_config(config: Mapping[str, Any], key: str) -> Any:
+    """Read one declared relevant-config key out of a dumped configuration.
+
+    The key is a dotted path, and it is written back as a single flat key of the
+    profile, which is how acceptance reads it. Freezing and checking therefore
+    share this one selection rather than each spelling the walk themselves.
+    """
+    value: Any = config
+    for part in key.split("."):
+        value = value[part]
+    return deepcopy(value)
 
 
 def _inputs(inputs: dict, coverage: frozenset[str]) -> None:

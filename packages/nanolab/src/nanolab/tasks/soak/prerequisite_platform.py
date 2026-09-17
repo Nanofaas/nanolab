@@ -257,6 +257,14 @@ class PrerequisitePlatformFactory:
         self.parent_pid = os.getpid()
         self.token = uuid4().hex
         self._lifetime_budgets = {}
+        # Which configuration sections each coverage's profile may carry beyond
+        # the recipe, as the scenario itself declares them.
+        self.relevant_config_keys = {
+            coverage: tuple(keys)
+            for coverage, keys in (
+                prepared.config.prerequisites.relevant_config_keys.items()
+            )
+        }
 
     def validate_inputs(self, inputs: dict) -> None:
         """Validate frozen expectations; no resource or observation is fabricated."""
@@ -269,7 +277,11 @@ class PrerequisitePlatformFactory:
             raise UnsupportedPreflightError("frozen prerequisite profiles are missing")
         settings = set()
         for coverage, profile in configs.items():
-            if not isinstance(profile, dict) or set(profile) - _RECIPE:
+            # A profile carries the recipe, plus the configuration this scenario
+            # declares as relevant: acceptance compares those projections against
+            # the live policy, so the freeze has to carry the sections themselves.
+            declared = set(self.relevant_config_keys.get(coverage, ()))
+            if not isinstance(profile, dict) or set(profile) - _RECIPE - declared:
                 raise UnsupportedPreflightError(
                     f"{coverage}: unsupported relevant configuration fields"
                 )
