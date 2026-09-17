@@ -513,10 +513,7 @@ class LocalHeapAnalysisSession:
             include_heap_info=True,
         )
         native = persist_native(
-            self._root,
-            checkpoint,
-            readings,
-            self._config.artifact_limit_bytes,
+            self._writer, checkpoint, readings, self._config.artifact_limit_bytes
         )
         document = {
             "schema": "nanolab-soak-v1",
@@ -525,8 +522,8 @@ class LocalHeapAnalysisSession:
             "observed": observed,
             "native": native,
         }
-        # Raw files are outside ArtifactWriter's individual-record accounting.
-        # Check the cumulative run budget before and after the JSON write too.
+        # Raw blobs are charged to the writer without its JSON-record cap.
+        # The cumulative run check also includes artifacts from other producers.
         required = len(json.dumps(document).encode("utf-8")) + 1
         if (
             measure_tree(self._root.parent) + required + 4096

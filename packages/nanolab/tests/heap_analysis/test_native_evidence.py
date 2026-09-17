@@ -2,10 +2,15 @@ import json
 
 import pytest
 
-from nanolab.tasks.heap_analysis.evidence import native_comparison, persist_native
+from nanolab.tasks.heap_analysis.evidence import (
+    _write_raw,
+    native_comparison,
+    persist_native,
+)
 from nanolab.tasks.soak.artifacts import (
     MAX_RECORD_BYTES,
     ArtifactLimitExceededError,
+    ArtifactWriter,
 )
 
 
@@ -25,8 +30,9 @@ def reading():
 
 def test_persist_native_keeps_all_sources_and_intervals(tmp_path):
     root = tmp_path / "evidence"
+    writer = ArtifactWriter(root, 1048576)
     raw = reading()
-    block = persist_native(root, "natural-drain", raw, 1048576)
+    block = persist_native(writer, "natural-drain", raw, 1048576)
     for key in ("status", "smaps_rollup", "smaps", "heap_info"):
         source = block["sources"][key]
         assert (root / source["artifact"]["path"]).read_text() == raw[key]
@@ -37,18 +43,19 @@ def test_persist_native_keeps_all_sources_and_intervals(tmp_path):
 
 def test_raw_writes_respect_cumulative_budget_before_writing(tmp_path):
     root = tmp_path / "evidence"
-    root.mkdir()
+    writer = ArtifactWriter(root, 1024 + 4096)
     (tmp_path / "other-artifact").write_bytes(b"x" * 1024)
     with pytest.raises(ArtifactLimitExceededError):
-        persist_native(root, "natural-drain", reading(), 1024 + 4096)
+        persist_native(writer, "natural-drain", reading(), 1024 + 4096)
     assert not list(root.rglob("*.txt"))
 
 
 def test_missing_source_is_visible_and_not_written(tmp_path):
+    writer = ArtifactWriter(tmp_path / "evidence", 1048576)
     raw = reading()
     raw["smaps"] = None
     raw["errors"]["smaps"] = "read bound exceeded"
-    block = persist_native(tmp_path / "evidence", "natural-drain", raw, 1048576)
+    block = persist_native(writer, "natural-drain", raw, 1048576)
     assert block["smaps"]["available"] is False
     assert "artifact" not in block["sources"]["smaps"]
     assert block["sources"]["smaps"]["error"] == "read bound exceeded"
@@ -75,9 +82,10 @@ def many_mappings(small=6000, big=2):
 
 def test_persist_native_keeps_the_summary_when_only_detail_exceeds_budget(tmp_path):
     root = tmp_path / "evidence"
+    writer = ArtifactWriter(root, 1048576)
     raw = reading()
     raw["smaps"] = many_mappings()
-    block = persist_native(root, "natural-drain", raw, 1048576)
+    block = persist_native(writer, "natural-drain", raw, 1048576)
     smaps = block["smaps"]
 
     assert len(json.dumps(block).encode("utf-8")) <= MAX_RECORD_BYTES // 2
@@ -104,23 +112,24 @@ def test_persist_native_keeps_the_summary_when_only_detail_exceeds_budget(tmp_pa
 def test_raw_evidence_refuses_a_symlinked_native_directory(tmp_path):
     root = tmp_path / "evidence"
     outside = tmp_path / "outside"
-    root.mkdir()
     outside.mkdir()
+    writer = ArtifactWriter(root, 1048576)
     (root / "native").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="symbolic link"):
-        persist_native(root, "natural-drain", reading(), 1048576)
+        persist_native(writer, "natural-drain", reading(), 1048576)
     assert not list(outside.iterdir())
 
 
 def test_comparison_trims_the_per_mapping_detail_the_report_embeds(tmp_path):
     root = tmp_path / "evidence"
+    writer = ArtifactWriter(root, 1048576)
     raw = reading()
     raw["smaps"] = (
         "1000-2000 rw-p 0 00:00 0\nSize: 4 kB\nRss: 4 kB\nPss: 4 kB\n"
         "200000-400000 rw-p 0 00:00 0\n"
         "Size: 65536 kB\nRss: 16384 kB\nPss: 8192 kB\n"
     )
-    block = persist_native(root, "natural-drain", raw, 1048576)
+    block = persist_native(writer, "natural-drain", raw, 1048576)
     document = root / "runtime-natural-drain.json"
     document.write_text(json.dumps({"native": block}))
 
@@ -165,3 +174,90 @@ def test_comparison_retains_missing_and_malformed_checkpoints(tmp_path):
     assert comparison["natural-drain"]["available"] is False
     assert comparison["after-final-gc"]["native"]["residency"]["RssAnon"] == 4096
     assert "before final dump" in comparison["after-final-gc"]["phase"]
+
+
+def write_one_record(root, checkpoint, block):
+    (root / f"runtime-{checkpoint}.json").write_text(json.dumps({"native": block}))
+    return root
+
+
+@pytest.mark.parametrize(
+    ("mappings", "expected"),
+    [
+        (
+            "see evidence/native/natural-drain-smaps.txt",
+            "see evidence/native/natural-drain-smaps.txt",
+        ),
+        ([{"size": 1}], "see evidence/runtime-natural-drain.json"),
+    ],
+)
+def test_comparison_preserves_existing_pointer(tmp_path, mappings, expected):
+    root = write_one_record(
+        tmp_path,
+        "natural-drain",
+        {
+            "smaps": {
+                "available": True,
+                "large_anonymous_mappings": {"count": 1, "mappings": mappings},
+            },
+        },
+    )
+    block = native_comparison(root)["natural-drain"]["native"]
+    assert block["smaps"]["large_anonymous_mappings"]["mappings"] == expected
+
+
+def test_valid_large_raw_is_charged_without_json_record_cap(tmp_path):
+    writer = ArtifactWriter(tmp_path / "evidence", 16 * 1024 * 1024)
+    body = b"x" * (2 * 1024 * 1024)
+    receipt = _write_raw(writer, "natural-drain-smaps.txt", body, 16 * 1024 * 1024)
+    assert (writer.root / receipt["path"]).read_bytes() == body
+    assert writer._used_bytes == len(body)
+    with pytest.raises(ArtifactLimitExceededError, match="individual evidence record"):
+        writer.write_json("too-large.json", {"data": "x" * (2 * 1024 * 1024)})
+
+
+def test_writer_refuses_raw_before_publication_when_budget_is_exhausted(tmp_path):
+    writer = ArtifactWriter(tmp_path / "evidence", 4096)
+    with pytest.raises(ArtifactLimitExceededError):
+        _write_raw(writer, "natural-drain-smaps.txt", b"x" * 4096, 1 << 20)
+    assert writer._used_bytes == 0
+    assert not list(writer.root.rglob("*.txt"))
+
+
+def test_raw_bytes_reduce_the_budget_for_later_json(tmp_path):
+    writer = ArtifactWriter(tmp_path / "evidence", 8192)
+    _write_raw(writer, "natural-drain-smaps.txt", b"x" * 6500, 1 << 20)
+    with pytest.raises(ArtifactLimitExceededError, match="budget exhausted"):
+        writer.write_json("next.json", {"data": "x" * 1000})
+    assert not (writer.root / "next.json").exists()
+
+
+def test_failed_raw_publication_does_not_charge_missing_bytes(monkeypatch, tmp_path):
+    from nanolab.tasks.soak import artifacts
+
+    writer = ArtifactWriter(tmp_path / "evidence", 1 << 20)
+
+    def fail_link(*args, **kwargs):
+        raise OSError("synthetic publication failure")
+
+    monkeypatch.setattr(artifacts.os, "link", fail_link)
+    with pytest.raises(OSError, match="publication failure"):
+        _write_raw(writer, "natural-drain-smaps.txt", b"body", 1 << 20)
+    assert writer._used_bytes == 0
+    assert not list(writer.root.rglob("*.txt"))
+    assert not list(writer.root.rglob(".pending-*"))
+
+
+def test_published_raw_stays_charged_when_later_hashing_fails(monkeypatch, tmp_path):
+    from nanolab.tasks.heap_analysis import evidence
+
+    writer = ArtifactWriter(tmp_path / "evidence", 1 << 20)
+
+    def fail_hash(path):
+        raise OSError("synthetic hashing failure")
+
+    monkeypatch.setattr(evidence, "describe_artifact", fail_hash)
+    with pytest.raises(OSError, match="hashing failure"):
+        _write_raw(writer, "natural-drain-smaps.txt", b"body", 1 << 20)
+    assert writer._used_bytes == 4
+    assert (writer.root / "native/natural-drain-smaps.txt").read_bytes() == b"body"
