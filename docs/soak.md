@@ -136,9 +136,11 @@ and 2560 MiB for these three application containers, plus the registry, generato
 observer, host, diagnostic helpers, and build tools. Native compilation has its
 own potentially substantial resource cost outside the measurement interval.
 The registry is acquired by the run under the name
-`nanofaas-e2e-registry` and published on `0.0.0.0:5000`; if you keep a registry
-of your own running, stop it before a run — a different container already bound
-to that port makes the run's own creation fail rather than adopt yours.
+`nanofaas-e2e-registry` and published on `0.0.0.0:5000`; a registry the run
+created is removed when it ends, together with the anonymous volume its layers
+went into, so nothing from a run survives it. If you keep a registry of your own
+running, stop it before a run — a different container already bound to that port
+makes the run's own creation fail rather than adopt yours.
 
 P24 declares 100 requests/second per function (200 total) and 200 VUs. These are explicit
 initial workload inputs, not a measured saturation claim. Validate achieved

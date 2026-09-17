@@ -1,9 +1,9 @@
-"""The builder a helper build publishes through, and why it is created here.
+"""The local docker resources a run owns: the builder, and the registry.
 
-`buildx_builder_resource` from the pinned catalogue does almost this. It cannot
-do it, because publishing to a local registry needs `network=host` on the
-builder's own container, which is a `--driver-opt` given at creation, and that
-resource passes no driver options.
+The pinned catalogue's resources do almost this. Each one leaves something
+behind, and each is wrapped here for exactly that reason: the builder cannot be
+created with the `network=host` publishing to a local registry needs, and the
+registry's data outlives the container that held it.
 """
 
 from __future__ import annotations
@@ -12,9 +12,11 @@ import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import TaskResult
 
-from nanolab.tasks.soak.helper_builder import (
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.tasks.soak.local_resources import (
     HELPER_BUILDER,
     helper_builder_resource,
+    local_registry_resource,
 )
 
 
@@ -134,3 +136,97 @@ def test_the_name_is_the_one_the_run_builds_with():
 
     assert acquire(executor, TaskInputs.empty()) == HELPER_BUILDER
     assert acquire(executor, TaskInputs.empty(), name="custom") == "custom"
+
+
+class RegistryExecutor:
+    """Answer the registry resource's own commands: inspect, run, stop, rm."""
+
+    def __init__(self, *, running: bool = False, present: bool = False):
+        self.commands: list[tuple[str, ...]] = []
+        self.running = running
+        self.present = present
+
+    def binding_key(self, role: str) -> str:
+        return f"test:{role}"
+
+    def run(self, task, *, dry_run: bool = False) -> TaskResult:
+        del dry_run
+        argv = tuple(task.argv)
+        self.commands.append(argv)
+        if argv[:2] == ("docker", "inspect"):
+            # Absent, stopped or running: the pinned acquire reads this and
+            # decides whether to run the container, start it, or adopt it.
+            code = 0 if self.present else 1
+            stdout = f"{str(self.running).lower()}\n" if self.present else ""
+        else:
+            code, stdout = 0, ""
+        expected = getattr(task.options, "expected_exit_codes", frozenset({0}))
+        return TaskResult(
+            task_id="",
+            status="passed" if code in expected else "failed",
+            return_code=code,
+            stdout=stdout,
+        )
+
+
+def registry(executor: RegistryExecutor, inputs: TaskInputs, **kwargs):
+    """Acquire the registry the way a workflow would, returning what it reported."""
+    resource = local_registry_resource(executor=executor, ready=lambda: True, **kwargs)
+    return resource, resource.acquire(inputs)
+
+
+def test_the_registry_data_is_removed_with_the_container_it_created():
+    """The volume is the leak: a run's pushed layers, left behind per run.
+
+    `docker_registry_resource` releases with `rm --force` and no `-v`, and the
+    registry image declares `VOLUME /var/lib/registry`, so docker gives every
+    registry container an anonymous volume holding everything the run pushed.
+    Removing the container without it leaves that volume dangling -- invisible to
+    every later run, because each gets a fresh one, and never reclaimed.
+    """
+    executor = RegistryExecutor(present=False)
+    inputs = TaskInputs.empty()
+    resource, state = registry(executor, inputs)
+
+    assert state == "created"
+    resource.release(inputs, state)
+
+    assert executor.commands[-1] == (
+        "docker",
+        "rm",
+        "--force",
+        "-v",
+        REGISTRY_CONTAINER_NAME,
+    )
+
+
+def test_a_registry_this_run_only_started_keeps_its_data():
+    """`started` means the data predates the run, so `stop` is the whole job."""
+    executor = RegistryExecutor(present=True, running=False)
+    inputs = TaskInputs.empty()
+    resource, state = registry(executor, inputs)
+
+    assert state == "started"
+    resource.release(inputs, state)
+
+    assert executor.commands[-1] == ("docker", "stop", REGISTRY_CONTAINER_NAME)
+
+
+def test_a_registry_this_run_found_running_is_left_alone():
+    executor = RegistryExecutor(present=True, running=True)
+    inputs = TaskInputs.empty()
+    resource, state = registry(executor, inputs)
+
+    assert state == "existing"
+    resource.release(inputs, state)
+
+    assert not any(argv[1] in {"rm", "stop"} for argv in executor.commands)
+
+
+def test_the_acquire_is_the_pinned_resources_own():
+    """Only the release is overridden, so the plan tests' title still names it."""
+    executor = RegistryExecutor(present=True, running=True)
+
+    resource, _ = registry(executor, TaskInputs.empty())
+
+    assert resource.title == "Acquire local registry"

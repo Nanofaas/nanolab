@@ -46,7 +46,7 @@ from nanolab.tasks.soak.diagnostic_helper import (
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
-from nanolab.tasks.soak.helper_builder import HELPER_BUILDER
+from nanolab.tasks.soak.local_resources import HELPER_BUILDER
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.observer import Observer, SystemClock
 from nanolab.tasks.soak.preflight import preflight

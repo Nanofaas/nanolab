@@ -28,7 +28,11 @@ building anything, or making a network call:
 It acquires the registry and the `docker buildx` builder itself, before the
 measuring task starts and released after it, and removes each again only if it
 was the run that created or started it — a registry or builder you already have
-running is adopted and left alone. Both are needed before any build: the builder
+running is adopted and left alone. A registry the run created is removed **with
+its data**: the registry image keeps `/var/lib/registry` in an anonymous volume
+holding every layer the run pushed, about 1.3 GB, and taking the container
+without it is what leaves one dangling volume behind per run. Both resources are
+needed before any build: the builder
 must support BuildKit attestations (`docker-container`, not the plain `docker`
 driver) because the build publishes `--provenance=mode=max`, and it must reach
 `localhost:5000`, which a `docker-container` builder does not by default because

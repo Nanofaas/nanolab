@@ -6,16 +6,15 @@ from typing import Any, Protocol, cast
 
 from sonata_engine import JournalConfig, Resource, Task, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resource
-from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
 from nanolab.tasks.platform import PlatformRequest, add_platform
-from nanolab.tasks.soak.helper_builder import (
+from nanolab.tasks.soak.local_resources import (
     HELPER_BUILDER,
     helper_builder_resource,
+    local_registry_resource,
 )
 from nanolab.tasks.soak.owned_functions import (
     journaled_function_resource,
@@ -172,10 +171,9 @@ def build_soak_plan(
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
     )
-    registry = docker_registry_resource(
+    registry = local_registry_resource(
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
-        container=REGISTRY_CONTAINER_NAME,
     )
     workflow.add(
         RunSingleVersionSoak(

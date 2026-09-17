@@ -53,7 +53,7 @@ from nanolab.tasks.soak.diagnostic_helper import (
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget
 from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
-from nanolab.tasks.soak.helper_builder import HELPER_BUILDER
+from nanolab.tasks.soak.local_resources import HELPER_BUILDER
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparationOptions, PreparedSoak
 from nanolab.tasks.soak.workflow import (
