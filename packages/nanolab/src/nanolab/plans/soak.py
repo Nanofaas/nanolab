@@ -13,6 +13,10 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resource
 from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
 from nanolab.tasks.platform import PlatformRequest, add_platform
+from nanolab.tasks.soak.helper_builder import (
+    HELPER_BUILDER,
+    helper_builder_resource,
+)
 from nanolab.tasks.soak.owned_functions import (
     journaled_function_resource,
 )
@@ -159,12 +163,15 @@ def build_soak_plan(
     # build push into the registry and build with the builder -- acquiring them
     # inside the frozen deployment's own resources would be too late.
     #
-    # The registry resource removes only what it created and leaves a container
-    # it found running alone, so an operator's own registry is never torn down by
-    # a run. The builder is deliberately not acquired here: a builder that can
-    # push to a local registry needs `--driver-opt network=host` at creation, and
-    # the pinned `buildx_builder_resource` passes no driver options, so it would
-    # create one that cannot publish. That stays an operator precondition.
+    # Each removes only what it created and leaves what it found running alone, so
+    # an operator's own registry or builder is never torn down by a run. The
+    # builder name comes from the same options the run builds with, so the two
+    # cannot name different builders.
+    builder = helper_builder_resource(
+        name=getattr(runtime_options, "helper_builder", HELPER_BUILDER),
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        role="host",
+    )
     registry = docker_registry_resource(
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
@@ -184,7 +191,7 @@ def build_soak_plan(
             else RuntimeOptions(allow_diagnostic_target_stop_on_cancel=True),
             keep=lambda: workflow.keep,
         ),
-        requires=(registry,),
+        requires=(registry, builder),
     )
     return workflow
 

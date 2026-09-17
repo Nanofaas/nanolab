@@ -53,6 +53,7 @@ from nanolab.tasks.soak.diagnostic_helper import (
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget
 from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
+from nanolab.tasks.soak.helper_builder import HELPER_BUILDER
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparationOptions, PreparedSoak
 from nanolab.tasks.soak.workflow import (
@@ -158,7 +159,7 @@ class HeapAnalysisOptions:
     preparation: PreparationOptions = field(default_factory=PreparationOptions)
     prepared: PreparedSoak | None = None
     docker_socket: str = "/var/run/docker.sock"
-    helper_builder: str = "nanolab-heap-analysis"
+    helper_builder: str = HELPER_BUILDER
     # An already-published helper digest, which skips this run's build. The
     # build is the default: a digest only names anything in the registry that
     # holds it, so supply one only when it is already there.

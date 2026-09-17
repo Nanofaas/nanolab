@@ -254,8 +254,9 @@ For the separately authorized integrated smoke:
 
 `inspect` must show the resolved policy, and `plan` must show all application build
 recipes without executing them. A parseable scenario or non-executing plan is not
-runtime preflight evidence. Do not render the new workflow until its builder is
-available. Prerequisite exercises use the similarly named prerequisites preset
+runtime preflight evidence. `plan` also shows the registry and builder this run
+acquires and releases; a builder already present is adopted and left running.
+Prerequisite exercises use the similarly named prerequisites preset
 only once the adapter routing exists; do not advertise its smoke as P24 coverage.
 
 ## Cancellation, evidence, and interpretation

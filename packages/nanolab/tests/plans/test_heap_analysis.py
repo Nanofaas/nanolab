@@ -31,11 +31,14 @@ def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
         i for i, title in enumerate(titles) if "Capture and analyze" in title
     )
     # Acquired before the run and released after it: preparation pushes the
-    # application images and the helper build pushes the helper, neither of which
-    # has happened yet when the workflow is compiled and both of which happen once
-    # the measuring task starts.
-    assert any("Acquire local registry" in title for title in titles[:measure])
-    assert any("Release local registry" in title for title in titles[measure + 1 :])
+    # application images into the registry and the helper build both pushes into
+    # it and builds through the builder, none of which has happened when the
+    # workflow is compiled and all of which happens once the measuring task runs.
+    before, after = titles[:measure], titles[measure + 1 :]
+    assert any("Acquire local registry" in title for title in before)
+    assert any("buildx builder" in title for title in before)
+    assert any("Release local registry" in title for title in after)
+    assert any("buildx builder" in title for title in after)
     assert not (tmp_path / "run").exists()
 
 

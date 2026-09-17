@@ -24,16 +24,14 @@ def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
     measure = next(
         i for i, title in enumerate(titles) if "single-version soak" in title
     )
-    # The registry is acquired before the measurement and released after it:
-    # preparation pushes application images and the helper build pushes the
-    # helper, and both happen once the measuring task starts.
-    assert any("Acquire local registry" in title for title in titles[:measure])
-    assert any("Release local registry" in title for title in titles[measure + 1 :])
-    # The builder is deliberately not acquired. A builder that can publish to a
-    # local registry needs `--driver-opt network=host` when it is created, and
-    # `buildx_builder_resource` passes no driver options, so acquiring it here
-    # would create one that cannot push. It stays an operator precondition.
-    assert not any("buildx builder" in title for title in titles)
+    # Both are acquired before the measurement and released after it:
+    # preparation pushes application images into the registry, and the helper
+    # build both pushes into it and builds through the builder.
+    before, after = titles[:measure], titles[measure + 1 :]
+    assert any("Acquire local registry" in title for title in before)
+    assert any("buildx builder" in title for title in before)
+    assert any("Release local registry" in title for title in after)
+    assert any("buildx builder" in title for title in after)
     assert not (tmp_path / "run").exists()
 
 

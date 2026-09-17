@@ -46,6 +46,7 @@ from nanolab.tasks.soak.diagnostic_helper import (
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
+from nanolab.tasks.soak.helper_builder import HELPER_BUILDER
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.observer import Observer, SystemClock
 from nanolab.tasks.soak.preflight import preflight
@@ -95,7 +96,7 @@ class RuntimeOptions:
     prerequisite_inputs: dict[str, object] | None = None
     docker_socket: str = "/var/run/docker.sock"
     memory_helper_image: str | None = None
-    helper_builder: str = "nanolab-heap-analysis"
+    helper_builder: str = HELPER_BUILDER
     allow_diagnostic_target_stop_on_cancel: bool = False
     prerequisite_parent_artifact_bytes: int | None = 32 * 1024 * 1024
     prerequisite_lifetime_artifact_bytes: int | None = 64 * 1024 * 1024

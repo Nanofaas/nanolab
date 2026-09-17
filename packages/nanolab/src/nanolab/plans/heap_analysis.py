@@ -17,6 +17,7 @@ from sonata_tasks.registry import docker_registry_resource
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.tasks.soak.helper_builder import helper_builder_resource
 
 
 def unique_heap_analysis_run_dir(runs_dir: Path) -> Path:
@@ -41,14 +42,19 @@ def build_heap_analysis_plan(
     from nanolab.tasks.heap_analysis.runtime import RunControlPlaneHeapAnalysis
 
     workflow = Workflow(workflow_id="heap-analysis")
-    # Acquired before the task runs, because preparation pushes the application
-    # images and the helper build pushes the helper -- both into the registry
-    # this run owns. It removes only what it created and leaves a registry it
-    # found running alone, so an operator's own is never torn down by a run.
+    # Both are acquired before the task runs, because preparation pushes the
+    # application images and the helper build pushes the helper -- the first into
+    # the registry and the second through the builder. Each removes only what it
+    # created and leaves what it found running alone, so an operator's own
+    # registry or builder is never torn down by a run.
     registry = docker_registry_resource(
         executor=RoleBoundCommandTaskExecutor(bindings),
         role="host",
         container=REGISTRY_CONTAINER_NAME,
+    )
+    builder = helper_builder_resource(
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        role="host",
     )
     workflow.add(
         RunControlPlaneHeapAnalysis(
@@ -58,6 +64,6 @@ def build_heap_analysis_plan(
             repo_root=repo_root,
             tool_root=tool_root,
         ),
-        requires=(registry,),
+        requires=(registry, builder),
     )
     return workflow
