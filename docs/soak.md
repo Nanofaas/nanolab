@@ -117,6 +117,11 @@ diagnostics, builds, and teardown do not consume the 5400 seconds. Budget more
 than 125 minutes for the full run; the 125 minutes cover steady plus final drain
 alone. The short smoke is deliberately too short to qualify these retention rules.
 
+Diagnostics that run between two measured phases do move what follows them: the
+baseline checkpoint's captures take their own time (bounded by `diagnostics.timeout_s`)
+before `steady` starts, so a run's wall clock grows by that capture and its phases
+carry an extra recorded window. Nothing in the measured windows absorbs it.
+
 The intended owner settings correspond to NanoFaaS's documented `sync-ttl: 30s`
 (unkeyed synchronous outcomes), `ttl: 5m` (terminal keys/readable outcomes), and
 `max-lifetime: 30m` (live key/execution ceiling). Their mapping in `retention_s`
@@ -196,7 +201,23 @@ Empty `runtime_options` declares no additional options; effective settings still
 need verification. If deployment adds options, declare and verify the actual
 ordered values instead of silently accepting a mismatch.
 
-Capture the natural final window before any forced GC or dump. Record diagnostic
+Two checkpoints declare diagnostics: `operations` for the final drain, and
+`baseline_operations` for the close of the baseline window. Declaring one reading
+in both is how a difference is expressed, and the two share one run-wide
+reservation, so `max_dumps`/`max_dump_bytes` are ceilings over both. Operations
+run **in the order declared**, which is meaning rather than style for a reading
+that measures a difference: a `native_memory_diff` declared after `gc` would
+include that GC's own reclamation in its delta. Declare `gc` last.
+
+Native Memory Tracking is captured that way, in the two spikes under
+`scenarios-v2/memory-soak-p24-*-spike-container.yaml`: `native_memory_baseline`
+at the baseline checkpoint, then `native_memory_diff` at drain for what grew per
+category over steady and drain, and `native_memory` for the absolute reading.
+They exist because NMT needs `-XX:NativeMemoryTracking` and costs a few percent,
+so it is a diagnostic instrument and not part of a qualifying run.
+
+Capture the natural final window before any forced GC or dump, and the baseline
+window before the measured phases it is the reference for. Record diagnostic
 perturbation intervals and completion evidence. Dump/root analysis must identify
 owner, population, lifetime, policy budget, reviewer, and hashed artifacts.
 Histograms alone do not establish ownership, and clean heap does not excuse
