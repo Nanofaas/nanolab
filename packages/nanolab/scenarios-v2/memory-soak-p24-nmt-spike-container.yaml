@@ -95,9 +95,9 @@ soak:
       phase: drain
       window_s: 120
       deadline_s: 420
-      absolute_tolerance: 0
+      absolute_tolerance: 67108864
       relative_tolerance: 0.25
-      rationale: Diagnostic guard only. This spike declares no heap-shrink options, so the heap keeps its steady working set and RSS returns to within a fifth of the reference instead of exactly to it; the exact return is what the serialgc-shrink spike measures.
+      rationale: Diagnostic guard only. The tighter of the two bounds applies, and this spike declares no heap-shrink options, so the heap keeps its steady working set and RSS cannot return exactly to the reference; the exact return is what the serialgc-shrink spike measures.
     - id: word-stats-java.diagnostic-cgroup-budget
       role: word-stats-java
       metric: cgroup_memory_usage_bytes
@@ -117,9 +117,9 @@ soak:
       phase: drain
       window_s: 120
       deadline_s: 420
-      absolute_tolerance: 0
+      absolute_tolerance: 67108864
       relative_tolerance: 0.25
-      rationale: Diagnostic guard only. This spike declares no heap-shrink options, so the heap keeps its steady working set and RSS returns to within a fifth of the reference instead of exactly to it; the exact return is what the serialgc-shrink spike measures.
+      rationale: Diagnostic guard only. The tighter of the two bounds applies, and this spike declares no heap-shrink options, so the heap keeps its steady working set and RSS cannot return exactly to the reference; the exact return is what the serialgc-shrink spike measures.
     - id: word-stats-javascript.diagnostic-cgroup-budget
       role: word-stats-javascript
       metric: cgroup_memory_usage_bytes
@@ -139,9 +139,9 @@ soak:
       phase: drain
       window_s: 120
       deadline_s: 420
-      absolute_tolerance: 0
+      absolute_tolerance: 67108864
       relative_tolerance: 0.25
-      rationale: Diagnostic guard only. This spike declares no heap-shrink options, so the heap keeps its steady working set and RSS returns to within a fifth of the reference instead of exactly to it; the exact return is what the serialgc-shrink spike measures.
+      rationale: Diagnostic guard only. The tighter of the two bounds applies, and this spike declares no heap-shrink options, so the heap keeps its steady working set and RSS cannot return exactly to the reference; the exact return is what the serialgc-shrink spike measures.
   diagnostics:
     operations:
       # Order is meaning here: operations run as declared, so reading the diff
