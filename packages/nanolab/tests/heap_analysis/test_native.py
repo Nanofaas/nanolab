@@ -11,8 +11,11 @@ from nanolab.tasks.heap_analysis.native import (
 # Real capture: `jcmd <pid> GC.heap_info` on JDK 25.0.4 (build
 # 25.0.4+7-1-24.04-Ubuntu), G1 at -Xms256m -Xmx1g. This is the production
 # shape: the role sets runtime_options: [] and G1 is the JVM default, and the
-# helper runs eclipse-temurin:25-jdk. Reproduced on the host before this
-# fixture was written; see .superpowers/sdd/jdk25-captures.txt.
+# helper runs eclipse-temurin:25-jdk. Reproduce it with a single-file Java
+# program that sleeps, run as
+# `java -Xms256m -Xmx1g -XX:+UseG1GC Prog.java`, then `jcmd <pid> GC.heap_info`
+# against it. Never hand-write this text: an invented fixture is what let a
+# parser that matched no real JDK 25 output pass review.
 HEAP_INFO = (
     "garbage-first heap   total reserved 1048576K, committed 264192K, "
     "used 27268K [0x00000000c0000000, 0x0000000100000000)\n"

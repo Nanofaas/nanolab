@@ -1,5 +1,16 @@
 # Control-plane Native Memory Readings Implementation Plan
 
+> **Correction (2026-09-17).** Task 4's `_HEAP`/`_METASPACE` regexes and every `heap_info`
+> fixture below were written for pre-JDK-25 `GC.heap_info` output. JDK 25 prints
+> `garbage-first heap   total reserved <R>K, committed <C>K, used <U>K [...]` and no Metaspace
+> line at all, so those regexes match nothing on the JDK 25 target this code requires
+> (`diagnostic_helper.py` refuses any non-`25.` version, and the helper image is
+> `eclipse-temurin:25-jdk`). A run built from Task 4 as written records the heap reading as
+> silently unavailable. **Do not re-execute that parser or those fixtures.** The corrected
+> parser and real captures now live in
+> `packages/nanolab/src/nanolab/tasks/heap_analysis/native.py` and
+> `packages/nanolab/tests/heap_analysis/test_native.py`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add two opt-in memory readings — `GC.heap_info` and the full `/proc/<pid>/smaps` — to the heap-analysis checkpoints, with an aggregate summary, without changing the P24 soak path.
