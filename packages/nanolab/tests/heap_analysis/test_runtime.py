@@ -1313,8 +1313,9 @@ def test_observation_budget_precheck_measures_the_published_encoding(
     assert session.observe("natural-drain").is_file()
 
 
+@pytest.mark.parametrize("preexisting", [False, True])
 def test_local_wiring_creates_the_run_root_before_building_the_helper(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preexisting: bool
 ) -> None:
     """The helper build writes into the run root, so the root must exist first.
 
@@ -1322,6 +1323,10 @@ def test_local_wiring_creates_the_run_root_before_building_the_helper(
     build, and every test of this wiring injected `helper_image`, which skips
     the build entirely -- so the ordering was never the thing under test. This
     asks the build what it actually saw.
+
+    `preexisting` covers the operator-supplied empty `--run-dir` that
+    `require_unused_run_dir` admits, which is why the creation carries
+    `exist_ok=True`.
     """
     import nanolab.tasks.heap_analysis.runtime as heap_runtime
 
@@ -1332,7 +1337,9 @@ def test_local_wiring_creates_the_run_root_before_building_the_helper(
         raise RuntimeError("stop here: the build's own inputs are not the subject")
 
     monkeypatch.setattr(heap_runtime, "build_helper_image", stop_at_the_build)
-    run_dir = tmp_path / "run"  # deliberately NOT created
+    run_dir = tmp_path / "run"
+    if preexisting:
+        run_dir.mkdir()
 
     task = RunControlPlaneHeapAnalysis(
         three_role_scenario(),

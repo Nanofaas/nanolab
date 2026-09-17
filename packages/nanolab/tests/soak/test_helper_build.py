@@ -166,8 +166,10 @@ def _stamp(tmp_path: Path, config, **options: object):
     """Run the soak helper stamp with a fake builder, returning the new config."""
     from nanolab.tasks.soak.runtime import RuntimeOptions, _with_built_helper
 
+    # Deliberately not created: `_with_built_helper` must create the run root
+    # itself, because the default diagnostic protocols carry no policy file and
+    # so nothing else does. Pre-creating it here would hide that.
     run_dir = tmp_path / "run"
-    run_dir.mkdir(exist_ok=True)
     return _with_built_helper(
         config,
         run_dir=run_dir,
@@ -235,3 +237,19 @@ def test_a_protocol_that_diagnoses_nothing_builds_no_helper(
     config = _soak_config(operations={})
 
     assert _stamp(tmp_path, config).diagnostics.helper_images == {}
+
+
+def test_request_rejects_a_context_without_the_dockerfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The missing-Dockerfile guard must still be reachable and still refuse.
+
+    The context is derived from this file now, so no real checkout can miss the
+    Dockerfile and the guard would otherwise stop being exercised at all. Point
+    the derived context at a bare directory to reach it.
+    """
+    from nanolab.tasks.soak import helper_build
+
+    monkeypatch.setattr(helper_build, "BUILD_CONTEXT", tmp_path)
+    with pytest.raises(ValueError, match="Dockerfile is missing"):
+        _request(tmp_path)

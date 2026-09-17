@@ -589,6 +589,12 @@ def _with_built_helper(
     roles = [role for role, operations in policy.operations.items() if operations]
     if not roles or policy.helper_images or options.memory_helper_image is not None:
         return config
+    # The build writes its log and metadata into the run root and refuses a
+    # run_dir that does not exist. Only a scenario carrying a policy file would
+    # have created it by now (`write_policy_input`), and the default diagnostic
+    # protocols carry none, so the root is created here for the same reason
+    # heap analysis creates it: the build needs it and nothing else does it.
+    run_dir.mkdir(parents=True, exist_ok=True)
     digest = build_helper_image(
         HelperImageRequest(
             run_dir=run_dir,
