@@ -126,6 +126,48 @@ def test_external_stack_maps_local_project_cwd_to_remote_subdirectory(tmp_path) 
     assert runner.calls[0][0][-1].endswith(" pwd'")
 
 
+def test_a_staged_release_maps_the_checkout_to_where_it_was_staged(tmp_path) -> None:
+    """A release stages its tree per version instead of syncing the project dir.
+
+    The benchmark's platform commands run with the local checkout as their cwd,
+    and without this they are translated into a project directory no release VM
+    ever populates, so the load test dies on its first `cd`.
+    """
+    runner = RecordingRunner()
+    root = tmp_path / "project"
+    root.mkdir()
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "external",
+            "roles": {
+                "stack": {"host": "vm.example", "user": "alice", "home": "/srv/alice"}
+            },
+        }
+    )
+
+    bindings, _ = build_role_bindings(
+        environment,
+        runner=runner,
+        repo_root=root,
+        remote_project_root="/home/azureuser/nanofaas-release/0.22.0/source",
+    )
+    bindings.executor_for("stack").run(
+        CommandTaskSpec(
+            task_id="check",
+            summary="check",
+            argv=("kubectl", "version", "--client"),
+            role="stack",
+            options=CommandOptions(cwd=root),
+        )
+    )
+
+    command = runner.calls[0][0][-1]
+    assert "cd /home/azureuser/nanofaas-release/0.22.0/source && env " in command
+    # The project directory is where every other workflow syncs the checkout, and
+    # it is exactly what a release VM does not have.
+    assert "/srv/alice/nanofaas " not in command
+
+
 def test_external_stack_rejects_cwd_outside_the_synced_project(tmp_path) -> None:
     runner = RecordingRunner()
     root = tmp_path / "project"

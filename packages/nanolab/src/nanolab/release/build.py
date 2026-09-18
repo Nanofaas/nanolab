@@ -298,7 +298,10 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 _GO_TOOLCHAIN,
                 "sh",
                 "-c",
-                copy_source + "for d in sdks/go functions/go/word-stats "
+                # The Go adapter shells out to the shared corpus validator,
+                # which is a Python script; the pinned toolchain is Alpine.
+                copy_source + "apk add --no-cache python3 >/dev/null && "
+                "for d in sdks/go functions/go/word-stats "
                 "functions/go/json-transform "
                 'functions/go/roman-numeral; do (cd "$d" && go test ./...); done',
             ),
@@ -313,7 +316,9 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 _NODE_TOOLCHAIN,
                 "sh",
                 "-c",
-                copy_source + "npm --prefix sdks/javascript ci && "
+                # Same shared validator, same reason: node:22-alpine has no python3.
+                copy_source + "apk add --no-cache python3 >/dev/null && "
+                "npm --prefix sdks/javascript ci && "
                 "npm --prefix sdks/javascript test && "
                 "for d in functions/javascript/word-stats "
                 "functions/javascript/json-transform "

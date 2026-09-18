@@ -262,12 +262,20 @@ def build_release_workflow(
         env, "loadgen", loadtest=True
     )  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
-    bindings, fetcher = build_role_bindings(
-        env, vm_provider=provider, repo_root=nanofaas
-    )
-    executor = RoleBoundCommandTaskExecutor(bindings)
     remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
     source_dir = f"{remote_root}/source"
+    # A release does not sync the checkout to the project directory the way
+    # every other workflow does: it stages one immutable tree per version, and
+    # the benchmark's platform commands run inside that tree. Without this the
+    # translation sends them to the project directory, which a release VM never
+    # populates -- the load test then dies on its first `cd`.
+    bindings, fetcher = build_role_bindings(
+        env,
+        vm_provider=provider,
+        repo_root=nanofaas,
+        remote_project_root=source_dir,
+    )
+    executor = RoleBoundCommandTaskExecutor(bindings)
     release_dir = versioned_release_run_dir(request.run_dir, identity.prepared_version)
 
     wf = Workflow(workflow_id=f"release-{request.version}")
