@@ -91,11 +91,19 @@ def _remote_project_executor(
     *,
     local_root: Path,
     remote_home: str,
+    remote_project_root: str | None = None,
 ) -> CommandTaskExecutor:
+    """Point the checkout at the directory the run actually keeps it in.
+
+    `remote_project_root` is for the releases that stage the repository
+    somewhere of their own choosing rather than syncing it to the project
+    directory. Left unset, the project directory is the answer, which is where
+    every other workflow's sync puts it.
+    """
     return _RemoteProjectExecutor(
         executor,
         local_root=local_root,
-        remote_root=f"{remote_home.rstrip('/')}/nanofaas",
+        remote_root=remote_project_root or f"{remote_home.rstrip('/')}/nanofaas",
     )
 
 
@@ -513,6 +521,7 @@ def _provider_bindings(
     provider: object,
     host: HostCommandTaskExecutor,
     local_root: Path,
+    remote_project_root: str | None = None,
 ) -> tuple[RoleBindings, VmRequest]:
     def make(role: str):
         request = vm_request_for_role(environment, role)  # type: ignore[arg-type]
@@ -545,6 +554,7 @@ def _provider_bindings(
                 executor,
                 local_root=local_root,
                 remote_home=vm_remote_home(request),
+                remote_project_root=remote_project_root,
             ),
             request,
         )
@@ -579,6 +589,7 @@ def _ssh_bindings(
     command_runner: HostCommandRunner,
     host: HostCommandTaskExecutor,
     local_root: Path,
+    remote_project_root: str | None = None,
 ) -> tuple[RoleBindings, RoleTarget]:
     def remote(role: str):
         target = environment.target(role)  # type: ignore[arg-type]
@@ -598,6 +609,7 @@ def _ssh_bindings(
             executor,
             local_root=local_root,
             remote_home=target.remote_home,
+            remote_project_root=remote_project_root,
         )
 
     stack = remote("stack")
@@ -626,6 +638,7 @@ def build_role_bindings(
     runner: HostCommandRunner | None = None,
     vm_provider: VmCommandProvider | None = None,
     repo_root: Path | None = None,
+    remote_project_root: str | None = None,
 ) -> tuple[RoleBindings, _RemoteFetcher | VmFileFetcher | None]:
     """Bind every execution role to a task executor, for one environment.
 
@@ -646,12 +659,12 @@ def build_role_bindings(
             environment, vm_provider, command_runner, local_root
         )
         bindings, fetch_request = _provider_bindings(
-            environment, provider, host, local_root
+            environment, provider, host, local_root, remote_project_root
         )
         return bindings, VmFileFetcher(provider, fetch_request)
 
     local_root = (repo_root or default_tool_paths().nanofaas_root).resolve()
     bindings, fetch_target = _ssh_bindings(
-        environment, command_runner, host, local_root
+        environment, command_runner, host, local_root, remote_project_root
     )
     return bindings, _RemoteFetcher(command_runner, fetch_target, environment.provider)
