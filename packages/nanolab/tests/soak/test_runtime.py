@@ -21,6 +21,7 @@ from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparedSoak
+from nanolab.tasks.soak.prerequisites import select_relevant_config
 from nanolab.tasks.soak.runtime import (
     RunSingleVersionSoak,
     RuntimeDeployment,
@@ -44,7 +45,7 @@ def inert_scenario():
     """Build a scenario declaring neither diagnostics nor prerequisites."""
     return SimpleNamespace(
         soak=SimpleNamespace(
-            diagnostics=SimpleNamespace(operations={}),
+            diagnostics=SimpleNamespace(operations={}, baseline_operations={}),
             prerequisites=SimpleNamespace(mode="run", required_coverage=[]),
         )
     )
@@ -482,6 +483,9 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
         "warmup",
         "baseline_drain",
         "baseline",
+        # The baseline checkpoint's captures are their own step, so a run's
+        # phase keys do not depend on which readings it declares.
+        "baseline_diagnostics",
         "steady",
         "drain",
     }
@@ -1017,7 +1021,7 @@ _DIAGNOSTIC_IMAGE = (
 )
 
 
-def diagnostic_prepared(tmp_path):
+def diagnostic_prepared(tmp_path, *, baseline=None):
     """Synthetic budgets intentionally exercise quotas above memory/4."""
     import nanolab.tasks.soak.runtime as module
 
@@ -1037,6 +1041,7 @@ def diagnostic_prepared(tmp_path):
     diagnostics = value.config.diagnostics.model_copy(
         update={
             "operations": selected,
+            "baseline_operations": baseline or {},
             "max_dumps": 100,
             "max_dump_bytes": 800 * 1024**2,
             "helper_images": dict.fromkeys(selected, _DIAGNOSTIC_IMAGE),
@@ -1191,12 +1196,12 @@ def test_owned_diagnostic_compose_and_controller_are_frozen_before_acquire(
     value.writer.close()
 
 
-def diagnostic_environment(tmp_path, monkeypatch):
+def diagnostic_environment(tmp_path, monkeypatch, *, baseline=None):
     """Mock live helper/collector boundaries; retain real lifecycle hooks/budget."""
     import nanolab.tasks.soak.runtime as module
     from nanolab.tasks.soak.models import Sample
 
-    value = diagnostic_prepared(tmp_path)
+    value = diagnostic_prepared(tmp_path, baseline=baseline)
     deployment = diagnostic_deployment(value, tmp_path, monkeypatch)
     targets = tuple(
         memory_target(policy.runtime, role)
@@ -1227,7 +1232,14 @@ def diagnostic_environment(tmp_path, monkeypatch):
             self.closed = 0
             helpers.append(self)
 
-        def adapter(self, *, budget, natural_checkpoint, max_capture_bytes):
+        def adapter(
+            self,
+            *,
+            budget,
+            natural_checkpoint,
+            max_capture_bytes,
+            natural_phase="drain",
+        ):
             budgets.append(budget)
             target = self.spec.target
 
@@ -1240,10 +1252,19 @@ def diagnostic_environment(tmp_path, monkeypatch):
                     )
 
                 def capture(self, actual, operation, output, timeout_s):
-                    # Every role's natural evidence must precede every capture.
-                    for role in value.config.diagnostics.operations:
+                    # Every role's natural evidence for this checkpoint must
+                    # precede every capture taken from it.
+                    declared = (
+                        value.config.diagnostics.baseline_operations
+                        if natural_phase == "baseline"
+                        else value.config.diagnostics.operations
+                    )
+                    for role in declared:
                         checkpoint = json.loads(
-                            (value.evidence_dir / f"natural-{role}.json").read_text()
+                            (
+                                value.evidence_dir
+                                / f"natural-{natural_phase}-{role}.json"
+                            ).read_text()
                         )
                         assert (
                             checkpoint["kind"] == "natural_checkpoint"
@@ -1255,7 +1276,10 @@ def diagnostic_environment(tmp_path, monkeypatch):
                                 module._reference(value.evidence_dir, artifact)
                                 == record
                             )
-                    assert natural_checkpoint.name == f"natural-{actual.role}.json"
+                    assert (
+                        natural_checkpoint.name
+                        == f"natural-{natural_phase}-{actual.role}.json"
+                    )
                     budget.reserve(max_capture_bytes, dump=operation == "heap_dump")
                     events.append((actual.role, operation))
                     output.mkdir()
@@ -1442,7 +1466,8 @@ def test_capture_only_after_completed_owned_natural_drain(
     with pytest.raises(RuntimeError, match="effective preflight INCONCLUSIVE"):
         lifecycle.hooks.preflight()
     # Direct hook test, not a synthetic claim that the public workflow passed.
-    lifecycle.observer.set_phase = lambda phase: None
+    labels: list[str] = []
+    lifecycle.observer.set_phase = lambda phase: labels.append(phase)
     start = lifecycle.clock.monotonic()
     if state_kind != "partial":
         lifecycle._natural("drain", value.config.phases.drain_s)
@@ -1453,16 +1478,270 @@ def test_capture_only_after_completed_owned_natural_drain(
         lifecycle.cancelled.set()
     if state_kind == "complete":
         lifecycle.hooks.final_capture(lifecycle.state, 30)
+        # The capture relabels the observer, so the ticks it perturbs are not
+        # written with the drain label past the drain window's end.
+        assert labels == ["drain", "diagnostic"]
         assert len(events) == 4
         index = json.loads((value.evidence_dir / "diagnostics.json").read_text())
         assert len(index["entries"]) == 4
     else:
         with pytest.raises(RuntimeError, match=r"completed owned natural final"):
             lifecycle.hooks.final_capture(lifecycle.state, 30)
+        # The guard refuses before the first perturbing read, so a capture that
+        # never runs never claims to have perturbed anything.
+        assert "diagnostic" not in labels
         assert events == []
         assert not list(value.evidence_dir.glob("natural-*.json"))
     lifecycle.stop_observer()
     assert all(helper.closed == 1 for helper in helpers)
+    value.writer.close()
+
+
+def test_a_capture_survives_an_observer_that_is_no_longer_running(
+    tmp_path, monkeypatch
+):
+    """A dead observer must not cost the run its diagnostics.
+
+    The label only changes how the ticks taken during a capture are judged; it
+    decides nothing about whether the capture happens. `Observer.set_phase`
+    raises when the sampler is not running, so the label is best-effort.
+    """
+    _, value, lifecycle, _, events, _, _, _ = diagnostic_environment(
+        tmp_path, monkeypatch
+    )
+    with pytest.raises(RuntimeError, match="effective preflight INCONCLUSIVE"):
+        lifecycle.hooks.preflight()
+
+    def set_phase(phase):
+        if phase == "diagnostic":
+            raise RuntimeError("observer is not running")
+
+    lifecycle.observer.set_phase = set_phase
+    start = lifecycle.clock.monotonic()
+    lifecycle._natural("drain", value.config.phases.drain_s)
+    lifecycle.state.windows["drain"] = (start, lifecycle.clock.monotonic())
+
+    lifecycle.hooks.final_capture(lifecycle.state, 30)
+
+    assert len(events) == 4
+    index = json.loads((value.evidence_dir / "diagnostics.json").read_text())
+    assert len(index["entries"]) == 4
+    lifecycle.stop_observer()
+    value.writer.close()
+
+
+def test_baseline_capture_takes_its_readings_at_its_own_checkpoint(
+    tmp_path, monkeypatch
+):
+    """The baseline checkpoint is a second one, not a rename of the final one.
+
+    It freezes its own natural window, publishes a receipt carrying that phase,
+    and captures what the baseline map declares -- and it does so before the
+    measured phases it is the reference for, because a difference measured from a
+    checkpoint taken afterwards is not a difference at all.
+    """
+    _, value, lifecycle, _, events, _, _, _ = diagnostic_environment(
+        tmp_path, monkeypatch, baseline={"control-plane": ["gc"]}
+    )
+    with pytest.raises(RuntimeError, match="effective preflight INCONCLUSIVE"):
+        lifecycle.hooks.preflight()
+    labels: list[str] = []
+    lifecycle.observer.set_phase = lambda phase: labels.append(phase)
+    start = lifecycle.clock.monotonic()
+    lifecycle._natural("baseline", value.config.phases.baseline_window_s)
+    lifecycle.state.windows["baseline"] = (start, lifecycle.clock.monotonic())
+
+    lifecycle.hooks.baseline_capture(lifecycle.state, 30)
+
+    # Its perturbation is labelled, and only its declared reading ran.
+    assert labels == ["baseline", "diagnostic"]
+    assert events == [("control-plane", "gc")]
+    checkpoint = json.loads(
+        (value.evidence_dir / "natural-baseline-control-plane.json").read_text()
+    )
+    assert checkpoint["phase"] == "baseline"
+    assert checkpoint["kind"] == "natural_checkpoint"
+    assert checkpoint["completed"] is True
+    assert not (value.evidence_dir / "natural-drain-control-plane.json").exists()
+    lifecycle.stop_observer()
+    value.writer.close()
+
+
+def test_a_baseline_capture_without_a_completed_window_is_refused(
+    tmp_path, monkeypatch
+):
+    """A checkpoint that never closed is no reference to read a difference from."""
+    _, value, lifecycle, _, events, _, _, _ = diagnostic_environment(
+        tmp_path, monkeypatch, baseline={"control-plane": ["gc"]}
+    )
+    with pytest.raises(RuntimeError, match="effective preflight INCONCLUSIVE"):
+        lifecycle.hooks.preflight()
+    lifecycle.observer.set_phase = lambda phase: None
+
+    with pytest.raises(RuntimeError, match=r"natural baseline checkpoint"):
+        lifecycle.hooks.baseline_capture(lifecycle.state, 30)
+
+    assert events == []
+    lifecycle.stop_observer()
+    value.writer.close()
+
+
+def test_a_run_that_declares_nothing_has_no_baseline_capture(tmp_path, monkeypatch):
+    """The step is unconditional, so phase keys do not depend on the policy.
+
+    It reads and writes nothing when no checkpoint declares a baseline reading,
+    so the step costs a run without diagnostics exactly one recorded window.
+    """
+    _, value, lifecycle, _, events, _, _, _ = diagnostic_environment(
+        tmp_path, monkeypatch
+    )
+    with pytest.raises(RuntimeError, match="effective preflight INCONCLUSIVE"):
+        lifecycle.hooks.preflight()
+    labels: list[str] = []
+    lifecycle.observer.set_phase = lambda phase: labels.append(phase)
+
+    lifecycle.hooks.baseline_capture(lifecycle.state, 30)
+
+    assert labels == [] and events == []
+    assert not list(value.evidence_dir.glob("natural-baseline-*.json"))
+    lifecycle.stop_observer()
+    value.writer.close()
+
+
+def test_the_provider_gate_routes_what_the_helper_dispatches(tmp_path, monkeypatch):
+    """A fifth copy of the operation set lived here, and read one map only.
+
+    It named `gc` and `heap_dump` itself, so it rejected the text readings the
+    helper had just been taught to dispatch -- and it read only the final
+    checkpoint, so a baseline reading would have reached preparation and failed
+    there, before any measurement, with a message naming the provider rather than
+    the operation.
+    """
+    module, value, _, _, _, _, _, _ = diagnostic_environment(tmp_path, monkeypatch)
+    jvm = next(
+        name for name, policy in value.config.roles.items() if policy.runtime == "jvm"
+    )
+    options = module.RuntimeOptions(allow_diagnostic_target_stop_on_cancel=True)
+
+    def declared(operations, baseline):
+        diagnostics = value.config.diagnostics.model_copy(
+            update={"operations": operations, "baseline_operations": baseline}
+        )
+        return value.config.model_copy(update={"diagnostics": diagnostics})
+
+    routed = module._runtime_preparation_options(
+        declared({jvm: ["gc", "native_memory"]}, {jvm: ["native_memory_baseline"]}),
+        options,
+    )
+    assert routed.diagnostic_provider_available is True
+
+    # `jfr` is in the vocabulary and not provisionable: the gate must tell the
+    # two apart rather than accept any name the type system allows.
+    with pytest.raises(ValueError, match="cannot route requested operations"):
+        module._runtime_preparation_options(
+            declared({jvm: ["jfr"]}, {}),
+            options,
+        )
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "memory-soak-p24-nmt-spike-container.yaml",
+        "memory-soak-p24-serialgc-shrink-spike-container.yaml",
+    ],
+)
+def test_the_shipped_nmt_spikes_provision_and_reserve(tmp_path, monkeypatch, scenario):
+    """The scenarios this repository ships must cross the gates they declare.
+
+    Both set `-XX:NativeMemoryTracking` and ask for the reading pair, so both are
+    a run that only works if the provider routes the text readings, if the budget
+    sizes four captures rather than three, and if the baseline map is admitted
+    everywhere the final one is.
+    """
+    import nanolab.tasks.soak.runtime as module
+
+    value = prepared(tmp_path, scenario=scenario)
+    policy = value.config.diagnostics
+    assert policy.baseline_operations == {"control-plane": ["native_memory_baseline"]}
+    assert policy.operations["control-plane"] == [
+        "native_memory_diff",
+        "native_memory",
+        "gc",
+    ]
+
+    # Stamp the helper digest the way a run does, rather than hand-filling it:
+    # which roles get one is itself a gate that reads the declared maps.
+    built = "localhost:5000/nanolab/diagnostic-helper@sha256:" + "c" * 64
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.helper_build.build_helper_image", lambda request: built
+    )
+    config = module._with_built_helper(
+        value.config, run_dir=tmp_path / "run", options=module.RuntimeOptions()
+    )
+    assert set(config.diagnostics.helper_images) == {"control-plane"}
+
+    inputs = module._diagnostic_resource_inputs(
+        replace(value, config=config), allow_target_stop=True
+    )
+
+    assert inputs["operation_count"] == 4
+    assert inputs["dump_count"] == 0
+    quota = inputs["roles"]["control-plane"]["quota_bytes"]
+    assert quota % 4096 == 0 and 0 < quota <= 1024**3
+    assert quota * 4 <= inputs["available_artifact_bytes"]
+    module._runtime_preparation_options(
+        config,
+        module.RuntimeOptions(allow_diagnostic_target_stop_on_cancel=True),
+    )
+    value.writer.close()
+
+
+def test_the_first_prerequisite_reservation_precedes_its_ownership_root(tmp_path):
+    """The reservation hook runs before the factory creates what it owns.
+
+    Both owned subtrees are charged at their full reservation rather than their
+    actual use, so the hook subtracts them from the run total. Before the first
+    lifetime is acquired neither may exist: the factory creates its ownership
+    root inside `__call__`, which is the acquisition the hook precedes. Measuring
+    an absent subtree is what made every soak run fail at prerequisites.
+    """
+    import nanolab.tasks.soak.runtime as module
+
+    value = prepared(tmp_path, scenario="memory-soak-p24-nmt-spike-container.yaml")
+    options = module.RuntimeOptions(
+        prerequisite_inputs=module._freeze_prerequisite_inputs(value)
+    )
+    _, frozen, supervision = module._make_runtime_prerequisites(
+        value, options, host_bindings(), tmp_path
+    )
+
+    # The acceptance gate compares each declared projection against the live
+    # policy. Spell both sides here exactly as they are spelled there, on the
+    # profile the production freeze just built for a shipped scenario.
+    normalized = value.config.model_dump(mode="json")
+    declared = value.config.prerequisites.relevant_config_keys["sync"]
+    assert declared == ["images", "roles", "retention_s", "workload"]
+    for key in declared:
+        assert frozen["relevant_config"]["sync"][key] == select_relevant_config(
+            normalized, key
+        )
+
+    owned = value.evidence_dir / "prerequisite-platforms"
+    parent = value.evidence_dir / "prerequisites"
+    assert not owned.exists()
+
+    supervision["before_fork"](
+        "71374cc5bfd048038e9a2f5ee50b9ee4",
+        ArtifactWriter(parent, supervision["parent_artifact_bytes"]),
+    )
+
+    reservation = json.loads(
+        (parent / "reservation-71374cc5bfd048038e9a2f5ee50b9ee4.json").read_text()
+    )
+    assert reservation["schema"] == "nanolab-soak-prerequisite-reservation-v1"
+    assert reservation["other_run_artifact_bytes"] >= 0
+    assert not owned.exists()
     value.writer.close()
 
 
@@ -1644,13 +1923,13 @@ def test_natural_checkpoint_requires_finite_available_matching_selectors(invalid
         "identity": {"target": replace(target, process_id=456)},
         "absent": {"metric": "different"},
     }
-    module._validate_natural_samples(config, target, (row,))
+    module._validate_natural_samples(config, target, (row,), "drain")
     with pytest.raises(
         RuntimeError,
         match=r"natural checkpoint observation|owned natural checkpoint",
     ):
         module._validate_natural_samples(
-            config, target, (replace(row, **changes[invalid]),)
+            config, target, (replace(row, **changes[invalid]),), "drain"
         )
 
 

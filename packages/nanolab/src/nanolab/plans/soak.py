@@ -5,12 +5,16 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from sonata_engine import JournalConfig, Resource, Task, Workflow
+from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resource
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
 from nanolab.tasks.platform import PlatformRequest, add_platform
+from nanolab.tasks.soak.helper_build import HELPER_BUILDER
 from nanolab.tasks.soak.owned_functions import (
     journaled_function_resource,
 )
@@ -153,6 +157,27 @@ def build_soak_plan(
     from nanolab.tasks.soak.runtime import RunSingleVersionSoak, RuntimeOptions
 
     workflow = Workflow(workflow_id="soak")
+    # Both are acquired before the task runs, because preparation and the helper
+    # build push into the registry and build with the builder -- acquiring them
+    # inside the frozen deployment's own resources would be too late.
+    #
+    # Each removes only what it created and leaves what it found running alone, so
+    # an operator's own registry or builder is never torn down by a run. The
+    # builder name comes from the same options the run builds with, so the two
+    # cannot name different builders.
+    builder = buildx_builder_resource(
+        name=getattr(runtime_options, "helper_builder", HELPER_BUILDER),
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        role="host",
+        # A `docker-container` builder has a `localhost` of its own, so without
+        # this the push into the registry above cannot resolve.
+        driver_options=("network=host",),
+    )
+    registry = docker_registry_resource(
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        role="host",
+        container=REGISTRY_CONTAINER_NAME,
+    )
     workflow.add(
         RunSingleVersionSoak(
             config,
@@ -166,7 +191,8 @@ def build_soak_plan(
             if runtime_options is not None
             else RuntimeOptions(allow_diagnostic_target_stop_on_cancel=True),
             keep=lambda: workflow.keep,
-        )
+        ),
+        requires=(registry, builder),
     )
     return workflow
 

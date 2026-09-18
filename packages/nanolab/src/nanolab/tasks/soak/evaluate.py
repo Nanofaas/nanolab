@@ -193,13 +193,22 @@ def _index(
                     or not scheduled <= started <= ended
                 ):
                     raise ValueError("invalid sample timing")
-                prior = last.get(role)
-                if prior is not None and (
-                    scheduled < prior[0] or phases[phase] < prior[1]
-                ):
-                    issues.add("non-monotone phase/sample timeline")
-                    continue
-                last[role] = (scheduled, phases[phase])
+                if phase != "diagnostic":
+                    # `diagnostic` is stamped on samples taken while a capture
+                    # runs, which takes far longer than one interval. It is
+                    # ranked above `drain` because at the final capture it
+                    # follows drain, but a capture also runs between the
+                    # baseline window and steady, where its ticks would arrive
+                    # before later phases and read as non-monotone. It is a
+                    # perturbation, not a phase of the measurement, so it is
+                    # compared against nothing and advances no cursor.
+                    prior = last.get(role)
+                    if prior is not None and (
+                        scheduled < prior[0] or phases[phase] < prior[1]
+                    ):
+                        issues.add("non-monotone phase/sample timeline")
+                        continue
+                    last[role] = (scheduled, phases[phase])
                 if phase not in policy["windows"]:
                     continue
                 # Where the label may legitimately appear, which is wider than

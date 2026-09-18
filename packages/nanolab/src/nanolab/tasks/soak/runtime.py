@@ -17,6 +17,7 @@ import socket
 import stat
 import time
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -43,8 +44,9 @@ from nanolab.tasks.soak.diagnostic_helper import (
     DockerHelperSpec,
     LocalDockerDiagnosticProvisioner,
 )
-from nanolab.tasks.soak.diagnostics import DiagnosticBudget
+from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
+from nanolab.tasks.soak.helper_build import HELPER_BUILDER
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.observer import Observer, SystemClock
 from nanolab.tasks.soak.preflight import preflight
@@ -94,7 +96,7 @@ class RuntimeOptions:
     prerequisite_inputs: dict[str, object] | None = None
     docker_socket: str = "/var/run/docker.sock"
     memory_helper_image: str | None = None
-    helper_builder: str = "nanolab-heap-analysis"
+    helper_builder: str = HELPER_BUILDER
     allow_diagnostic_target_stop_on_cancel: bool = False
     prerequisite_parent_artifact_bytes: int | None = 32 * 1024 * 1024
     prerequisite_lifetime_artifact_bytes: int | None = 64 * 1024 * 1024
@@ -151,21 +153,33 @@ def _runtime_preparation_options(config, options: RuntimeOptions) -> Preparation
         _check_prerequisite_resources(config, options)
         preparation = replace(preparation, prerequisite_provider_available=True)
     if (
-        not any(config.diagnostics.operations.values())
+        (
+            not any(config.diagnostics.operations.values())
+            and not any(config.diagnostics.baseline_operations.values())
+        )
         or preparation.diagnostic_adapter is not None
         or options.deployment_factory is not None
     ):
         return preparation
     if not options.allow_diagnostic_target_stop_on_cancel:
         raise ValueError("diagnostics require explicit owned-target stop permission")
-    for role, operations in config.diagnostics.operations.items():
+    for role in set(config.diagnostics.operations) | set(
+        config.diagnostics.baseline_operations
+    ):
+        # Both checkpoints' declarations, because the provider routes whichever
+        # checkpoint asks. Reading only the final one let a baseline reading
+        # reach preparation and fail there, before any measurement.
+        operations = [
+            *config.diagnostics.operations.get(role, []),
+            *config.diagnostics.baseline_operations.get(role, []),
+        ]
         if not operations:
             continue
         policy = config.roles[role]
-        if policy.runtime not in {"jvm", "node"} or set(operations) - {
-            "gc",
-            "heap_dump",
-        }:
+        # The provider's own declaration, not a second copy of it: an operation
+        # this set does not carry is one it cannot dispatch, and naming the set
+        # here is how the two drifted apart before.
+        if set(operations) - supported_operations(policy.runtime):
             raise ValueError(
                 "local diagnostic provider cannot route requested operations"
             )
@@ -225,7 +239,11 @@ def _population_retention(config, population: str) -> float:
 
 def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
     """Derive the built-in sync gate only after images and payloads are frozen."""
-    from nanolab.tasks.soak.prerequisites import _inputs, _required_populations
+    from nanolab.tasks.soak.prerequisites import (
+        _inputs,
+        _required_populations,
+        select_relevant_config,
+    )
 
     config = prepared.config
     coverage = frozenset(config.prerequisites.required_coverage)
@@ -253,20 +271,27 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
     populations = _required_populations(
         prepared.images, coverage, config.metrics_profile
     )
+    profile: dict[str, Any] = {
+        "function": role,
+        "role": role,
+        "request": {"input": deepcopy(case["input"])},
+        "expected_output": deepcopy(case["expected"]),
+        "request_timeout_s": 3,
+        "exercise_timeout_s": 30,
+        "poll_interval_s": 0.05,
+    }
+    # The scenario declares which configuration the prerequisite run had to be
+    # frozen against, and acceptance compares each of those projections against
+    # the live policy. A profile that carries none of them cannot pass that gate,
+    # so the sections are copied here, at the only place the built-in sync recipe
+    # is derived.
+    normalized = config.model_dump(mode="json")
+    for key in config.prerequisites.relevant_config_keys["sync"]:
+        profile[key] = select_relevant_config(normalized, key)
     frozen = {
         "images": dict(prepared.images),
         "metrics_profile": config.metrics_profile,
-        "relevant_config": {
-            "sync": {
-                "function": role,
-                "role": role,
-                "request": {"input": deepcopy(case["input"])},
-                "expected_output": deepcopy(case["expected"]),
-                "request_timeout_s": 3,
-                "exercise_timeout_s": 30,
-                "poll_interval_s": 0.05,
-            }
-        },
+        "relevant_config": {"sync": profile},
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
@@ -366,8 +391,8 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
         # already charged at their FULL reservations, never actual-use/refunded.
         other = (
             _artifact_bytes(run_dir)
-            - _artifact_bytes(factory_root)
-            - _artifact_bytes(parent_root)
+            - _owned_bytes(factory_root)
+            - _owned_bytes(parent_root)
         )
         next_reserved = reserved + lifetime_quota + recovery_quota
         if other + parent_quota + next_reserved > prepared.config.artifact_limit_bytes:
@@ -440,9 +465,14 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
     )
 
 
-def _validate_natural_samples(config, target: Target, rows) -> None:
-    """Require actual observations, not merely a nonempty scrape result."""
-    if not rows or any(row.target != target or row.phase != "drain" for row in rows):
+def _validate_natural_samples(config, target: Target, rows, phase: str) -> None:
+    """Require actual observations, not merely a nonempty scrape result.
+
+    `phase` is the checkpoint the rows were taken for. It is not cosmetic: the
+    metric family is the same at every checkpoint, so validating the wrong
+    phase's criteria against these rows would pass and hold the wrong set.
+    """
+    if not rows or any(row.target != target or row.phase != phase for row in rows):
         raise RuntimeError("owned natural checkpoint samples unavailable")
 
     def require(metric, selector, unit=None):
@@ -470,19 +500,47 @@ def _validate_natural_samples(config, target: Target, rows) -> None:
     for metric in config.roles[target.role].required_metrics:
         require(metric, {})
     for criterion in config.criteria:
-        if criterion.role == target.role and criterion.phase == "drain":
+        if criterion.role == target.role and criterion.phase == phase:
             require(criterion.metric, criterion.label_selector, criterion.unit)
 
 
 _artifact_bytes = measure_tree
 
 
+def _owned_bytes(root: Path) -> int:
+    """Measure an owned subtree, which is absent until its first lifetime.
+
+    The reservation hook runs before the factory's first acquisition creates its
+    ownership root, and a run directory that has not had a prerequisite yet has
+    no parent subtree either. A missing subtree contributes nothing to the run
+    total, so charging it zero is what the subtraction above means.
+    """
+    return 0 if not root.exists() else _artifact_bytes(root)
+
+
+# The natural checkpoints a run freezes and reads from, in the order they happen.
+# Each one names both the window its samples were taken over and the phase its
+# captures are gated on, so the two can never be told apart.
+_CHECKPOINTS = ("baseline", "drain")
+
+
 def _diagnostic_resource_inputs(prepared, *, allow_target_stop: bool) -> dict:
     """Derive finite reservations from frozen policy; never clamp application limits."""
     config, policy = prepared.config, prepared.config.diagnostics
-    requested = {role: ops for role, ops in policy.operations.items() if ops}
-    count = sum(len(ops) for ops in requested.values())
-    dumps = sum("heap_dump" in ops for ops in requested.values())
+    # Both checkpoints' declarations, in capture order. A reading declared at
+    # both is two captures and reserves twice, so these are concatenated rather
+    # than unioned -- and the run-wide dump ceiling counts captures too, which is
+    # what acceptance re-sums from the entries it receives.
+    declared = {
+        role: [
+            *policy.operations.get(role, []),
+            *policy.baseline_operations.get(role, []),
+        ]
+        for role in set(policy.operations) | set(policy.baseline_operations)
+    }
+    requested = {role: ops for role, ops in declared.items() if ops}
+    count = sum(len(ops) for ops in declared.values())
+    dumps = sum(ops.count("heap_dump") for ops in declared.values())
     if not count:
         return {}
     if not allow_target_stop:
@@ -498,10 +556,8 @@ def _diagnostic_resource_inputs(prepared, *, allow_target_stop: bool) -> dict:
         if role not in requested:
             continue
         operations = requested[role]
-        if application.runtime not in {"jvm", "node"} or set(operations) - {
-            "gc",
-            "heap_dump",
-        }:
+        supported = supported_operations(application.runtime)
+        if application.runtime not in {"jvm", "node"} or set(operations) - supported:
             raise ValueError(
                 "local diagnostic helper does not support requested operations"
             )
@@ -571,7 +627,7 @@ def _diagnostic_resource_inputs(prepared, *, allow_target_stop: bool) -> dict:
 
 
 def _with_built_helper(
-    config: SoakConfig, *, run_dir: Path, repo_root: Path, options: RuntimeOptions
+    config: SoakConfig, *, run_dir: Path, options: RuntimeOptions
 ) -> SoakConfig:
     """Return the protocol with this run's freshly built helper digest in it.
 
@@ -586,12 +642,25 @@ def _with_built_helper(
     from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
 
     policy = config.diagnostics
-    roles = [role for role, operations in policy.operations.items() if operations]
+    # Every role that asks for any reading at any checkpoint. Reading only the
+    # final map left a baseline-only role without a helper digest, and a policy
+    # that declares nothing but baseline readings built no helper at all -- so
+    # the reading the run was configured for had nothing to run it.
+    roles = [
+        role
+        for role in set(policy.operations) | set(policy.baseline_operations)
+        if policy.operations.get(role) or policy.baseline_operations.get(role)
+    ]
     if not roles or policy.helper_images or options.memory_helper_image is not None:
         return config
+    # The build writes its log and metadata into the run root and refuses a
+    # run_dir that does not exist. Only a scenario carrying a policy file would
+    # have created it by now (`write_policy_input`), and the default diagnostic
+    # protocols carry none, so the root is created here for the same reason
+    # heap analysis creates it: the build needs it and nothing else does it.
+    run_dir.mkdir(parents=True, exist_ok=True)
     digest = build_helper_image(
         HelperImageRequest(
-            repo_root=repo_root,
             run_dir=run_dir,
             run_id=run_dir.name,
             registry=options.preparation.registry.split("/", 1)[0] + "/nanolab",
@@ -1249,8 +1318,9 @@ def create_soak_lifecycle(
     cancelled = cancelled if cancelled is not None else Event()
     diagnostic_inputs = getattr(deployment, "diagnostic_inputs", None) or {}
     automatic_diagnostics = (
-        any(config.diagnostics.operations.values()) and diagnostic_adapter is None
-    )
+        any(config.diagnostics.operations.values())
+        or any(config.diagnostics.baseline_operations.values())
+    ) and diagnostic_adapter is None
     if automatic_diagnostics and (
         not allow_diagnostic_target_stop_on_cancel
         or not diagnostic_inputs
@@ -1360,10 +1430,23 @@ def create_soak_lifecycle(
         def set_phase(self, phase):
             observer.set_phase(phase)
 
+        def label_diagnostic(self):
+            """Label the samples a capture perturbs, when the observer is live.
+
+            Through `set_phase` so a caller that owns phase transitions still
+            does. A run whose observer already died still gets its diagnostics:
+            this label changes how those ticks are judged, never whether the
+            capture runs.
+            """
+            with suppress(RuntimeError):
+                self.set_phase("diagnostic")
+
         def stop(self, timeout_s):
             nonlocal observed_end
             observer.stop(timeout_s)
             observed_end = clock.monotonic()
+
+    timed_observer = TimedObserver()
 
     def check():
         actual = (observations or deployment.observations)(targets)
@@ -1383,12 +1466,19 @@ def create_soak_lifecycle(
                 if memory_transport is None:
                     raise RuntimeError("memory transport was not initialized")
                 _, helper = memory_transport.helpers[target.role]
-                adapter = helper.adapter(
-                    budget=diagnostic_budget,
-                    natural_checkpoint=root / f"natural-{target.role}.json",
-                    max_capture_bytes=decision["quota_bytes"],
-                )
-                diagnostic_adapters[target.role] = adapter
+                for phase in _CHECKPOINTS:
+                    # One adapter per checkpoint: the checkpoint it accepts and
+                    # the phase it is gated on are the same declaration, so a
+                    # capture can never take a reading against a window it was
+                    # not measured from.
+                    adapter = helper.adapter(
+                        budget=diagnostic_budget,
+                        natural_checkpoint=root / f"natural-{phase}-{target.role}.json",
+                        max_capture_bytes=decision["quota_bytes"],
+                        natural_phase=phase,
+                    )
+                    diagnostic_adapters[(target.role, phase)] = adapter
+                adapter = diagnostic_adapters[(target.role, "drain")]
                 receipt = _read_json(helper.receipt)
                 role = actual.setdefault("roles", {}).setdefault(target.role, {})
                 role["diagnostics"] = sorted(adapter.capabilities(target))
@@ -1485,12 +1575,163 @@ def create_soak_lifecycle(
             )
         writer.write_json("prerequisites.json", receipt)
 
+    def capture_checkpoint(phase, window, deadline, declared):
+        """Freeze one natural checkpoint, then take the readings it declares.
+
+        Shared by the baseline checkpoint and the final drain one: the same
+        freeze-then-perturb order and the same per-capture reservation, a
+        different window and a different declared set. The caller validates the
+        window, so this never captures from a checkpoint that was not a natural
+        one.
+        """
+        # Relabel before the first perturbing read. Without this every tick taken
+        # here keeps the previous label with a timestamp past its window's end,
+        # and `evaluate` judges each one a boundary crossing -- so a run passed or
+        # failed by whether a tick happened to land in a capture that takes far
+        # longer than one sample interval.
+        timed_observer.label_diagnostic()
+        checkpoints = []
+
+        def remaining_checkpoint_time():
+            if cancelled.is_set():
+                raise KeyboardInterrupt("soak cancelled during natural checkpoints")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("shared diagnostic deadline exhausted")
+            return min(config.scrape_timeout_s, remaining)
+
+        # Freeze ALL natural checkpoints before perturbing any role.
+        for target in targets:
+            if not declared.get(target.role):
+                continue
+            ordinary = next(item for item in bindings if item.target == target)
+            checkpoint_binding = RoleBinding(
+                target,
+                ordinary.endpoint,
+                {
+                    **ordinary.required_metrics,
+                    **{
+                        c.metric: c.unit
+                        for c in config.criteria
+                        if c.role == target.role and c.phase == phase
+                    },
+                },
+            )
+            # The existing transport owns/kills its collector on timeout. A new
+            # probe propagates the shared remainder, not its usual timeout.
+            checkpoint_probe = RoleBoundProbe(
+                (checkpoint_binding,),
+                collection_transport,
+                timeout_s=remaining_checkpoint_time(),
+            )
+            rows = checkpoint_probe.sample(target, phase, clock.monotonic())
+            remaining_checkpoint_time()
+            _validate_natural_samples(config, target, rows, phase)
+            checkpoints.append((target, rows))
+        # No completed marker is published until every role has valid evidence.
+        for target, rows in checkpoints:
+            remaining_checkpoint_time()
+            evidence = writer.write_json(
+                f"natural-samples-{phase}-{target.role}.json",
+                {
+                    **binding,
+                    "target": asdict(target),
+                    "rows": [asdict(row) for row in rows],
+                },
+            )
+            remaining_checkpoint_time()
+            writer.write_json(
+                f"natural-{phase}-{target.role}.json",
+                {
+                    **binding,
+                    "kind": "natural_checkpoint",
+                    "phase": phase,
+                    "completed": True,
+                    "target": asdict(target),
+                    "window": window,
+                    "ended_s": clock.monotonic(),
+                    "artifacts": [_reference(root, evidence)],
+                },
+            )
+        for target in targets:
+            for operation in declared.get(target.role, []):
+                if cancelled.is_set():
+                    raise KeyboardInterrupt("soak cancelled before diagnostic capture")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("shared diagnostic deadline exhausted")
+                # The phase is in the path because the same reading at both
+                # checkpoints is the point of the split, and one directory per
+                # capture name would collide on the second.
+                output = root / f"diagnostic-{phase}-{target.role}-{operation}"
+                if automatic_diagnostics:
+                    quota = diagnostic_inputs["roles"][target.role]["quota_bytes"]
+                    if (
+                        _artifact_bytes(root) + quota + _DIAGNOSTIC_RECEIPT_BYTES
+                        > config.artifact_limit_bytes
+                        - diagnostic_inputs["terminal_reserve_bytes"]
+                    ):
+                        raise RuntimeError(
+                            "remaining artifact budget cannot reserve "
+                            "diagnostic capture"
+                        )
+                    if memory_transport is None:
+                        raise RuntimeError("memory transport was not initialized")
+                    receipt = _capture_owned_diagnostic(
+                        diagnostic_adapters[(target.role, phase)],
+                        memory_transport.helpers[target.role][1],
+                        target,
+                        operation,
+                        output,
+                        remaining,
+                        cancelled,
+                    )
+                else:
+                    if diagnostic_adapter is None:
+                        raise RuntimeError("diagnostic adapter was not initialized")
+                    receipt = diagnostic_adapter.capture(
+                        target, operation, output, remaining
+                    )
+                diagnostic_entries.append(
+                    {
+                        "role": target.role,
+                        "phase": phase,
+                        "operation": operation,
+                        "receipt": _reference(root, receipt),
+                    }
+                )
+
+    def baseline_capture(state: LifecycleState, timeout_s: float):
+        """Take the readings declared for the baseline checkpoint's close.
+
+        Reads nothing when none are declared, so the step can stay an
+        unconditional part of the phase sequence and a run's phase keys stay
+        independent of its policy.
+        """
+        declared = config.diagnostics.baseline_operations
+        if not any(declared.values()):
+            return
+        window = state.windows.get("baseline", ())
+        if (
+            state.primary_error is not None
+            or cancelled.is_set()
+            or len(window) != 2
+            or not all(math.isfinite(t) for t in window)
+            or window[1] - window[0] < config.phases.baseline_window_s
+        ):
+            raise RuntimeError(
+                "completed owned natural baseline checkpoint unavailable"
+            )
+        capture_checkpoint("baseline", window, time.monotonic() + timeout_s, declared)
+
     def final_capture(state: LifecycleState, timeout_s: float):
         nonlocal final_targets
         # Discovery repeats while resources remain alive. Identity differences
         # are handed to acceptance, never silently rebound to fresh processes.
         final_targets = deployment.discover()
-        if any(config.diagnostics.operations.values()):
+        if any(config.diagnostics.operations.values()) or any(
+            config.diagnostics.baseline_operations.values()
+        ):
             window = state.windows.get("drain", ())
             if (
                 not natural_drain_completed
@@ -1504,118 +1745,15 @@ def create_soak_lifecycle(
                 raise RuntimeError(
                     "completed owned natural final checkpoint unavailable"
                 )
-            deadline = time.monotonic() + timeout_s
-            checkpoints = []
-
-            def remaining_checkpoint_time():
-                if cancelled.is_set():
-                    raise KeyboardInterrupt("soak cancelled during natural checkpoints")
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("shared diagnostic deadline exhausted")
-                return min(config.scrape_timeout_s, remaining)
-
-            # Freeze ALL natural checkpoints before perturbing any role.
-            for target in targets:
-                if not config.diagnostics.operations.get(target.role):
-                    continue
-                ordinary = next(item for item in bindings if item.target == target)
-                checkpoint_binding = RoleBinding(
-                    target,
-                    ordinary.endpoint,
-                    {
-                        **ordinary.required_metrics,
-                        **{
-                            c.metric: c.unit
-                            for c in config.criteria
-                            if c.role == target.role and c.phase == "drain"
-                        },
-                    },
-                )
-                # The existing transport owns/kills its collector on timeout.
-                # A new probe propagates the shared remainder, not its usual timeout.
-                checkpoint_probe = RoleBoundProbe(
-                    (checkpoint_binding,),
-                    collection_transport,
-                    timeout_s=remaining_checkpoint_time(),
-                )
-                rows = checkpoint_probe.sample(target, "drain", clock.monotonic())
-                remaining_checkpoint_time()
-                _validate_natural_samples(config, target, rows)
-                checkpoints.append((target, rows))
-            # No completed marker is published until every role has valid evidence.
-            for target, rows in checkpoints:
-                remaining_checkpoint_time()
-                evidence = writer.write_json(
-                    f"natural-samples-{target.role}.json",
-                    {
-                        **binding,
-                        "target": asdict(target),
-                        "rows": [asdict(row) for row in rows],
-                    },
-                )
-                remaining_checkpoint_time()
-                writer.write_json(
-                    f"natural-{target.role}.json",
-                    {
-                        **binding,
-                        "kind": "natural_checkpoint",
-                        "phase": "drain",
-                        "completed": True,
-                        "target": asdict(target),
-                        "window": window,
-                        "ended_s": clock.monotonic(),
-                        "artifacts": [_reference(root, evidence)],
-                    },
-                )
-            for target in targets:
-                for operation in config.diagnostics.operations.get(target.role, []):
-                    if cancelled.is_set():
-                        raise KeyboardInterrupt(
-                            "soak cancelled before diagnostic capture"
-                        )
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError("shared diagnostic deadline exhausted")
-                    output = root / f"diagnostic-{target.role}-{operation}"
-                    if automatic_diagnostics:
-                        quota = diagnostic_inputs["roles"][target.role]["quota_bytes"]
-                        if (
-                            _artifact_bytes(root) + quota + _DIAGNOSTIC_RECEIPT_BYTES
-                            > config.artifact_limit_bytes
-                            - diagnostic_inputs["terminal_reserve_bytes"]
-                        ):
-                            raise RuntimeError(
-                                "remaining artifact budget cannot reserve "
-                                "diagnostic capture"
-                            )
-                        if memory_transport is None:
-                            raise RuntimeError("memory transport was not initialized")
-                        receipt = _capture_owned_diagnostic(
-                            diagnostic_adapters[target.role],
-                            memory_transport.helpers[target.role][1],
-                            target,
-                            operation,
-                            output,
-                            remaining,
-                            cancelled,
-                        )
-                    else:
-                        if diagnostic_adapter is None:
-                            raise RuntimeError("diagnostic adapter was not initialized")
-                        receipt = diagnostic_adapter.capture(
-                            target, operation, output, remaining
-                        )
-                    diagnostic_entries.append(
-                        {
-                            "role": target.role,
-                            "operation": operation,
-                            "receipt": _reference(root, receipt),
-                        }
-                    )
-        writer.write_json(
-            "diagnostics.json", {**binding, "entries": diagnostic_entries}
-        )
+            capture_checkpoint(
+                "drain",
+                window,
+                time.monotonic() + timeout_s,
+                config.diagnostics.operations,
+            )
+            writer.write_json(
+                "diagnostics.json", {**binding, "entries": diagnostic_entries}
+            )
 
     def evaluate(state: LifecycleState):
         nonlocal results
@@ -1792,10 +1930,12 @@ def create_soak_lifecycle(
 
     return MemoryOwnedLifecycle(
         config,
-        observer=TimedObserver(),
+        observer=timed_observer,
         clock=clock,
         driver_factory=driver_factory,
-        hooks=LifecycleHooks(check, prerequisites, final_capture, evaluate, report),
+        hooks=LifecycleHooks(
+            check, prerequisites, baseline_capture, final_capture, evaluate, report
+        ),
         run_dir=run_dir,
         cancelled=cancelled,
     )
@@ -1842,7 +1982,6 @@ class RunSingleVersionSoak(Task):
             soak = _with_built_helper(
                 self.config.soak,
                 run_dir=self.run_dir,
-                repo_root=self.repo_root,
                 options=self.options,
             )
             if prepared is None:

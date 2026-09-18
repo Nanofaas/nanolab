@@ -42,8 +42,8 @@ SAFETY_ORDER = [
     "drain",
     "observe:natural-drain",
     "gc:final",
-    "dump:final",
     "observe:after-final-gc",
+    "dump:final",
     "release-deployment",
     "mat",
     "cleanup-helper",
@@ -1005,10 +1005,11 @@ def test_session_refuses_a_deployment_without_diagnostic_inputs(
     with pytest.raises(RuntimeError, match="no control-plane diagnostic inputs"):
         session.observe("before-baseline")
 
-    # The observation itself is published before the helper is ever needed, so
-    # the failure is about provisioning, not about losing the evidence.
+    # The deployment is still asked for its observations first, but a reading
+    # needs the helper: without one there is no native block and therefore no
+    # runtime document, so failed provisioning is the whole outcome.
     assert deployment.observed == 1
-    assert (tmp_path / "evidence" / "runtime-before-baseline.json").is_file()
+    assert not (tmp_path / "evidence" / "runtime-before-baseline.json").exists()
 
 
 def test_session_refuses_diagnostic_inputs_naming_another_role(
@@ -1126,3 +1127,231 @@ def test_failed_report_publication_still_closes_evidence_and_writes_terminal(
     terminal = json.loads((run_dir / "terminal.json").read_text())
     assert terminal["status"] == "INCONCLUSIVE"
     assert harness.writer_closed
+
+
+def fake_session_with_readings(tmp_path, *, response=None, error=None):
+    session, _deployment = local_session(tmp_path)
+
+    class ReadingHelper(FakeHelper):
+        def __init__(self):
+            super().__init__()
+            self.options = []
+
+        def read_memory(self, timeout_s=5.0, **options):
+            self.options.append(options)
+            if error is not None:
+                raise error
+            return response or {
+                "status": "RssAnon: 4 kB\n",
+                "smaps_rollup": "Pss_Anon: 4 kB\n",
+                "smaps": "1000-2000 rw-p 0 00:00 0\nSize: 4 kB\nRss: 4 kB\nPss: 4 kB\n",
+                # Real JDK 25.0.4 G1 capture from `jcmd <pid> GC.heap_info`.
+                "heap_info": (
+                    "garbage-first heap   total reserved 1048576K, "
+                    "committed 264192K, used 27268K "
+                    "[0x00000000c0000000, 0x0000000100000000)\n"
+                    " region size 1024K, 26 young (26624K), 0 survivors (0K)\n"
+                ),
+                "intervals": {"status": {"started_s": 1.0, "ended_s": 2.0}},
+                "completion": {"heap_info": "completed"},
+                "errors": {},
+            }
+
+    session._helper = ReadingHelper()
+    session._target = Target(
+        "control-plane",
+        "c" * 64,
+        1,
+        "2026-09-15T00:00:00Z",
+        DIGEST,
+        "jvm",
+    )
+    return session
+
+
+def test_after_final_gc_is_observed_before_the_final_dump(tmp_path):
+    events = []
+    task, _, _ = build(tmp_path, FakeSession(events, evidence(tmp_path)))
+    measure(task)
+    assert events.index("gc:final") < events.index("observe:after-final-gc")
+    assert events.index("observe:after-final-gc") < events.index("dump:final")
+
+
+def test_observation_retains_native_sources_and_intervals(tmp_path):
+    session = fake_session_with_readings(tmp_path)
+    path = session.observe("natural-drain")
+    document = json.loads(path.read_text())
+    native = document["native"]
+    assert native["heap_info"]["heap"]["used"] == 27268 * 1024
+    assert native["heap_info"]["heap"]["committed"] == 264192 * 1024
+    assert native["sources"]["status"]["interval"]["ended_s"] == 2.0
+    for source in native["sources"].values():
+        assert (session._root / source["artifact"]["path"]).is_file()
+    assert session._helper.options == [
+        {"include_smaps": True, "include_heap_info": True}
+    ]
+    natural = json.loads((session._root / "natural-drain.json").read_text())
+    assert natural["completed"] is True
+
+
+def test_completed_optional_error_keeps_session_usable(tmp_path):
+    session = fake_session_with_readings(
+        tmp_path,
+        response={
+            "status": "RssAnon: 4 kB\n",
+            "smaps_rollup": "Pss_Anon: 4 kB\n",
+            "smaps": None,
+            "heap_info": None,
+            "errors": {
+                "smaps": "read bound exceeded",
+                "heap_info": "acknowledged failure",
+            },
+            "completion": {"heap_info": "completed"},
+        },
+    )
+    document = json.loads(session.observe("natural-drain").read_text())
+    assert document["native"]["heap_info"]["available"] is False
+    assert document["native"]["residency"]["RssAnon"] == 4096
+    assert session._helper.closed == 0
+    session.observe("after-final-gc")
+    assert session._helper.closed == 0
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError("cleanup unconfirmed"), KeyboardInterrupt()]
+)
+def test_observation_keeps_cleanup_handle_and_original_exception(tmp_path, error):
+    session = fake_session_with_readings(tmp_path, error=error)
+    helper = session._helper
+    with pytest.raises(type(error)) as raised:
+        session.observe("natural-drain")
+    assert raised.value is error
+    assert session._helper is helper
+    session.close()
+    assert helper.closed == 1
+
+
+def test_report_publishes_three_explicit_checkpoint_entries(tmp_path):
+    events = []
+    task, _, _ = build(tmp_path, FakeSession(events, evidence(tmp_path)))
+    result = measure(task)
+    report = json.loads(result.report.read_text())
+    assert set(report["native"]) == {
+        "before-baseline",
+        "natural-drain",
+        "after-final-gc",
+    }
+    # This FakeSession does not publish native data into wiring.writer.root.
+    # Its absence is visible and does not prevent terminal publication.
+    assert all(entry["available"] is False for entry in report["native"].values())
+    assert result.status == "PASS"
+
+
+def test_cleanup_note_survives_cancellation_receipt(tmp_path):
+    class Interrupted(FakeSession):
+        def load(self, phase, duration_s):
+            if phase == "steady":
+                error = KeyboardInterrupt("user cancelled")
+                error.add_note("memory cleanup unconfirmed: daemon unavailable")
+                raise error
+            return super().load(phase, duration_s)
+
+    task, _, run_dir = build(tmp_path, Interrupted([], evidence(tmp_path)))
+    with pytest.raises(KeyboardInterrupt):
+        measure(task)
+    terminal = json.loads((run_dir / "terminal.json").read_text())
+    report = json.loads((run_dir / "report.json").read_text())
+    assert terminal["status"] == "ABORTED"
+    assert "cleanup unconfirmed" in json.dumps(terminal)
+    assert any("cleanup unconfirmed" in reason for reason in report["reasons"])
+
+
+def test_failure_reason_keeps_the_failure_behind_long_cleanup_notes() -> None:
+    """Cleanup notes come first, but must never be the whole recorded reason."""
+    from nanolab.tasks.heap_analysis.runtime import _failure_reason
+
+    error = KeyboardInterrupt("the workload was cancelled")
+    for index in range(3):
+        error.add_note(
+            f"memory cleanup unconfirmed: owned Docker log {index} " + "x" * 900
+        )
+
+    reason = _failure_reason(error)
+
+    assert len(reason) <= 1024
+    assert "KeyboardInterrupt: the workload was cancelled" in reason
+    assert reason.startswith("memory cleanup unconfirmed")
+
+
+def test_failure_reason_without_notes_is_just_the_failure() -> None:
+    from nanolab.tasks.heap_analysis.runtime import _failure_reason
+
+    assert _failure_reason(RuntimeError("no helper")) == "RuntimeError: no helper"
+
+
+def test_observation_budget_precheck_measures_the_published_encoding(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A document the writer would accept is never refused by the pre-check.
+
+    The pre-check used the looser `json.dumps` defaults while `write_json`
+    publishes the compact, sort-keyed encoding, so it charged ~10% more than
+    the bytes it was guarding and refused documents that fit.
+    """
+    from nanolab.tasks.heap_analysis import runtime as runtime_module
+
+    published = fake_session_with_readings(tmp_path / "one").observe("natural-drain")
+    payload = published.stat().st_size
+    loose = len(json.dumps(json.loads(published.read_text())).encode("utf-8")) + 1
+    # The two encodings differ by enough to tell them apart at the boundary.
+    assert loose > payload + 64
+
+    monkeypatch.setattr(runtime_module, "measure_tree", lambda root: 500_000)
+    session = fake_session_with_readings(tmp_path / "two")
+    session._config.artifact_limit_bytes = 500_000 + payload + 4096 + 64
+
+    assert session.observe("natural-drain").is_file()
+
+
+@pytest.mark.parametrize("preexisting", [False, True])
+def test_local_wiring_creates_the_run_root_before_building_the_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preexisting: bool
+) -> None:
+    """The helper build writes into the run root, so the root must exist first.
+
+    A real `run` failed here: nothing created the run directory before the
+    build, and every test of this wiring injected `helper_image`, which skips
+    the build entirely -- so the ordering was never the thing under test. This
+    asks the build what it actually saw.
+
+    `preexisting` covers the operator-supplied empty `--run-dir` that
+    `require_unused_run_dir` admits, which is why the creation carries
+    `exist_ok=True`.
+    """
+    import nanolab.tasks.heap_analysis.runtime as heap_runtime
+
+    observed: list[tuple[Path, bool]] = []
+
+    def stop_at_the_build(request: Any) -> str:
+        observed.append((request.run_dir, request.run_dir.is_dir()))
+        raise RuntimeError("stop here: the build's own inputs are not the subject")
+
+    monkeypatch.setattr(heap_runtime, "build_helper_image", stop_at_the_build)
+    run_dir = tmp_path / "run"
+    if preexisting:
+        run_dir.mkdir()
+
+    task = RunControlPlaneHeapAnalysis(
+        three_role_scenario(),
+        bindings=None,
+        run_dir=run_dir,
+        repo_root=tmp_path,
+        tool_root=tmp_path,
+        options=HeapAnalysisOptions(),
+    )
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        task._local_wiring(run_dir)
+
+    assert observed == [(run_dir, True)]
+    assert run_dir.is_dir()

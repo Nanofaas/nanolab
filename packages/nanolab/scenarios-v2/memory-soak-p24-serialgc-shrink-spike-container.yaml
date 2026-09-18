@@ -12,7 +12,9 @@ resources:
   word-stats-javascript:
     limits: {cpu: 1, memoryMiB: 512}
 soak:
-  purpose: p24
+  # Short and explicitly non-qualifying, so `p24`'s three-retention-cycle
+  # rule does not apply: every criterion below already says so.
+  purpose: smoke
   metrics_profile: soak
   phases:
     warmup_s: 120
@@ -21,10 +23,14 @@ soak:
     steady_s: 900
     drain_s: 420
     cleanup_margin_s: 120
+  # The platform's own retention, which preflight compares against what the
+  # control plane reports. Retention is an operator-side property, not a knob a
+  # scenario turns: nothing in the deployment applies these values, so declaring
+  # anything but what the platform runs fails preflight by design.
   retention_s:
     unkeyed-sync-outcome: 30
-    terminal-key-and-readable-outcome: 60
-    live-key-and-execution: 300
+    terminal-key-and-readable-outcome: 300
+    live-key-and-execution: 1800
   roles:
     control-plane:
       runtime: jvm
@@ -138,7 +144,14 @@ soak:
       rationale: Preserve the strict natural-recovery observation during the spike.
   diagnostics:
     operations:
-      control-plane: [gc]
+      # Order is meaning here: operations run as declared, so reading the diff
+      # after `gc` would include that full GC's own reclamation in the delta and
+      # it would no longer be the growth over steady + drain.
+      control-plane: [native_memory_diff, native_memory, gc]
+    # The mark the diff is measured from, taken once the baseline window closed.
+    # Read Native Memory Tracking where the flag above actually produces it.
+    baseline_operations:
+      control-plane: [native_memory_baseline]
     timeout_s: 120
     max_dumps: 1
     max_dump_bytes: 1073741824

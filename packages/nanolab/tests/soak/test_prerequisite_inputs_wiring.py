@@ -25,7 +25,7 @@ class _CompileOnlyExecutor:
 def _soak_config():
     return SimpleNamespace(
         prerequisites=SimpleNamespace(mode="run", required_coverage=["sync"]),
-        diagnostics=SimpleNamespace(operations={}),
+        diagnostics=SimpleNamespace(operations={}, baseline_operations={}),
         artifact_limit_bytes=8 * 1024 * 1024 * 1024,
     )
 
@@ -66,9 +66,30 @@ def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_pat
     import nanolab.tasks.soak.runtime as runtime
 
     writer = ArtifactWriter(tmp_path, 8 * 1024 * 1024)
+    # The sections this scenario declares as relevant, as its dumped policy
+    # carries them. Acceptance compares each frozen projection against the live
+    # policy, so a profile that carries none of them cannot pass its gate.
+    declared = {
+        "images": {
+            "control-plane": {"mode": "build", "variant": "jvm"},
+            "word-stats-java": {"mode": "build", "variant": "jvm"},
+            "word-stats-javascript": {"mode": "build", "variant": "default"},
+        },
+        "roles": {"control-plane": {"runtime": "jvm", "runtime_options": []}},
+        "retention_s": {
+            "unkeyed-sync-outcome": 30,
+            "terminal-key-and-readable-outcome": 300,
+            "live-key-and-execution": 1800,
+        },
+        "workload": {"rates": {"word-stats-java": 100}, "preallocated_vus": 200},
+    }
     config = SimpleNamespace(
         metrics_profile="soak",
-        prerequisites=SimpleNamespace(required_coverage=["sync"]),
+        prerequisites=SimpleNamespace(
+            required_coverage=["sync"],
+            relevant_config_keys={"sync": list(declared)},
+        ),
+        model_dump=lambda *, mode: dict(declared),
         retention_s={
             "unkeyed-sync-outcome": 30,
             "terminal-key-and-readable-outcome": 300,
@@ -104,6 +125,9 @@ def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_pat
     assert set(frozen["relevant_config"]) == {"sync"}
     assert frozen["relevant_config"]["sync"]["role"] == "word-stats-java"
     assert frozen["relevant_config"]["sync"]["request"] == {"input": {"text": "hello"}}
+    # Exactly the declared projections, which is what the acceptance gate reads.
+    for key, section in declared.items():
+        assert frozen["relevant_config"]["sync"][key] == section
     assert frozen["settlement"]["control-plane"]["outcomes"] == {
         "limit": 0,
         "retention_s": 35,

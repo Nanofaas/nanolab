@@ -28,6 +28,7 @@ def phase_order() -> tuple[str, ...]:
         "warmup",
         "baseline-drain",
         "baseline",
+        "baseline-diagnostics",
         "steady",
         "drain",
         "final-diagnostics",
@@ -80,6 +81,7 @@ class LifecycleHooks:
 
     preflight: Callable[[], None]
     prerequisites: Callable[[], None]
+    baseline_capture: Callable[[LifecycleState, float], None]
     final_capture: Callable[[LifecycleState, float], None]
     evaluate: Callable[[LifecycleState], Any]
     report: Callable[[LifecycleState], Path]
@@ -190,6 +192,16 @@ class SoakLifecycle(Task[LifecycleState]):
                 lambda: self._natural("baseline", phases.baseline_drain_s),
             ),
             ("baseline", lambda: self._natural("baseline", phases.baseline_window_s)),
+            # Unconditional, so a run's phase keys do not depend on its policy;
+            # the hook returns immediately when nothing is declared for the
+            # baseline checkpoint. It runs after the baseline window closed, so
+            # what it perturbs is outside the natural window it measures from.
+            (
+                "baseline-diagnostics",
+                lambda: self.hooks.baseline_capture(
+                    self.state, self.config.diagnostics.timeout_s
+                ),
+            ),
             ("steady", lambda: self._load("steady", phases.steady_s)),
             ("drain", lambda: self._natural("drain", phases.drain_s)),
         )

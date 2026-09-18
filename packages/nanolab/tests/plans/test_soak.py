@@ -20,8 +20,18 @@ def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
         repo_root=tmp_path,
         tool_root=tmp_path,
     )
-    assert len(workflow.compile().tasks) == 1
-    assert "single-version soak" in workflow.compile().tasks[0].task.title
+    titles = [task.task.title for task in workflow.compile().tasks]
+    measure = next(
+        i for i, title in enumerate(titles) if "single-version soak" in title
+    )
+    # Both are acquired before the measurement and released after it:
+    # preparation pushes application images into the registry, and the helper
+    # build both pushes into it and builds through the builder.
+    before, after = titles[:measure], titles[measure + 1 :]
+    assert any("Acquire local registry" in title for title in before)
+    assert any("buildx builder" in title for title in before)
+    assert any("Release local registry" in title for title in after)
+    assert any("buildx builder" in title for title in after)
     assert not (tmp_path / "run").exists()
 
 
@@ -139,3 +149,36 @@ def test_function_registration_uses_api_not_management_readiness(tmp_path, monke
         api_endpoint="http://127.0.0.1:18080",
     )
     assert observed["local_endpoint"] == "http://127.0.0.1:18080"
+
+
+def test_the_plan_acquires_a_builder_that_can_reach_the_local_registry(
+    tmp_path, monkeypatch
+):
+    """Nothing else pins the driver option, and without it the run cannot publish.
+
+    A `docker-container` builder runs buildkitd in a container of its own, so its
+    `localhost` is itself: the build succeeds and the push into the registry this
+    run just acquired does not. That failure lands after the build, so the option
+    is pinned here rather than discovered there.
+    """
+    import nanolab.plans.soak as plan
+
+    seen: list[dict] = []
+    real = plan.buildx_builder_resource
+    monkeypatch.setattr(
+        plan,
+        "buildx_builder_resource",
+        lambda **kwargs: (seen.append(kwargs), real(**kwargs))[1],
+    )
+
+    build_soak_plan(
+        SimpleNamespace(workflow="soak", soak=object()),  # pyright: ignore[reportArgumentType]
+        SimpleNamespace(provider="local"),  # pyright: ignore[reportArgumentType]
+        RoleBindings({"host": _CompileOnlyExecutor()}),
+        run_dir=tmp_path / "run",
+        repo_root=tmp_path,
+        tool_root=tmp_path,
+    )
+
+    assert len(seen) == 1
+    assert seen[0]["driver_options"] == ("network=host",)

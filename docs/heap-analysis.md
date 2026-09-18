@@ -24,12 +24,20 @@ building anything, or making a network call:
 ./nanolab.sh plan packages/nanolab/scenarios-v2/memory-heap-analysis-control-plane-container.yaml
 ```
 
-`run` requires a local container environment, `docker` and `k6` on the host,
-and a `docker buildx` builder whose driver supports BuildKit attestations
-(`docker-container`, not the plain `docker` driver) reachable at
-`localhost:5000` — the build step publishes `--provenance=mode=max`, which
-the `docker` driver rejects outright, and the builder needs `network=host`
-(or an equivalent bridge) to push to the local registry. It owns its own
+`run` requires a local container environment and `docker` and `k6` on the host.
+It acquires the registry and the `docker buildx` builder itself, before the
+measuring task starts and released after it, and removes each again only if it
+was the run that created or started it — a registry or builder you already have
+running is adopted and left alone. A registry the run created is removed **with
+its data**: the registry image keeps `/var/lib/registry` in an anonymous volume
+holding every layer the run pushed, about 1.3 GB, and taking the container
+without it is what leaves one dangling volume behind per run. Both resources are
+needed before any build: the builder
+must support BuildKit attestations (`docker-container`, not the plain `docker`
+driver) because the build publishes `--provenance=mode=max`, and it must reach
+`localhost:5000`, which a `docker-container` builder does not by default because
+its `localhost` is its own — so a builder the run creates carries
+`--driver-opt network=host`. It owns its own
 endpoints: `--environment`, `--control-plane-url` and
 `--prometheus-url` overrides are rejected, as is `--resume`/`--only`/`--from`/
 `--until` partial selection. There is no `--teardown` mode and no `--keep`:
@@ -130,8 +138,10 @@ first checking what the captured functions were processing.
 │   ├── payloads.json            # workload payload fixtures
 │   ├── builds/                  # per-role build output
 │   ├── source/                  # captured source snapshot
-│   ├── runtime-<checkpoint>.json    # runtime-before-baseline / -after-final-gc /
-│   │                                # -natural-drain
+│   ├── runtime-<checkpoint>.json    # runtime-before-baseline / -natural-drain /
+│   │                                # -after-final-gc
+│   ├── native/                      # retained raw readings for the checkpoints
+│   │                                # that have them (optional; see below)
 │   ├── natural-<phase>.json         # natural-baseline.json, natural-drain.json
 │   ├── warmup/, steady/, drain/     # one k6 receipt directory per phase
 │   ├── baseline-gc/, final-gc/      # GC captures (diagnostic.json, events.jsonl)
@@ -144,6 +154,70 @@ first checking what the captured functions were processing.
     ├── docker-run.log            # the MAT container's bounded output
     └── reports/                  # the eight MAT report outputs, flat (see below)
 ```
+
+### Optional memory readings
+
+Heap-analysis collects `GC.heap_info` and full procfs mappings at
+`before-baseline`, `natural-drain`, and `after-final-gc`. The last observation
+is immediately after the verified explicit full GC and before the final dump.
+The dump requests a further full GC, so its effects are outside that reading.
+
+Each `evidence/runtime-<checkpoint>.json` contains a `native` block with parsed
+measurements, source intervals, completion states, errors and raw artifact
+references. Available sources are retained as:
+
+    evidence/native/<checkpoint>-status.txt
+    evidence/native/<checkpoint>-smaps-rollup.txt
+    evidence/native/<checkpoint>-smaps.txt
+    evidence/native/<checkpoint>-heap-info.txt
+
+`report.json` compares all three checkpoints and shows missing evidence
+explicitly. The report carries that comparison only: per-mapping records and
+the large-mapping list are not repeated there, so
+`large_anonymous_mappings.mappings` appears as a pointer string naming the
+checkpoint record, not as a list or a count — do not read that string as a
+count, nor its absence as lost data. Partial or malformed smaps produces no
+mapping totals; complete sibling sources remain usable. Exceptionally large
+parsed summaries are trimmed to their totals in the checkpoint record, with
+complete raw evidence retained; only a block still over budget after that trim
+is marked unavailable.
+
+Paths inside that comparison keep the base they were produced with. In
+`report.json`, `native.<checkpoint>.sources.<key>.artifact.path` is relative to
+the run's `evidence/` directory (`native/before-baseline-status.txt`), whereas
+the trim pointer string (`see evidence/native/<checkpoint>-smaps.txt`) only
+resolves from the run root. The report's other path fields
+(`dumps.<name>`, `analysis_manifest`, `workload_receipt`) are run-root paths,
+absolute for a CLI run.
+
+Committed heap is not resident heap. Stable committed heap does not establish
+that RSS growth is outside Java heap, and net live-set decline can mask growth
+in individual object populations. Large anonymous mappings describe virtual
+regions, not glibc arena counts or allocator ownership. Process residency uses
+the kernel's anonymous, file and shared-memory categories; mapping labels do
+not classify every resident page, including copy-on-write pages.
+
+These are bounded diagnostics with collection overhead: heap-info acquires the
+JVM heap lock. Completed optional reading errors do not themselves change the
+verdict. Unresolved command completion stops further diagnostics and follows
+owned-target cleanup; cancellation remains cancellation. All evidence shares
+the run's artifact budget. The P24 soak and Node default observation paths
+enable neither reading and retain their existing behavior.
+
+The diagnostic helper uses the local Linux Docker backend and validates target
+PIDs through the host's `/proc`. Its absolute monotonic deadline assumes this
+supported shared clock domain and includes exec startup delay. A forwarded
+Docker socket or a daemon in another kernel is not supported by this protocol.
+The host deadline remains the outer bound; a late worker may return missing
+readings or be interrupted, and unresolved JVM completion follows owned-target
+cleanup. No timeout representation alone guarantees timely acknowledgement.
+
+For procfs sources, `not_started` means the deadline prevented the attempt,
+`failed` means the attempted read raised an error, and `completed` means the
+read returned. Source availability and parsing errors are reported separately.
+For JVM commands, completion acknowledges the command lifetime: an ordinary
+positive error exit can be completed with an error; a missing or signal exit
+does not establish completion.
 
 ## Interpreting the result
 

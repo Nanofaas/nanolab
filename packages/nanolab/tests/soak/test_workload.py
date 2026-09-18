@@ -623,3 +623,54 @@ def test_duration_precision_is_preserved_in_effective_schedule():
         module().constant_arrival_options(100000, 1.23456789, 1)["duration"]
         == "1.23456789s"
     )
+
+
+def test_an_adopted_child_may_stop_on_its_own_after_the_leader(tmp_path):
+    """A single-use helper that stops with the leader is not a stray.
+
+    This supervisor is a subreaper, so a leader's orphaned child is adopted and
+    was killed in the very iteration the leader exited. Gradle's `--no-daemon`
+    build forks exactly such a helper and announces that it stops at the end of
+    the build, so killing it reported a successful build as a forced stop.
+    """
+    from nanolab.tasks.soak.processes import run_owned_command
+
+    leader = (
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(0.15)'])\n"
+        "time.sleep(0.05)\n"
+    )
+    result = run_owned_command(
+        [sys.executable, "-c", leader],
+        cwd=tmp_path,
+        env=dict(os.environ),
+        log_path=tmp_path / "leader.log",
+        timeout_s=10,
+        cancelled=threading.Event(),
+        output_limit_bytes=1024,
+    )
+
+    assert result.returncode == 0
+    assert result.reaped and not result.forced_stop
+
+
+def test_an_adopted_child_that_outlives_the_grace_is_still_forced(tmp_path):
+    """The grace is bounded: a child that will not leave is still killed."""
+    from nanolab.tasks.soak.processes import run_owned_command
+
+    leader = (
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "time.sleep(0.05)\n"
+    )
+    result = run_owned_command(
+        [sys.executable, "-c", leader],
+        cwd=tmp_path,
+        env=dict(os.environ),
+        log_path=tmp_path / "leader.log",
+        timeout_s=10,
+        cancelled=threading.Event(),
+        output_limit_bytes=1024,
+    )
+
+    assert result.reaped and result.forced_stop

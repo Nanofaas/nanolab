@@ -23,12 +23,23 @@ from threading import Event
 from nanolab.tasks.soak.processes import run_owned_command
 
 _DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
-# Same repo-relative asset lookup mat.py uses for its own lock file.
-_ASSETS = Path(__file__).resolve().parents[4] / "assets" / "soak"
+# The helper is built from this package, resolved from this file rather than
+# from a caller-supplied checkout root. nanolab once lived at
+# `packages/nanolab` *inside* the nanoFaaS checkout, where a repo_root-relative
+# lookup was correct; after the extraction to a standalone workspace that path
+# exists only under nanolab's own root, and nothing noticed until a real `run`
+# tried to build. Same derivation the asset lookup below already uses.
+BUILD_CONTEXT = Path(__file__).resolve().parents[4]
+_ASSETS = BUILD_CONTEXT / "assets" / "soak"
 MAT_LOCK = _ASSETS / "mat.lock.json"
 BASES_LOCK = _ASSETS / "helper-bases.lock.json"
 DOCKERFILE = "assets/soak/diagnostic-helper.Dockerfile"
 _LOG_BYTES = 4 * 1024 * 1024
+
+# The builder a run looks for when nothing overrides it. One home, because the
+# plan acquires a builder and the run builds through one: two literals drifting
+# apart means a run building with a builder nothing acquired.
+HELPER_BUILDER = "nanolab-heap-analysis"
 
 
 class HelperImageError(RuntimeError):
@@ -39,7 +50,6 @@ class HelperImageError(RuntimeError):
 class HelperImageRequest:
     """One run's helper build: where to publish it and what to build it from."""
 
-    repo_root: Path
     run_dir: Path
     run_id: str
     registry: str
@@ -56,9 +66,8 @@ class HelperImageRequest:
             raise ValueError("run_id must be a tag-safe identifier")
         if not self.registry or re.search(r"\s|@|://", self.registry):
             raise ValueError("registry must be an image repository prefix, not a URL")
-        context = self.repo_root / "packages" / "nanolab"
-        if not (context / DOCKERFILE).is_file():
-            raise ValueError(f"helper Dockerfile is missing under {context}")
+        if not (BUILD_CONTEXT / DOCKERFILE).is_file():
+            raise ValueError(f"helper Dockerfile is missing under {BUILD_CONTEXT}")
         if not self.run_dir.is_dir():
             raise ValueError("run_dir must be an existing directory")
 
@@ -118,6 +127,46 @@ def _resolve(metadata: Path, reference: str) -> str:
     return resolved
 
 
+def _adopt_into_the_local_daemon(
+    request: HelperImageRequest, resolved: str, cancelled: Event | None
+) -> None:
+    """Pull the pushed image into the local daemon, which is where it is needed.
+
+    The helper container is created with `--pull=never` (see
+    `helper_create_argv`), which is deliberate: the target-side container must
+    come from an image this run already resolved, never from whatever a registry
+    answers with later. But the build above pushes through a `docker-container`
+    buildx builder -- the only driver that publishes the attestations this
+    build is required to carry, and the one the run documentation prescribes --
+    and such a builder leaves the result in the registry, NOT in the host
+    daemon. Without this the create fails with "No such image". The pull is from
+    this run's own registry, not from the network.
+    """
+    argv = [request.docker, "pull", resolved]
+    result = run_owned_command(
+        argv,
+        cwd=BUILD_CONTEXT,
+        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "DOCKER_BUILDKIT": "1"},
+        log_path=(request.run_dir / "helper-image-pull.log").absolute(),
+        timeout_s=request.timeout_s,
+        cancelled=cancelled or Event(),
+        output_limit_bytes=_LOG_BYTES,
+    )
+    if (
+        result.returncode != 0
+        or not result.reaped
+        or result.errors
+        or result.cancelled
+        or result.timed_out
+        or result.forced_stop
+        or result.quota_exceeded
+    ):
+        raise HelperImageError(
+            "helper image was not adopted into the local daemon; see "
+            f"helper-image-pull.log (exit {result.returncode})"
+        )
+
+
 def build_helper_image(
     request: HelperImageRequest, *, cancelled: Event | None = None
 ) -> str:
@@ -151,7 +200,7 @@ def build_helper_image(
     argv.append(".")
     result = run_owned_command(
         argv,
-        cwd=request.repo_root / "packages" / "nanolab",
+        cwd=BUILD_CONTEXT,
         env={"PATH": "/usr/bin:/bin:/usr/local/bin", "DOCKER_BUILDKIT": "1"},
         log_path=(request.run_dir / "helper-image-build.log").absolute(),
         timeout_s=request.timeout_s,
@@ -171,4 +220,6 @@ def build_helper_image(
             "helper image build did not complete cleanly; see "
             f"helper-image-build.log (exit {result.returncode})"
         )
-    return _resolve(metadata, request.reference)
+    resolved = _resolve(metadata, request.reference)
+    _adopt_into_the_local_daemon(request, resolved, cancelled)
+    return resolved

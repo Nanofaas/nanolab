@@ -55,6 +55,83 @@ def heap_dump_completed(output):
     )
 
 
+def histogram_completed(output):
+    """Report a complete histogram: a cut read has no Total line."""
+    return (
+        re.search(r"(?m)^ num\s+#instances\s+#bytes\s+class name", output) is not None
+        and re.search(r"(?m)^Total\s+\d+\s+\d+$", output) is not None
+    )
+
+
+def native_memory_completed(output):
+    """NMT disabled exits 0 and says so, so exit status alone is not a reading.
+
+    `jcmd <pid> VM.native_memory summary` answers "Native memory tracking is not
+    enabled" and exits 0 on a JVM started without the flag. A capture trusting
+    the exit status would record a passing receipt and a useless artifact for
+    the exact case the flag exists to enable, so the content decides.
+
+    JDK 25 spells the unit `KB`; the optional `B` also accepts the `K` an older
+    JDK prints, since the total line is the only terminator this reading has.
+    """
+    return (
+        re.search(r"(?m)^Native Memory Tracking:$", output) is not None
+        and re.search(r"(?m)^Total: reserved=\d+KB?, committed=\d+KB?$", output)
+        is not None
+    )
+
+
+def native_memory_baseline_taken(output):
+    """Report that the baseline mark the diff is measured from was set.
+
+    Only the acknowledgement is required, because that is all this command
+    prints; a JVM started without the flag answers "Native memory tracking is
+    not enabled" and exits 0, which cannot carry the ack.
+    """
+    return re.search(r"(?m)^Baseline taken\b", output) is not None
+
+
+def native_memory_diff_completed(output):
+    """Report a real comparison against a baseline, deltas or not.
+
+    The delta suffixes are optional on purpose. A JVM with nothing to report
+    omits them, and "nothing grew" is the reading that matters most here -- it
+    must not be recorded as an unreadable capture. They are also signed: NMT
+    reports released memory as `-N`, which is the answer a shrink spike exists to
+    find, so accepting only `+N` discards exactly that. What is required is the
+    report header and a total, and neither the no-baseline answer ("No baseline
+    for comparison") nor the not-enabled one carries either, both exiting 0.
+    """
+    delta = r"(?: [+-]\d+KB?)?"
+    total = (
+        r"(?m)^Total: reserved=\d+KB?" + delta + r", committed=\d+KB?" + delta + r"$"
+    )
+    return (
+        re.search(r"(?m)^Native Memory Tracking:$", output) is not None
+        and re.search(total, output) is not None
+    )
+
+
+# Text readings of the target JVM: one jcmd call whose stdout is the artifact and
+# whose content, not its exit status, is the completion evidence.
+TEXT_READINGS = {
+    "histogram": (("GC.class_histogram",), histogram_completed),
+    "native_memory": (("VM.native_memory", "summary"), native_memory_completed),
+    "native_memory_baseline": (
+        ("VM.native_memory", "baseline"),
+        native_memory_baseline_taken,
+    ),
+    "native_memory_diff": (
+        ("VM.native_memory", "summary.diff"),
+        native_memory_diff_completed,
+    ),
+}
+# Must equal nanolab's LOCAL_HELPER_OPERATIONS: the runtime gate admits a run
+# from that set, so a name missing here provisions a helper that rejects its own
+# first capture, and a name extra here is one the host can never request.
+SUPPORTED_OPERATIONS = frozenset({"gc", "heap_dump", *TEXT_READINGS})
+
+
 def validate_request(message):
     """Only fixed diagnostic methods are dispatchable, never caller argv."""
     if message.get("kind") not in {"inspect", "execute"}:
@@ -62,7 +139,7 @@ def validate_request(message):
     if message["kind"] == "inspect":
         return
     if (
-        message.get("operation") not in {"gc", "heap_dump"}
+        message.get("operation") not in SUPPORTED_OPERATIONS
         or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", message.get("request_id", ""))
         or type(message.get("max_bytes")) is not int
         or message["max_bytes"] <= 0
@@ -116,7 +193,8 @@ def read_proc(path, limit):
 
 
 def memory(cfg):
-    """Read the owned namespace-init process, retaining raw text and errors."""
+    include_heap = bool(cfg.get("include_heap_info"))
+    opt_in = bool(cfg.get("include_smaps") or include_heap)
     result = {
         "schema": "nanolab-soak-memory-helper-v1",
         "target": cfg["target"],
@@ -124,15 +202,76 @@ def memory(cfg):
         "started_s": time.monotonic(),
         "errors": {},
     }
-    result["before"] = identity(cfg, require_shared_tmp=False)
-    for name, limit in (("status", 65536), ("smaps_rollup", 262144)):
+    deadline = cfg.get("memory_deadline_s", result["started_s"] + 5.0)
+    if opt_in:
+        result["intervals"], result["completion"] = {}, {}
+    result["before"] = identity(cfg, require_shared_tmp=include_heap)
+    reads = [("status", 65536), ("smaps_rollup", 262144)]
+    if cfg.get("include_smaps"):
+        reads.append(("smaps", 8388608))
+    for name, limit in reads:
+        begin = time.monotonic() if opt_in else None
+        state = "not_started"
         try:
+            if opt_in and time.monotonic() >= deadline:
+                raise TimeoutError("memory collection deadline exhausted")
+            state = "failed"
             result[name] = read_proc(Path("/proc/1") / name, limit)
+            state = "completed"
         except (OSError, ValueError) as error:
             result[name] = None
-            result["errors"][name] = f"{type(error).__name__}: {error}"
-    result["after"] = identity(cfg, require_shared_tmp=False)
+            message = f"{type(error).__name__}: {error}"
+            result["errors"][name] = message[:1024] if opt_in else message
+        if opt_in:
+            result["completion"][name] = state
+            result["intervals"][name] = {
+                "started_s": begin,
+                "ended_s": time.monotonic(),
+            }
+    if include_heap:
+        begin = time.monotonic()
+        result["heap_info"] = None
+        state = "not_started"
+        try:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("memory collection deadline exhausted")
+            with TemporaryDirectory(dir="/work") as scratch:
+                state = "unresolved"
+                result["heap_info"] = jcmd(
+                    ("GC.heap_info",),
+                    deadline,
+                    Path(scratch),
+                    require_completion=True,
+                )
+                state = "completed"
+        except CommandCompletionUnresolved as error:
+            result["errors"]["heap_info"] = str(error)[:1024]
+        except CommandCompletedError as error:
+            state = "completed"
+            result["errors"]["heap_info"] = str(error)[:1024]
+        except CommandNotStartedError as error:
+            # The runner failed before launching anything: the target is
+            # untouched, so this is not_started and the host must not treat it
+            # as an unacknowledged in-JVM command.
+            state = "not_started"
+            result["errors"]["heap_info"] = str(error)[:1024]
+        except (OSError, ValueError, RuntimeError) as error:
+            # A failure before the scratch directory exists leaves this
+            # not_started; once a command was launched it stays unresolved,
+            # unless jcmd has already acknowledged completion.
+            result["errors"]["heap_info"] = str(error)[:1024]
+        result["completion"]["heap_info"] = state
+        result["intervals"]["heap_info"] = {
+            "started_s": begin,
+            "ended_s": time.monotonic(),
+        }
+    result["after"] = identity(cfg, require_shared_tmp=include_heap)
     result["ended_s"] = time.monotonic()
+    if opt_in:
+        raw_keys = {"status", "smaps_rollup", "smaps", "heap_info"}
+        metadata = {key: value for key, value in result.items() if key not in raw_keys}
+        if len(json.dumps(metadata).encode("utf-8")) > 65536:
+            raise ValueError("memory response metadata exceeds its bound")
     return result
 
 
@@ -148,23 +287,73 @@ def quota(path, maximum, *, mountpoint="/out"):
     return {"type": "tmpfs", "capacity_bytes": capacity}
 
 
-def command(argv, deadline, scratch, limit=2 * 1024 * 1024):
+class CommandCompletionUnresolved(RuntimeError):  # noqa: N818
+    """The command runner cannot acknowledge in-JVM completion."""
+
+
+class CommandNotStartedError(RuntimeError):
+    """The runner failed before any command reached the target process."""
+
+
+class CommandCompletedError(RuntimeError):
+    """A normally completed command reported an error."""
+
+
+def command(
+    argv, deadline, scratch, limit=2 * 1024 * 1024, *, require_completion=False
+):
     from processes import OwnedCommandRunner
 
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise TimeoutError("remote operation deadline exhausted")
+        raise CommandNotStartedError("remote operation deadline exhausted")
     log = scratch / (uuid4().hex + ".log")
-    result = OwnedCommandRunner(
-        argv,
-        cwd=scratch,
-        env=dict(os.environ),
-        log_path=log,
-        timeout_s=remaining,
-        cancelled=Event(),
-        output_limit_bytes=limit,
-        stop_timeout_s=1.0,
-    ).run()
+    runner: OwnedCommandRunner | None = None
+    try:
+        runner = OwnedCommandRunner(
+            argv,
+            cwd=scratch,
+            env=dict(os.environ),
+            log_path=log,
+            timeout_s=remaining,
+            cancelled=Event(),
+            output_limit_bytes=limit,
+            stop_timeout_s=1.0,
+        )
+        result = runner.run()
+    except (OSError, ValueError, RuntimeError) as error:
+        # The launch point is the owned runner's own child: a failure without
+        # one provably left the target untouched, so it is not_started rather
+        # than an unresolved in-JVM command. Never inferred from message text.
+        if runner is not None and runner.launched:
+            raise
+        raise CommandNotStartedError(
+            f"{type(error).__name__}: {error}"[:1024]
+        ) from error
+    if require_completion and (
+        not result.reaped
+        or result.ended_s is None
+        or result.forced_stop
+        or result.errors
+        or result.cancelled
+        or result.timed_out
+        or result.quota_exceeded
+        # A missing returncode means the child never reported an exit status,
+        # which is no proof that the in-JVM command finished.
+        or result.returncode is None
+        # A negative returncode means the child died from a signal (a killed
+        # helper container, the kernel OOM killer), which is no proof at all
+        # that the in-JVM command finished.
+        or result.returncode < 0
+    ):
+        raise CommandCompletionUnresolved("remote command completion unresolved")
+    if require_completion and result.returncode != 0:
+        # Same bounded excerpt as the sibling failure below: an acknowledged
+        # error exit and a bare constant tell an operator nothing about why.
+        raise CommandCompletedError(
+            "remote command exited with an error: "
+            + log.read_text(errors="replace")[:1024]
+        )
     if (
         result.returncode != 0
         or not result.reaped
@@ -179,8 +368,11 @@ def command(argv, deadline, scratch, limit=2 * 1024 * 1024):
     return log.read_text()
 
 
-def jcmd(args, deadline, scratch):
-    return command(("/opt/java/openjdk/bin/jcmd", "1", *args), deadline, scratch)
+def jcmd(args, deadline, scratch, *, limit=2 * 1024 * 1024, require_completion=False):
+    argv = ("/opt/java/openjdk/bin/jcmd", "1", *args)
+    if require_completion:
+        return command(argv, deadline, scratch, limit, require_completion=True)
+    return command(argv, deadline, scratch, limit)
 
 
 def node_call(cfg, request, deadline):
@@ -469,6 +661,23 @@ def gc_node(cfg, output, deadline):
     }
 
 
+def capture_text_jvm(cfg, request, output, deadline, scratch):
+    """Capture one complete text reading of the target JVM as the artifact.
+
+    The request budget bounds the read itself, so an output larger than the
+    reservation is an unresolved reading rather than a truncated artifact the
+    host would have to notice.
+    """
+    operation = request["operation"]
+    args, completed = TEXT_READINGS[operation]
+    identity(cfg)
+    maximum = min(cfg["quota_bytes"], request["max_bytes"])
+    text = jcmd(args, deadline, scratch, limit=maximum, require_completion=True)
+    if not completed(text):
+        raise ValueError(f"{operation} is not a complete reading: " + text[:1024])
+    (output / f"{operation}.txt").write_text(text)
+
+
 def emit(value):
     sys.stdout.write(json.dumps(value, allow_nan=False, separators=(",", ":")) + "\n")
     sys.stdout.flush()
@@ -535,6 +744,10 @@ def exchange(cfg, request):
                     **observed,
                 }
                 (output / "full-gc.json").write_text(json.dumps(event))
+            elif operation in TEXT_READINGS:
+                if runtime != "jvm":
+                    raise ValueError("text readings require a JVM target")
+                capture_text_jvm(cfg, request, output, deadline, scratch)
             elif runtime == "jvm":
                 emitted_bytes = dump_heap_jvm(cfg, request, output, deadline, scratch)
             else:

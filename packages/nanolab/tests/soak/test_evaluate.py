@@ -315,3 +315,43 @@ def test_baseline_samples_from_the_settling_drain_are_placed_by_label_extent():
     assert placed(60.0)  # during the measurement window
     assert not placed(15.0)  # before the baseline period began
     assert not placed(85.0)  # after it ended
+
+
+def _tick(samples, phase, at):
+    """Build a sample shaped like the observer's, at one scheduled instant."""
+    return replace(samples[0], phase=phase, scheduled_s=at, started_s=at, ended_s=at)
+
+
+def test_a_tick_stamped_after_its_phase_closed_cannot_pass(tmp_path):
+    """The observer keeps its last label while diagnostics are captured.
+
+    `workflow._natural` is the only thing that relabels the running observer and
+    the last call is the drain phase, so every tick during `final_capture` is
+    written with the drain label and a timestamp past the drain window's end.
+    `_index` judges those against the drain extent, which is exactly that window,
+    and reports a boundary crossing -- so a run passes or fails by whether a tick
+    happens to land inside a capture that takes far longer than one interval.
+    """
+    root, _, samples = make_run(tmp_path)
+    rewrite_samples(root, [*samples, _tick(samples, "drain", 13.0)])
+
+    integrity = results(root)["sample-integrity"]
+    assert integrity.status == "INCONCLUSIVE"
+    assert "sample crosses natural phase boundary" in integrity.reason
+
+
+def test_a_diagnostic_tick_does_not_break_the_natural_timeline(tmp_path):
+    """A capture between two natural phases must not read as non-monotone.
+
+    The planned baseline capture runs after the baseline window closes and before
+    steady begins. Labeled `diagnostic` it is ranked above `steady`, so a tick
+    carrying it arrives out of order against the steady ticks that follow --
+    unless the diagnostic label is exempt from the comparison and does not
+    advance the per-role cursor.
+    """
+    root, _, samples = make_run(tmp_path)
+    rewrite_samples(root, [*samples, _tick(samples, "diagnostic", 2.5)])
+
+    integrity = results(root)["sample-integrity"]
+    assert integrity.status == "PASS"
+    assert integrity.reason is None or "non-monotone" not in integrity.reason

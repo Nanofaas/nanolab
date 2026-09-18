@@ -209,7 +209,16 @@ def preflight(
             ("metrics", policy.required_metrics),
             ("capabilities", policy.required_capabilities),
             ("collection_sources", policy.collection_sources),
-            ("diagnostics", config.diagnostics.operations.get(target.role, [])),
+            # Every checkpoint's declarations are checked against the helper here.
+            # A reading the pinned helper cannot dispatch is otherwise found at
+            # capture time, after the measured phases have already run.
+            (
+                "diagnostics",
+                [
+                    *config.diagnostics.operations.get(target.role, []),
+                    *config.diagnostics.baseline_operations.get(target.role, []),
+                ],
+            ),
         ):
             values = actual.get(key)
             valid = isinstance(values, list) and set(required).issubset(values)

@@ -35,15 +35,28 @@ from nanolab.config.soak import (
     PrerequisitePolicy,
     SoakConfig,
 )
+from nanolab.tasks.heap_analysis.evidence import native_comparison, persist_native
 from nanolab.tasks.heap_analysis.mat import MatAnalysisRequest, MatAnalyzer
-from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact
+from nanolab.tasks.soak.artifacts import (
+    TERMINAL_RESERVE,
+    ArtifactLimitExceededError,
+    ArtifactWriter,
+    describe_artifact,
+    encode_record,
+    enforce_limit,
+    measure_tree,
+)
 from nanolab.tasks.soak.diagnostic_helper import (
     GC_SOURCES,
     DockerHelperSpec,
     LocalDockerDiagnosticProvisioner,
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget
-from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
+from nanolab.tasks.soak.helper_build import (
+    HELPER_BUILDER,
+    HelperImageRequest,
+    build_helper_image,
+)
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparationOptions, PreparedSoak
 from nanolab.tasks.soak.workflow import (
@@ -149,7 +162,7 @@ class HeapAnalysisOptions:
     preparation: PreparationOptions = field(default_factory=PreparationOptions)
     prepared: PreparedSoak | None = None
     docker_socket: str = "/var/run/docker.sock"
-    helper_builder: str = "nanolab-heap-analysis"
+    helper_builder: str = HELPER_BUILDER
     # An already-published helper digest, which skips this run's build. The
     # build is the default: a digest only names anything in the registry that
     # holds it, so supply one only when it is already there.
@@ -297,8 +310,8 @@ class _MeasureControlPlaneHeap(Task[_Measurement]):
             # collecting first would destroy the reading this step exists for.
             session.observe("natural-drain")
             session.full_gc("final")
-            final = session.heap_dump("final")
             session.observe("after-final-gc")
+            final = session.heap_dump("final")
         except BaseException as error:
             try:
                 session.stop_load(config.diagnostic_timeout_s)
@@ -496,18 +509,39 @@ class LocalHeapAnalysisSession:
             raise KeyboardInterrupt("heap analysis cancelled during natural drain")
 
     def observe(self, checkpoint: str) -> Path:
-        """Record observed runtime evidence and seal its natural checkpoint."""
+        """Record the optional readings and seal the natural checkpoint."""
         targets = self._deployment.discover()
         observed = self._deployment.observations(targets)
-        evidence = self._writer.write_json(
-            f"runtime-{checkpoint}.json",
-            {
-                "schema": "nanolab-soak-v1",
-                "kind": "runtime_observation",
-                "checkpoint": checkpoint,
-                "observed": observed,
-            },
+        _target, helper = self._bind()
+        readings = helper.read_memory(
+            timeout_s=min(self._config.diagnostic_timeout_s, 300),
+            include_smaps=True,
+            include_heap_info=True,
         )
+        native = persist_native(
+            self._writer, checkpoint, readings, self._config.artifact_limit_bytes
+        )
+        document = {
+            "schema": "nanolab-soak-v1",
+            "kind": "runtime_observation",
+            "checkpoint": checkpoint,
+            "observed": observed,
+            "native": native,
+        }
+        # Raw blobs are charged to the writer without its JSON-record cap.
+        # The cumulative run check also includes artifacts from other producers.
+        # Measured with the exact bytes `write_json` publishes, so a document
+        # the writer would accept is never refused here.
+        required = len(encode_record(document))
+        if (
+            measure_tree(self._root.parent) + required + TERMINAL_RESERVE
+            > self._config.artifact_limit_bytes
+        ):
+            raise ArtifactLimitExceededError(
+                "runtime observation exceeds cumulative artifact budget"
+            )
+        evidence = self._writer.write_json(f"runtime-{checkpoint}.json", document)
+        enforce_limit(self._root.parent, self._config.artifact_limit_bytes)
         phase = _CHECKPOINT_PHASES.get(checkpoint)
         if phase is not None:
             target, _helper = self._bind()
@@ -570,6 +604,30 @@ class LocalHeapAnalysisSession:
             self._helper.close()
 
 
+def _failure_reason(error: BaseException) -> str:
+    """Keep cleanup uncertainty visible without displacing the actual failure.
+
+    Cleanup notes stay first, but their share of the 1024-character reason is
+    bounded by what the failure's own segment and the separators leave, so a
+    long owned-Docker log path in a note cannot truncate the failure away.
+    """
+    notes = [str(note) for note in getattr(error, "__notes__", ())]
+    cleanup = [note for note in notes if "cleanup unconfirmed" in note]
+    other = [note for note in notes if "cleanup unconfirmed" not in note]
+    # The separators and the failure's own segment are reserved before the notes
+    # get their share, so the sum of the parts stays within the 1024-character
+    # reason and the failure itself is never what gets cut off.
+    reserved = 2 * len(notes)
+    summary = f"{type(error).__name__}: {error}"[: max(1, 1024 - reserved)]
+    share = (1024 - len(summary) - reserved) // max(1, len(notes))
+    parts = [
+        *(note[:share] for note in cleanup),
+        summary,
+        *(note[:share] for note in other),
+    ]
+    return "; ".join(parts)[:1024]
+
+
 class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
     """An indivisible deferred workflow; every terminal path cleans up."""
 
@@ -609,10 +667,10 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
             wiring = factory(self.run_dir)
             self._execute(wiring, holder)
         except Exception as error:
-            reasons.append(f"{type(error).__name__}: {str(error)[:1024]}")
+            reasons.append(_failure_reason(error))
         except BaseException as error:
             interrupted = error
-            reasons.append(f"{type(error).__name__}: {str(error)[:1024]}")
+            reasons.append(_failure_reason(error))
         finally:
             if wiring is not None:
                 try:
@@ -706,6 +764,7 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
                         name: describe_artifact(Path(path))
                         for name, path in dumps.items()
                     },
+                    "native": native_comparison(wiring.writer.root),
                     "analysis_manifest": None if manifest is None else str(manifest),
                     "workload_receipt": (
                         None
@@ -745,6 +804,11 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
         from nanolab.tasks.soak.runtime import create_local_deployment
         from nanolab.tasks.soak.teardown import cleanup_timeout_s
 
+        # The helper build writes its log and metadata into the run root, and it
+        # runs before prepare_soak does anything that would create it. The CLI's
+        # preflight already admitted this root (an empty directory passes
+        # require_unused_run_dir), so creating it here cannot mask a collision.
+        run_dir.mkdir(parents=True, exist_ok=True)
         preparation = self.options.preparation
         # Build the helper first: prepare_soak needs its digest in the
         # diagnostic policy, and MAT needs the same one later. Freezing it here
@@ -752,7 +816,6 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
         # a digest that only exists in the builder's own registry.
         helper_image = self.options.helper_image or build_helper_image(
             HelperImageRequest(
-                repo_root=self.repo_root,
                 run_dir=run_dir,
                 run_id=run_dir.name,
                 registry=preparation.registry.split("/", 1)[0] + "/nanolab",

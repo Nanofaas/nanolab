@@ -163,9 +163,28 @@ produces a timeout rather than fabricated data.
   target-written bytes into `/out` for framed transport. Start/stop/summary
   outputs are retained in probe evidence; invalid files report the stop output.
   No full GC is invented or forced merely to make the provisioning probe pass.
-  This worker change requires rebuilding/publishing the helper image. The
-  standalone validation script now requires `--helper-image <new-repo@sha256>`
-  rather than silently selecting the previous image.
+  A worker change requires rebuilding/publishing the helper image, which every
+  run does for itself; `scripts/validate-diagnostic-helper.py` exists to prove a
+  change to this worker or to a reading reaches a real target, and it takes
+  `--helper-image <repo@sha256>` to validate a specific published digest instead
+  of building one.
+- JVM text readings (`histogram`, `native_memory`, `native_memory_baseline`,
+  `native_memory_diff`) are one `jcmd` call whose stdout is the artifact, and the
+  content is the completion evidence. Every one of those NMT commands exits 0 on
+  the answer that means no reading was taken -- "Native memory tracking is not
+  enabled" without the flag, "No baseline for comparison" without a mark -- so
+  exit status alone would record a passing receipt and a useless artifact for the
+  exact case the flag exists to enable. Each has its own validator, and each
+  rejects a truncated read. `native_memory` therefore needs the flag set in the
+  role's `runtime_options`; it is a reading, never an enabled state this helper
+  establishes. The request budget bounds the read, so an output larger than the
+  reservation is an unresolved reading rather than a truncated artifact.
+  The diff's deltas are optional in its validator: a JVM with nothing to report
+  omits them, and "nothing grew" is the answer that closes a leak question rather
+  than a capture to discard. The mark lives in the target JVM, so
+  `native_memory_baseline` is only useful at a checkpoint before the window being
+  measured from, and `native_memory_diff` reports growth since it -- the same
+  process incarnation, which the target's `process_started_at` pins for the run.
 - The owned host evidence directory is mounted read-only into the helper at its
   same absolute path. Device/inode observations establish this alias, satisfying
   the existing framed executor's namespace contract. Only the host executor

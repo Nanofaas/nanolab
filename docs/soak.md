@@ -117,6 +117,11 @@ diagnostics, builds, and teardown do not consume the 5400 seconds. Budget more
 than 125 minutes for the full run; the 125 minutes cover steady plus final drain
 alone. The short smoke is deliberately too short to qualify these retention rules.
 
+Diagnostics that run between two measured phases do move what follows them: the
+baseline checkpoint's captures take their own time (bounded by `diagnostics.timeout_s`)
+before `steady` starts, so a run's wall clock grows by that capture and its phases
+carry an extra recorded window. Nothing in the measured windows absorbs it.
+
 The intended owner settings correspond to NanoFaaS's documented `sync-ttl: 30s`
 (unkeyed synchronous outcomes), `ttl: 5m` (terminal keys/readable outcomes), and
 `max-lifetime: 30m` (live key/execution ceiling). Their mapping in `retention_s`
@@ -130,6 +135,12 @@ not proof of workload capacity or acceptable retained memory. Allow up to 5 CPU
 and 2560 MiB for these three application containers, plus the registry, generator,
 observer, host, diagnostic helpers, and build tools. Native compilation has its
 own potentially substantial resource cost outside the measurement interval.
+The registry is acquired by the run under the name
+`nanofaas-e2e-registry` and published on `0.0.0.0:5000`; a registry the run
+created is removed when it ends, together with the anonymous volume its layers
+went into, so nothing from a run survives it. If you keep a registry of your own
+running, stop it before a run — a different container already bound to that port
+makes the run's own creation fail rather than adopt yours.
 
 P24 declares 100 requests/second per function (200 total) and 200 VUs. These are explicit
 initial workload inputs, not a measured saturation claim. Validate achieved
@@ -180,8 +191,9 @@ Distroless images may lack diagnostic tools. JVM capture requires compatible
 execution. Node capture requires private, verified inspector control. Provision
 and identify helpers explicitly; no placeholder helper digest is shipped.
 The helper is built at the start of each run from
-`assets/soak/diagnostic-helper.Dockerfile`, published to the registry
-preparation already uses, and pinned to the digest that build reported. No
+`assets/soak/diagnostic-helper.Dockerfile`, published to the run's own registry
+— acquired before the run and, if the run started it, removed again when it ends
+— and pinned to the digest that build reported. No
 scenario carries one: a digest names bytes in whichever registry built them, so
 it is unpullable elsewhere and a prune breaks it even locally. The inputs stay
 pinned in `assets/soak/mat.lock.json` and `assets/soak/helper-bases.lock.json`.
@@ -196,7 +208,23 @@ Empty `runtime_options` declares no additional options; effective settings still
 need verification. If deployment adds options, declare and verify the actual
 ordered values instead of silently accepting a mismatch.
 
-Capture the natural final window before any forced GC or dump. Record diagnostic
+Two checkpoints declare diagnostics: `operations` for the final drain, and
+`baseline_operations` for the close of the baseline window. Declaring one reading
+in both is how a difference is expressed, and the two share one run-wide
+reservation, so `max_dumps`/`max_dump_bytes` are ceilings over both. Operations
+run **in the order declared**, which is meaning rather than style for a reading
+that measures a difference: a `native_memory_diff` declared after `gc` would
+include that GC's own reclamation in its delta. Declare `gc` last.
+
+Native Memory Tracking is captured that way, in the two spikes under
+`scenarios-v2/memory-soak-p24-*-spike-container.yaml`: `native_memory_baseline`
+at the baseline checkpoint, then `native_memory_diff` at drain for what grew per
+category over steady and drain, and `native_memory` for the absolute reading.
+They exist because NMT needs `-XX:NativeMemoryTracking` and costs a few percent,
+so it is a diagnostic instrument and not part of a qualifying run.
+
+Capture the natural final window before any forced GC or dump, and the baseline
+window before the measured phases it is the reference for. Record diagnostic
 perturbation intervals and completion evidence. Dump/root analysis must identify
 owner, population, lifetime, policy budget, reviewer, and hashed artifacts.
 Histograms alone do not establish ownership, and clean heap does not excuse
@@ -228,8 +256,9 @@ For the separately authorized integrated smoke:
 
 `inspect` must show the resolved policy, and `plan` must show all application build
 recipes without executing them. A parseable scenario or non-executing plan is not
-runtime preflight evidence. Do not render the new workflow until its builder is
-available. Prerequisite exercises use the similarly named prerequisites preset
+runtime preflight evidence. `plan` also shows the registry and builder this run
+acquires and releases; a builder already present is adopted and left running.
+Prerequisite exercises use the similarly named prerequisites preset
 only once the adapter routing exists; do not advertise its smoke as P24 coverage.
 
 ## Cancellation, evidence, and interpretation

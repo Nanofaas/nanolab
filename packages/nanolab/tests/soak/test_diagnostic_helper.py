@@ -1,7 +1,10 @@
 """Synthetic helper boundaries; no Docker daemon or runtime is contacted."""
 
+import base64
 import importlib.util
 import json
+import tempfile
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -428,7 +431,11 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
     tmp_path, monkeypatch
 ):
     from nanolab.tasks.soak import diagnostic_helper as helper
-    from nanolab.tasks.soak.diagnostics import DiagnosticBudget, JvmDiagnosticAdapter
+    from nanolab.tasks.soak.diagnostics import (
+        DiagnosticBudget,
+        JvmDiagnosticAdapter,
+        supported_operations,
+    )
 
     cli = tmp_path / "never-executed-cli"
     cli.write_bytes(b"synthetic identity only")
@@ -527,7 +534,13 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
     prepared = helper.LocalDockerDiagnosticProvisioner(assets_dir=assets).prepare(
         config
     )
-    assert prepared.executor.capabilities().operations == frozenset({"gc", "heap_dump"})
+    # The receipt carries the helper's own capability claim, which is what the
+    # adapter and the runtime gate read -- so it is the runtime's supported set,
+    # not the handful of operations this fixture happens to request.
+    assert prepared.executor.capabilities().operations == supported_operations("jvm")
+    assert json.loads(prepared.receipt.read_text())["operations"] == sorted(
+        supported_operations("jvm")
+    )
     receipt = json.loads(prepared.receipt.read_text())
     assert receipt["file_output_quota_bytes"] == 16777216
     assert (prepared.receipt.parent / "observations.json").is_file()
@@ -537,7 +550,9 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
         max_capture_bytes=16777216,
     )
     assert isinstance(adapter, JvmDiagnosticAdapter)
-    assert adapter.capabilities(TARGET) == frozenset({"gc", "heap_dump"})
+    # `jfr` is the one name the adapter holds back, because this fixture named no
+    # recording to dump -- and the provider's own set is what the adapter offers.
+    assert adapter.capabilities(TARGET) == supported_operations("jvm")
 
 
 def test_memory_only_helper_supports_native_without_target_stop_permission(tmp_path):
@@ -570,6 +585,235 @@ def test_memory_worker_preserves_raw_pss_and_permission_denial(monkeypatch):
     assert "PermissionError" in result["errors"]["smaps_rollup"]
     assert result["target"] == asdict(TARGET)
     assert result["before"] == result["after"] == observed
+
+
+def test_memory_worker_omits_smaps_unless_requested(monkeypatch):
+    module = worker()
+    observed = probe()
+    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
+    requested = []
+
+    def read(path, limit):
+        requested.append((path.name, limit))
+        return "Name:\tjava\n"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory({"target": asdict(TARGET)})
+    assert requested == [("status", 65536), ("smaps_rollup", 262144)]
+    assert "smaps" not in result
+    assert result["errors"] == {}
+
+
+def test_memory_worker_reads_smaps_when_requested(monkeypatch):
+    module = worker()
+    observed = probe()
+    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
+    requested = []
+
+    def read(path, limit):
+        requested.append((path.name, limit))
+        return "7f00-7f01 rw-p 0 00:00 0\nSize: 4 kB\n"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory({"target": asdict(TARGET), "include_smaps": True})
+    assert requested == [
+        ("status", 65536),
+        ("smaps_rollup", 262144),
+        ("smaps", 8388608),
+    ]
+    assert result["smaps"] == "7f00-7f01 rw-p 0 00:00 0\nSize: 4 kB\n"
+
+
+def test_memory_worker_records_an_over_limit_smaps_without_losing_siblings(
+    monkeypatch,
+):
+    module = worker()
+    observed = probe()
+    monkeypatch.setattr(module, "identity", lambda cfg, **kwargs: observed)
+
+    def read(path, limit):
+        if path.name == "smaps":
+            raise ValueError("procfs evidence exceeds read bound")
+        return f"{path.name}-body"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory({"target": asdict(TARGET), "include_smaps": True})
+    assert result["smaps"] is None
+    assert "exceeds read bound" in result["errors"]["smaps"]
+    assert result["status"] == "status-body"
+    assert result["smaps_rollup"] == "smaps_rollup-body"
+
+
+@pytest.fixture
+def memory_worker(monkeypatch, tmp_path):
+    module = worker()
+    checks, order = [], []
+
+    def identity(cfg, **kwargs):
+        checks.append(kwargs.get("require_shared_tmp"))
+        return probe()
+
+    def read(path, limit):
+        order.append(path.name)
+        return path.name + "-body"
+
+    monkeypatch.setattr(module, "identity", identity)
+    monkeypatch.setattr(module, "read_proc", read)
+    monkeypatch.setattr(
+        module,
+        "TemporaryDirectory",
+        lambda **kwargs: tempfile.TemporaryDirectory(dir=tmp_path),
+    )
+    return module, checks, order
+
+
+def test_legacy_memory_response_has_no_new_metadata(memory_worker, monkeypatch):
+    module, checks, order = memory_worker
+    monkeypatch.setattr(
+        module, "jcmd", lambda *a, **k: pytest.fail("unexpected attach")
+    )
+    for options in ({}, {"include_smaps": False, "include_heap_info": False}):
+        result = module.memory({"target": asdict(TARGET), **options})
+        assert set(result) == {
+            "schema",
+            "target",
+            "source",
+            "started_s",
+            "errors",
+            "before",
+            "status",
+            "smaps_rollup",
+            "after",
+            "ended_s",
+        }
+    assert order == ["status", "smaps_rollup"] * 2
+    assert checks == [False] * 4
+
+
+@pytest.mark.parametrize(
+    ("failure", "state"), [(False, "completed"), (True, "completed")]
+)
+def test_heap_info_follows_procfs_and_records_acknowledged_completion(
+    memory_worker,
+    monkeypatch,
+    failure,
+    state,
+):
+    module, checks, order = memory_worker
+
+    def jcmd(args, deadline, scratch, *, require_completion=False):
+        assert args == ("GC.heap_info",)
+        assert deadline > time.monotonic()
+        assert require_completion
+        order.append("heap_info")
+        if failure:
+            raise module.CommandCompletedError("acknowledged command error")
+        # Real JDK 25.0.4 G1 capture from `jcmd <pid> GC.heap_info`.
+        return (
+            "garbage-first heap   total reserved 1048576K, committed 264192K, "
+            "used 27268K [0x00000000c0000000, 0x0000000100000000)\n"
+            " region size 1024K, 26 young (26624K), 0 survivors (0K)\n"
+        )
+
+    monkeypatch.setattr(module, "jcmd", jcmd)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert order == ["status", "smaps_rollup", "smaps", "heap_info"]
+    assert checks == [True, True]
+    assert result["completion"]["heap_info"] == state
+    assert (result["heap_info"] is None) == failure
+    assert set(result["intervals"]) == set(order)
+    for interval in result["intervals"].values():
+        assert interval["ended_s"] >= interval["started_s"]
+
+
+def test_worker_does_not_disguise_unresolved_completion(memory_worker, monkeypatch):
+    module, _, _ = memory_worker
+
+    def unresolved(*args, **kwargs):
+        raise module.CommandCompletionUnresolved("jcmd deadline exceeded")
+
+    monkeypatch.setattr(module, "jcmd", unresolved)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "unresolved"
+    assert result["heap_info"] is None
+    assert result["status"] == "status-body"
+
+
+def test_expired_budget_never_launches_jcmd(memory_worker, monkeypatch):
+    module, _, _ = memory_worker
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("expired attach"))
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() - 1,
+        }
+    )
+    assert result["completion"]["heap_info"] == "not_started"
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("timed_out", True),
+        ("forced_stop", True),
+        ("cancelled", True),
+        ("quota_exceeded", True),
+        ("errors", ("runner error",)),
+        ("reaped", False),
+        ("ended_s", None),
+        # A negative returncode is signal death, not an acknowledged error exit.
+        ("returncode", -9),
+    ],
+)
+def test_memory_command_requires_acknowledged_completion(
+    monkeypatch, tmp_path, flag, value
+):
+    module = worker()
+    import sys
+    from types import SimpleNamespace
+
+    from nanolab.tasks.soak import processes
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+
+    result = {
+        "returncode": 0,
+        "reaped": True,
+        "ended_s": 1.0,
+        "forced_stop": False,
+        "errors": (),
+        "cancelled": False,
+        "timed_out": False,
+        "quota_exceeded": False,
+    }
+    result[flag] = value
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return SimpleNamespace(**result)
+
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    with pytest.raises(module.CommandCompletionUnresolved):
+        module.command(
+            ("unused",), time.monotonic() + 5, tmp_path, require_completion=True
+        )
 
 
 def test_proc_reader_rejects_truncation_and_preserves_original_text(tmp_path):
@@ -662,3 +906,513 @@ def test_memory_api_returns_raw_bound_sample_using_only_remote_read(
     assert result["smaps_rollup"] == "Pss:\t137 kB\n"
     assert result["status"] == "VmRSS:\t512 kB\n"
     assert result["errors"] == {}
+
+
+def memory_owner(monkeypatch, tmp_path, *, smaps=None, completion="completed"):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    cfg = spec(tmp_path)
+    process = {"start_ticks": "314", "ns_pid": 1}
+    calls, cleanup = [], []
+
+    class Commands:
+        deadline = None
+        cleanup_deadline = None
+
+        def run(self, args, **kwargs):
+            calls.append((tuple(args), kwargs))
+            request = json.loads(base64.b64decode(args[-1]))
+            payload = {
+                "schema": "nanolab-soak-memory-helper-v1",
+                "target": asdict(TARGET),
+                "before": probe(),
+                "after": probe(),
+                "status": "VmRSS:\t512 kB\n",
+                "smaps_rollup": "Pss:\t137 kB\n",
+                "errors": {},
+            }
+            if request.get("include_smaps"):
+                payload["smaps"] = smaps
+            if request.get("include_heap_info"):
+                payload["heap_info"] = None
+                payload["completion"] = {"heap_info": completion}
+                payload["errors"]["heap_info"] = "synthetic command error"
+            response = json.dumps(payload)
+            if len(response.encode()) > kwargs.get("limit", 1048576):
+                raise RuntimeError("transport quota exceeded")
+            consume = kwargs.get("consume")
+            return consume(response) if consume is not None else response
+
+    owner = helper._OwnedDockerHelper(cfg, Commands(), "e" * 64, process)
+    monkeypatch.setattr(owner, "_check_target", lambda: None)
+    monkeypatch.setattr(owner, "_helper_owned", lambda **kw: {"State": {"Pid": 5678}})
+    monkeypatch.setattr(helper, "_proc_identity", lambda pid: {"ns_pid": 8})
+
+    def close():
+        cleanup.append("close")
+        owner._closed = True
+
+    def cancel_remote():
+        cleanup.append("cancel-target")
+        close()
+
+    monkeypatch.setattr(owner, "close", close)
+    monkeypatch.setattr(owner, "_cancel_remote", cancel_remote)
+    return owner, calls, cleanup
+
+
+def test_read_memory_preserves_legacy_wire_behavior(monkeypatch, tmp_path):
+    owner, calls, cleanup = memory_owner(monkeypatch, tmp_path)
+    owner.read_memory(timeout_s=1)
+    args, kwargs = calls[-1]
+    cfg = json.loads(base64.b64decode(args[-1]))
+    assert set(cfg) == {"target", "target_start_ticks", "helper_pid"}
+    assert kwargs == {}
+    assert cleanup == []
+
+
+@pytest.mark.parametrize("raw", ["x" * 2097152, "\x01" * 8388608])
+def test_read_memory_transports_large_escaped_responses(monkeypatch, tmp_path, raw):
+    owner, calls, cleanup = memory_owner(monkeypatch, tmp_path, smaps=raw)
+    result = owner.read_memory(timeout_s=120, include_smaps=True)
+    args, kwargs = calls[-1]
+    cfg = json.loads(base64.b64decode(args[-1]))
+    assert result["smaps"] == raw
+    assert kwargs["limit"] == 67108864
+    assert 20 < kwargs["timeout_s"] <= 120
+    assert cfg["include_smaps"] is True
+    assert "include_heap_info" not in cfg
+    assert cleanup == []
+
+
+def test_worker_deadline_uses_remaining_host_budget(monkeypatch, tmp_path):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    owner, calls, _ = memory_owner(monkeypatch, tmp_path)
+    now = [100.0]
+    monkeypatch.setattr(helper.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(owner, "_check_target", lambda: now.__setitem__(0, 104.0))
+    owner.read_memory(timeout_s=5, include_heap_info=True)
+    args, kwargs = calls[-1]
+    cfg = json.loads(base64.b64decode(args[-1]))
+    assert kwargs["timeout_s"] == 1.0
+    assert 104.0 < cfg["memory_deadline_s"] < 105.0
+
+
+def test_unresolved_heap_command_cancels_owned_target(monkeypatch, tmp_path):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path, completion="unresolved")
+    with pytest.raises(helper.MemoryCommandUnresolved):
+        owner.read_memory(include_heap_info=True)
+    assert cleanup == ["cancel-target", "close"]
+
+
+def test_not_started_heap_command_leaves_the_owned_target_alone(monkeypatch, tmp_path):
+    """Only a possibly-running JVM command justifies killing the measured target."""
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path, completion="not_started")
+    result = owner.read_memory(include_heap_info=True)
+    assert result["completion"]["heap_info"] == "not_started"
+    assert cleanup == []
+    assert not owner._closed
+    owner.read_memory()  # another operation remains possible
+
+
+def test_completed_source_error_leaves_helper_usable(monkeypatch, tmp_path):
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
+    result = owner.read_memory(include_heap_info=True)
+    assert result["errors"]["heap_info"]
+    assert not owner._closed
+    assert cleanup == []
+    owner.read_memory()  # another operation remains possible
+
+
+@pytest.mark.parametrize("error", [RuntimeError("lost reply"), KeyboardInterrupt()])
+def test_lost_reply_or_cancel_preserves_exception_and_stops_target(
+    monkeypatch,
+    tmp_path,
+    error,
+):
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(owner.commands, "run", fail)
+    with pytest.raises(type(error)) as raised:
+        owner.read_memory(include_heap_info=True)
+    assert raised.value is error
+    assert cleanup == ["cancel-target", "close"]
+
+
+def test_local_memory_request_keeps_the_remaining_absolute_deadline(
+    monkeypatch, tmp_path
+):
+    import nanolab.tasks.soak.diagnostic_helper as helper
+
+    owner, calls, _ = memory_owner(monkeypatch, tmp_path)
+    now = [100.0]
+    monkeypatch.setattr(helper.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(owner, "_check_target", lambda: now.__setitem__(0, 104.0))
+    owner.read_memory(timeout_s=5, include_smaps=True)
+    argv, options = calls[-1]
+    cfg = json.loads(base64.b64decode(argv[-1]))
+    assert "memory_budget_s" not in cfg
+    assert 104.0 < cfg["memory_deadline_s"] < 105.0
+    assert options["timeout_s"] == 1.0
+
+
+def test_late_worker_does_not_restart_the_collection_budget(monkeypatch):
+    module = worker()
+    monkeypatch.setattr(module.time, "monotonic", lambda: 112.0)
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+    monkeypatch.setattr(module, "read_proc", lambda *a: pytest.fail("expired read"))
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("expired attach"))
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": 109.0,
+        }
+    )
+    assert all(value == "not_started" for value in result["completion"].values())
+    assert result["heap_info"] is None
+
+
+def test_procfs_and_heap_info_share_one_deadline(monkeypatch):
+    module = worker()
+    now = [100.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+
+    def read(path, limit):
+        now[0] += 3.0
+        return "body"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    monkeypatch.setattr(module, "jcmd", lambda *a, **k: pytest.fail("late attach"))
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_heap_info": True,
+            "memory_deadline_s": 105.0,
+        }
+    )
+    assert result["completion"]["heap_info"] == "not_started"
+
+
+def logged_memory_owner(monkeypatch, tmp_path, *, raw=None, returncode=0):
+    from threading import Event
+
+    from nanolab.tasks.soak import diagnostic_helper as helper
+    from nanolab.tasks.soak.processes import OwnedCommandResult
+
+    owner, _, cleanup = memory_owner(monkeypatch, tmp_path)
+    payload = (
+        raw
+        if raw is not None
+        else json.dumps(
+            {
+                "schema": "nanolab-soak-memory-helper-v1",
+                "target": asdict(TARGET),
+                "before": probe(),
+                "after": probe(),
+                "errors": {},
+                "status": "VmRSS: 4 kB\n",
+                "smaps_rollup": "Pss: 4 kB\n",
+                "smaps": "body",
+                "heap_info": None,
+                "completion": {"heap_info": "completed"},
+            }
+        )
+    )
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            self.log = kwargs["log_path"]
+
+        def run(self):
+            self.log.write_text(payload)
+            return OwnedCommandResult(returncode, False, True, ended_s=1.0)
+
+    monkeypatch.setattr(helper, "OwnedCommandRunner", Runner)
+    # The genuine transport replaces memory_owner's fake on purpose.
+    owner.commands = helper._DockerCommands(  # pyright: ignore[reportAttributeAccessIssue]
+        owner.spec, tmp_path, Event()
+    )
+    return owner, cleanup
+
+
+def test_accepted_optional_response_removes_duplicate_log(monkeypatch, tmp_path):
+    owner, _ = logged_memory_owner(monkeypatch, tmp_path)
+    assert owner.read_memory(include_smaps=True)["smaps"] == "body"
+    assert not list(tmp_path.glob("docker-*.log"))
+
+
+@pytest.mark.parametrize(
+    ("raw", "returncode"), [("not JSON", 0), ("command failed", 1)]
+)
+def test_rejected_optional_response_keeps_log(monkeypatch, tmp_path, raw, returncode):
+    owner, _ = logged_memory_owner(
+        monkeypatch, tmp_path, raw=raw, returncode=returncode
+    )
+    with pytest.raises((ValueError, RuntimeError)):
+        owner.read_memory(include_smaps=True)
+    assert list(tmp_path.glob("docker-*.log"))
+
+
+def test_unresolved_response_keeps_log_even_with_zero_exit(monkeypatch, tmp_path):
+    payload = {
+        "schema": "nanolab-soak-memory-helper-v1",
+        "target": asdict(TARGET),
+        "before": probe(),
+        "after": probe(),
+        "completion": {"heap_info": "unresolved"},
+    }
+    owner, cleanup = logged_memory_owner(monkeypatch, tmp_path, raw=json.dumps(payload))
+    with pytest.raises(RuntimeError, match="completion unresolved"):
+        owner.read_memory(include_heap_info=True)
+    assert list(tmp_path.glob("docker-*.log"))
+    assert cleanup == ["cancel-target", "close"]
+
+
+def test_legacy_memory_log_is_retained(monkeypatch, tmp_path):
+    owner, _ = logged_memory_owner(monkeypatch, tmp_path)
+    owner.read_memory()
+    assert list(tmp_path.glob("docker-*.log"))
+
+
+def test_unresolved_memory_cleanup_receives_ten_seconds(monkeypatch, tmp_path):
+    from nanolab.tasks.soak import diagnostic_helper as helper
+
+    owner, _, _ = memory_owner(monkeypatch, tmp_path, completion="unresolved")
+    monkeypatch.setattr(helper.time, "monotonic", lambda: 100.0)
+    budgets = []
+
+    def record_budget():
+        deadline = owner.commands.cleanup_deadline
+        assert deadline is not None
+        budgets.append(deadline - 100.0)
+
+    monkeypatch.setattr(owner, "_cancel_remote", record_budget)
+    with pytest.raises(helper.MemoryCommandUnresolved):
+        owner.read_memory(include_heap_info=True)
+    assert budgets == [10.0]
+
+
+def test_cleanup_failure_keeps_the_original_interrupt(monkeypatch, tmp_path):
+    owner, _, _ = memory_owner(monkeypatch, tmp_path)
+    interrupted = KeyboardInterrupt("user cancelled")
+
+    def fail_read(*args, **kwargs):
+        raise interrupted
+
+    def fail_cleanup():
+        raise RuntimeError("daemon unavailable")
+
+    monkeypatch.setattr(owner.commands, "run", fail_read)
+    monkeypatch.setattr(owner, "_cancel_remote", fail_cleanup)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        owner.read_memory(include_heap_info=True)
+    assert raised.value is interrupted
+    assert any("cleanup unconfirmed" in note for note in interrupted.__notes__)
+
+
+def test_failed_procfs_read_has_a_distinct_state(monkeypatch):
+    module = worker()
+    monkeypatch.setattr(module, "identity", lambda *a, **k: probe())
+
+    def read(path, limit):
+        if path.name == "smaps":
+            raise ValueError("procfs evidence exceeds read bound")
+        return "body"
+
+    monkeypatch.setattr(module, "read_proc", read)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "memory_deadline_s": time.monotonic() + 30,
+        }
+    )
+    assert result["completion"]["smaps"] == "failed"
+    assert result["completion"]["status"] == "completed"
+    assert "exceeds read bound" in result["errors"]["smaps"]
+
+
+@pytest.mark.parametrize(
+    ("code", "exception_name"),
+    [
+        (None, "CommandCompletionUnresolved"),
+        (-9, "CommandCompletionUnresolved"),
+        (1, "CommandCompletedError"),
+        (0, None),
+    ],
+)
+def test_command_exit_code_preserves_completion_semantics(
+    monkeypatch, tmp_path, code, exception_name
+):
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module = worker()
+    result = processes.OwnedCommandResult(
+        returncode=code,
+        forced_stop=False,
+        reaped=True,
+        ended_s=1.0,
+    )
+
+    class Runner:
+        def __init__(self, *args, **kwargs):
+            kwargs["log_path"].write_text("acknowledged output")
+
+        def run(self):
+            return result
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    if exception_name is None:
+        assert (
+            module.command(
+                ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+            )
+            == "acknowledged output"
+        )
+    else:
+        with pytest.raises(getattr(module, exception_name)):
+            module.command(
+                ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+            )
+
+
+def test_runner_failure_before_launch_is_not_started(memory_worker, monkeypatch):
+    """A failure without a launched child leaves the target untouched.
+
+    Reported as unresolved, the host would SIGKILL the measured container for a
+    command that never reached the JVM.
+    """
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module, _, _ = memory_worker
+
+    class Runner:
+        launched = False
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            raise OSError("cannot create the owned log directory")
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "not_started"
+    assert result["heap_info"] is None
+    assert "OSError" in result["errors"]["heap_info"]
+
+
+def test_runner_failure_after_launch_stays_unresolved(memory_worker, monkeypatch):
+    """A launched child means the in-JVM command may still be running."""
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module, _, _ = memory_worker
+
+    class Runner:
+        launched = True
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            raise OSError("supervisor receipt was lost after launch")
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "unresolved"
+    assert result["heap_info"] is None
+
+
+def test_expired_command_deadline_never_starts_the_target(tmp_path, monkeypatch):
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module = worker()
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    with pytest.raises(module.CommandNotStartedError, match="deadline exhausted"):
+        module.command(
+            ("unused",), time.monotonic() - 1, tmp_path, require_completion=True
+        )
+
+
+def test_acknowledged_error_carries_a_bounded_log_excerpt(
+    memory_worker, monkeypatch, tmp_path
+):
+    """A failed jcmd must say why somewhere in the published evidence."""
+    import sys
+
+    from nanolab.tasks.soak import processes
+
+    module, _, _ = memory_worker
+    excerpt = "Attach refused: the target JVM does not respond"
+    outcome = processes.OwnedCommandResult(
+        returncode=1,
+        forced_stop=False,
+        reaped=True,
+        ended_s=1.0,
+    )
+
+    class Runner:
+        launched = True
+
+        def __init__(self, *args, **kwargs):
+            kwargs["log_path"].write_text(excerpt + "\n" + "x" * 4096)
+
+        def run(self):
+            return outcome
+
+    monkeypatch.setitem(sys.modules, "processes", processes)
+    monkeypatch.setattr(processes, "OwnedCommandRunner", Runner)
+    with pytest.raises(module.CommandCompletedError) as caught:
+        module.command(
+            ("unused",), time.monotonic() + 30, tmp_path, require_completion=True
+        )
+    message = str(caught.value)
+    assert excerpt in message
+    assert len(message) <= 1024 + len("remote command exited with an error: ")
+
+    result = module.memory(
+        {
+            "target": asdict(TARGET),
+            "include_smaps": True,
+            "include_heap_info": True,
+            "memory_deadline_s": time.monotonic() + 5,
+        }
+    )
+    assert result["completion"]["heap_info"] == "completed"
+    assert result["heap_info"] is None
+    assert excerpt in result["errors"]["heap_info"]
+    assert len(result["errors"]["heap_info"]) <= 1024

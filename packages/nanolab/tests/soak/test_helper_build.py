@@ -10,6 +10,8 @@ import pytest
 
 from nanolab.tasks.soak.helper_build import (
     BASES_LOCK,
+    BUILD_CONTEXT,
+    DOCKERFILE,
     MAT_LOCK,
     HelperImageError,
     HelperImageRequest,
@@ -20,18 +22,10 @@ from nanolab.tasks.soak.helper_build import (
 DIGEST = "sha256:" + "c" * 64
 
 
-def _repo(tmp_path: Path) -> Path:
-    context = tmp_path / "packages" / "nanolab" / "assets" / "soak"
-    context.mkdir(parents=True)
-    (context / "diagnostic-helper.Dockerfile").write_text("FROM scratch\n")
-    return tmp_path
-
-
 def _request(tmp_path: Path, **overrides: object) -> HelperImageRequest:
     run_dir = tmp_path / "run"
     run_dir.mkdir(exist_ok=True)
     fields: dict[str, object] = {
-        "repo_root": _repo(tmp_path),
         "run_dir": run_dir,
         "run_id": "heap-analysis-abc123",
         "registry": "localhost:5000/nanolab",
@@ -42,17 +36,20 @@ def _request(tmp_path: Path, **overrides: object) -> HelperImageRequest:
 
 
 def _fake_docker(tmp_path: Path, *, digest: str | None = DIGEST, code: int = 0) -> Path:
-    """Stand in for docker: record argv and write a build's metadata file."""
+    """Stand in for docker: record argv, write build metadata, accept a pull."""
     script = tmp_path / "docker"
     payload = json.dumps({"containerimage.digest": digest} if digest else {})
     script.write_text(
         "#!/usr/bin/env python3\n"
         "import json, sys, pathlib\n"
-        f"pathlib.Path({str(tmp_path / 'argv.json')!r}).write_text("
-        "json.dumps(sys.argv[1:]))\n"
         "argv = sys.argv[1:]\n"
-        "meta = argv[argv.index('--metadata-file') + 1]\n"
-        f"pathlib.Path(meta).write_text({payload!r})\n"
+        f"here = pathlib.Path({str(tmp_path)!r})\n"
+        "if 'buildx' in argv:\n"
+        "    (here / 'argv.json').write_text(json.dumps(argv))\n"
+        "    meta = argv[argv.index('--metadata-file') + 1]\n"
+        f"    pathlib.Path(meta).write_text({payload!r})\n"
+        "else:\n"
+        "    (here / 'pull-argv.json').write_text(json.dumps(argv))\n"
         f"sys.exit({code})\n"
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
@@ -131,17 +128,20 @@ def test_request_rejects_unusable_inputs(tmp_path, field, value, message) -> Non
         _request(tmp_path, **{field: value})
 
 
-def test_request_rejects_a_context_without_the_dockerfile(tmp_path) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    with pytest.raises(ValueError, match="Dockerfile is missing"):
-        HelperImageRequest(
-            repo_root=tmp_path,
-            run_dir=run_dir,
-            run_id="heap-analysis-abc123",
-            registry="localhost:5000/nanolab",
-            builder="nanolab-heap-analysis",
-        )
+def test_the_build_context_resolves_from_this_package(tmp_path) -> None:
+    """The context must be nanolab's own package, wherever it is checked out.
+
+    nanolab was once a subdirectory of the nanoFaaS checkout, so a
+    caller-supplied repo_root was correct then. Extraction to a standalone
+    workspace left that root naming a path with no `packages/nanolab` in it,
+    and every test in this file still passed because each one built its own
+    fake context -- so the production path was never the path under test. A
+    real `run` is what found it. This pins the real, derived context instead.
+    """
+    _request(tmp_path)  # raises if the derived context has no Dockerfile
+
+    assert (BUILD_CONTEXT / DOCKERFILE).is_file()
+    assert BUILD_CONTEXT.parts[-2:] == ("packages", "nanolab")
 
 
 def _soak_config(**diagnostics: object):
@@ -169,12 +169,13 @@ def _stamp(tmp_path: Path, config, **options: object):
     """Run the soak helper stamp with a fake builder, returning the new config."""
     from nanolab.tasks.soak.runtime import RuntimeOptions, _with_built_helper
 
+    # Deliberately not created: `_with_built_helper` must create the run root
+    # itself, because the default diagnostic protocols carry no policy file and
+    # so nothing else does. Pre-creating it here would hide that.
     run_dir = tmp_path / "run"
-    run_dir.mkdir(exist_ok=True)
     return _with_built_helper(
         config,
         run_dir=run_dir,
-        repo_root=_repo(tmp_path),
         options=RuntimeOptions(**options),  # type: ignore[arg-type]
     )
 
@@ -239,3 +240,38 @@ def test_a_protocol_that_diagnoses_nothing_builds_no_helper(
     config = _soak_config(operations={})
 
     assert _stamp(tmp_path, config).diagnostics.helper_images == {}
+
+
+def test_request_rejects_a_context_without_the_dockerfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The missing-Dockerfile guard must still be reachable and still refuse.
+
+    The context is derived from this file now, so no real checkout can miss the
+    Dockerfile and the guard would otherwise stop being exercised at all. Point
+    the derived context at a bare directory to reach it.
+    """
+    from nanolab.tasks.soak import helper_build
+
+    monkeypatch.setattr(helper_build, "BUILD_CONTEXT", tmp_path)
+    with pytest.raises(ValueError, match="Dockerfile is missing"):
+        _request(tmp_path)
+
+
+def test_the_pushed_helper_is_adopted_into_the_local_daemon(tmp_path) -> None:
+    """A buildx build leaves the image in the registry, not in the daemon.
+
+    The helper container is created with `--pull=never`, so it must already be
+    in the local daemon -- and a `docker-container` builder, the only driver
+    that publishes the required attestations, never puts it there. The first
+    real heap-analysis run died here: it built and pushed the image, then the
+    create answered "No such image" for the digest it had just published.
+    """
+    docker = _fake_docker(tmp_path)
+    request = _request(tmp_path, docker=str(docker))
+    built = f"localhost:5000/nanolab/diagnostic-helper@{DIGEST}"
+
+    assert build_helper_image(request) == built
+
+    pull = json.loads((tmp_path / "pull-argv.json").read_text())
+    assert pull == ["pull", built]

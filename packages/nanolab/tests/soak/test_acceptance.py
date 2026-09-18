@@ -210,6 +210,9 @@ def make_run(
         "warmup": {"start_s": 2, "end_s": 3},
         "baseline_drain": {"start_s": 3, "end_s": 6},
         "baseline": {"start_s": 6, "end_s": 8},
+        # The baseline checkpoint's captures, which run for as long as they take
+        # rather than for a declared duration.
+        "baseline_diagnostics": {"start_s": 8, "end_s": 8},
         "steady": {"start_s": 8, "end_s": 14},
         "drain": {"start_s": 14, "end_s": 17},
     }
@@ -532,7 +535,12 @@ print("\\n" + marker + ":START\\n" + json.dumps(summary)
     if diagnostic or growth:
         receipt, _observation = capture(run, monkeypatch, "final", 20, 150)
         run["diagnostics"]["entries"] = [
-            {"role": "control-plane", "operation": "gc", "receipt": receipt}
+            {
+                "role": "control-plane",
+                "phase": "drain",
+                "operation": "gc",
+                "receipt": receipt,
+            }
         ]
         persist(run)
     return run

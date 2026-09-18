@@ -24,7 +24,14 @@ class ArtifactCorruptionError(ValueError):
     """A complete evidence record is malformed and cannot be silently discarded."""
 
 
-def _encode(value: dict[str, object]) -> bytes:
+# The terminal-report space a producer must keep clear of its own writes. It is
+# deliberately not the writer's own reserve, which is `min(TERMINAL_RESERVE,
+# limit_bytes // 8)` and therefore smaller for limits under 32768 bytes.
+TERMINAL_RESERVE = 4096
+
+
+def encode_record(value: dict[str, object]) -> bytes:
+    """Encode one record exactly as `ArtifactWriter` publishes it, newline included."""
     return (
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
     ).encode("utf-8")
@@ -51,18 +58,23 @@ def measure_tree(root: Path) -> int:
     """Measure every generated file under ``root``, not only owned evidence.
 
     Build workspaces and dot-files are excluded, matching what the run actually
-    retains: the same exclusion the acceptance inventory uses.
+    retains: the same exclusion the acceptance inventory uses. Excluded
+    directories are pruned during the walk, so a build workspace costs one
+    directory entry rather than one `stat` per file beneath it, and the walk
+    never follows a symbolic link (as `Path.rglob` does not).
     """
-    return sum(
-        path.stat().st_size
-        for path in root.rglob("*")
-        if path.is_file()
-        and not path.is_symlink()
-        and not any(
-            part.startswith(("workspace-", "."))
-            for part in path.relative_to(root).parts
-        )
-    )
+    total = 0
+    pending = [str(root)]
+    while pending:
+        with os.scandir(pending.pop()) as entries:
+            for entry in entries:
+                if entry.name.startswith(("workspace-", ".")):
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(entry.path)
+                elif entry.is_file() and not entry.is_symlink():
+                    total += entry.stat().st_size
+    return total
 
 
 def enforce_limit(root: Path, limit_bytes: int) -> int:
@@ -98,7 +110,7 @@ class ArtifactWriter:
         os.close(descriptor)
         self.root = root
         self.limit_bytes = limit_bytes
-        self._reserve = min(4096, limit_bytes // 8)
+        self._reserve = min(TERMINAL_RESERVE, limit_bytes // 8)
         self._used_bytes = 0
         self._closed = False
         self._lock = Lock()
@@ -108,6 +120,15 @@ class ArtifactWriter:
             raise ValueError("artifact name must be a single safe path component")
         return self.root / name
 
+    def _check_budget(self, size: int, *, terminal: bool = False) -> None:
+        if self._closed:
+            raise RuntimeError("artifact writer is closed")
+        budget = self.limit_bytes if terminal else self.limit_bytes - self._reserve
+        if self._used_bytes + size > budget:
+            raise ArtifactLimitExceededError(
+                "artifact budget exhausted; terminal space is reserved"
+            )
+
     def _check_write(self, size: int, *, terminal: bool = False) -> None:
         if self._closed:
             raise RuntimeError("artifact writer is closed")
@@ -115,17 +136,13 @@ class ArtifactWriter:
             raise ArtifactLimitExceededError(
                 "individual evidence record exceeds its size limit"
             )
-        budget = self.limit_bytes if terminal else self.limit_bytes - self._reserve
-        if self._used_bytes + size > budget:
-            raise ArtifactLimitExceededError(
-                "artifact budget exhausted; terminal space is reserved"
-            )
+        self._check_budget(size, terminal=terminal)
 
     def append(self, stream: str, record: dict[str, object]) -> None:
         """Append one complete JSONL record, accounting for partial writes."""
         target = self._target(stream)
         target = target.with_name(target.name + ".jsonl")
-        payload = _encode(record)
+        payload = encode_record(record)
         with self._lock:
             self._check_write(len(payload))
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
@@ -149,7 +166,7 @@ class ArtifactWriter:
         target = self._target(name)
         if target.suffix != ".json":
             raise ValueError("complete JSON artifact names must end with .json")
-        payload = _encode(value)
+        payload = encode_record(value)
         with self._lock:
             self._check_write(len(payload), terminal=name == "terminal.json")
             descriptor, filename = tempfile.mkstemp(prefix=".pending-", dir=self.root)
@@ -164,6 +181,34 @@ class ArtifactWriter:
                 os.link(temporary, target)
                 self._used_bytes += len(payload)
             finally:
+                temporary.unlink(missing_ok=True)
+        return target
+
+    def write_blob(self, directory: str, name: str, body: bytes) -> Path:
+        """Publish immutable raw evidence without imposing the JSON-record cap."""
+        parent = self._target(directory)
+        if _NAME.fullmatch(name) is None:
+            raise ValueError("artifact name must be a single safe path component")
+        target = parent / name
+        with self._lock:
+            self._check_budget(len(body))
+            if parent.is_symlink():
+                raise ValueError("raw evidence directory cannot be a symbolic link")
+            parent.mkdir(exist_ok=True, mode=0o700)
+            fd, filename = tempfile.mkstemp(prefix=".pending-", dir=parent)
+            temporary = Path(filename)
+            published = False
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(body)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.link(temporary, target)
+                published = True
+            finally:
+                # A later cleanup error must not leave a published file uncharged.
+                if published:
+                    self._used_bytes += len(body)
                 temporary.unlink(missing_ok=True)
         return target
 

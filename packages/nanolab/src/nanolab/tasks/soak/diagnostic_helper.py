@@ -27,6 +27,7 @@ from nanolab.tasks.soak.diagnostics import (
     DiagnosticBudget,
     JvmDiagnosticAdapter,
     NodeDiagnosticAdapter,
+    supported_operations,
 )
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.processes import OwnedCommandRunner
@@ -37,6 +38,11 @@ PYTHON = "/usr/local/bin/python3"
 NODE_SOCKET = "/tmp/nanolab-diagnostic.sock"  # nosec B108 - isolated container path
 GC_SOURCES = {"jvm": "jdk.GarbageCollection", "node": "node:perf_hooks:major-gc"}
 _DIGEST = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
+_OPT_IN_RESPONSE_BYTES = 67108864
+
+
+class MemoryCommandUnresolved(RuntimeError):  # noqa: N818
+    """No acknowledgement permits a later diagnostic on this target."""
 
 
 @dataclass(frozen=True)
@@ -342,7 +348,9 @@ class _DockerCommands:
         self.deadline: float | None = None
         self.cleanup_deadline: float | None = None
 
-    def run(self, args, timeout_s=20.0, *, cleanup=False, limit=1024 * 1024):
+    def run(
+        self, args, timeout_s=20.0, *, cleanup=False, limit=1024 * 1024, consume=None
+    ):
         deadline = self.cleanup_deadline if cleanup else self.deadline
         if deadline is not None:
             timeout_s = min(timeout_s, deadline - time.monotonic())
@@ -374,7 +382,12 @@ class _DockerCommands:
             or result.quota_exceeded
         ):
             raise RuntimeError(f"owned Docker command failed; evidence: {log}")
-        return log.read_text()
+        text = log.read_text()
+        if consume is None:
+            return text
+        accepted = consume(text)
+        log.unlink(missing_ok=True)
+        return accepted
 
     def inspect(self, identity, *, image=False, cleanup=False):
         value = json.loads(
@@ -490,14 +503,23 @@ class _OwnedDockerHelper:
         # from a killed CLI or kill unrelated targets during ordinary teardown.
         self._closed = True
 
-    def read_memory(self, timeout_s=5.0):
+    def read_memory(
+        self, timeout_s=5.0, *, include_smaps=False, include_heap_info=False
+    ):
         """Return raw target procfs data; unavailable PSS is never zero-filled."""
         if not 0 < timeout_s <= 300:
             raise ValueError("memory collection timeout must be in (0, 300]")
+        if include_heap_info and (
+            self.spec.memory_only
+            or self.spec.target.runtime != "jvm"
+            or not self.spec.allow_target_stop_on_cancel
+        ):
+            raise ValueError("heap-info requires an owned JVM diagnostic helper")
         started = time.monotonic()
         if not self._serial.acquire(timeout=timeout_s):
             raise TimeoutError("helper busy with another operation")
         self.commands.deadline = started + timeout_s
+        jvm_may_be_running = False
         try:
             if self._closed:
                 raise RuntimeError("memory helper is closed")
@@ -509,36 +531,70 @@ class _OwnedDockerHelper:
                 "target_start_ticks": self.process_identity["start_ticks"],
                 "helper_pid": holder["ns_pid"],
             }
-            data = json.loads(
-                self.commands.run(
-                    ("exec", self.helper_id, PYTHON, WORKER, "memory", _encoded(cfg))
-                )
-            )
-            self._check_target()
-            before, after = data.get("before", {}), data.get("after", {})
-            if (
-                data.get("schema") != "nanolab-soak-memory-helper-v1"
-                or data.get("target") != asdict(self.spec.target)
-                or before != after
-                or before.get("target_start_ticks")
-                != self.process_identity["start_ticks"]
-                or before.get("target_pid") != 1
-                or before.get("uid") != self.spec.uid
-                or before.get("target_uid") != self.spec.uid
-                or not before.get("pid_namespace")
-                or before["pid_namespace"] != before.get("target_pid_namespace")
-            ):
-                raise ValueError("memory response process/namespace identity changed")
-            return data
+            options = {}
+            if include_smaps or include_heap_info:
+                remaining = self.commands.deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("memory collection deadline exhausted")
+                margin = min(1.0, remaining / 5)
+                cfg["memory_deadline_s"] = self.commands.deadline - margin
+                if include_smaps:
+                    cfg["include_smaps"] = True
+                if include_heap_info:
+                    cfg["include_heap_info"] = True
+                options = {"timeout_s": remaining, "limit": _OPT_IN_RESPONSE_BYTES}
+            argv = ("exec", self.helper_id, PYTHON, WORKER, "memory", _encoded(cfg))
+
+            def accept(text):
+                nonlocal jvm_may_be_running
+                data = json.loads(text)
+                self._check_target()
+                before, after = data.get("before", {}), data.get("after", {})
+                if (
+                    data.get("schema") != "nanolab-soak-memory-helper-v1"
+                    or data.get("target") != asdict(self.spec.target)
+                    or before != after
+                    or before.get("target_start_ticks")
+                    != self.process_identity["start_ticks"]
+                    or before.get("target_pid") != 1
+                    or before.get("uid") != self.spec.uid
+                    or before.get("target_uid") != self.spec.uid
+                    or not before.get("pid_namespace")
+                    or before["pid_namespace"] != before.get("target_pid_namespace")
+                ):
+                    raise ValueError(
+                        "memory response process/namespace identity changed"
+                    )
+                if include_heap_info:
+                    state = data.get("completion", {}).get("heap_info")
+                    if state not in {"completed", "not_started"}:
+                        raise MemoryCommandUnresolved(
+                            "in-JVM command completion unresolved"
+                        )
+                    jvm_may_be_running = False
+                return data
+
+            jvm_may_be_running = include_heap_info
+            if include_smaps or include_heap_info:
+                return self.commands.run(argv, **options, consume=accept)
+            return accept(self.commands.run(argv, **options))
         except BaseException as error:
-            # This operation only reads procfs. Removing the exact helper cgroup
-            # cancels its docker-exec reader without stopping the target.
             try:
-                self.commands.cleanup_deadline = time.monotonic() + 5.0
-                self.close()
+                self.commands.cleanup_deadline = time.monotonic() + (
+                    10.0 if jvm_may_be_running else 5.0
+                )
+                if jvm_may_be_running:
+                    # This validates ownership, stops the exact target, confirms
+                    # it stopped, then removes the helper. close() alone is not enough.
+                    self._cancel_remote()
+                else:
+                    self.close()
             except BaseException as cleanup_error:
+                if include_smaps or include_heap_info:
+                    error.add_note(f"memory cleanup unconfirmed: {cleanup_error}")
+                    raise error from cleanup_error
                 raise RuntimeError(
-                    f"memory read failed; remote reader cleanup unconfirmed: "
+                    "memory read failed; remote reader cleanup unconfirmed: "
                     f"{cleanup_error}"
                 ) from error
             raise
@@ -621,9 +677,17 @@ class PreparedDockerDiagnostics:
         """Release the owned helper during main's teardown."""
         self.executor.close()
 
-    def read_memory(self, timeout_s=5.0):
+    def read_memory(
+        self, timeout_s=5.0, *, include_smaps=False, include_heap_info=False
+    ):
         """Collect raw RSS/PSS evidence through the existing same-UID helper."""
-        return self.executor.read_memory(timeout_s)
+        if not include_smaps and not include_heap_info:
+            return self.executor.read_memory(timeout_s)
+        return self.executor.read_memory(
+            timeout_s,
+            include_smaps=include_smaps,
+            include_heap_info=include_heap_info,
+        )
 
     def cancel(self, timeout_s=10.0):
         """Explicitly cancel remote writers when main aborts a diagnostic."""
@@ -639,9 +703,17 @@ class PreparedDockerMemory:
     initial_sample: dict
     evidence: Path
 
-    def read_memory(self, timeout_s=5.0):
+    def read_memory(
+        self, timeout_s=5.0, *, include_smaps=False, include_heap_info=False
+    ):
         """Return raw procfs data with identity and explicit availability errors."""
-        return self._owner.read_memory(timeout_s)
+        if not include_smaps and not include_heap_info:
+            return self._owner.read_memory(timeout_s)
+        return self._owner.read_memory(
+            timeout_s,
+            include_smaps=include_smaps,
+            include_heap_info=include_heap_info,
+        )
 
     def close(self):
         """Cancel/remove only the owned helper; never stop the measured target."""
@@ -837,7 +909,10 @@ class LocalDockerDiagnosticProvisioner:
                 "target": asdict(spec.target),
                 "command": list(command),
                 "helper_digest": spec.helper_image,
-                "operations": ["gc", "heap_dump"],
+                # The helper's own capability claim, not an echo of the request:
+                # the adapter and the runtime gate both read it. Sorted for a
+                # stable receipt and for comparison against supported_operations.
+                "operations": sorted(supported_operations(spec.target.runtime)),
                 "attach_verified": True,
                 "runtime_compatible": True,
                 "bounded_execution": True,

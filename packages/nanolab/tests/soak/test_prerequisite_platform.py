@@ -20,6 +20,7 @@ from nanolab.tasks.soak.prerequisite_runtime import (
 
 class Config:
     artifact_limit_bytes = 1024 * 1024
+    prerequisites = SimpleNamespace(relevant_config_keys={"sync": ["workload"]})
     roles: ClassVar[dict[str, SimpleNamespace]] = {
         "control-plane": SimpleNamespace(
             runtime="jvm",
@@ -223,6 +224,22 @@ def test_owned_manifest_matches_current_function_response():
     )
 
     assert platform._matches_owned_function_manifest(response, manifest)
+
+
+def test_a_profile_may_carry_only_the_recipe_and_the_declared_sections(case):
+    """Widening the profile is bounded by what the scenario itself declares."""
+    factory, inputs, _, _ = case
+    profile = inputs["relevant_config"]["sync"]
+    assert "workload" in factory.relevant_config_keys["sync"]
+
+    profile["workload"] = {"rates": {"echo": 1}}
+    factory.validate_inputs(inputs)
+
+    profile["undeclared_section"] = {}
+    with pytest.raises(
+        UnsupportedPreflightError, match="unsupported relevant configuration fields"
+    ):
+        factory.validate_inputs(inputs)
 
 
 @pytest.mark.parametrize("field", ["requestedExecutionMode", "effectiveExecutionMode"])
