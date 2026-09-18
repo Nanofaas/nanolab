@@ -32,6 +32,12 @@ CURATED_FILES = (
     Path(
         "clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands/RootCommandTest.java"
     ),
+    Path(
+        "clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands"
+        "/controlplane/ControlPlaneCommandTest.java"
+    ),
+    Path("openapi/core.yaml"),
+    Path("platform/modules/build-metadata/README.md"),
 )
 LOCKFILE_COMMANDS = (
     (

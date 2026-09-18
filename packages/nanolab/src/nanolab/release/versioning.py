@@ -29,6 +29,12 @@ _CURATED_COUNTS = {
     Path(
         "clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands/RootCommandTest.java"
     ): 1,
+    Path(
+        "clients/cli/src/test/java/it/unimib/datai/nanofaas/cli/commands"
+        "/controlplane/ControlPlaneCommandTest.java"
+    ): 1,
+    Path("openapi/core.yaml"): 1,
+    Path("platform/modules/build-metadata/README.md"): 1,
 }
 _LOCKFILE_COMMANDS = (
     (("cargo", "check"), Path("runtimes/watchdog")),
