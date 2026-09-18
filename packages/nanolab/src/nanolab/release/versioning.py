@@ -41,13 +41,12 @@ _LOCKFILE_COMMANDS = (
     (("uv", "lock"), Path("sdks/python")),
     (("uv", "lock"), Path("functions/python/roman-numeral")),
 )
-_LOCKFILES = frozenset(
-    {
-        Path("runtimes/watchdog/Cargo.lock"),
-        Path("sdks/python/uv.lock"),
-        Path("functions/python/roman-numeral/uv.lock"),
-    }
-)
+_LOCKFILE_PACKAGES = {
+    Path("runtimes/watchdog/Cargo.lock"): "nanofaas-watchdog",
+    Path("sdks/python/uv.lock"): "nanofaas-sdk",
+    Path("functions/python/roman-numeral/uv.lock"): "nanofaas-sdk",
+}
+_LOCKFILES = frozenset(_LOCKFILE_PACKAGES)
 _PRIMARY_COUNTS = {
     relative_path: count
     for relative_path, count in _CURATED_COUNTS.items()
@@ -153,14 +152,37 @@ def _version_pattern(version: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![\d.=><~!^]){re.escape(version)}(?![\d.])")
 
 
-def _count_version(text: str, version: str) -> int:
-    return len(_version_pattern(version).findall(text))
+def _lockfile_pattern(package: str, version: str) -> re.Pattern[str]:
+    """Match our own pin in a lockfile, never a dependency at the same version.
+
+    `_version_pattern` separates our version from a longer one that merely
+    starts with it, but nothing about the number alone separates it from a
+    dependency pinned at exactly the same version. The watchdog lockfile
+    carries `base64 0.22.1`, which is what the release after 0.22.0 is called,
+    so counting that way would abort it. Both lock formats spell a package as a
+    `name` line followed by its `version`, so anchoring on the name does.
+    """
+    return re.compile(
+        rf'(?<=name = "{re.escape(package)}"\nversion = "){re.escape(version)}(?=")'
+    )
+
+
+def _count_version(relative_path: Path, text: str, version: str) -> int:
+    package = _LOCKFILE_PACKAGES.get(relative_path)
+    pattern = (
+        _version_pattern(version)
+        if package is None
+        else _lockfile_pattern(package, version)
+    )
+    return len(pattern.findall(text))
 
 
 def _validate_replacement_counts(repo_root: Path, version: str) -> None:
     for relative_path, expected_count in _CURATED_COUNTS.items():
         path = repo_root / relative_path
-        actual_count = _count_version(path.read_text(encoding="utf-8"), version)
+        actual_count = _count_version(
+            relative_path, path.read_text(encoding="utf-8"), version
+        )
         if actual_count != expected_count:
             raise ValueError(
                 f"replacement count in {relative_path} is {actual_count}, "
@@ -178,7 +200,7 @@ def _prepared_updates(
     for relative_path, expected_count in counts.items():
         path = repo_root / relative_path
         source = path.read_text(encoding="utf-8")
-        actual_count = _count_version(source, current)
+        actual_count = _count_version(relative_path, source, current)
         if actual_count != expected_count:
             raise ValueError(
                 f"replacement count in {relative_path} is {actual_count}, "

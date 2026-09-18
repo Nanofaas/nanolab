@@ -211,6 +211,46 @@ def test_prepare_version_ignores_dependency_pins_that_start_with_the_new_version
     assert colliding_pin in lockfile.read_text(encoding="utf-8")
 
 
+def test_prepare_version_ignores_a_dependency_pinned_at_the_target_version(
+    source_tree: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dependency can sit at exactly the version being released.
+
+    The watchdog lockfile pins `base64 0.22.1`, which is the release right
+    after 0.22.0. Nothing about the number tells that pin apart from ours, so
+    counting every occurrence aborts a release on a file nobody edited by hand.
+    """
+    lockfile = source_tree / "runtimes" / "watchdog" / "Cargo.lock"
+    colliding_pin = (
+        f'\n[[package]]\nname = "colliding-dep"\nversion = "{NEXT_PATCH_VERSION}"\n'
+    )
+    lockfile.write_text(
+        lockfile.read_text(encoding="utf-8") + colliding_pin, encoding="utf-8"
+    )
+
+    def bump_lockfiles(_command: tuple[str, ...], cwd: Path) -> None:
+        # Regenerate the way cargo and uv do: our own entry, nothing beside it.
+        for _, relative_cwd, relative_lockfile in LOCKFILE_COMMANDS:
+            if cwd.relative_to(source_tree) != relative_cwd:
+                continue
+            path = source_tree / relative_lockfile
+            package = versioning._LOCKFILE_PACKAGES[relative_lockfile]
+            path.write_text(
+                versioning._lockfile_pattern(package, CURRENT_VERSION).sub(
+                    NEXT_PATCH_VERSION, path.read_text(encoding="utf-8")
+                ),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(versioning, "_run_command", bump_lockfiles)
+
+    prepare_version(source_tree, NEXT_PATCH_VERSION)
+
+    assert verify_version_consistency(source_tree) == NEXT_PATCH_VERSION
+    assert colliding_pin in lockfile.read_text(encoding="utf-8")
+
+
 def test_prepare_version_regenerates_lockfiles_after_primary_edits(
     source_tree: Path,
     monkeypatch: pytest.MonkeyPatch,
