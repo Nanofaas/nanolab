@@ -4,6 +4,7 @@ import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from sonata_engine import TaskInputs, Workflow
@@ -19,6 +20,7 @@ from nanolab.tasks.containerd_rootless import (
     registry_resource,
 )
 from nanolab.tasks.resources import ContainerdResourceCheckTask
+from nanolab.tasks.vm.ports import VmCommandProvider
 
 
 @dataclass
@@ -83,7 +85,9 @@ def test_remote_rootless_resource_uses_synced_vm_directory_not_local_cwd(tmp_pat
         {"provider": "multipass", "roles": {"stack": {"name": "owned-test-vm"}}}
     )
     bindings, _ = build_role_bindings(
-        environment, vm_provider=provider, repo_root=tmp_path
+        environment,
+        vm_provider=Mock(spec=VmCommandProvider, wraps=provider),
+        repo_root=tmp_path,
     )
     executor = RoleBoundCommandTaskExecutor(bindings)
     remote = Path("/home/ubuntu/nanofaas")

@@ -20,6 +20,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 
 def command(*argv: str, timeout: float = 5) -> str:
+    """Run an external command with bounded execution time."""
     result = subprocess.run(
         argv, text=True, capture_output=True, timeout=timeout, check=True
     )
@@ -29,6 +30,7 @@ def command(*argv: str, timeout: float = 5) -> str:
 
 
 def bounded(path: Path, limit: int = 1024 * 1024) -> str:
+    """Read a file while enforcing the byte limit."""
     with path.open("rb") as stream:
         data = stream.read(limit + 1)
     if len(data) > limit:
@@ -37,6 +39,7 @@ def bounded(path: Path, limit: int = 1024 * 1024) -> str:
 
 
 def digest(path: Path) -> str:
+    """Hash a file incrementally with SHA256."""
     sha = hashlib.sha256()
     with path.open("rb") as stream:
         while block := stream.read(1024 * 1024):
@@ -45,6 +48,7 @@ def digest(path: Path) -> str:
 
 
 def start_ticks(pid: int) -> str:
+    """Read the process start time from procfs."""
     stat = bounded(Path("/proc") / str(pid) / "stat", 4096)
     end = stat.rfind(")")
     fields = stat[end + 1 :].split()
@@ -54,6 +58,7 @@ def start_ticks(pid: int) -> str:
 
 
 def task_pid(socket: str, namespace: str, identifier: str) -> int:
+    """Find the PID of the owned containerd task."""
     output = command(
         "ctr", "--address", socket, "--namespace", namespace, "tasks", "list"
     )
@@ -65,6 +70,7 @@ def task_pid(socket: str, namespace: str, identifier: str) -> int:
 
 
 def process_environment(pid: int) -> dict[str, str]:
+    """Read the environment of the selected process."""
     return dict(
         item.split("=", 1)
         for item in bounded(Path("/proc") / str(pid) / "environ").split("\0")
@@ -73,6 +79,7 @@ def process_environment(pid: int) -> dict[str, str]:
 
 
 def run_paths(run_id: str) -> tuple[Path, str, str]:
+    """Resolve paths and runtime identifiers for a validated run ID."""
     if re.fullmatch(r"[a-z0-9-]{1,48}", run_id) is None:
         raise ValueError("invalid run ID")
     home = Path(os.environ["HOME"])
@@ -82,6 +89,7 @@ def run_paths(run_id: str) -> tuple[Path, str, str]:
 
 
 def host_platform() -> str:
+    """Return the supported Linux platform of this host."""
     machine = {"aarch64": "arm64", "x86_64": "amd64"}.get(platform.machine())
     if platform.system() != "Linux" or machine is None:
         raise ValueError("unsupported control-plane host architecture")
@@ -89,6 +97,7 @@ def host_platform() -> str:
 
 
 def inspect(run_id: str, role: str, repo_root: Path, script: Path) -> dict:
+    """Inspect the process or container owned by this run."""
     state, socket, namespace = run_paths(run_id)
     if role == "control-plane":
         env_file = state / "control-plane.env"
@@ -183,6 +192,7 @@ def inspect(run_id: str, role: str, repo_root: Path, script: Path) -> dict:
 
 
 def cgroup(pid: int) -> tuple[Path, dict]:
+    """Read the unified cgroup path and resource configuration."""
     lines = bounded(Path("/proc") / str(pid) / "cgroup", 65536).splitlines()
     paths = [line.removeprefix("0::") for line in lines if line.startswith("0::")]
     if len(paths) != 1 or ".." in Path(paths[0]).parts:
@@ -202,6 +212,7 @@ def cgroup(pid: int) -> tuple[Path, dict]:
 
 
 def exposition(target: dict, timeout: float) -> str:
+    """Collect the target metrics with a bounded timeout."""
     if target["role"] == "control-plane":
         url = "http://127.0.0.1:8081/actuator/prometheus"
         opener = build_opener(ProxyHandler({}))
@@ -244,6 +255,7 @@ def sample(
     expected: dict,
     timeout: float,
 ) -> dict:
+    """Collect a sample bound to the same process identity."""
     before = inspect(run_id, role, repo_root, script)
     if before != expected:
         raise ValueError("owned process changed before collection")
@@ -299,6 +311,7 @@ def sample(
 
 
 def main(argv: list[str]) -> int:
+    """Dispatch the requested inspection or sampling command."""
     action, run_id, role, repo_text, script_text, *rest = argv
     root = Path(repo_text)
     script = Path(script_text)

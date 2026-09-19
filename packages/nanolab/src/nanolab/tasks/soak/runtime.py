@@ -22,7 +22,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from threading import Event, Thread
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
@@ -67,6 +67,12 @@ from nanolab.tasks.soak.workflow import (
     write_policy_input,
     write_terminal_receipt,
 )
+
+if TYPE_CHECKING:
+    from nanolab.tasks.soak.containerd_runtime import (
+        ContainerdDeployment,
+        PreparedContainerdSoak,
+    )
 
 
 @dataclass(frozen=True)
@@ -1271,9 +1277,9 @@ def _capture_owned_diagnostic(
 
 
 def create_soak_lifecycle(
-    prepared: PreparedSoak,
+    prepared: PreparedSoak | PreparedContainerdSoak,
     *,
-    deployment: RuntimeDeployment,
+    deployment: RuntimeDeployment | ContainerdDeployment,
     run_dir: Path,
     observations: Callable[[tuple[Target, ...]], dict[str, Any]] | None = None,
     prerequisite_runner: Any = None,
@@ -1348,6 +1354,9 @@ def create_soak_lifecycle(
             raise ValueError("memory helper option conflicts with frozen helper_images")
         helper_images.update({target.role: memory_helper_image for target in targets})
     if helper_images:
+        project = getattr(deployment, "project", None)
+        if project is None:
+            raise ValueError("memory helper images require a Docker deployment")
         writer.write_json(
             "memory-helper-inputs.json",
             {
@@ -1370,7 +1379,7 @@ def create_soak_lifecycle(
         memory_transport = _MemoryHelperTransport(
             collection_transport,
             images=helper_images,
-            project_name=deployment.project.name,
+            project_name=project.name,
             output_root=root / "memory-helpers",
             docker_socket=docker_socket,
             cancelled=cancelled,
@@ -2371,7 +2380,9 @@ def _observed_collection_sources(rows: Iterable[Any]) -> set[str]:
 
 
 def observe_local_configuration(
-    prepared: PreparedSoak, management_url: str, api_url: str | None = None
+    prepared: PreparedSoak | PreparedContainerdSoak,
+    management_url: str,
+    api_url: str | None = None,
 ) -> dict[str, Any]:
     """Query bounded actuator documents; missing bound values stay unavailable."""
     from urllib.request import ProxyHandler, Request, build_opener

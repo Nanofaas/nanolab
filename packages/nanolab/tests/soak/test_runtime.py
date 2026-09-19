@@ -352,8 +352,8 @@ def test_real_deferred_lifecycle_preserves_evaluation_without_early_terminal(
             self.elapsed += 1.0
             return self.elapsed
 
-        def wait_until(self, deadline, cancelled):
-            self.elapsed = deadline
+        def wait_until(self, deadline_s, cancelled):
+            self.elapsed = deadline_s
             return True
 
     class Observer:
@@ -363,14 +363,14 @@ def test_real_deferred_lifecycle_preserves_evaluation_without_early_terminal(
         def set_phase(self, phase):
             pass
 
-        def stop(self, timeout):
+        def stop(self, timeout_s):
             pass
 
     class Driver:
         def run(self, output_dir, duration_s, cancelled):
             return tmp_path / "workload.json"
 
-        def stop(self, timeout):
+        def stop(self, timeout_s):
             pass
 
     lifecycle.clock = Clock()

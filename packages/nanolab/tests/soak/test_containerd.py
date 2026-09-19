@@ -22,10 +22,14 @@ def test_collection_uses_stack_helper_and_immutable_target() -> None:
     }
 
     class Executor:
+        def binding_key(self, role: str) -> str:
+            return f"test:{role}"
+
         def __init__(self):
             self.commands = []
 
-        def run(self, command, *, dry_run=False):
+        def run(self, task, *, dry_run=False):
+            command = task
             self.commands.append(command)
             output = (
                 target
@@ -67,7 +71,11 @@ def test_collection_uses_stack_helper_and_immutable_target() -> None:
 
 def test_collection_rejects_failed_remote_read() -> None:
     class Executor:
-        def run(self, command, *, dry_run=False):
+        def binding_key(self, role: str) -> str:
+            return f"test:{role}"
+
+        def run(self, task, *, dry_run=False):
+            command = task
             return TaskResult(command.task_id, "failed", 1, stderr="task missing")
 
     transport = RootlessCollectionTransport(

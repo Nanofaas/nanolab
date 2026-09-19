@@ -278,7 +278,8 @@ def provision_environment(
     with TemporaryDirectory(prefix="nanolab-containerd-maven-") as staging:
         maven_source = None
         if scenario.backend == "containerd":
-            assert environment.containerd_maven_repository is not None
+            if environment.containerd_maven_repository is None:
+                raise ValueError("containerd Maven repository is required")
             maven_source = Path(staging) / "maven"
             stage_snapshot_repository(
                 environment.containerd_maven_repository, maven_source

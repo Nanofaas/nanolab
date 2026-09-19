@@ -4,7 +4,6 @@ import hashlib
 import json
 from dataclasses import asdict
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -12,7 +11,7 @@ import yaml
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.soak.acceptance import verify_containerd_builds
 from nanolab.tasks.soak.artifacts import describe_artifact
-from nanolab.tasks.soak.sources import SourceEntry
+from nanolab.tasks.soak.sources import SourceEntry, SourceSnapshot
 
 
 def _case(tmp_path):
@@ -22,7 +21,10 @@ def _case(tmp_path):
     config = ScenarioConfig.model_validate(yaml.safe_load(scenario.read_text())).soak
     assert config is not None
     entry = SourceEntry("x", "file", 0o644, 1, "a" * 64)
-    snapshot = SimpleNamespace(
+    snapshot = SourceSnapshot(
+        root=tmp_path,
+        manifest_path=tmp_path / "source.json",
+        manifest_sha256="b" * 64,
         fingerprint="source-hash",
         revision="commit123",
         dirty=False,

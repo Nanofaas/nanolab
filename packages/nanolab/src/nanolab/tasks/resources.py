@@ -81,14 +81,14 @@ class ContainerdResourceCheckTask(Task[None]):
         cpu = actual.get("cpu") or {}
         memory = actual.get("memory") or {}
         expected: dict[str, int] = {}
-        if requests.get("cpu") is not None:
+        if requests.get("cpu") is not None:  # nosec B113: resource mapping, not HTTP
             expected["cpu.shares"] = max(
                 2, int(Decimal(str(requests["cpu"])) * 1024 + Decimal("0.5"))
             )
         if limits.get("cpu") is not None:
             expected["cpu.quota"] = int(Decimal(str(limits["cpu"])) * 100000)
             expected["cpu.period"] = 100000
-        if requests.get("memoryMiB") is not None:
+        if requests.get("memoryMiB") is not None:  # nosec B113: resource mapping, not HTTP
             expected["memory.reservation"] = int(requests["memoryMiB"]) * 1024 * 1024
         if limits.get("memoryMiB") is not None:
             expected["memory.limit"] = int(limits["memoryMiB"]) * 1024 * 1024

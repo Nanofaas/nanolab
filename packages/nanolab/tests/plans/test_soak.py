@@ -223,8 +223,12 @@ def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
     tasks = [item.task for item in workflow.compile().tasks]
     build = next(task for task in tasks if task.title == "Build control plane")
     measure = next(task for task in tasks if isinstance(task, ContainerdSoakRun))
+    from sonata_tasks.command import CommandTask
+
+    assert isinstance(build, CommandTask)
     assert isinstance(build.executor, BuildExecutionRecorder)
     assert build.executor is measure.executor
+    assert not callable(build.argv)
     assert "-PcontainerdMavenLocal=true" in build.argv
 
 

@@ -8,9 +8,9 @@ import json
 import shutil
 import time
 import zlib
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
@@ -24,6 +24,7 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.containerd_rootless import RootlessRun
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.containerd import RootlessCollectionTransport
+from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preflight import effective_cpu_limit
 from nanolab.tasks.soak.preparation import PreparationOptions, _payloads
 from nanolab.tasks.soak.runtime import (
@@ -125,7 +126,7 @@ class ContainerdBuildReceipt:
     role: str
     image_digest: str
     source_fingerprint: str
-    source_revision: str
+    source_revision: str | None
     platform: str
     artifact_kind: str
     artifact_path: str | None
@@ -172,6 +173,17 @@ class PreparedContainerdSoak:
     def images(self) -> dict[str, str]:
         """Return actual process and OCI identities used by common workload gates."""
         return {item.role: item.image_digest for item in self.receipts}
+
+
+@dataclass(frozen=True)
+class ContainerdDeployment:
+    """Live endpoints and observations of the owned rootless deployment."""
+
+    api_endpoint: str
+    metrics_endpoints: dict[str, str | None]
+    discover: Callable[[], tuple[Target, ...]]
+    observations: Callable[[tuple[Target, ...]], dict[str, Any]]
+    diagnostic_inputs: dict[str, Any] | None = None
 
 
 class ContainerdSoakRun(Task):
@@ -260,7 +272,8 @@ class ContainerdSoakRun(Task):
         self, transport: RootlessCollectionTransport, targets: tuple[Any, ...]
     ) -> PreparedContainerdSoak:
         policy = self.scenario.soak
-        assert policy is not None
+        if policy is None:
+            raise ValueError("containerd soak policy unavailable")
         evidence = self.run_dir / "evidence"
         writer = ArtifactWriter(evidence, policy.artifact_limit_bytes)
         try:
@@ -427,7 +440,7 @@ class ContainerdSoakRun(Task):
                         )
                 return observed
 
-            deployment = SimpleNamespace(
+            deployment = ContainerdDeployment(
                 api_endpoint=api,
                 metrics_endpoints={
                     role: management + "/actuator/prometheus"

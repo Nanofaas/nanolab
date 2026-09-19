@@ -7,10 +7,12 @@ compose project on `container`, the Helm release and queue probe on `k8s`.
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
-from sonata_engine import Workflow
+from sonata_engine import Resource, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.registry import docker_registry_resource
 
@@ -323,7 +325,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             ),
         )
     requires = ()
-    control_plane_process = None
+    control_plane_process: Callable[[], Resource] | None = None
     if config.backend == "containerd":
         run = run_for_environment(root, tool_root or discover_tool_root(), environment)
         registry = registry_resource(
@@ -333,13 +335,13 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         )
         requires = (registry,)
 
-        def control_plane_process():
-            return control_plane_resource(
-                run,
-                executor=RoleBoundCommandTaskExecutor(bindings),
-                role="stack",
-                requires=(registry,),
-            )
+        control_plane_process = partial(
+            control_plane_resource,
+            run,
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            role="stack",
+            requires=(registry,),
+        )
 
         request = replace(request, rootless_run=run)
     elif not kubernetes:

@@ -277,7 +277,7 @@ class ContainerdPersistentRecoveryTask(Task[None]):
         self._run = run
         self._endpoint = endpoint
         self._executor = executor
-        self._role = role
+        self._role: ExecutionRole = role
         self._cwd = cwd
 
     def _managed_ids(self, inputs: TaskInputs) -> tuple[str, ...]:

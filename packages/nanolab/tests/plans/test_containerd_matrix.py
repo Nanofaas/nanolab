@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -85,7 +86,9 @@ def test_containerd_matrix_compiles_without_docker_lifecycle(
     build = next(
         task.task.argv
         for task in plan.compile().tasks
-        if task.task.title in {"Build control plane", "Build local control plane"}
+        if isinstance(task.task, CommandTask)
+        and task.task.title in {"Build control plane", "Build local control plane"}
     )
+    assert not callable(build)
     assert "-PcontainerdMavenLocal=true" in build
     assert any(arg.startswith("-Dmaven.repo.local=/home/ubuntu/") for arg in build)

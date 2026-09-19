@@ -58,7 +58,7 @@ def verify(root: Path, encoded: str) -> dict[str, object]:
                 "link_target": None,
             }
         elif path.is_symlink():
-            target = os.readlink(path)
+            target = os.readlink(path)  # noqa: PTH115 -- hash the raw, unnormalized link target
             encoded_target = os.fsencode(target)
             actual = {
                 "path": entry["path"],

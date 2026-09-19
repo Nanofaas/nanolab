@@ -117,8 +117,10 @@ def test_containerd_cli_compiles_rootless_runtime_and_public_contract() -> None:
     build = next(
         task.task.argv
         for task in plan.compile().tasks
-        if task.task.title == "Build local control plane"
+        if isinstance(task.task, CommandTask)
+        and task.task.title == "Build local control plane"
     )
+    assert not callable(build)
     assert "-PcontainerdMavenLocal=true" in build
     assert any(
         arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")

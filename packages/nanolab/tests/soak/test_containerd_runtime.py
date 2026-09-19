@@ -6,10 +6,12 @@ import subprocess
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import yaml
-from sonata_engine import TaskOutcome
+from sonata_engine import TaskInputs, TaskOutcome
+from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandTaskSpec
 from sonata_tasks.tasks.models import TaskResult
 
@@ -97,12 +99,12 @@ def test_failed_owned_target_inspection_records_inconclusive_terminal(
         _scenario(),
         RootlessRun("run123", tmp_path / "repo", tmp_path / "session.sh"),
         EnvironmentConfig.model_validate({"provider": "local"}),
-        object(),
+        Mock(spec=CommandTaskExecutor),
         run_dir=tmp_path / "run",
         repo_root=tmp_path / "repo",
     )
     with pytest.raises(OSError, match="owned task absent"):
-        task.run(None)
+        task.run(TaskInputs({}, frozenset()))
     assert not (tmp_path / "run/terminal.json").exists()
     finalize_containerd_terminal(tmp_path / "run", OSError("owned task absent"))
     terminal = json.loads((tmp_path / "run/terminal.json").read_text())
@@ -207,11 +209,11 @@ def test_runner_binds_common_lifecycle_to_real_cgroup_observations(
         _scenario(),
         RootlessRun("run123", tmp_path / "repo", tmp_path / "session.sh"),
         EnvironmentConfig.model_validate({"provider": "local"}),
-        object(),
+        Mock(spec=CommandTaskExecutor),
         run_dir=tmp_path / "run",
         repo_root=tmp_path / "repo",
     )
-    assert task.run(None).value == "shared-workload-complete"
+    assert task.run(TaskInputs({}, frozenset())).value == "shared-workload-complete"
     assert not (tmp_path / "run/terminal.json").exists()
     finalize_containerd_terminal(tmp_path / "run", None)
     assert json.loads((tmp_path / "run/terminal.json").read_text())["status"] == "PASS"
@@ -233,7 +235,11 @@ def test_remote_source_verification_uses_staged_content_without_git(tmp_path):
     commands = []
 
     class Executor:
-        def run(self, command, *, dry_run=False):
+        def binding_key(self, role: str) -> str:
+            return f"test:{role}"
+
+        def run(self, task, *, dry_run=False):
+            command = task
             commands.append(command.argv)
             process = subprocess.run(
                 command.argv, text=True, capture_output=True, check=False

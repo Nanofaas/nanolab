@@ -279,6 +279,8 @@ def verify_containerd_builds(
         command = build.get("build_argv")
         steps = build.get("build_steps")
         executions = build.get("build_results")
+        if not isinstance(command, list) or not isinstance(steps, list):
+            raise ValueError("containerd build command differs from frozen recipe")
         _require(
             isinstance(command, list)
             and bool(command)
