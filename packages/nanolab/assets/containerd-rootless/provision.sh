@@ -29,6 +29,19 @@ check() {
   containerd --version
 }
 
+wait_for_rootless_socket() {
+  local socket=$XDG_RUNTIME_DIR/containerd/containerd.sock attempt
+  for attempt in {1..30}; do
+    if [[ -S $socket && -r $XDG_RUNTIME_DIR/containerd-rootless/child_pid ]] &&
+      timeout 1s ctr --address "$socket" version >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "rootless containerd did not become ready after restart" >&2
+  return 1
+}
+
 [[ $action == install ]] || { [[ $action == check ]] && check; exit; }
 [[ $(id -u) != 0 ]] || { echo "install as the unprivileged VM user" >&2; exit 2; }
 mkdir -p "$state" "$HOME/.config/containerd/certs.d/127.0.0.1:5000" \
@@ -129,5 +142,6 @@ systemctl --user restart containerd.service
 if [[ -f $state/needs-reboot ]]; then
   echo "delegation changed; VM reboot required before rootless check"
 else
+  wait_for_rootless_socket
   check
 fi
