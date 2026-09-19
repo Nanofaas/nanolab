@@ -2145,3 +2145,38 @@ def test_artifact_inventory_defers_the_source_tree_to_its_own_manifest(tmp_path)
         "source/source-manifest.jsonl",
     ]
     assert len(json.dumps(listed).encode()) < MAX_RECORD_BYTES
+
+
+def test_artifact_inventory_binds_helper_log_trees_that_cannot_be_listed(tmp_path):
+    """A helper tree holds thousands of command logs; one record cannot list them.
+
+    The tree becomes a single reference that still hashes every file and carries
+    the exact byte total, so the budget and the hash chain are both unchanged.
+    """
+    from nanolab.tasks.soak.artifacts import MAX_RECORD_BYTES
+    from nanolab.tasks.soak.runtime import _inventory_entries
+
+    root = tmp_path / "evidence"
+    helper = root / "helper-0123456789abcdef"
+    helper.mkdir(parents=True)
+    (root / "source" / "tree" / "platform").mkdir(parents=True)
+    (root / "builds" / "workspace-0").mkdir(parents=True)
+    for index in range(5000):
+        (helper / f"docker-{index:032x}.log").write_text("x")
+        (root / "source" / "tree" / "platform" / f"f{index}.java").write_bytes(b"x")
+        (root / "builds" / "workspace-0" / f"f{index}.class").write_bytes(b"x")
+    (root / "builds" / "recipe-0.json").write_text("{}")
+    (root / "source" / "snapshot.json").write_text('{"manifest_sha256": "a"}')
+    (root / "samples.jsonl").write_text("{}\n")
+
+    entries = _inventory_entries(root)
+
+    assert [entry["path"] for entry in entries] == [
+        "builds/recipe-0.json",
+        "helper-0123456789abcdef",
+        "samples.jsonl",
+        "source/snapshot.json",
+    ]
+    bound = next(entry for entry in entries if entry["path"].startswith("helper-"))
+    assert bound["size_bytes"] == 5000 * len(b"x")
+    assert len(json.dumps(entries).encode()) < MAX_RECORD_BYTES

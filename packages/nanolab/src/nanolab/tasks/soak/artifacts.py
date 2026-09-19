@@ -54,6 +54,26 @@ def describe_artifact(path: Path) -> dict[str, object]:
     return {"path": str(path), "size_bytes": size, "sha256": digest.hexdigest()}
 
 
+def describe_tree(path: Path) -> dict[str, object]:
+    """Hash and measure a whole tree in one pass, without listing its files.
+
+    Thousands of small command logs cannot each hold an inventory entry: the
+    document that carries them has to fit one bounded record. Binding the tree
+    as a single reference keeps every byte hashed and the byte total exact.
+    """
+    digest = hashlib.sha256()
+    size = 0
+    for item in sorted(path.rglob("*")):
+        if item.is_symlink() or not item.is_file() or item.name.startswith("."):
+            continue
+        digest.update(item.relative_to(path).as_posix().encode("utf-8") + b"\0")
+        with item.open("rb") as source:
+            while chunk := source.read(65536):
+                size += len(chunk)
+                digest.update(chunk)
+    return {"path": str(path), "size_bytes": size, "sha256": digest.hexdigest()}
+
+
 def measure_tree(root: Path) -> int:
     """Measure every generated file under ``root``, not only owned evidence.
 

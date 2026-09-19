@@ -35,6 +35,7 @@ from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from nanolab.tasks.soak.adapters import RoleBinding, RoleBoundProbe, SubprocessTransport
 from nanolab.tasks.soak.artifacts import (
     describe_artifact,
+    describe_tree,
     enforce_limit,
     fingerprint,
     measure_tree,
@@ -919,6 +920,49 @@ def _reference(root: Path, path: Path) -> dict[str, Any]:
         **describe_artifact(path),
         "path": path.relative_to(root.absolute()).as_posix(),
     }
+
+
+def _inventory_entries(root: Path) -> list[dict[str, Any]]:
+    """Reference retained evidence as documents that fit one bounded record.
+
+    Three subtrees cannot be listed file by file, for the same reason each time:
+    the inventory is a single record and they hold thousands of files.
+
+    - the captured source tree is inventoried in `source-manifest.jsonl`, which
+      `snapshot.json` seals with `manifest_sha256`, and both stay in this
+      inventory, so listing its files again only duplicates that chain;
+    - build workspaces and dot-directories are scratch the run does not retain
+      as evidence, and `measure_tree` excludes them from the budget as well;
+    - the helper command-log trees have no sealed manifest of their own, so each
+      is bound as one reference that still hashes every file and carries the
+      exact byte total the budget charges for.
+    """
+    entries: list[dict[str, Any]] = []
+    for directory, subdirectories, names in os.walk(root):
+        here = Path(directory)
+        retained: list[str] = []
+        for name in sorted(subdirectories):
+            child = here / name
+            if name.startswith(("workspace-", ".")) or child.is_symlink():
+                continue
+            if here == root / "source" and name == "tree":
+                continue
+            if name.startswith(("helper-", "memory-helper-")):
+                entries.append(
+                    {
+                        **describe_tree(child),
+                        "path": child.relative_to(root).as_posix(),
+                    }
+                )
+                continue
+            retained.append(name)
+        subdirectories[:] = retained
+        for name in sorted(names):
+            item = here / name
+            if name.startswith(".") or item.is_symlink() or not item.is_file():
+                continue
+            entries.append(_reference(root, item))
+    return sorted(entries, key=lambda entry: str(entry["path"]))
 
 
 def _read_json(path: Path) -> dict:
@@ -1838,22 +1882,7 @@ def create_soak_lifecycle(
             manifest["workload_script"] = _reference(root, root / "frozen-workload.js")
             workload = _read_json(receipt)
             manifest["traffic_stopped_s"] = workload.get("generator_end_s")
-        # The captured source tree is already inventoried, file by file, in
-        # source-manifest.jsonl, which snapshot.json seals with manifest_sha256
-        # and both of which stay in this inventory. Listing its thousands of
-        # files again only duplicates that chain, and it overflows the
-        # single-record limit this document has to fit in.
-        entries = [
-            _reference(root, path)
-            for path in sorted(root.rglob("*"))
-            if (
-                path.is_file()
-                and not path.is_symlink()
-                and not path.name.startswith(".")
-                and not any(part.startswith("workspace-") for part in path.parts)
-                and not path.is_relative_to(root / "source" / "tree")
-            )
-        ]
+        entries = _inventory_entries(root)
         inventory = writer.write_json(
             "artifacts.json",
             {
