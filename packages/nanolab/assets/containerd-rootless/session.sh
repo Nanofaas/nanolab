@@ -104,7 +104,7 @@ case $action in
       --name "$registry_name" --net host --runtime crun \
       docker.io/library/registry:2 >/dev/null
     port_add registry 127.0.0.1:5000:5000/tcp
-    curl -fsS --retry 20 --retry-connrefused --retry-delay 1 \
+    curl -fsS --max-time 5 --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 30 \
       http://127.0.0.1:5000/v2/ >/dev/null
     trap - ERR
     ;;
@@ -134,7 +134,7 @@ PROMETHEUS
       -v "$state/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
       docker.io/prom/prometheus:v3.5.1 >/dev/null
     port_add prometheus 0.0.0.0:9090:9090/tcp
-    curl -fsS --retry 30 --retry-connrefused --retry-delay 1 \
+    curl -fsS --max-time 5 --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 30 \
       http://127.0.0.1:9090/-/ready >/dev/null
     trap - ERR
     ;;
@@ -221,7 +221,7 @@ PY
     systemctl --user start "$unit_name"
     port_add api 0.0.0.0:8080:8080/tcp
     port_add management 0.0.0.0:8081:8081/tcp
-    curl -fsS --retry 30 --retry-connrefused --retry-delay 1 \
+    curl -fsS --max-time 5 --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 30 \
       http://127.0.0.1:8081/actuator/health/readiness >/dev/null
     trap - ERR
     ;;
@@ -231,7 +231,7 @@ PY
   control-restart)
     [[ -f $unit_path ]] || { echo "no owned unit $unit_name" >&2; exit 1; }
     systemctl --user restart "$unit_name"
-    curl -fsS --retry 30 --retry-connrefused --retry-delay 1 \
+    curl -fsS --max-time 5 --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 30 \
       http://127.0.0.1:8081/actuator/health/readiness >/dev/null
     ;;
   managed-ids)

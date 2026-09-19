@@ -2,7 +2,11 @@
 
 import json
 import os
+import shutil
+import socket
+import struct
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -280,6 +284,65 @@ def test_control_restart_keeps_run_owned_registry_and_provider_state(
     assert values["NANOFAAS_CONTAINERD_CNICACHEDIRECTORY"] == str(state / "cni-cache")
     assert (state / "containerd").is_dir()
     assert (state / "cni-cache").is_dir()
+
+
+def test_control_restart_retries_connection_reset_until_ready(
+    session_home: tuple[Path, dict[str, str]],
+) -> None:
+    home, env = session_home
+    unit = home / ".config/systemd/user/nanofaas-run123.service"
+    unit.parent.mkdir(parents=True)
+    unit.write_text("owned")
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(3)
+    attempts = []
+
+    def serve() -> None:
+        try:
+            for attempt in range(2):
+                connection, _ = listener.accept()
+                with connection:
+                    connection.recv(4096)
+                    attempts.append(attempt)
+                    if attempt == 0:
+                        connection.setsockopt(
+                            socket.SOL_SOCKET,
+                            socket.SO_LINGER,
+                            struct.pack("ii", 1, 0),
+                        )
+                    else:
+                        connection.sendall(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+                        )
+        except TimeoutError:
+            pass
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    binary = Path(env["PATH"].split(":", 1)[0]) / "curl"
+    binary.write_text(
+        '#!/bin/bash\nargs=("$@")\nargs[-1]=$TEST_CURL_URL\n'
+        'exec "$TEST_REAL_CURL" "${args[@]}"\n'
+    )
+    binary.chmod(0o755)
+    env["TEST_REAL_CURL"] = shutil.which("curl") or "curl"
+    env["TEST_CURL_URL"] = f"http://127.0.0.1:{listener.getsockname()[1]}/ready"
+    try:
+        result = subprocess.run(
+            ["bash", str(SESSION), "control-restart", "run123", str(home)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        thread.join(timeout=4)
+        listener.close()
+
+    assert result.returncode == 0, result.stderr
+    assert attempts == [0, 1]
 
 
 def test_soak_control_start_sets_actual_artifact_limits_and_cleans_owned_dropin(
