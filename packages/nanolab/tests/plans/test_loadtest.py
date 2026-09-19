@@ -96,7 +96,11 @@ def test_containerd_loadtest_starts_rootless_runtime_without_compose(
             autoscaling=True,
         ),
         EnvironmentConfig.model_validate(
-            {"provider": "multipass", "roles": {"stack": {"name": "rootless-stack"}}}
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
         ),
         RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
         control_plane_url="http://127.0.0.1:8080",
@@ -111,6 +115,16 @@ def test_containerd_loadtest_starts_rootless_runtime_without_compose(
     assert "Acquire rootless containerd test runtime" in titles
     assert "Run the load test" in titles
     assert not any("Docker Compose" in title for title in titles)
+    build = next(
+        task.task.argv
+        for task in plan.compile().tasks
+        if task.task.title == "Build control plane"
+    )
+    assert "-PcontainerdMavenLocal=true" in build
+    assert any(
+        arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")
+        for arg in build
+    )
 
 
 def test_containerd_co_tenancy_passes_core_count_and_budget(tmp_path: Path) -> None:
@@ -124,7 +138,11 @@ def test_containerd_co_tenancy_passes_core_count_and_budget(tmp_path: Path) -> N
             concurrencyMode="BUDGETED",
         ),
         EnvironmentConfig.model_validate(
-            {"provider": "multipass", "roles": {"stack": {"name": "rootless-stack"}}}
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
         ),
         RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
         control_plane_url="http://127.0.0.1:8080",

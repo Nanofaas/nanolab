@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-ASSET = Path(__file__).parents[4] / "assets/containerd-rootless/soak_collect.py"
+ASSET = Path(__file__).parents[2] / "assets/containerd-rootless/soak_collect.py"
 
 
 def _module():

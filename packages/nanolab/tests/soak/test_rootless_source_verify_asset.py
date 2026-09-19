@@ -9,7 +9,7 @@ import zlib
 from hashlib import sha256
 from pathlib import Path
 
-ASSET = Path(__file__).parents[4] / "assets/containerd-rootless/source_verify.py"
+ASSET = Path(__file__).parents[2] / "assets/containerd-rootless/source_verify.py"
 
 
 def _check(root, entries):

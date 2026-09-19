@@ -8,6 +8,7 @@ from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import list_functions
 from nanolab.plans.functions import resolve_function, sonata_function
@@ -91,6 +92,17 @@ class RecordingExecutor:
 
 
 def _plan(backend: str, **config: object) -> Workflow:
+    environment = (
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
+        )
+        if backend == "containerd"
+        else None
+    )
     return build_validate_plan(
         ScenarioConfig.model_validate(
             {
@@ -101,6 +113,7 @@ def _plan(backend: str, **config: object) -> Workflow:
             }
         ),
         RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
+        environment=environment,
     )
 
 
@@ -181,6 +194,12 @@ def test_containerd_plan_uses_rootless_resource_and_shared_http_checks() -> None
     )
     assert "-PcontrolPlaneModules=containerd-deployment-provider" in _argv(
         plan, "Build control plane"
+    )
+    build = _argv(plan, "Build control plane")
+    assert "-PcontainerdMavenLocal=true" in build
+    assert any(
+        arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")
+        for arg in build
     )
 
 

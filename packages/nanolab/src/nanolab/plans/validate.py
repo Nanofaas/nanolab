@@ -23,6 +23,7 @@ from nanolab.plans.functions import (
 )
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.containerd_maven import repository_for_build
 from nanolab.tasks.containerd_rootless import (
     control_plane_resource,
     registry_resource,
@@ -269,6 +270,11 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         ),
         source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes or config.backend == "containerd",
+        containerd_maven_repository=(
+            repository_for_build(environment)
+            if config.backend == "containerd"
+            else None
+        ),
         push_function_images=not kubernetes,
         persistent_recovery=config.persistent_recovery,
     )

@@ -50,6 +50,7 @@ from nanolab.tasks.components.operations import (
     RemoteCommandOperation,
     ScenarioOperation,
 )
+from nanolab.tasks.containerd_maven import repository_for_build
 from nanolab.tasks.containerd_rootless import (
     control_plane_resource,
     registry_resource,
@@ -396,6 +397,7 @@ def _build_containerd_plan(
     environment: EnvironmentConfig | None,
     namespace: str,
 ) -> Workflow:
+    maven_repository = repository_for_build(environment)
     run = run_for_environment(repo_root, discover_tool_root(), environment)
     executor = RoleBoundCommandTaskExecutor(bindings)
     registry = registry_resource(run, executor=executor, role="stack")
@@ -433,6 +435,8 @@ def _build_containerd_plan(
             "./gradlew",
             ":control-plane:bootJar",
             "-PcontrolPlaneModules=containerd-deployment-provider,runtime-config",
+            "-PcontainerdMavenLocal=true",
+            f"-Dmaven.repo.local={maven_repository}",
             "--no-daemon",
         ),
         requires=(registry, control),

@@ -90,7 +90,11 @@ class FakeAzureOrchestrator(FakeMultipassOrchestrator):
 def _multipass_environment(**role_overrides: object) -> EnvironmentConfig:
     role = {"name": "nanofaas-e2e-cli", **role_overrides}
     return EnvironmentConfig.model_validate(
-        {"provider": "multipass", "roles": {"stack": role}}
+        {
+            "provider": "multipass",
+            "roles": {"stack": role},
+            "containerdMavenRepository": "/tmp/test-containerd-maven",
+        }
     )
 
 
@@ -110,6 +114,16 @@ def test_containerd_cli_compiles_rootless_runtime_and_public_contract() -> None:
     assert "Acquire rootless containerd test runtime" in titles
     assert "List functions" in titles
     assert not any("Docker Compose" in title or "Helm" in title for title in titles)
+    build = next(
+        task.task.argv
+        for task in plan.compile().tasks
+        if task.task.title == "Build local control plane"
+    )
+    assert "-PcontainerdMavenLocal=true" in build
+    assert any(
+        arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")
+        for arg in build
+    )
 
 
 def test_resolved_context_returns_scenario_execution_context() -> None:

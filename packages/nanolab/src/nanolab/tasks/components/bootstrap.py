@@ -238,6 +238,25 @@ def plan_assets_sync_to_vm(
     )
 
 
+def plan_containerd_maven_sync_to_vm(
+    context: ScenarioExecutionContext,
+    *,
+    source: Path,
+    destination: Path,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Sync an already filtered repository, including its SHA256 receipt."""
+    return (
+        _rsync_operation(
+            context.vm_request,
+            operation_id="containerd.maven.sync_to_vm",
+            summary="Sync isolated containerd Maven artifacts",
+            source=source,
+            destination=str(destination),
+            discover_private_key=True,
+        ),
+    )
+
+
 def plan_containerd_rootless_install(
     context: ScenarioExecutionContext,
 ) -> tuple[RemoteCommandOperation, ...]:

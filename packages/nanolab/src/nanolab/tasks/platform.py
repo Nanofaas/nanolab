@@ -101,6 +101,7 @@ class PlatformRequest:
     build_images: bool = True
     build_control_plane: bool = True
     push_function_images: bool = False
+    containerd_maven_repository: Path | None = None
     control_plane_image: str | None = None
     # What the source being built looks like. Callers that can fingerprint their
     # checkout pass it here and the built image is named after it, so a rebuilt
@@ -175,9 +176,28 @@ def _control_plane_build(
     request: PlatformRequest,
     executor: CommandTaskExecutor,
     cwd: Path | None,
-) -> GradleTask:
+) -> CommandTask:
     target = ":control-plane:bootJar"
     modules = request.control_plane_modules()
+    if request.backend == "containerd":
+        if request.containerd_maven_repository is None:
+            raise ValueError(
+                "containerd Maven repository is required for control-plane build"
+            )
+        return CommandTask(
+            title=request.titled("Build control plane"),
+            argv=(
+                "./gradlew",
+                target,
+                f"-PcontrolPlaneModules={','.join(modules)}",
+                "-PcontainerdMavenLocal=true",
+                f"-Dmaven.repo.local={request.containerd_maven_repository}",
+                "--no-daemon",
+            ),
+            executor=executor,
+            role=request.role,
+            options=CommandOptions(cwd=cwd),
+        )
     return GradleTask(
         target,
         title=request.titled("Build control plane"),

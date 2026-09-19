@@ -196,7 +196,11 @@ def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
     )
     config = ScenarioConfig.model_validate(yaml.safe_load(scenario.read_text()))
     environment = EnvironmentConfig.model_validate(
-        {"provider": "multipass", "roles": {"stack": {"name": "owned-soak-vm"}}}
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "owned-soak-vm"}},
+            "containerdMavenRepository": "/tmp/test-containerd-maven",
+        }
     )
     workflow = build_soak_plan(
         config,

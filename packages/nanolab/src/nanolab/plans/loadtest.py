@@ -36,6 +36,7 @@ from nanolab.plans.functions import (
 from nanolab.tasks.components.bootstrap import remote_project_dir
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.containerd_maven import repository_for_build
 from nanolab.tasks.containerd_rootless import (
     RootlessRun,
     control_plane_resource,
@@ -1552,6 +1553,10 @@ def build_loadtest_plan(
         container_metrics=container_metrics,
         control_plane_resources=_control_plane_resources(config),
     )
+    if backend == "containerd":
+        request = replace(
+            request, containerd_maven_repository=repository_for_build(environment)
+        )
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)
     rootless_run = (

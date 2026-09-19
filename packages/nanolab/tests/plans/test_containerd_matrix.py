@@ -51,7 +51,11 @@ def test_containerd_matrix_compiles_without_docker_lifecycle(
         yaml.safe_load((SCENARIOS / filename).read_text())
     )
     environment = EnvironmentConfig.model_validate(
-        {"provider": "multipass", "roles": {"stack": {"name": "rootless-stack"}}}
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "rootless-stack"}},
+            "containerdMavenRepository": "/tmp/test-containerd-maven",
+        }
     )
     executor = Executor()
     bindings = RoleBindings({"host": executor, "stack": executor, "loadgen": executor})
@@ -78,3 +82,10 @@ def test_containerd_matrix_compiles_without_docker_lifecycle(
     titles = [task.task.title for task in plan.compile().tasks]
     assert "Acquire rootless containerd test runtime" in titles
     assert not any("Docker Compose" in title for title in titles)
+    build = next(
+        task.task.argv
+        for task in plan.compile().tasks
+        if task.task.title in {"Build control plane", "Build local control plane"}
+    )
+    assert "-PcontainerdMavenLocal=true" in build
+    assert any(arg.startswith("-Dmaven.repo.local=/home/ubuntu/") for arg in build)

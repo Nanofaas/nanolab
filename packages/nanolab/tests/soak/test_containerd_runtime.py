@@ -195,7 +195,7 @@ def test_remote_source_verification_uses_staged_content_without_git(tmp_path):
         RootlessRun(
             "run123",
             staged,
-            Path(__file__).parents[4] / "assets/containerd-rootless/session.sh",
+            Path(__file__).parents[2] / "assets/containerd-rootless/session.sh",
         ),
         EnvironmentConfig.model_validate({"provider": "local"}),
         Executor(),
