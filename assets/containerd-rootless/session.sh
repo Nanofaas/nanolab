@@ -34,7 +34,8 @@ port_add() {
 }
 
 port_remove() {
-  local name=$1 id_file=$state/port-$name
+  local name=$1
+  local id_file=$state/port-$name
   [[ -f $id_file ]] || return 0
   local id ports
   id=$(cat "$id_file")
@@ -141,15 +142,16 @@ PROMETHEUS
       echo "core count and budget must be nonnegative integers" >&2; exit 2;
     }
     bash "$(dirname "$0")/provision.sh" check
-    mkdir -p "$state" "$HOME/.config/systemd/user"
-    chmod 700 "$state"
+    mkdir -p "$state/containerd" "$state/cni-cache" "$HOME/.config/systemd/user"
+    chmod 700 "$state" "$state/containerd" "$state/cni-cache"
     trap 'control_stop' ERR
     [[ ! -f $unit_path ]] || { echo "unit already owned by run $run_id" >&2; exit 1; }
     env_file=$state/control-plane.env
     printf 'NANOFAAS_ROOT=%s\nHOME=%s\nXDG_RUNTIME_DIR=%s\nSERVER_ADDRESS=0.0.0.0\nSERVER_PORT=8080\nMANAGEMENT_SERVER_PORT=8081\nNANOFAAS_DEPLOYMENT_DEFAULTBACKEND=containerd\nNANOFAAS_CONTAINERD_SOCKETPATH=%s\nNANOFAAS_CONTAINERD_NAMESPACE=%s\nNANOFAAS_CONTAINERD_NETWORKNAME=nanofaas\nNANOFAAS_CONTAINERD_RUNTIMEBINARY=crun\nNANOFAAS_CONTAINERD_SNAPSHOTTER=native\nNANOFAAS_CONTAINERD_CNIPLUGINDIRECTORY=/usr/local/libexec/cni\nNANOFAAS_CONTAINERD_CNICONFIGDIRECTORY=%s\nNANOFAAS_CONTAINERD_CNICACHEDIRECTORY=%s\nNANOFAAS_CONTAINERD_STATEDIRECTORY=%s\nNANOFAAS_CONTAINERD_CALLBACKURL=http://10.90.0.1:8080\nNANOFAAS_CONTAINERD_BINDHOST=127.0.0.1\n' \
       "$repo_root" "$HOME" "$XDG_RUNTIME_DIR" "$CONTAINERD_ADDRESS" \
       "$namespace" "$HOME/.config/cni/net.d" \
-      "$HOME/.local/share/cni/cache" "$HOME/.local/share/nanofaas/containerd" > "$env_file"
+      "$state/cni-cache" "$state/containerd" > "$env_file"
+    printf 'NANOFAAS_REGISTRY_PATH=%s\n' "$state/functions.json" >> "$env_file"
     if (( cpuset_cores > 0 )); then
       cpuset=$(python3 - "$cpuset_cores" <<'PY'
 import os
@@ -200,9 +202,39 @@ PY
       --filter "label=io.nanofaas.function=$name" \
       --filter 'label=io.nanofaas.backend=containerd'
     ;;
-  inspect)
-    name=${1:?container name required}
-    ctr --address "$CONTAINERD_ADDRESS" --namespace "$namespace" containers info "$name"
+  inspect-owned)
+    function_name=${1:?function name required}
+    replica=${2:?replica index required}
+    python3 - "$CONTAINERD_ADDRESS" "$namespace" "$function_name" "$replica" <<'PY'
+import json
+import subprocess
+import sys
+
+address, namespace, function, replica = sys.argv[1:]
+if not replica.isdecimal() or int(replica) < 1:
+    raise SystemExit("replica index must be positive")
+ctr = ("ctr", "--address", address, "--namespace", namespace, "containers")
+identifiers = subprocess.check_output((*ctr, "list", "--quiet"), text=True).splitlines()
+matches = []
+for identifier in identifiers:
+    payload = json.loads(subprocess.check_output((*ctr, "info", identifier), text=True))
+    if payload.get("ID", payload.get("id")) != identifier:
+        raise SystemExit(f"containerd inspect ID disagrees with inventory: {identifier}")
+    labels = payload.get("Labels", payload.get("labels", {}))
+    if all((
+        labels.get("io.nanofaas.backend") == "containerd",
+        labels.get("io.nanofaas.managed") == "true",
+        labels.get("io.nanofaas.function") == function,
+        labels.get("io.nanofaas.replica") == replica,
+    )):
+        matches.append(payload)
+if len(matches) != 1:
+    raise SystemExit(
+        f"{function} replica {replica}: expected exactly one owned container "
+        f"in {namespace}, found {len(matches)}"
+    )
+print(json.dumps(matches[0], separators=(",", ":")))
+PY
     ;;
   inventory)
     nerdctl --namespace "$namespace" ps -a

@@ -113,7 +113,8 @@ def _inspection_task(
         if request.rootless_run is None:
             raise ValueError("containerd validation requires a rootless run")
         return ContainerdResourceCheckTask(
-            container=f"nanofaas-{function.name}-r1",
+            function=function.name,
+            replica=1,
             resources=function.resources,
             run=request.rootless_run,
             executor=executor,

@@ -143,7 +143,10 @@ def test_autoscaling_is_opt_in_for_loadtest() -> None:
     assert config.autoscaling is True
 
 
-def test_hpa_autoscaling_is_available_only_for_kubernetes_loadtests() -> None:
+@pytest.mark.parametrize("non_k8s_backend", ["container", "containerd"])
+def test_hpa_autoscaling_is_available_only_for_kubernetes_loadtests(
+    non_k8s_backend: str,
+) -> None:
     config = ScenarioConfig.model_validate(
         {
             "workflow": "loadtest",
@@ -162,7 +165,7 @@ def test_hpa_autoscaling_is_available_only_for_kubernetes_loadtests() -> None:
         ScenarioConfig.model_validate(
             {
                 "workflow": "loadtest",
-                "backend": "container",
+                "backend": non_k8s_backend,
                 "functions": ["word-stats-java"],
                 "autoscaling": True,
                 "autoscalingStrategy": "HPA",

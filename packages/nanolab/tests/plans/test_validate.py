@@ -173,7 +173,7 @@ def test_containerd_plan_uses_rootless_resource_and_shared_http_checks() -> None
 
     assert "Acquire rootless containerd test runtime" in titles
     assert "Invoke word-stats-java" in titles
-    assert "Inspect resources of nanofaas-word-stats-java-r1" in titles
+    assert "Inspect resources of word-stats-java replica 1" in titles
     assert not any("Docker Compose" in title for title in titles)
     assert not any(
         "docker inspect" in " ".join(getattr(task.task, "argv", ()))

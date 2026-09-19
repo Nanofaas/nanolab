@@ -168,12 +168,13 @@ def test_containerd_resource_check_reads_actual_oci_limits() -> None:
                 task_id=task.task_id,
                 status="passed",
                 return_code=0,
-                stdout='{"Spec":{"linux":{"resources":{"cpu":{"shares":512,"quota":50000,"period":100000},"memory":{"limit":536870912,"reservation":268435456}}}}}',
+                stdout='{"ID":"nanofaas-word-stats-java-0123456789-r1","Spec":{"linux":{"resources":{"cpu":{"shares":512,"quota":50000,"period":100000},"memory":{"limit":536870912,"reservation":268435456}}}}}',
             )
 
     executor = InspectExecutor()
     task = ContainerdResourceCheckTask(
-        container="nanofaas-word-stats-java-r1",
+        function="word-stats-java",
+        replica=1,
         resources={
             "requests": {"cpu": 0.5, "memoryMiB": 256},
             "limits": {"cpu": 0.5, "memoryMiB": 512},
@@ -186,7 +187,8 @@ def test_containerd_resource_check_reads_actual_oci_limits() -> None:
     )
 
     task.run(TaskInputs.empty())
-    assert executor.seen[0].argv[-1] == "nanofaas-word-stats-java-r1"
+    assert executor.seen[0].argv[2] == "inspect-owned"
+    assert executor.seen[0].argv[-2:] == ("word-stats-java", "1")
 
 
 def test_containerd_resource_check_rejects_missing_memory_limit() -> None:
@@ -196,11 +198,12 @@ def test_containerd_resource_check_rejects_missing_memory_limit() -> None:
                 task_id=task.task_id,
                 status="passed",
                 return_code=0,
-                stdout='{"Spec":{"linux":{"resources":{"memory":{}}}}}',
+                stdout='{"ID":"nanofaas-echo-0123456789-r1","Spec":{"linux":{"resources":{"memory":{}}}}}',
             )
 
     task = ContainerdResourceCheckTask(
-        container="nanofaas-echo-r1",
+        function="echo",
+        replica=1,
         resources={"limits": {"memoryMiB": 512}},
         run=RootlessRun(
             "run123", Path("/home/ubuntu/nanofaas"), Path("/assets/session.sh")

@@ -402,7 +402,7 @@ class ScenarioConfig(BaseModel):
             )
         if self.autoscaling_strategy == "HPA" and not self.autoscaling:
             raise ValueError("HPA autoscaling requires autoscaling=true")
-        if self.autoscaling_strategy == "HPA" and self.backend == "container":
+        if self.autoscaling_strategy == "HPA" and self.backend != "k8s":
             raise ValueError("HPA autoscaling requires the k8s backend")
         if self.hpa_scale_to_zero and self.autoscaling_strategy != "HPA":
             raise ValueError("HPA scale-to-zero requires autoscalingStrategy=HPA")

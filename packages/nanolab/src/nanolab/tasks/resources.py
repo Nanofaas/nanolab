@@ -29,7 +29,8 @@ class ContainerdResourceCheckTask(Task[None]):
     def __init__(
         self,
         *,
-        container: str,
+        function: str,
+        replica: int,
         resources: ResourceSpec | None,
         run: RootlessRun,
         executor: CommandTaskExecutor,
@@ -37,8 +38,9 @@ class ContainerdResourceCheckTask(Task[None]):
         cwd: Path | None = None,
     ) -> None:
         """Record the expected resources and the test-owned containerd runtime."""
-        self.title = f"Inspect resources of {container}"
-        self._container = container
+        self.title = f"Inspect resources of {function} replica {replica}"
+        self._function = function
+        self._replica = replica
         self._resources = resources
         self._run = run
         self._executor = executor
@@ -47,31 +49,34 @@ class ContainerdResourceCheckTask(Task[None]):
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
         """Fail when the actual OCI CPU or memory values differ from the manifest."""
+        subject = f"{self._function} replica {self._replica}"
         outcome = CommandTask(
             title=self.title,
             argv=(
                 "bash",
                 str(self._run.script),
-                "inspect",
+                "inspect-owned",
                 self._run.run_id,
                 str(self._run.repo_root),
-                self._container,
+                self._function,
+                str(self._replica),
             ),
             executor=self._executor,
             role=self._role,
             options=CommandOptions(cwd=self._cwd),
         ).run(inputs)
         if outcome.value is None:
-            raise RuntimeError(
-                f"{self._container}: containerd inspect returned no result"
-            )
-        payload = _payload(outcome.value, self._container)
+            raise RuntimeError(f"{subject}: containerd inspect returned no result")
+        payload = _payload(outcome.value, subject)
+        identifier = payload.get("ID", payload.get("id"))
+        if not isinstance(identifier, str) or not identifier:
+            raise RuntimeError(f"{subject}: containerd inspect returned no ID")
         if self._resources is None:
             return TaskOutcome(value=None)
         spec = payload.get("Spec") or payload.get("spec") or {}
         actual = spec.get("linux", {}).get("resources", {})
         if not isinstance(actual, dict):
-            raise RuntimeError(f"{self._container}: no OCI Linux resources")
+            raise RuntimeError(f"{identifier}: no OCI Linux resources")
         requests, limits = _halves(self._resources)
         cpu = actual.get("cpu") or {}
         memory = actual.get("memory") or {}
@@ -93,7 +98,7 @@ class ContainerdResourceCheckTask(Task[None]):
                 for scope, name in (key.split(".") for key in expected)
             },
             expected,
-            self._container,
+            identifier,
         )
         return TaskOutcome(value=None)
 
