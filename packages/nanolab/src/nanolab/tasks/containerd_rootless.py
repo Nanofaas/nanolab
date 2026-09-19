@@ -11,7 +11,6 @@ from sonata_engine import Resource, TaskInputs
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.execution.bindings import CommandTaskExecutor
-from sonata_tasks.execution.models import CommandOptions
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.tasks.execution import ExecutionRole
@@ -57,7 +56,6 @@ def _resource(
     requires: tuple[Resource[Any], ...] = (),
     start_args: tuple[str, ...] = (),
 ) -> Resource[RootlessRun]:
-    options = CommandOptions(cwd=run.repo_root)
     acquire = CommandTask(
         title=f"Start {name}",
         argv=(
@@ -70,14 +68,12 @@ def _resource(
         ),
         executor=executor,
         role=role,
-        options=options,
     )
     release = CommandTask(
         title=f"Stop {name}",
         argv=("bash", str(run.script), stop, run.run_id, str(run.repo_root)),
         executor=executor,
         role=role,
-        options=options,
     )
 
     def start_run(inputs: TaskInputs) -> RootlessRun:

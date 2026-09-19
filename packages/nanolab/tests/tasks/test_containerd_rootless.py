@@ -3,12 +3,16 @@
 import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sonata_engine import TaskInputs, Workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.cli.execution import build_role_bindings
+from nanolab.config.environment import EnvironmentConfig
 from nanolab.tasks.containerd_rootless import (
     RootlessRun,
     control_plane_resource,
@@ -63,6 +67,45 @@ def test_rootless_runtime_releases_service_before_registry() -> None:
         "control-stop",
         "registry-stop",
     ]
+
+
+def test_remote_rootless_resource_uses_synced_vm_directory_not_local_cwd(tmp_path):
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def exec_argv(self, request, argv, *, env, remote_dir, dry_run):
+            self.calls.append((tuple(argv), remote_dir))
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    provider = Provider()
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "owned-test-vm"}}}
+    )
+    bindings, _ = build_role_bindings(
+        environment, vm_provider=provider, repo_root=tmp_path
+    )
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    remote = Path("/home/ubuntu/nanofaas")
+    run = RootlessRun(
+        "run123",
+        remote,
+        Path("/home/ubuntu/nanolab-assets/containerd-rootless/session.sh"),
+    )
+    registry = registry_resource(run, executor=executor, role="stack")
+    workflow = Workflow(workflow_id="remote-rootless")
+    workflow.add(
+        CommandTask(
+            title="Use platform", argv=("true",), executor=executor, role="stack"
+        ),
+        requires=(registry,),
+    )
+    workflow.run()
+    assert provider.calls[0] == (
+        ("bash", str(run.script), "registry-start", "run123", str(remote)),
+        str(remote),
+    )
+    assert provider.calls[-1][0][2] == "registry-stop"
 
 
 def test_control_plane_receives_per_run_core_count_and_budget() -> None:
