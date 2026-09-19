@@ -17,6 +17,7 @@ real_home=$(getent passwd "$(id -u)" | cut -d: -f6)
 [[ -n $real_home && $real_home == /* ]] || { echo "cannot resolve user home" >&2; exit 2; }
 export HOME=$real_home XDG_RUNTIME_DIR=/run/user/$(id -u)
 export CONTAINERD_ADDRESS=$XDG_RUNTIME_DIR/containerd/containerd.sock
+export CONTAINERD_SNAPSHOTTER=native
 state=$HOME/.local/share/nanolab/containerd-rootless/$run_id
 rk_socket=$XDG_RUNTIME_DIR/containerd-rootless/api.sock
 unit_name=nanofaas-$run_id.service

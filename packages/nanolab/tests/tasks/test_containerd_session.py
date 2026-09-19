@@ -369,3 +369,16 @@ def test_inspect_owned_rejects_missing_or_ambiguous_matches(
 
     assert result.returncode != 0
     assert "expected exactly one" in result.stderr
+
+
+def test_session_pins_native_snapshotter_for_nerdctl(
+    session_home: tuple[Path, dict[str, str]],
+) -> None:
+    home, env = session_home
+    binary = Path(env["PATH"].split(":", 1)[0]) / "nerdctl"
+    binary.write_text('#!/bin/sh\nprintf "%s\\n" "${CONTAINERD_SNAPSHOTTER:-unset}"\n')
+    binary.chmod(0o755)
+
+    result = _run("managed-ids", home, env, "word-stats-java")
+
+    assert result.stdout.strip() == "native"
