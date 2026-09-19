@@ -11,6 +11,10 @@ PositiveInt = Annotated[int, Field(gt=0)]
 PositiveNumber = Annotated[float, Field(gt=0)]
 NonNegativeNumber = Annotated[float, Field(ge=0)]
 Text = Annotated[str, Field(min_length=1)]
+PREREQUISITE_GROUPS = {
+    "error-timeout-cancellation": ("error", "timeout", "cancellation"),
+    "async-late-callback": ("async", "late-callback"),
+}
 MetricOperation = Literal[
     "maximum", "return_to_reference", "growth_review", "expected_zero"
 ]
@@ -246,6 +250,17 @@ class PrerequisitePolicy(_StrictModel):
             raise ValueError("receipt mode requires a receipt for every prerequisite")
         if self.mode == "run" and self.receipts:
             raise ValueError("run mode does not consume saved receipts")
+        expanded = {}
+        for name in self.required_coverage:
+            members = PREREQUISITE_GROUPS.get(name, (name,))
+            if self.mode == "receipts" and len(members) > 1:
+                raise ValueError("saved receipts require atomic prerequisite coverage")
+            for member in members:
+                if member in expanded:
+                    raise ValueError("prerequisite coverage groups overlap")
+                expanded[member] = list(self.relevant_config_keys[name])
+        self.required_coverage = list(expanded)
+        self.relevant_config_keys = expanded
         return self
 
 

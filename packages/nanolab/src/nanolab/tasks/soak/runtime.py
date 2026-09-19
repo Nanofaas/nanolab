@@ -348,11 +348,7 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
         profile["effective_config"] = deepcopy(expected)
     coverage = frozenset(prepared.config.prerequisites.required_coverage)
     _inputs(frozen, coverage)
-    if prepared.config.diagnostics.timeout_s < required_body_budget(frozen):
-        raise ValueError(
-            "configured prerequisite body deadline cannot cover "
-            "frozen retention/exercise"
-        )
+    body_timeout_s = required_body_budget(frozen)
     factory_root = prepared.evidence_dir / "prerequisite-platforms"
     parent_root = prepared.evidence_dir / "prerequisites"
     factory = make_prerequisite_platform_factory(
@@ -448,7 +444,7 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
             "recovery_artifact_bytes": recovery_quota,
             "acquire_timeout_s": options.prerequisite_acquire_timeout_s,
             "release_timeout_s": options.prerequisite_release_timeout_s,
-            "body_timeout_s": prepared.config.diagnostics.timeout_s,
+            "body_timeout_s": body_timeout_s,
             "global_artifact_limit_bytes": prepared.config.artifact_limit_bytes,
         },
     )
@@ -459,6 +455,7 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
             "before_fork": before_fork,
             "recover_after_reap": recover_after_reap,
             "parent_artifact_bytes": parent_quota,
+            "body_timeout_s": body_timeout_s,
             "acquire_timeout_s": options.prerequisite_acquire_timeout_s,
             "release_timeout_s": options.prerequisite_release_timeout_s,
         },
@@ -1554,11 +1551,13 @@ def create_soak_lifecycle(
                         ),
                         runner=prerequisite_runner,
                         writer=profile_writer,
-                        timeout_s=config.diagnostics.timeout_s,
+                        timeout_s=prerequisite_supervision.get(
+                            "body_timeout_s", config.diagnostics.timeout_s
+                        ),
                         **{
                             key: value
                             for key, value in prerequisite_supervision.items()
-                            if key != "parent_artifact_bytes"
+                            if key not in {"parent_artifact_bytes", "body_timeout_s"}
                         },
                     )
                 )

@@ -1773,6 +1773,21 @@ def test_the_shipped_nmt_spikes_provision_and_reserve(tmp_path, monkeypatch, sce
     value.writer.close()
 
 
+def test_prerequisite_body_budget_is_independent_of_diagnostic_capture(tmp_path):
+    import nanolab.tasks.soak.runtime as module
+    from nanolab.tasks.soak.prerequisite_runtime import required_body_budget
+
+    value = prepared(tmp_path, scenario="memory-soak-p24-nmt-spike-container.yaml")
+    value.config.diagnostics.timeout_s = 1
+    _, frozen, supervision = module._make_runtime_prerequisites(
+        value, module.RuntimeOptions(), host_bindings(), tmp_path
+    )
+    assert supervision["body_timeout_s"] == required_body_budget(frozen)
+    assert supervision["body_timeout_s"] > 35
+    assert value.config.diagnostics.timeout_s == 1
+    value.writer.close()
+
+
 def test_the_first_prerequisite_reservation_precedes_its_ownership_root(tmp_path):
     """The reservation hook runs before the factory creates what it owns.
 
