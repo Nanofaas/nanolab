@@ -24,6 +24,32 @@ def test_validate_requires_backend() -> None:
         ScenarioConfig(workflow="validate", functions=["word-stats-java"])
 
 
+@pytest.mark.parametrize("workflow", ["validate", "cli", "loadtest"])
+def test_containerd_backend_is_accepted_for_shared_workflows(workflow: str) -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": workflow,
+            "backend": "containerd",
+            "functions": ["word-stats-java"],
+        }
+    )
+
+    assert config.backend == "containerd"
+
+
+def test_containerd_async_validate_is_accepted() -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": "containerd",
+            "functions": ["word-stats-java"],
+            "asyncLoad": True,
+        }
+    )
+
+    assert config.async_load
+
+
 @pytest.mark.parametrize("backend", ["container", "k8s"])
 def test_persistent_recovery_is_opt_in_for_validate(backend: str) -> None:
     config = ScenarioConfig.model_validate(

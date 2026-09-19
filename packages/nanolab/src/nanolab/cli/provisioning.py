@@ -16,6 +16,7 @@ from nanolab.config.environment import ExecutionRole
 from nanolab.release.environment import secure_release_endpoints
 from nanolab.tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
+    plan_containerd_rootless_install,
     plan_k3s_configure_registry,
     plan_k3s_install,
     plan_loadtest_install_k6,
@@ -52,10 +53,15 @@ def _stack_operations(
     dedicated_loadgen: bool,
     include_repo_sync: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
+    if scenario.backend == "containerd" and context.vm_request.user == "root":
+        raise ValueError("containerd backend requires an unprivileged VM user")
     planners: list[
         Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]
     ] = [plan_vm_provision_base]
-    if scenario.backend == "k8s" or scenario.workflow in ("loadtest", "release"):
+    if scenario.backend == "k8s" or (
+        scenario.workflow in ("loadtest", "release")
+        and scenario.backend != "containerd"
+    ):
         planners.extend(
             [
                 plan_k3s_install,
@@ -63,10 +69,14 @@ def _stack_operations(
                 plan_k3s_configure_registry,
             ]
         )
+    if scenario.backend == "containerd":
+        planners.extend([plan_assets_sync_to_vm, plan_containerd_rootless_install])
     if (scenario.workflow == "loadtest" and not dedicated_loadgen) or (
         scenario.workflow == "validate" and scenario.backend == "k8s"
     ):
-        planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
+        planners.append(plan_loadtest_install_k6)
+        if scenario.backend != "containerd":
+            planners.append(plan_assets_sync_to_vm)
     if include_repo_sync:
         planners.append(plan_repo_sync_to_vm)
     return remote_operations(
@@ -228,6 +238,10 @@ def provision_environment(
     """
     if environment.provider == "local":
         raise ValueError("a non-local environment is required")
+    if scenario.backend == "containerd" and environment.provider != "multipass":
+        raise ValueError(
+            "containerd auto-provisioning requires a disposable Multipass VM"
+        )
     provider = provider_for_environment(
         environment, repo_root, orchestrator_factory=orchestrator_factory
     )

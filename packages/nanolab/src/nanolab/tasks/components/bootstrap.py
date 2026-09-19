@@ -238,6 +238,24 @@ def plan_assets_sync_to_vm(
     )
 
 
+def plan_containerd_rootless_install(
+    context: ScenarioExecutionContext,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Install and verify the rootless daemon after NanoLab assets are synced."""
+    return (
+        _ansible_operation(
+            context=context,
+            operation_id="vm.provision_containerd_rootless",
+            summary="Provision rootless containerd",
+            playbook_name="provision-containerd-rootless.yml",
+            extra_vars={
+                "vm_user": context.vm_request.user,
+                "vm_home": _remote_home(context.vm_request),
+            },
+        ),
+    )
+
+
 def _retarget_ansible_argv(
     argv: tuple[str, ...] | list[str],
     *,

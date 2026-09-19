@@ -23,6 +23,11 @@ from nanolab.plans.functions import (
 )
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.containerd_rootless import (
+    control_plane_resource,
+    registry_resource,
+    run_for_environment,
+)
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.http_function import HttpFunctionExpectation
 from nanolab.tasks.validate import (
@@ -255,9 +260,15 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         async_checks=_async_checks(functions, config, repo_root)
         if config.async_load
         else (),
-        additional_modules=("sync-queue",) if kubernetes else (),
+        additional_modules=("sync-queue",)
+        if kubernetes
+        else (
+            ("async-queue",)
+            if config.backend == "containerd" and config.async_load
+            else ()
+        ),
         source_fingerprint=source_fingerprint(root),
-        build_control_plane=kubernetes,
+        build_control_plane=kubernetes or config.backend == "containerd",
         push_function_images=not kubernetes,
         persistent_recovery=config.persistent_recovery,
     )
@@ -306,7 +317,26 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             ),
         )
     requires = ()
-    if not kubernetes:
+    control_plane_process = None
+    if config.backend == "containerd":
+        run = run_for_environment(root, tool_root or discover_tool_root(), environment)
+        registry = registry_resource(
+            run,
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            role="stack",
+        )
+        requires = (registry,)
+
+        def control_plane_process():
+            return control_plane_resource(
+                run,
+                executor=RoleBoundCommandTaskExecutor(bindings),
+                role="stack",
+                requires=(registry,),
+            )
+
+        request = replace(request, rootless_run=run)
+    elif not kubernetes:
         registry = docker_registry_resource(
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="host",
@@ -351,4 +381,5 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         cwd=root,
         local_endpoint="http://127.0.0.1:8080",
         requires=requires,
+        control_plane_process=control_plane_process,
     )

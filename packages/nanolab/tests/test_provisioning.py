@@ -102,6 +102,91 @@ def test_multipass_k8s_provisioning_composes_lifecycle_and_bootstrap_tasks(
     assert orchestrator.events[-1] == ("teardown", "stack")
 
 
+def test_containerd_provisioning_installs_rootless_runtime_without_k3s(
+    tmp_path: Path,
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "rootless-stack"}}}
+    )
+
+    with provision_environment(
+        ScenarioConfig(
+            workflow="validate", backend="containerd", functions=["word-stats-java"]
+        ),
+        environment,
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+
+    assert _playbooks(orchestrator) == [
+        "provision-base.yml",
+        "provision-containerd-rootless.yml",
+    ]
+    commands = _commands(orchestrator)
+    assert any(
+        command[0] == "rsync" and "nanolab-assets" in " ".join(command)
+        for command in commands
+    )
+    assert commands[-1][0] == "rsync"
+    assert orchestrator.events[-1] == ("teardown", "rootless-stack")
+
+
+def test_containerd_provisioning_rejects_root_vm_user_before_creation(
+    tmp_path: Path,
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "rootless-stack", "user": "root"}},
+        }
+    )
+
+    with (
+        pytest.raises(ValueError, match="unprivileged VM user"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="validate", backend="containerd", functions=["word-stats-java"]
+            ),
+            environment,
+            repo_root=tmp_path,
+            orchestrator_factory=lambda _: orchestrator,
+        ),
+    ):
+        pass
+
+    assert orchestrator.events == []
+
+
+def test_containerd_provisioning_rejects_non_disposable_external_host(
+    tmp_path: Path,
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "external",
+            "roles": {"stack": {"host": "shared.example", "user": "ubuntu"}},
+        }
+    )
+
+    with (
+        pytest.raises(ValueError, match="disposable Multipass VM"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="validate", backend="containerd", functions=["word-stats-java"]
+            ),
+            environment,
+            repo_root=tmp_path,
+            orchestrator_factory=lambda _: orchestrator,
+        ),
+    ):
+        pass
+
+    assert orchestrator.events == []
+
+
 def test_external_provisioning_without_factory_falls_back_to_orchestrator(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

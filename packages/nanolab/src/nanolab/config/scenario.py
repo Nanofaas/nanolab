@@ -25,7 +25,7 @@ WorkflowName = Literal[
     "soak",
     "heap-analysis",
 ]
-BackendName = Literal["container", "k8s"]
+BackendName = Literal["container", "containerd", "k8s"]
 BuildStrategy = Literal["docker", "buildpack"]
 AutoscalingStrategy = Literal["INTERNAL", "HPA"]
 
@@ -407,10 +407,11 @@ class ScenarioConfig(BaseModel):
         if self.hpa_scale_to_zero and self.autoscaling_strategy != "HPA":
             raise ValueError("HPA scale-to-zero requires autoscalingStrategy=HPA")
         if self.async_load and (
-            self.workflow != "validate" or self.backend != "container"
+            self.workflow != "validate"
+            or self.backend not in ("container", "containerd")
         ):
             raise ValueError(
-                "async load requires the validate workflow with the container backend"
+                "async load requires the validate workflow with a container backend"
             )
         if self.persistent_recovery and self.workflow != "validate":
             raise ValueError(

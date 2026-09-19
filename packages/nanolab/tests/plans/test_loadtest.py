@@ -83,6 +83,62 @@ CONTAINER_SCENARIO = ScenarioConfig(
     autoscaling=True,
 )
 
+
+def test_containerd_loadtest_starts_rootless_runtime_without_compose(
+    tmp_path: Path,
+) -> None:
+    executor = RecordingExecutor()
+    plan = build_loadtest_plan(
+        ScenarioConfig(
+            workflow="loadtest",
+            backend="containerd",
+            functions=["word-stats-java"],
+            autoscaling=True,
+        ),
+        EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "rootless-stack"}}}
+        ),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Acquire rootless containerd test registry" in titles
+    assert "Acquire rootless Prometheus" in titles
+    assert "Acquire rootless containerd test runtime" in titles
+    assert "Run the load test" in titles
+    assert not any("Docker Compose" in title for title in titles)
+
+
+def test_containerd_co_tenancy_passes_core_count_and_budget(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    plan = build_loadtest_plan(
+        ScenarioConfig(
+            workflow="loadtest",
+            backend="containerd",
+            functions=["word-stats-java", "word-stats-java-lite"],
+            concurrencyControl=True,
+            concurrencyMode="BUDGETED",
+        ),
+        EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "rootless-stack"}}}
+        ),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    commands = _run(plan, executor)
+    assert any(
+        "control-start" in command and command.endswith(" 4 12") for command in commands
+    )
+
+
 # Twelve, not eighteen: the eight steps of the load itself are one composite,
 # because none of them can run without what the run before it produced.
 DEFAULT_TASK_IDS = [

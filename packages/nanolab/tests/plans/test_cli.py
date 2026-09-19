@@ -94,6 +94,24 @@ def _multipass_environment(**role_overrides: object) -> EnvironmentConfig:
     )
 
 
+def test_containerd_cli_compiles_rootless_runtime_and_public_contract() -> None:
+    executor = RecordingExecutor()
+    plan = build_cli_plan(
+        ScenarioConfig(
+            workflow="cli", backend="containerd", functions=["word-stats-java"]
+        ),
+        RoleBindings({"host": executor, "stack": executor}),
+        repo_root=default_tool_paths().nanofaas_root,
+        environment=_multipass_environment(),
+    )
+
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Acquire rootless containerd test registry" in titles
+    assert "Acquire rootless containerd test runtime" in titles
+    assert "List functions" in titles
+    assert not any("Docker Compose" in title or "Helm" in title for title in titles)
+
+
 def test_resolved_context_returns_scenario_execution_context() -> None:
     context = cli._placeholder_context(
         Path("/repo"), VmRequest(lifecycle="multipass", name="stack")

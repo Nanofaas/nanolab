@@ -167,6 +167,33 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     assert stack.seen == []
 
 
+def test_containerd_plan_uses_rootless_resource_and_shared_http_checks() -> None:
+    plan = _plan("containerd")
+    titles = [task.task.title for task in plan.compile().tasks]
+
+    assert "Acquire rootless containerd test runtime" in titles
+    assert "Invoke word-stats-java" in titles
+    assert "Inspect resources of nanofaas-word-stats-java-r1" in titles
+    assert not any("Docker Compose" in title for title in titles)
+    assert not any(
+        "docker inspect" in " ".join(getattr(task.task, "argv", ()))
+        for task in plan.compile().tasks
+    )
+    assert "-PcontrolPlaneModules=containerd-deployment-provider" in _argv(
+        plan, "Build control plane"
+    )
+
+
+def test_containerd_recovery_plan_uses_containerd_restart() -> None:
+    titles = [
+        task.task.title
+        for task in _plan("containerd", persistentRecovery=True).compile().tasks
+    ]
+
+    assert "Recover word-stats-java after containerd control-plane restart" in titles
+    assert "Acquire Docker Compose project nanofaas-recovery" not in titles
+
+
 def test_persistent_recovery_container_plan_restarts_only_the_control_plane() -> None:
     plan = _plan("container", persistentRecovery=True)
 
