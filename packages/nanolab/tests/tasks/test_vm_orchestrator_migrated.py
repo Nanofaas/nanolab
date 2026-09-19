@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from multipass import MultipassCommandError, VmNotFoundError
+from multipass.models import VmState
 from sonata_tasks.shell import RecordingShell, ShellBackend, ShellExecutionResult
 from sonata_tasks.vm.models import VmRequest
 
@@ -54,7 +55,7 @@ def test_vm_exists_only_treats_not_found_as_absent() -> None:
 
 def test_vm_exists_refuses_deleted_instance_global_purge() -> None:
     client = MagicMock()
-    client.get_vm.return_value.info.return_value.state.value = "deleted"
+    client.get_vm.return_value.info.return_value.state = VmState.DELETED
     provider = _make_orch(multipass_client=client)
     with pytest.raises(RuntimeError, match="refusing global purge"):
         provider.vm_exists(VmRequest(lifecycle="multipass", name="stack"))

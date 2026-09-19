@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from multipass import MultipassCommandError, VmNotFoundError
+from multipass.models import VmState
 from shellcraft.backend import ShellExecutionResult
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.providers.multipass import MultipassVmProvider
@@ -72,7 +73,7 @@ class VmOrchestrator(MultipassVmProvider):
             info = self._client.get_vm(request.name).info()
         except VmNotFoundError:
             return False
-        if info.state.value == "deleted":
+        if info.state == VmState.DELETED:
             raise RuntimeError(
                 f"Multipass VM {request.name} is deleted; refusing global purge"
             )
