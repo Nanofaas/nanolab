@@ -277,19 +277,76 @@ def verify_containerd_builds(
             "running artifact/source/build receipt differs",
         )
         command = build.get("build_argv")
+        steps = build.get("build_steps")
+        executions = build.get("build_results")
         _require(
             isinstance(command, list)
             and bool(command)
             and all(isinstance(arg, str) and arg for arg in command)
+            and isinstance(steps, list)
+            and bool(steps)
+            and all(
+                isinstance(step, list)
+                and bool(step)
+                and all(isinstance(arg, str) and arg for arg in step)
+                for step in steps
+            )
+            and steps[-1] == command
             and recipe
             == {
                 "role": role,
                 "artifact_kind": spec.artifact_kind,
                 "platform": spec.platform,
                 "build_argv": command,
+                "build_steps": steps,
+                "mode": spec.mode,
+                "variant": spec.variant,
+                "modules": spec.modules,
+                "build_options": spec.build_options,
             },
             "containerd build command differs from frozen recipe",
         )
+        _require(
+            all(
+                build.get(key) == recipe[key]
+                for key in (
+                    "build_steps",
+                    "mode",
+                    "variant",
+                    "modules",
+                    "build_options",
+                )
+            )
+            and len(steps)
+            == (2 if spec.variant == "jvm" and role != "control-plane" else 1),
+            "containerd build steps or requested image recipe differ",
+        )
+        expected_titles = (
+            [f"Build application artifact: {role}", f"Build image {role}"]
+            if role != "control-plane" and spec.variant == "jvm"
+            else [
+                "Build control plane"
+                if role == "control-plane"
+                else f"Build image {role}"
+            ]
+        )
+        _require(
+            isinstance(executions, list)
+            and executions
+            == [
+                {"title": title, "argv": step, "status": "passed", "return_code": 0}
+                for title, step in zip(expected_titles, steps, strict=True)
+            ],
+            "containerd build task results differ from executed steps",
+        )
+        if role != "control-plane" and spec.variant == "jvm":
+            _require(
+                len(steps[0]) >= 2
+                and steps[0][0] == "./gradlew"
+                and steps[0][1].startswith(":functions:java:")
+                and steps[0][1].endswith(":bootJar"),
+                "Java application artifact build is missing",
+            )
         if spec.artifact_kind == "process":
             _require(
                 isinstance(build.get("artifact_path"), str)

@@ -10,21 +10,74 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from sonata_engine import TaskOutcome
+from sonata_tasks.execution.models import CommandTaskSpec
 from sonata_tasks.tasks.models import TaskResult
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.containerd_rootless import RootlessRun
 from nanolab.tasks.soak.artifacts import ArtifactWriter
-from nanolab.tasks.soak.containerd_runtime import ContainerdSoakRun
+from nanolab.tasks.soak.containerd_runtime import (
+    BuildExecutionRecorder,
+    ContainerdSoakRun,
+    finalize_containerd_terminal,
+)
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.sources import SourceEntry
-from nanolab.tasks.soak.workflow import write_terminal_receipt
 
 
 def _scenario():
     path = Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
     return ScenarioConfig.model_validate(yaml.safe_load(path.read_text()))
+
+
+def test_build_receipt_uses_executed_task_command_and_result():
+    class Executor:
+        def binding_key(self, role):
+            return role
+
+        def run(self, task, *, dry_run=False):
+            return TaskResult(task.task_id, "passed", 0)
+
+    recorder = BuildExecutionRecorder(Executor())
+    actual = ("./gradlew", ":control-plane:bootJar", "-PcontainerdMavenLocal=true")
+    recorder.run(CommandTaskSpec("cp", "Build control plane", actual, "stack"))
+    observed = recorder.require_build("Build control plane")
+    assert observed.argv == actual
+    assert observed.status == "passed" and observed.return_code == 0
+    with pytest.raises(ValueError, match="missing or repeated"):
+        recorder.require_build("Build image word-stats-java")
+
+
+@pytest.mark.parametrize(
+    ("measured", "cleanup_error", "expected"),
+    [
+        ("PASS", None, "PASS"),
+        ("FAIL", RuntimeError("cleanup failed"), "FAIL"),
+        ("PASS", RuntimeError("cleanup failed"), "INCONCLUSIVE"),
+    ],
+)
+def test_terminal_is_sealed_after_cleanup_with_evaluated_verdict(
+    tmp_path, measured, cleanup_error, expected
+):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "measurement-verdict.json").write_text(
+        json.dumps({"schema": "nanolab-containerd-measurement-v1", "status": measured})
+    )
+    finalize_containerd_terminal(run, cleanup_error)
+    terminal = json.loads((run / "terminal.json").read_text())
+    assert terminal["status"] == expected
+    if cleanup_error:
+        assert "cleanup failed" in terminal["reason"]
+
+
+def test_corrupt_measurement_verdict_cannot_publish_pass(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "measurement-verdict.json").write_text("{")
+    finalize_containerd_terminal(run, None)
+    assert json.loads((run / "terminal.json").read_text())["status"] == "INCONCLUSIVE"
 
 
 def test_failed_owned_target_inspection_records_inconclusive_terminal(
@@ -50,6 +103,8 @@ def test_failed_owned_target_inspection_records_inconclusive_terminal(
     )
     with pytest.raises(OSError, match="owned task absent"):
         task.run(None)
+    assert not (tmp_path / "run/terminal.json").exists()
+    finalize_containerd_terminal(tmp_path / "run", OSError("owned task absent"))
     terminal = json.loads((tmp_path / "run/terminal.json").read_text())
     assert terminal["status"] == "INCONCLUSIVE"
 
@@ -132,10 +187,9 @@ def test_runner_binds_common_lifecycle_to_real_cgroup_observations(
         assert deployment.api_endpoint == "http://127.0.0.1:8080"
 
         class Lifecycle:
-            state = SimpleNamespace(report=None)
+            state = SimpleNamespace(report=None, evaluation={"status": "PASS"})
 
             def run(self, inputs):
-                write_terminal_receipt(tmp_path / "run", "PASS")
                 return TaskOutcome(value="shared-workload-complete")
 
         return Lifecycle()
@@ -158,6 +212,8 @@ def test_runner_binds_common_lifecycle_to_real_cgroup_observations(
         repo_root=tmp_path / "repo",
     )
     assert task.run(None).value == "shared-workload-complete"
+    assert not (tmp_path / "run/terminal.json").exists()
+    finalize_containerd_terminal(tmp_path / "run", None)
     assert json.loads((tmp_path / "run/terminal.json").read_text())["status"] == "PASS"
 
 

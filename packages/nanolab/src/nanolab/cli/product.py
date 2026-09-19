@@ -1038,6 +1038,19 @@ def install_product_commands(
         except ReleaseRunInProgressError as error:
             raise typer.BadParameter(str(error)) from None
         except BaseException as exc:
+            if (
+                scenario_config.workflow == "soak"
+                and scenario_config.backend == "containerd"
+                and effective_run_dir is not None
+            ):
+                from nanolab.tasks.soak.containerd_runtime import (
+                    finalize_containerd_terminal,
+                )
+
+                try:
+                    finalize_containerd_terminal(effective_run_dir, exc)
+                except Exception as terminal_error:
+                    exc.add_note(f"terminal receipt unavailable: {terminal_error}")
             _write_failure_metadata(
                 effective_run_dir,
                 exc,
@@ -1059,6 +1072,16 @@ def install_product_commands(
                 raise typer.Exit(soak_exit_code(status)) from exc
             raise
         else:
+            if (
+                scenario_config.workflow == "soak"
+                and scenario_config.backend == "containerd"
+                and effective_run_dir is not None
+            ):
+                from nanolab.tasks.soak.containerd_runtime import (
+                    finalize_containerd_terminal,
+                )
+
+                finalize_containerd_terminal(effective_run_dir, None)
             _write_success_metadata(
                 effective_run_dir,
                 started_at=started_at,

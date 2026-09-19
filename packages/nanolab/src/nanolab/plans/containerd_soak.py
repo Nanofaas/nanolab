@@ -16,7 +16,10 @@ from nanolab.tasks.containerd_rootless import (
     run_for_environment,
 )
 from nanolab.tasks.platform import PlatformRequest, add_platform
-from nanolab.tasks.soak.containerd_runtime import ContainerdSoakRun
+from nanolab.tasks.soak.containerd_runtime import (
+    BuildExecutionRecorder,
+    ContainerdSoakRun,
+)
 
 
 def _run_image(function, run_id: str):
@@ -56,6 +59,18 @@ def build_containerd_soak_plan(
         or config.soak.images["control-plane"].variant != "jvm"
     ):
         raise ValueError("containerd soak currently requires a JVM process artifact")
+    for role, spec in config.soak.images.items():
+        runtime = config.soak.roles[role].runtime
+        expected_variant = {"jvm": "jvm", "node": "default"}.get(runtime)
+        if (
+            spec.mode != "build"
+            or spec.variant != expected_variant
+            or spec.build_options
+            or (role != "control-plane" and spec.modules)
+            or spec.artifact_kind
+            != ("process" if role == "control-plane" else "oci-image")
+        ):
+            raise ValueError(f"unsupported containerd soak image recipe for {role}")
     if (
         config.soak.prerequisites.required_coverage
         or any(config.soak.diagnostics.operations.values())
@@ -70,7 +85,7 @@ def build_containerd_soak_plan(
             "containerd soak requires a local or owned Multipass environment"
         )
     run = run_for_environment(repo_root, tool_root, environment)
-    executor = RoleBoundCommandTaskExecutor(bindings)
+    executor = BuildExecutionRecorder(RoleBoundCommandTaskExecutor(bindings))
     registry = registry_resource(run, executor=executor, role="stack")
     control = control_plane_resource(
         run,
@@ -93,7 +108,7 @@ def build_containerd_soak_plan(
         )
         for key in config.functions
     )
-    requested_modules = set(config.soak.images["control-plane"].modules)
+    requested_modules = config.soak.images["control-plane"].modules
     provider = "containerd-deployment-provider"
     if provider not in requested_modules:
         raise ValueError("containerd soak must build its declared provider module")
@@ -104,7 +119,9 @@ def build_containerd_soak_plan(
         build_control_plane=True,
         push_function_images=True,
         containerd_maven_repository=repository_for_build(environment),
-        additional_modules=tuple(sorted(requested_modules - {provider})),
+        additional_modules=tuple(
+            module for module in requested_modules if module != provider
+        ),
     )
     workflow = Workflow(workflow_id="containerd-soak")
     platform = add_platform(

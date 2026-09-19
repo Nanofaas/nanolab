@@ -15,6 +15,10 @@ from nanolab.plans.soak import (
 )
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
+from nanolab.tasks.soak.containerd_runtime import (
+    BuildExecutionRecorder,
+    ContainerdSoakRun,
+)
 
 
 def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
@@ -216,6 +220,12 @@ def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
     assert any("soak measurement" in title for title in titles)
     assert not any("Compose" in title or "Docker project" in title for title in titles)
     assert not (tmp_path / "run").exists()
+    tasks = [item.task for item in workflow.compile().tasks]
+    build = next(task for task in tasks if task.title == "Build control plane")
+    measure = next(task for task in tasks if isinstance(task, ContainerdSoakRun))
+    assert isinstance(build.executor, BuildExecutionRecorder)
+    assert build.executor is measure.executor
+    assert "-PcontainerdMavenLocal=true" in build.argv
 
 
 def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
@@ -240,6 +250,43 @@ def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
             repo_root=Path(os.environ["NANOFAAS_ROOT"]),
             tool_root=Path(__file__).parents[4],
         )
+
+
+@pytest.mark.parametrize(
+    ("role", "field", "value"),
+    [
+        ("word-stats-java", "variant", "native"),
+        ("word-stats-javascript", "build_options", {"RUNTIME_IMAGE": "other"}),
+        ("word-stats-java", "mode", "prebuilt"),
+    ],
+)
+def test_containerd_soak_rejects_unapplied_image_recipe_before_acquisition(
+    tmp_path, role, field, value
+):
+    scenario = (
+        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
+    )
+    data = yaml.safe_load(scenario.read_text())
+    data["soak"]["images"][role][field] = value
+    if field == "mode":
+        data["soak"]["images"][role]["digest"] = "registry/fn@sha256:" + "a" * 64
+        data["soak"]["images"][role]["provenance_receipt"] = "receipt.json"
+    config = ScenarioConfig.model_validate(data)
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "local", "containerdMavenRepository": str(tmp_path / "maven")}
+    )
+    with pytest.raises(ValueError, match=r"unsupported.*recipe"):
+        build_soak_plan(
+            config,
+            environment,
+            RoleBindings(
+                {"host": _CompileOnlyExecutor(), "stack": _CompileOnlyExecutor()}
+            ),
+            run_dir=tmp_path / "run",
+            repo_root=Path(os.environ["NANOFAAS_ROOT"]),
+            tool_root=Path(__file__).parents[4],
+        )
+    assert not (tmp_path / "run").exists()
 
 
 def test_containerd_soak_refuses_unimplemented_p24_diagnostics(tmp_path):

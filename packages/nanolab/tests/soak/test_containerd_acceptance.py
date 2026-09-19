@@ -72,6 +72,23 @@ def _case(tmp_path):
             if process
             else ["docker", "build", "-t", "127.0.0.1:5000/fn:soak-run123", "."]
         )
+        steps = (
+            [["./gradlew", ":functions:java:word-stats:bootJar", "--quiet"], command]
+            if role == "word-stats-java"
+            else [command]
+        )
+        titles = (
+            [
+                "Build application artifact: word-stats-java",
+                "Build image word-stats-java",
+            ]
+            if role == "word-stats-java"
+            else ["Build control plane" if process else f"Build image {role}"]
+        )
+        results = [
+            {"title": title, "argv": step, "status": "passed", "return_code": 0}
+            for title, step in zip(titles, steps, strict=True)
+        ]
         receipt = {
             "schema": "nanolab-containerd-build-v1",
             "role": role,
@@ -82,12 +99,23 @@ def _case(tmp_path):
             "artifact_kind": spec.artifact_kind,
             "artifact_path": path,
             "build_argv": command,
+            "build_steps": steps,
+            "build_results": results,
+            "mode": spec.mode,
+            "variant": spec.variant,
+            "modules": spec.modules,
+            "build_options": spec.build_options,
         }
         recipe = {
             "role": role,
             "artifact_kind": spec.artifact_kind,
             "platform": spec.platform,
             "build_argv": command,
+            "build_steps": steps,
+            "mode": spec.mode,
+            "variant": spec.variant,
+            "modules": spec.modules,
+            "build_options": spec.build_options,
         }
         for key, value in (("builds", receipt), ("recipes", recipe)):
             file = tmp_path / f"{key}-{role}.json"
@@ -109,6 +137,26 @@ def test_containerd_build_receipts_bind_real_process_and_images(tmp_path):
     assert "systemd process" in verify_containerd_builds(
         tmp_path, manifest, config, targets, source, observed
     )
+
+
+def test_containerd_build_receipts_reject_changed_frozen_recipe(tmp_path):
+    config, source, manifest, observed, targets = _case(tmp_path)
+    config.images["word-stats-java"].variant = "native"
+    with pytest.raises(ValueError, match="frozen recipe"):
+        verify_containerd_builds(tmp_path, manifest, config, targets, source, observed)
+
+
+def test_containerd_build_receipts_reject_failed_build_result(tmp_path):
+    config, source, manifest, observed, targets = _case(tmp_path)
+    reference = manifest["builds"]["word-stats-java"]
+    path = tmp_path / reference["path"]
+    receipt = json.loads(path.read_text())
+    receipt["build_results"][0]["return_code"] = 1
+    path.write_text(json.dumps(receipt))
+    reference["sha256"] = describe_artifact(path)["sha256"]
+    observed["build_receipts"]["word-stats-java"]["build_results"][0]["return_code"] = 1
+    with pytest.raises(ValueError, match="task results"):
+        verify_containerd_builds(tmp_path, manifest, config, targets, source, observed)
 
 
 def test_containerd_build_receipts_reject_unused_cp_image_claim(tmp_path):
@@ -134,6 +182,9 @@ def test_containerd_build_receipts_reject_different_repository_on_same_registry(
             "127.0.0.1:5000/foreign:soak-run123",
             ".",
         ]
+        value["build_steps"][-1] = value["build_argv"]
+        if "build_results" in value:
+            value["build_results"][-1]["argv"] = value["build_argv"]
         path.write_text(json.dumps(value))
         ref["sha256"] = describe_artifact(path)["sha256"]
     observed["build_receipts"]["word-stats-java"]["build_argv"] = [
@@ -143,6 +194,12 @@ def test_containerd_build_receipts_reject_different_repository_on_same_registry(
         "127.0.0.1:5000/foreign:soak-run123",
         ".",
     ]
+    observed["build_receipts"]["word-stats-java"]["build_steps"][-1] = observed[
+        "build_receipts"
+    ]["word-stats-java"]["build_argv"]
+    observed["build_receipts"]["word-stats-java"]["build_results"][-1]["argv"] = (
+        observed["build_receipts"]["word-stats-java"]["build_argv"]
+    )
     with pytest.raises(ValueError, match="repository"):
         verify_containerd_builds(tmp_path, manifest, config, targets, source, observed)
 

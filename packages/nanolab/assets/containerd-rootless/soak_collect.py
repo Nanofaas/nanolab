@@ -215,6 +215,8 @@ def exposition(target: dict, timeout: float) -> str:
                 "nsenter",
                 "--target",
                 str(target["process_id"]),
+                "--user",
+                "--preserve-credentials",
                 "--net",
                 "--",
                 "curl",

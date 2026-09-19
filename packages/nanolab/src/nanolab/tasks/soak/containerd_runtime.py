@@ -31,7 +31,91 @@ from nanolab.tasks.soak.runtime import (
     observe_local_configuration,
 )
 from nanolab.tasks.soak.sources import capture_source_snapshot
-from nanolab.tasks.soak.workflow import write_policy_input, write_terminal_receipt
+from nanolab.tasks.soak.workflow import (
+    _publish_run_document,
+    write_policy_input,
+    write_terminal_receipt,
+)
+
+
+def finalize_containerd_terminal(run_dir: Path, error: BaseException | None) -> Path:
+    """Seal the measured verdict only after Sonata and provisioning cleanup finish."""
+    marker = run_dir / "measurement-verdict.json"
+    status = "INCONCLUSIVE"
+    report_path = None
+    try:
+        if marker.is_file() and not marker.is_symlink():
+            with marker.open("rb") as stream:
+                body = stream.read(1024 * 1024 + 1)
+            if len(body) <= 1024 * 1024:
+                data = json.loads(body)
+                if (
+                    isinstance(data, dict)
+                    and data.get("schema") == "nanolab-containerd-measurement-v1"
+                ):
+                    status = data.get("status", "INCONCLUSIVE")
+                    report = data.get("report_path")
+                    report_path = Path(report) if isinstance(report, str) else None
+    except (OSError, ValueError, TypeError):
+        pass
+    if status not in {"PASS", "FAIL", "INCONCLUSIVE", "ABORTED"}:
+        status = "INCONCLUSIVE"
+    if error is not None:
+        if not isinstance(error, Exception):
+            status = "ABORTED"
+        elif status == "PASS":
+            status = "INCONCLUSIVE"
+    return write_terminal_receipt(
+        run_dir,
+        status,
+        report_path=report_path,
+        reason=str(error) if error is not None else None,
+    )
+
+
+class BuildExecutionRecorder:
+    """Retain successful build task commands observed at the executor boundary."""
+
+    def __init__(self, delegate: CommandTaskExecutor) -> None:
+        """Wrap the same executor used by platform build tasks."""
+        self.delegate = delegate
+        self.builds: dict[str, list[ObservedBuild]] = {}
+
+    def binding_key(self, role: str) -> str:
+        """Keep Sonata task fingerprints bound to the delegated role."""
+        return self.delegate.binding_key(role)
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False):
+        """Record a build command only when its real execution succeeded."""
+        result = self.delegate.run(task, dry_run=dry_run)
+        if task.role == "stack" and task.summary.startswith("Build "):
+            if dry_run or result.status != "passed" or result.return_code != 0:
+                raise RuntimeError(
+                    f"build task did not execute successfully: {task.summary}"
+                )
+            self.builds.setdefault(task.summary, []).append(
+                ObservedBuild(
+                    task.summary, tuple(task.argv), result.status, result.return_code
+                )
+            )
+        return result
+
+    def require_build(self, title: str) -> ObservedBuild:
+        """Return the one executed result for a planned task title."""
+        commands = self.builds.get(title, ())
+        if len(commands) != 1:
+            raise ValueError(f"missing or repeated successful build task: {title}")
+        return commands[0]
+
+
+@dataclass(frozen=True)
+class ObservedBuild:
+    """A command/result pair captured from the actual platform build task."""
+
+    title: str
+    argv: tuple[str, ...]
+    status: str
+    return_code: int
 
 
 @dataclass(frozen=True)
@@ -46,6 +130,12 @@ class ContainerdBuildReceipt:
     artifact_kind: str
     artifact_path: str | None
     build_argv: tuple[str, ...]
+    build_steps: tuple[tuple[str, ...], ...]
+    build_results: tuple[ObservedBuild, ...]
+    mode: str
+    variant: str
+    modules: tuple[str, ...]
+    build_options: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -56,6 +146,11 @@ class ContainerdRecipe:
     artifact_kind: str
     platform: str
     build_argv: tuple[str, ...]
+    build_steps: tuple[tuple[str, ...], ...]
+    mode: str
+    variant: str
+    modules: tuple[str, ...]
+    build_options: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -185,16 +280,9 @@ class ContainerdSoakRun(Task):
             actual = {role: transport.inspect(role)[1] for role in policy.roles}
             recipes = []
             receipts = []
-            commands = {
-                function.name: function.image_build_argv or function.build_argv
-                for function in self.functions
-            }
-            commands["control-plane"] = (
-                "./gradlew",
-                ":control-plane:bootJar",
-                "-PcontrolPlaneModules="
-                + ",".join(policy.images["control-plane"].modules),
-            )
+            if not isinstance(self.executor, BuildExecutionRecorder):
+                raise ValueError("containerd soak requires observed build task results")
+            functions = {function.name: function for function in self.functions}
             builds = ArtifactWriter(
                 evidence / "builds", policy.artifact_limit_bytes // 4
             )
@@ -208,8 +296,31 @@ class ContainerdSoakRun(Task):
                         raise ValueError(
                             f"{role} running artifact kind/platform differs from policy"
                         )
+                    if role == "control-plane":
+                        results = (self.executor.require_build("Build control plane"),)
+                    else:
+                        function = functions[role]
+                        results = (
+                            (
+                                self.executor.require_build(
+                                    f"Build application artifact: {role}"
+                                ),
+                            )
+                            if function.image_build_argv is not None
+                            else ()
+                        ) + (self.executor.require_build(f"Build image {role}"),)
+                    steps = tuple(result.argv for result in results)
+                    command = steps[-1]
                     recipe = ContainerdRecipe(
-                        role, spec.artifact_kind, spec.platform, tuple(commands[role])
+                        role,
+                        spec.artifact_kind,
+                        spec.platform,
+                        command,
+                        steps,
+                        spec.mode,
+                        spec.variant,
+                        tuple(spec.modules),
+                        dict(spec.build_options),
                     )
                     receipt = ContainerdBuildReceipt(
                         role,
@@ -219,7 +330,13 @@ class ContainerdSoakRun(Task):
                         detail["platform"],
                         spec.artifact_kind,
                         detail.get("artifact_path"),
-                        tuple(commands[role]),
+                        command,
+                        steps,
+                        results,
+                        spec.mode,
+                        spec.variant,
+                        tuple(spec.modules),
+                        dict(spec.build_options),
                     )
                     writer.write_json(f"recipe-{index}.json", asdict(recipe))
                     builds.write_json(
@@ -247,7 +364,7 @@ class ContainerdSoakRun(Task):
             raise
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[Any]:
-        """Measure the owned deployment and retain a terminal receipt on failure."""
+        """Measure the owned deployment; CLI seals its verdict after cleanup."""
         policy = self.scenario.soak
         if policy is None:
             raise ValueError("containerd soak policy unavailable")
@@ -329,14 +446,41 @@ class ContainerdSoakRun(Task):
                 transport=transport,
                 defer_terminal=True,
             )
-            return holder.run(inputs)
+            result = holder.run(inputs)
+            evaluation = holder.state.evaluation
+            _publish_run_document(
+                self.run_dir,
+                "measurement-verdict.json",
+                {
+                    "schema": "nanolab-containerd-measurement-v1",
+                    "status": evaluation.get("status")
+                    if isinstance(evaluation, dict)
+                    else "INCONCLUSIVE",
+                    "report_path": str(holder.state.report)
+                    if holder.state.report
+                    else None,
+                },
+            )
+            return result
         except BaseException as error:
-            if not (self.run_dir / "terminal.json").exists():
-                write_terminal_receipt(
+            if not (self.run_dir / "measurement-verdict.json").exists():
+                evaluation = getattr(getattr(holder, "state", None), "evaluation", None)
+                _publish_run_document(
                     self.run_dir,
-                    "ABORTED" if not isinstance(error, Exception) else "INCONCLUSIVE",
-                    report_path=getattr(getattr(holder, "state", None), "report", None),
-                    reason=str(error),
+                    "measurement-verdict.json",
+                    {
+                        "schema": "nanolab-containerd-measurement-v1",
+                        "status": (
+                            "ABORTED"
+                            if not isinstance(error, Exception)
+                            else evaluation.get("status")
+                            if isinstance(evaluation, dict)
+                            else "INCONCLUSIVE"
+                        ),
+                        "report_path": str(holder.state.report)
+                        if holder is not None and holder.state.report
+                        else None,
+                    },
                 )
             raise
         finally:

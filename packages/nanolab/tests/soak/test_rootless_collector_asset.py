@@ -3,6 +3,7 @@
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -76,3 +77,30 @@ def test_control_plane_platform_comes_from_actual_host(monkeypatch):
     monkeypatch.setattr(module.platform, "machine", lambda: "riscv64")
     with pytest.raises(ValueError, match="unsupported"):
         module.host_platform()
+
+
+def test_function_exposition_enters_owning_user_and_network_namespaces(monkeypatch):
+    module = _module()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(stdout=b"function_metric 1\n")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    assert module.exposition({"role": "word-stats-java", "process_id": 123}, 2) == (
+        "function_metric 1\n"
+    )
+    argv, options = calls[0]
+    assert argv[:8] == (
+        "nsenter",
+        "--target",
+        "123",
+        "--user",
+        "--preserve-credentials",
+        "--net",
+        "--",
+        "curl",
+    )
+    assert options["timeout"] == 3
+    assert options["check"] is True
