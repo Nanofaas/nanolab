@@ -1,8 +1,14 @@
+import os
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+import yaml
 from sonata_engine import Resource, Task, TaskOutcome
 from sonata_tasks.execution.bindings import RoleBindings
 
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.soak import (
     build_soak_plan,
     compose_frozen_soak_workflow,
@@ -182,3 +188,74 @@ def test_the_plan_acquires_a_builder_that_can_reach_the_local_registry(
 
     assert len(seen) == 1
     assert seen[0]["driver_options"] == ("network=host",)
+
+
+def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
+    scenario = (
+        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
+    )
+    config = ScenarioConfig.model_validate(yaml.safe_load(scenario.read_text()))
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "owned-soak-vm"}}}
+    )
+    workflow = build_soak_plan(
+        config,
+        environment,
+        RoleBindings({"host": _CompileOnlyExecutor(), "stack": _CompileOnlyExecutor()}),
+        run_dir=tmp_path / "run",
+        repo_root=Path(os.environ["NANOFAAS_ROOT"]),
+        tool_root=Path(__file__).parents[4],
+    )
+    titles = [task.task.title for task in workflow.compile().tasks]
+    assert any("rootless containerd test registry" in title for title in titles)
+    assert any("rootless containerd test runtime" in title for title in titles)
+    assert any("soak measurement" in title for title in titles)
+    assert not any("Compose" in title or "Docker project" in title for title in titles)
+    assert not (tmp_path / "run").exists()
+
+
+def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
+    scenario = (
+        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
+    )
+    data = yaml.safe_load(scenario.read_text())
+    data["soak"]["roles"]["control-plane"]["runtime"] = "native"
+    data["soak"]["images"]["control-plane"]["variant"] = "native"
+    config = ScenarioConfig.model_validate(data)
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "owned-soak-vm"}}}
+    )
+    with pytest.raises(ValueError, match="JVM process artifact"):
+        build_soak_plan(
+            config,
+            environment,
+            RoleBindings(
+                {"host": _CompileOnlyExecutor(), "stack": _CompileOnlyExecutor()}
+            ),
+            run_dir=tmp_path / "run",
+            repo_root=Path(os.environ["NANOFAAS_ROOT"]),
+            tool_root=Path(__file__).parents[4],
+        )
+
+
+def test_containerd_soak_refuses_unimplemented_p24_diagnostics(tmp_path):
+    scenario = (
+        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
+    )
+    config = ScenarioConfig.model_validate(yaml.safe_load(scenario.read_text()))
+    assert config.soak is not None
+    config.soak.prerequisites.required_coverage.append("sync")
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "owned-soak-vm"}}}
+    )
+    with pytest.raises(ValueError, match="prerequisite and diagnostic adapters"):
+        build_soak_plan(
+            config,
+            environment,
+            RoleBindings(
+                {"host": _CompileOnlyExecutor(), "stack": _CompileOnlyExecutor()}
+            ),
+            run_dir=tmp_path / "run",
+            repo_root=Path(os.environ["NANOFAAS_ROOT"]),
+            tool_root=Path(__file__).parents[4],
+        )

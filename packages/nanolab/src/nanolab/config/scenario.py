@@ -254,8 +254,8 @@ class ScenarioConfig(BaseModel):
         if self.workflow == "soak":
             if self.soak is None:
                 raise ValueError("soak workflow requires its protocol block")
-            if self.backend != "container":
-                raise ValueError("soak currently requires the container backend")
+            if self.backend not in {"container", "containerd"}:
+                raise ValueError("soak requires a container or containerd backend")
             unexpected = self.model_fields_set - {
                 "workflow",
                 "backend",
@@ -269,6 +269,21 @@ class ScenarioConfig(BaseModel):
                     + ", ".join(sorted(unexpected))
                 )
             self.soak.validate_functions(self.functions)
+            for name, role in self.soak.roles.items():
+                image = self.soak.images[name]
+                if self.backend == "containerd":
+                    expected = "process" if name == "control-plane" else "oci-image"
+                    if image.artifact_kind != expected:
+                        raise ValueError(f"{name} requires {expected} artifact")
+                    if (
+                        "docker-engine" in role.collection_sources
+                        or "docker-engine" in role.required_capabilities
+                    ):
+                        raise ValueError(
+                            "containerd soak cannot claim Docker engine observations"
+                        )
+                elif image.artifact_kind != "oci-image":
+                    raise ValueError("Docker soak requires OCI images for every role")
             if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
                 raise ValueError(
                     "resources must refer to selected functions or control-plane"

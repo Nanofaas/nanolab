@@ -312,6 +312,7 @@ def test_scale_to_zero_scenario_rejects_an_environment_without_the_feature_gate(
         build_loadtest_plan(
             ScenarioConfig(
                 workflow="loadtest",
+                backend="k8s",
                 functions=["word-stats-java"],
                 autoscaling=True,
                 autoscalingStrategy="HPA",
@@ -333,6 +334,7 @@ def test_scale_to_zero_scenario_accepts_an_environment_that_provides_the_gate(
     plan = build_loadtest_plan(
         ScenarioConfig(
             workflow="loadtest",
+            backend="k8s",
             functions=["word-stats-java"],
             autoscaling=True,
             autoscalingStrategy="HPA",

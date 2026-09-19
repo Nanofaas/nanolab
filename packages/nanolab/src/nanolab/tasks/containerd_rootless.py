@@ -119,8 +119,31 @@ def control_plane_resource(
     requires: tuple[Resource[Any], ...] = (),
     cpuset_cores: int = 0,
     budget: str = "",
+    mode: str | None = None,
+    artifact: Path | None = None,
+    cpu: float | None = None,
+    memory_bytes: int | None = None,
 ) -> Resource[RootlessRun]:
     """Start and later stop the control-plane unit and owned publications."""
+    if artifact is not None and (
+        not artifact.is_absolute()
+        or mode not in {"jvm", "native"}
+        or cpu is None
+        or cpu <= 0
+        or memory_bytes is None
+        or memory_bytes <= 0
+    ):
+        raise ValueError(
+            "soak control plane requires absolute artifact and positive limits"
+        )
+    extra = (
+        (mode, str(artifact), str(cpu), str(memory_bytes))
+        if artifact is not None
+        and mode is not None
+        and cpu is not None
+        and memory_bytes is not None
+        else ()
+    )
     return _resource(
         run,
         name="rootless containerd test runtime",
@@ -129,7 +152,7 @@ def control_plane_resource(
         executor=executor,
         role=role,
         requires=requires,
-        start_args=(str(cpuset_cores), budget),
+        start_args=(str(cpuset_cores), budget, *extra),
     )
 
 

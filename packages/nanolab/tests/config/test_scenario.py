@@ -1,9 +1,33 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from nanolab.config.scenario import ScenarioConfig
+
+
+def test_containerd_soak_requires_process_cp_and_actual_cgroup_source() -> None:
+    scenario = (
+        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
+    )
+    data = yaml.safe_load(scenario.read_text())
+    assert ScenarioConfig.model_validate(data).backend == "containerd"
+    data["soak"]["roles"]["control-plane"]["collection_sources"] = [
+        "procfs",
+        "docker-engine",
+    ]
+    with pytest.raises(ValidationError, match="cannot claim Docker engine"):
+        ScenarioConfig.model_validate(data)
+    data["soak"]["roles"]["control-plane"]["collection_sources"] = [
+        "procfs",
+        "cgroup-v2",
+    ]
+    data["soak"]["images"]["control-plane"]["artifact_kind"] = "oci-image"
+    with pytest.raises(ValidationError, match="requires process artifact"):
+        ScenarioConfig.model_validate(data)
 
 
 @pytest.mark.parametrize("workflow", ["validate", "cli", "loadtest"])

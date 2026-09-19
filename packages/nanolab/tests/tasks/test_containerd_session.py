@@ -282,6 +282,59 @@ def test_control_restart_keeps_run_owned_registry_and_provider_state(
     assert (state / "cni-cache").is_dir()
 
 
+def test_soak_control_start_sets_actual_artifact_limits_and_cleans_owned_dropin(
+    session_home: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
+    home, env = session_home
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    script = runner / "session.sh"
+    script.write_bytes(SESSION.read_bytes())
+    (runner / "provision.sh").write_text("#!/bin/sh\nexit 0\n")
+    repo = tmp_path / "repo"
+    template = repo / "deploy/containerd-rootless/nanofaas.service"
+    template.parent.mkdir(parents=True)
+    template.write_text(
+        "[Service]\nEnvironmentFile=@NANOLAB_ENV_FILE@\nExecStart=@NANOFAAS_ROOT@/start-control-plane.sh\n"
+    )
+    artifact = repo / "platform/control-plane/build/libs/app.jar"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"actual jar")
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            "control-start",
+            "run123",
+            str(repo),
+            "0",
+            "",
+            "jvm",
+            str(artifact),
+            "2",
+            "1073741824",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    state = home / ".local/share/nanolab/containerd-rootless/run123"
+    values = dict(
+        line.split("=", 1)
+        for line in (state / "control-plane.env").read_text().splitlines()
+    )
+    assert values["NANOFAAS_CONTROL_PLANE_MODE"] == "jvm"
+    assert values["NANOFAAS_CONTROL_PLANE_ARTIFACT"] == str(artifact)
+    dropin = home / ".config/systemd/user/nanofaas-run123.service.d/limits.conf"
+    assert "CPUQuota=200%" in dropin.read_text()
+    assert "MemoryMax=1073741824" in dropin.read_text()
+    _run("control-stop", home, env)
+    assert not dropin.exists()
+    assert not (state / "soak-limits-owned").exists()
+
+
 @pytest.mark.parametrize("matches", [0, 2])
 def test_inspect_owned_rejects_missing_or_ambiguous_matches(
     session_home: tuple[Path, dict[str, str]], matches: int

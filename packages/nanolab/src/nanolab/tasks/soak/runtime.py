@@ -1413,6 +1413,11 @@ def create_soak_lifecycle(
         "schema": "nanolab-soak-v1",
         "run_id": prepared.run_id,
         "policy_sha256": fingerprint(config.model_dump(mode="json")),
+        "backend": (
+            "containerd"
+            if config.images["control-plane"].artifact_kind == "process"
+            else "container"
+        ),
     }
     results: tuple = ()
     diagnostic_entries: list[dict] = []
@@ -1822,6 +1827,7 @@ def create_soak_lifecycle(
         for key, name in {
             "config": "config.json",
             "source": "source/snapshot.json",
+            "remote_source": "remote-source.json",
             "preflight": "preflight.json",
             "prerequisites": "prerequisites.json",
             "prerequisite_inputs": "prerequisite-inputs.json",

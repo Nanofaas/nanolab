@@ -70,6 +70,7 @@ class PhaseConfig(_StrictModel):
 class ImageBuildSpec(_StrictModel):
     """Build a requested recipe unless immutable prebuilt use is explicit."""
 
+    artifact_kind: Literal["oci-image", "process"] = "oci-image"
     mode: Literal["build", "prebuilt"] = "build"
     variant: Text
     platform: Annotated[str, Field(pattern=r"^linux/(amd64|arm64)(/v8)?$")]

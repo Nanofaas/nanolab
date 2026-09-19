@@ -68,6 +68,11 @@ control_stop() {
     rm -f "$unit_path"
     systemctl --user daemon-reload
   fi
+  if [[ -f $state/soak-limits-owned ]]; then
+    rm -f "$unit_path.d/limits.conf" "$state/soak-limits-owned"
+    rmdir "$unit_path.d" 2>/dev/null || true
+    systemctl --user daemon-reload
+  fi
   rm -f "$state/control-plane.env"
 }
 
@@ -138,9 +143,24 @@ PROMETHEUS
   control-start)
     cpuset_cores=${1:-0}
     budget=${2:-}
+    artifact_mode=${3:-}
+    artifact_path=${4:-}
+    cpu_limit=${5:-}
+    memory_limit=${6:-}
     [[ $cpuset_cores =~ ^[0-9]+$ && $budget =~ ^[0-9]*$ ]] || {
       echo "core count and budget must be nonnegative integers" >&2; exit 2;
     }
+    if [[ -n $artifact_mode || -n $artifact_path || -n $cpu_limit || -n $memory_limit ]]; then
+      [[ $artifact_mode == jvm || $artifact_mode == native ]] || {
+        echo "invalid control-plane artifact mode" >&2; exit 2;
+      }
+      [[ $artifact_path =~ ^/[A-Za-z0-9_./-]+$ && $artifact_path == "$repo_root/"* && -f $artifact_path ]] || {
+        echo "control-plane artifact must be a built file in the staged repository" >&2; exit 2;
+      }
+      [[ $cpu_limit =~ ^[0-9]+([.][0-9]+)?$ && $memory_limit =~ ^[0-9]+$ && $memory_limit -gt 0 ]] || {
+        echo "invalid soak CPU or memory limit" >&2; exit 2;
+      }
+    fi
     bash "$(dirname "$0")/provision.sh" check
     mkdir -p "$state/containerd" "$state/cni-cache" "$HOME/.config/systemd/user"
     chmod 700 "$state" "$state/containerd" "$state/cni-cache"
@@ -152,6 +172,23 @@ PROMETHEUS
       "$namespace" "$HOME/.config/cni/net.d" \
       "$state/cni-cache" "$state/containerd" > "$env_file"
     printf 'NANOFAAS_REGISTRY_PATH=%s\n' "$state/functions.json" >> "$env_file"
+    if [[ -n $artifact_mode ]]; then
+      printf 'NANOFAAS_CONTROL_PLANE_MODE=%s\nNANOFAAS_CONTROL_PLANE_ARTIFACT=%s\n' \
+        "$artifact_mode" "$artifact_path" >> "$env_file"
+      [[ ! -e $unit_path.d/limits.conf ]] || {
+        echo "soak unit limits already exist" >&2; exit 1;
+      }
+      mkdir -p "$unit_path.d"
+      touch "$state/soak-limits-owned"
+      cpu_percent=$(python3 - "$cpu_limit" <<'PY'
+from decimal import Decimal
+import sys
+print(Decimal(sys.argv[1]) * 100)
+PY
+      )
+      printf '[Service]\nCPUQuota=%s%%\nMemoryMax=%s\n' \
+        "$cpu_percent" "$memory_limit" > "$unit_path.d/limits.conf"
+    fi
     if (( cpuset_cores > 0 )); then
       cpuset=$(python3 - "$cpuset_cores" <<'PY'
 import os

@@ -87,6 +87,37 @@ def test_control_plane_receives_per_run_core_count_and_budget() -> None:
     assert start.argv[-2:] == ("4", "12")
 
 
+def test_soak_control_plane_declares_actual_artifact_and_cgroup_limits() -> None:
+    executor = Executor()
+    run = RootlessRun(
+        "run123", Path("/home/ubuntu/nanofaas"), Path("/assets/session.sh")
+    )
+    control = control_plane_resource(
+        run,
+        executor=executor,
+        role="stack",
+        mode="jvm",
+        artifact=run.repo_root / "platform/control-plane/build/libs/app.jar",
+        cpu=2,
+        memory_bytes=1073741824,
+    )
+    workflow = Workflow(workflow_id="soak-artifact")
+    workflow.add(
+        CommandTask(
+            title="Use platform", argv=("true",), executor=executor, role="stack"
+        ),
+        requires=(control,),
+    )
+    workflow.run()
+    start = next(spec for spec in executor.seen if "control-start" in spec.argv)
+    assert start.argv[-4:] == (
+        "jvm",
+        "/home/ubuntu/nanofaas/platform/control-plane/build/libs/app.jar",
+        "2",
+        "1073741824",
+    )
+
+
 def test_rootless_runtime_cleans_up_after_workload_failure() -> None:
     class FailingExecutor(Executor):
         def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
