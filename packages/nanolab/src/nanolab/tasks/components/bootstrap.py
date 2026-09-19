@@ -318,18 +318,32 @@ def retarget_bootstrap_operation(
             ),
         )
 
-    if operation.operation_id in ("repo.sync_to_vm", _ASSETS_SYNC_TO_VM):
+    if operation.operation_id in (
+        "repo.sync_to_vm",
+        _ASSETS_SYNC_TO_VM,
+        "containerd.maven.sync_to_vm",
+    ):
         request = context.vm_request
         assets = operation.operation_id == _ASSETS_SYNC_TO_VM
+        maven = operation.operation_id == "containerd.maven.sync_to_vm"
         if assets and context.assets_root is None:
             raise ValueError("assets sync requires context.assets_root")
+        destination = (
+            operation.argv[-1].rpartition(":")[2]
+            if maven
+            else remote_assets_dir(request)
+            if assets
+            else _remote_project_dir(request)
+        )
+        if not destination:
+            raise ValueError("Maven sync destination is missing")
         argv = repo_rsync_command(
-            source=cast(Path, context.assets_root) if assets else context.repo_root,
+            source=Path(operation.argv[-2])
+            if maven
+            else (cast(Path, context.assets_root) if assets else context.repo_root),
             user=request.user,
             host=host,
-            destination=remote_assets_dir(request)
-            if assets
-            else _remote_project_dir(request),
+            destination=destination,
             ssh_rsh=repo_sync_ssh_rsh(private_key, port=port),
         )
         return cast(RemoteCommandOperation, replace(operation, argv=tuple(argv)))
