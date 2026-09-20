@@ -6,21 +6,21 @@ version = "0.6.0"
 description = "Control-plane orchestration product for build, test, and reporting"
 requires-python = ">=3.12"
 dependencies = [
-    "azure-vm-sdk @ git+https://github.com/miciav/azure-vm-sdk.git@eb8a54203e36ea48cb37ba26044353ba4afc8259",
+    "azure-vm-sdk==0.6.0",
     "httpx>=0.27",
-    "multipass-sdk @ git+https://github.com/miciav/multipass-sdk.git@402c4061e6b32cc6dda5e7a9876fa7cefd6f9ae1",
+    "multipass-vm-sdk==0.6.0",
     "pandas>=2.2",
     "plotly>=5.24",
     "pydantic-settings>=2.5",
-    "proxmox-sdk @ git+https://github.com/miciav/proxmox-sdk.git@b82c68c3ed5ecfdb9b90c047bb43df4749dd9817",
-    "shellcraft @ git+https://github.com/miciav/shellcraft.git@9f2726ac31ab5bdcbf9a378f1cc4d99bdb5090c0",
+    "proxmox-vm-sdk==0.6.0",
+    "subprocess-toolkit==0.6.0",
     "typer>=0.12.5",
     "questionary>=2.1.1",
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@ba8e02b097943202e5d09b89ae0a3b692cebe278",
-    "sonata-tasks[shell,prometheus,multipass,azure,proxmox] @ git+https://github.com/miciav/sonata.git@c9d3f52dd8e8c99b7cae3365f7ab514b00ed3186#subdirectory=packages/sonata-tasks",
+    "sonata-engine==0.6.1",
+    "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.1",
     "tui-toolkit",
 ]
 
@@ -64,7 +64,6 @@ dev = [
 ]
 
 [tool.uv.sources]
-sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "c9d3f52dd8e8c99b7cae3365f7ab514b00ed3186", subdirectory = "packages/sonata-tasks" }
 tui-toolkit = { workspace = true }
 
 [tool.pytest.ini_options]

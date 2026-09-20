@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-from multipass import MultipassClient
+from multipass_vm_sdk import MultipassClient
 from sonata_tasks.execution.bindings import CommandTaskExecutor, RoleBindings
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 from sonata_tasks.shell import ShellBackend, SubprocessShell

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from proxmox_sdk.exceptions import VmNotFoundError as ProxmoxVmNotFoundError
+from proxmox_vm_sdk.exceptions import VmNotFoundError as ProxmoxVmNotFoundError
 from sonata_engine.workflow.reporting import subtask
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
 from sonata_tasks.vm.azure import AzureVmProvider

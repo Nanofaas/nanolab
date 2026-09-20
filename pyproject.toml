@@ -5,21 +5,14 @@ license-files = ["LICENSE"]
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "sonata-engine @ git+https://github.com/Nanofaas/sonata.git@ba8e02b097943202e5d09b89ae0a3b692cebe278",
+    "sonata-engine==0.6.1",
 ]
 
 [tool.uv]
 package = false
-override-dependencies = [
-    "sonata-engine @ git+https://github.com/Nanofaas/sonata.git@ba8e02b097943202e5d09b89ae0a3b692cebe278",
-]
 
 [tool.uv.workspace]
 members = [
     "packages/nanolab",
     "packages/tui-toolkit",
 ]
-
-[tool.uv.sources]
-sonata-engine = { git = "https://github.com/Nanofaas/sonata.git", rev = "ba8e02b097943202e5d09b89ae0a3b692cebe278" }
-sonata-tasks = { git = "https://github.com/Nanofaas/sonata.git", rev = "c9d3f52dd8e8c99b7cae3365f7ab514b00ed3186", subdirectory = "packages/sonata-tasks" }
