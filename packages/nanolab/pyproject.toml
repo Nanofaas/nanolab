@@ -2,7 +2,7 @@
 name = "nanolab"
 license = "MIT"
 license-files = ["LICENSE"]
-version = "0.1.0"
+version = "0.6.0"
 description = "Control-plane orchestration product for build, test, and reporting"
 requires-python = ">=3.12"
 dependencies = [

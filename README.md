@@ -1,6 +1,6 @@
 # nanolab
 
-`miciav/nanolab` is the standalone home for the operational tooling extracted
+`Nanofaas/nanolab` is the standalone home for the operational tooling extracted
 from nanofaas. It contains three Python workspace members:
 
 - `packages/nanolab`: the nanofaas operations CLI and supporting tooling

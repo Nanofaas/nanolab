@@ -5,7 +5,7 @@ Workflow event types and reporting helpers live in sonata_engine.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.6.0"
 
 # theming + setup
 import tui_toolkit.console as console
