@@ -1,4 +1,4 @@
-"""Resolved locations for the nanoFaaS checkout and this tool's own outputs."""
+"""Resolved locations: the nanoFaaS checkout, this tool's outputs, its assets."""
 
 from __future__ import annotations
 
@@ -38,6 +38,20 @@ class ToolPaths:
 def discover_tool_root() -> Path:
     """Return the root of the ``nanolab`` package this module ships in."""
     return Path(__file__).resolve().parents[3]
+
+
+def bundled_assets_root() -> Path:
+    """Return the ``assets`` directory inside this package.
+
+    Deliberately separate from :func:`discover_tool_root`. That one is the
+    checkout, which holds the caller's scenarios, profiles and run outputs and is
+    legitimately absent from an installed wheel. These assets ship *inside* the
+    distribution, so they are derived from the package and never from a directory
+    beside it -- deriving them from the checkout worked until nanolab was
+    installed, where the parent of the package is site-packages and holds no
+    assets at all.
+    """
+    return Path(__file__).resolve().parents[1] / "assets"
 
 
 def nanofaas_root_from_env() -> Path:

@@ -7,9 +7,10 @@ import subprocess
 import sys
 import zlib
 from hashlib import sha256
-from pathlib import Path
 
-ASSET = Path(__file__).parents[2] / "assets/containerd-rootless/source_verify.py"
+from nanolab.workspace.paths import bundled_assets_root
+
+ASSET = bundled_assets_root() / "containerd-rootless/source_verify.py"
 
 
 def _check(root, entries):

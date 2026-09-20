@@ -140,8 +140,10 @@ def test_the_build_context_resolves_from_this_package(tmp_path) -> None:
     """
     _request(tmp_path)  # raises if the derived context has no Dockerfile
 
+    # Derived from the package, not from the checkout: these assets ship in the
+    # wheel, so the context has to be a path that still exists after an install.
+    assert BUILD_CONTEXT.name == "nanolab"
     assert (BUILD_CONTEXT / DOCKERFILE).is_file()
-    assert BUILD_CONTEXT.parts[-2:] == ("packages", "nanolab")
 
 
 def _soak_config(**diagnostics: object):

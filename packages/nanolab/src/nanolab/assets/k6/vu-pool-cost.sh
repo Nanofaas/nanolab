@@ -2,7 +2,9 @@
 # Quanta memoria costano N VU preallocate, con QUESTO script.
 # Endpoint morto: le richieste falliscono subito, ma le VU vengono allocate lo
 # stesso - l'allocazione avviene all'avvio, non alla prima iterazione.
-S=/Users/micheleciavotta/Downloads/nanolab/.worktrees/dispatch-instrumentation/packages/nanolab/assets/k6/runtime-comparison.js
+# Beside this script, so it runs from any checkout: it used to carry an absolute
+# path into one developer's worktree, which no other machine could resolve.
+S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-comparison.js"
 for n in "$@"; do
   NANOFAAS_URL=http://127.0.0.1:1 K6_MAX_VUS=$n K6_RATE_SCALE=2.0 \
     k6 run --quiet "$S" >/dev/null 2>&1 &

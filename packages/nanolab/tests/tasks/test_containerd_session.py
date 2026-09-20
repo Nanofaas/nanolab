@@ -15,8 +15,9 @@ from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks.containerd_rootless import RootlessRun
 from nanolab.tasks.resources import ContainerdResourceCheckTask
+from nanolab.workspace.paths import bundled_assets_root
 
-SESSION = Path(__file__).resolve().parents[2] / "assets/containerd-rootless/session.sh"
+SESSION = bundled_assets_root() / "containerd-rootless/session.sh"
 
 
 @pytest.fixture

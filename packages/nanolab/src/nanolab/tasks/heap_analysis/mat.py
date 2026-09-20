@@ -29,6 +29,7 @@ from threading import Event
 
 from nanolab.tasks.soak.artifacts import describe_artifact, measure_tree
 from nanolab.tasks.soak.processes import run_owned_command
+from nanolab.workspace.paths import bundled_assets_root
 
 _DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
 
@@ -57,9 +58,10 @@ _PIDS_LIMIT = "512"
 _REAP_TIMEOUT_S = 30
 _DOCKER_LOG_LIMIT_BYTES = 1024 * 1024
 
-# packages/nanolab/assets/soak/mat.lock.json - the same repo-relative asset
-# lookup pattern runtime.py/workload.py already use for assets/soak/*.
-_LOCK_PATH = Path(__file__).resolve().parents[4] / "assets/soak/mat.lock.json"
+# The lock lives beside this package: the same bundled-asset lookup runtime.py
+# and workload.py already use for assets/soak/*, and the only one that still
+# resolves once nanolab is installed rather than run from a checkout.
+_LOCK_PATH = bundled_assets_root() / "soak/mat.lock.json"
 _UNKNOWN_MAT_VERSION = "unknown"
 
 

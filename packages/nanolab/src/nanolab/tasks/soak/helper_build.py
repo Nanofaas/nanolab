@@ -21,6 +21,7 @@ from pathlib import Path
 from threading import Event
 
 from nanolab.tasks.soak.processes import run_owned_command
+from nanolab.workspace.paths import bundled_assets_root
 
 _DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
 # The helper is built from this package, resolved from this file rather than
@@ -29,8 +30,8 @@ _DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
 # lookup was correct; after the extraction to a standalone workspace that path
 # exists only under nanolab's own root, and nothing noticed until a real `run`
 # tried to build. Same derivation the asset lookup below already uses.
-BUILD_CONTEXT = Path(__file__).resolve().parents[4]
-_ASSETS = BUILD_CONTEXT / "assets" / "soak"
+BUILD_CONTEXT = bundled_assets_root().parent
+_ASSETS = bundled_assets_root() / "soak"
 MAT_LOCK = _ASSETS / "mat.lock.json"
 BASES_LOCK = _ASSETS / "helper-bases.lock.json"
 DOCKERFILE = "assets/soak/diagnostic-helper.Dockerfile"

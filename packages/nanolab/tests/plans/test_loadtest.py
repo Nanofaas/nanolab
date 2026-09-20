@@ -11,6 +11,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.tasks.loadtest.models import TimeWindow
+from nanolab.workspace.paths import bundled_assets_root
 
 CONTROL_PLANE_LOG = "InternalScaler starting with poll interval 5000ms\n"
 
@@ -525,7 +526,7 @@ def test_local_loadtest_reads_k6_script_from_the_nanolab_package(
     k6 = next(
         command for command in _run(workflow, executor) if command.startswith("k6 run")
     )
-    assert str(tool_root / "assets/k6/two-vm-function-invoke.js") in k6
+    assert str(bundled_assets_root() / "k6/two-vm-function-invoke.js") in k6
 
 
 def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:

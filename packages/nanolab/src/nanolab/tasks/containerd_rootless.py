@@ -14,6 +14,7 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.tasks.execution import ExecutionRole
+from nanolab.workspace.paths import bundled_assets_root
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,10 +28,13 @@ class RootlessRun:
 
 def run_for_environment(
     repo_root: Path,
-    tool_root: Path,
     environment: EnvironmentConfig | None,
 ) -> RootlessRun:
-    """Resolve absolute paths on the machine running the rootless daemon."""
+    """Resolve absolute paths on the machine running the rootless daemon.
+
+    The script is the one bundled in this package, so there is no tool root to
+    take: a checkout and an installed wheel resolve it the same way.
+    """
     if environment is not None and environment.provider != "local":
         home = Path(environment.target("stack").remote_home)
         return RootlessRun(
@@ -41,7 +45,7 @@ def run_for_environment(
     return RootlessRun(
         uuid4().hex[:12],
         repo_root,
-        tool_root / "assets/containerd-rootless/session.sh",
+        bundled_assets_root() / "containerd-rootless/session.sh",
     )
 
 

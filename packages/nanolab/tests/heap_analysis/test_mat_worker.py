@@ -11,13 +11,15 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 
-WORKER = Path(__file__).resolve().parents[2] / "assets" / "soak" / "mat-worker.py"
+from nanolab.workspace.paths import bundled_assets_root
+
+WORKER = bundled_assets_root() / "soak" / "mat-worker.py"
 
 FAKE_LAUNCHER = """#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
+
 
 recorder = Path(os.environ["MAT_TEST_RECORDER"])
 args = sys.argv[1:]

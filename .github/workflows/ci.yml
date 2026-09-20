@@ -134,6 +134,10 @@ jobs:
           # repeating it here means a version bump breaks CI for no reason.
           uv pip install dist/*.whl --python .wheel-smoke/bin/python
           .wheel-smoke/bin/python -c "import nanolab, sonata_tasks, tui_toolkit"
+          # The bundled assets have to resolve from the installed copy. The wheel is
+          # their only source, and a checkout-relative path resolves fine in a source
+          # tree and fails only after an install -- which is how this broke twice.
+          .wheel-smoke/bin/python -c "from nanolab.workspace.paths import bundled_assets_root; a = bundled_assets_root(); assert a.is_dir(), a; assert (a / 'k6/soak-workload.js').is_file(), a"
           .wheel-smoke/bin/nanolab --help
 
   plans:

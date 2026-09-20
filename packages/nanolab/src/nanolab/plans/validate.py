@@ -41,7 +41,7 @@ from nanolab.tasks.validate import (
 )
 from nanolab.tasks.validate import ValidateFunction as SonataFunction
 from nanolab.tasks.validate_recovery import managed_container_cleanup_resource
-from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.paths import bundled_assets_root
 from nanolab.workspace.provenance import source_fingerprint
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -281,14 +281,13 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         persistent_recovery=config.persistent_recovery,
     )
     if kubernetes:
-        product_root = tool_root or discover_tool_root()
         if environment is not None and environment.provider != "local":
             target = environment.target("stack")
             queue_burst_script = (
                 Path(target.remote_home) / "nanolab-assets/k6/k8s-queue-burst.js"
             )
         else:
-            queue_burst_script = product_root / "assets/k6/k8s-queue-burst.js"
+            queue_burst_script = bundled_assets_root() / "k6/k8s-queue-burst.js"
         request = replace(
             request,
             queue_probe=SonataFunction(
@@ -327,7 +326,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
     requires = ()
     control_plane_process: Callable[[], Resource] | None = None
     if config.backend == "containerd":
-        run = run_for_environment(root, tool_root or discover_tool_root(), environment)
+        run = run_for_environment(root, environment)
         registry = registry_resource(
             run,
             executor=RoleBoundCommandTaskExecutor(bindings),
