@@ -109,7 +109,8 @@ known-first-party = ["tui_toolkit"]
 # basedpyright - type checking
 # =============================================================================
 # reportImplicitOverride is left off because typing.override requires 3.12 and
-# this package supports 3.11 (see the same note in shellcraft and proxmox-sdk).
+# this package supports 3.11 (see the same note in subprocess-toolkit and
+# proxmox-vm-sdk).
 
 [tool.basedpyright]
 include = ["src/tui_toolkit"]

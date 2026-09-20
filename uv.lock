@@ -720,8 +720,8 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.8" },
-    { name = "sonata-engine", specifier = "==0.6.1" },
-    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], specifier = "==0.6.1" },
+    { name = "sonata-engine", specifier = "==0.6.2" },
+    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], specifier = "==0.6.2" },
     { name = "subprocess-toolkit", specifier = "==0.6.0" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
@@ -749,7 +749,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sonata-engine", specifier = "==0.6.1" }]
+requires-dist = [{ name = "sonata-engine", specifier = "==0.6.2" }]
 
 [[package]]
 name = "narwhals"
@@ -1373,23 +1373,23 @@ wheels = [
 
 [[package]]
 name = "sonata-engine"
-version = "0.6.1"
+version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ea/dc/f061753122f04a9ad9353281a6922f6b58f7a8fb87bc43a70e86988abd6a/sonata_engine-0.6.1.tar.gz", hash = "sha256:678caa68192e8331381bb77b130903fe69c19e61818dc6b2c9a9753ab334f43a", size = 54556, upload-time = "2026-09-20T13:57:17.919Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/64/47ec4cbc5210762dadb21c551478743db9c4f5f587fd7a291fe9e4f6d5a4/sonata_engine-0.6.2.tar.gz", hash = "sha256:bd716752ddbf5000e2f50f453875c5a3b21a67853ae73f71006b98f0cb4efb1c", size = 54564, upload-time = "2026-09-20T17:34:57.045Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/3f/ed50c474cfe8964ce0740bb28e94e013dd415ad17137d4ddde4793b85ffd/sonata_engine-0.6.1-py3-none-any.whl", hash = "sha256:35d044d8aae8c27ef94c9d394f484b86a11d6cd9ab26783d641b576f0b31c7b8", size = 46070, upload-time = "2026-09-20T13:57:16.647Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/84/c536117b1dfcbda7f6a421e76a71d17258ef21ac8720fd9445140db0947e/sonata_engine-0.6.2-py3-none-any.whl", hash = "sha256:594a69358e9910fc601c6071337f3d59ed6078b4b6292de891ea89431fb4ea2a", size = 46070, upload-time = "2026-09-20T17:34:55.303Z" },
 ]
 
 [[package]]
 name = "sonata-tasks"
-version = "0.6.1"
+version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "sonata-engine" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/f5/5baa172788d5ff35a76f3cfce43c16a2c98f05988562833e3749a83f405b/sonata_tasks-0.6.1.tar.gz", hash = "sha256:779db2f0f0593ffde261df05b7c8f57494da8a5a86b80c6894cf1cbe200f1e93", size = 79092, upload-time = "2026-09-20T14:05:57.948Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/9b/edbef76bb1693f7552a4b74606c8794b0cbdd763d2b76e3b65291a3a1c62/sonata_tasks-0.6.2.tar.gz", hash = "sha256:9f407b32c80be47ecc5bade562c3214e6b6b987b754d85f78a06e926930aa4de", size = 79403, upload-time = "2026-09-20T17:35:25.089Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/77/77bef39f679be0377a0210602c03c34718349663be37a88f144c520ebee9/sonata_tasks-0.6.1-py3-none-any.whl", hash = "sha256:fa25f4ad971bbec26074e2f8d721c2e248a87ec74be169078c6aa86eaba8e8be", size = 73066, upload-time = "2026-09-20T14:05:56.492Z" },
+    { url = "https://files.pythonhosted.org/packages/54/89/69c9813fbbe191cd912189424093fbd28ddb7d2009101d702903c12e23ee/sonata_tasks-0.6.2-py3-none-any.whl", hash = "sha256:fb5b0095208ce110af40451620f0d5eb0af23a08b62d3a0497ff7c0447e10d9c", size = 73462, upload-time = "2026-09-20T17:35:23.718Z" },
 ]
 
 [package.optional-dependencies]

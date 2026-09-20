@@ -11,7 +11,8 @@ a uv workspace with three members:
   (console scripts: `nanolab`, `nanolab-package-report`, `nanolab-quality`).
 - `packages/tui-toolkit` — shared terminal UI components, published separately
   and also consumed by other projects.
-- `sonata-tasks` — pinned from the Sonata repository, not vendored here.
+- `sonata-tasks` — pinned to a released version from the Sonata repository, not
+  vendored here.
 
 ## Setup
 
@@ -99,15 +100,31 @@ Notes that are easy to get wrong:
 
 ## Pin discipline
 
-`nanolab` pins two packages from the Sonata repository, and they are pinned to
-**different commits on purpose**:
+`nanolab` pins two packages from the Sonata repository, both to the **same
+released version** on PyPI:
 
-- `sonata-engine` → the tip of the `feature/workflow-observers` branch, which is
-  **not** an ancestor of Sonata's `main`. nanolab imports `WorkflowObserver` and
-  `WorkflowCompletion`, which exist only there.
-- `sonata-tasks` → a commit on Sonata's `main`, because that is the package that
-  carries the shellcraft and proxmox-sdk pins.
+```toml
+"sonata-engine==0.6.2"
+"sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.2"
+```
 
-Bumping one and "unifying" the other onto the same revision silently reverts
-nanolab onto a tree without the observers and breaks the `package`, `plans` and
-`smoke` jobs with `ImportError: cannot import name 'WorkflowObserver'`.
+They are one lockstep pair: `sonata-tasks` carries
+`Requires-Dist: sonata-engine==<its own version>`, because the two are released
+from one repository under one tag and a tasks without its matching engine has no
+meaning. So a bump moves **both** numbers and the engine pin inside
+`sonata-tasks`, in Sonata, before this repository sees anything:
+
+1. In Sonata, move all four version sites together — the two pyprojects, the
+   `__version__` in `src/sonata_engine/__init__.py` that
+   `test_dunder_version_matches_the_pyproject` compares, and the
+   `sonata-engine==` pin in `packages/sonata-tasks/pyproject.toml` — then the
+   lock. The release workflow publishes `sonata-engine` first and `sonata-tasks`
+   after it, on a `needs:`, so a failed engine upload cannot leave a tasks on
+   PyPI that pins an engine that does not exist.
+2. Only then update the three pins here (the workspace `pyproject.toml` and the
+   two in `packages/nanolab/pyproject.toml`) and re-lock.
+
+Updating the pins here before the version exists on PyPI fails in `uv lock`, not
+in CI. `grep -c 'git+' uv.lock` returning `0` is the invariant to keep: these
+used to be pinned to git revisions on two different branches, and a lock with a
+git URL in it means something has reverted to that.
