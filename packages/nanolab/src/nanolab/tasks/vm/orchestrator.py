@@ -5,19 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from multipass import MultipassCommandError, VmNotFoundError
-from multipass.models import VmState
-from shellcraft.backend import ShellExecutionResult
+from multipass_vm_sdk import MultipassCommandError, VmNotFoundError
+from multipass_vm_sdk.models import VmState
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.providers.multipass import MultipassVmProvider
 from sonata_tasks.vm.results import successful_result
+from subprocess_toolkit.backend import ShellExecutionResult
 
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
 
 if TYPE_CHECKING:
-    from multipass import MultipassClient
-    from shellcraft.backend import ShellBackend
+    from multipass_vm_sdk import MultipassClient
+    from subprocess_toolkit.backend import ShellBackend
 
     from nanolab.tasks.infra.ansible import AnsibleAdapter
 

@@ -12,7 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
-from multipass import find_ssh_public_key
+from multipass_vm_sdk import find_ssh_public_key
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor

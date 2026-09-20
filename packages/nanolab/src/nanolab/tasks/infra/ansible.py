@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from multipass import MultipassClient
+from multipass_vm_sdk import MultipassClient
 from sonata_tasks.ansible import build_ansible_argv
 from sonata_tasks.shell import (
     ShellBackend,

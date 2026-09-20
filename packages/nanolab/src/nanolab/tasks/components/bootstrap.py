@@ -8,7 +8,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import cast
 
-from multipass import find_ssh_public_key
+from multipass_vm_sdk import find_ssh_public_key
 from sonata_tasks.vm.ssh import find_ssh_private_key_path
 
 from nanolab.tasks.components.context import ScenarioExecutionContext

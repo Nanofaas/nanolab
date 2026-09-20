@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from multipass import MultipassCommandError, VmNotFoundError
-from multipass.models import VmState
+from multipass_vm_sdk import MultipassCommandError, VmNotFoundError
+from multipass_vm_sdk.models import VmState
 from sonata_tasks.shell import RecordingShell, ShellBackend, ShellExecutionResult
 from sonata_tasks.vm.models import VmRequest
 
