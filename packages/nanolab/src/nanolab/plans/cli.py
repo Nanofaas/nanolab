@@ -66,7 +66,6 @@ from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 from nanolab.tasks.vm.sync import repo_sync_ssh_rsh
-from nanolab.workspace.paths import discover_tool_root
 
 LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
 # The runtime-config module carries both the admin API `control-plane config`
@@ -398,7 +397,7 @@ def _build_containerd_plan(
     namespace: str,
 ) -> Workflow:
     maven_repository = repository_for_build(environment)
-    run = run_for_environment(repo_root, discover_tool_root(), environment)
+    run = run_for_environment(repo_root, environment)
     executor = RoleBoundCommandTaskExecutor(bindings)
     registry = registry_resource(run, executor=executor, role="stack")
     control = control_plane_resource(

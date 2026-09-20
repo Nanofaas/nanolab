@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-ASSET = Path(__file__).parents[2] / "assets/containerd-rootless/soak_collect.py"
+from nanolab.workspace.paths import bundled_assets_root
+
+ASSET = bundled_assets_root() / "containerd-rootless/soak_collect.py"
 
 
 def _module():

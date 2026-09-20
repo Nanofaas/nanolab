@@ -43,7 +43,7 @@ from nanolab.tasks.offload_loadtest import (
 )
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from nanolab.tasks.vm.models import VmRequest
-from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.paths import bundled_assets_root
 from nanolab.workspace.provenance import source_fingerprint
 
 _ACTUATOR_PORT = 30081
@@ -292,8 +292,7 @@ def _loadtest_paths(
             Path(home) / "nanolab-assets/k6/offload-mixed.js",
             Path(home) / "nanofaas-loadtest/k6-summary.json",
         )
-    product_root = tool_root or discover_tool_root()
-    return product_root / "assets/k6/offload-mixed.js", run_dir / "k6-summary.json"
+    return bundled_assets_root() / "k6/offload-mixed.js", run_dir / "k6-summary.json"
 
 
 def _append_result_collection_steps(

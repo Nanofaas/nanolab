@@ -84,7 +84,7 @@ def build_containerd_soak_plan(
         raise ValueError(
             "containerd soak requires a local or owned Multipass environment"
         )
-    run = run_for_environment(repo_root, tool_root, environment)
+    run = run_for_environment(repo_root, environment)
     executor = BuildExecutionRecorder(RoleBoundCommandTaskExecutor(bindings))
     registry = registry_resource(run, executor=executor, role="stack")
     control = control_plane_resource(

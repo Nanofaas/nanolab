@@ -8,10 +8,12 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
+from nanolab.workspace.paths import bundled_assets_root
+
 
 def worker():
     """Load the script asset directly, independently of pytest import mode."""
-    path = Path(__file__).parents[2] / "assets/soak/diagnostic-worker.py"
+    path = bundled_assets_root() / "soak/diagnostic-worker.py"
     spec = importlib.util.spec_from_file_location("heapdump_worker", path)
     module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]

@@ -26,6 +26,7 @@ from nanolab.tasks.soak.containerd_runtime import (
 )
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.sources import SourceEntry
+from nanolab.workspace.paths import bundled_assets_root
 
 
 def _scenario():
@@ -257,7 +258,7 @@ def test_remote_source_verification_uses_staged_content_without_git(tmp_path):
         RootlessRun(
             "run123",
             staged,
-            Path(__file__).parents[2] / "assets/containerd-rootless/session.sh",
+            bundled_assets_root() / "containerd-rootless/session.sh",
         ),
         EnvironmentConfig.model_validate({"provider": "local"}),
         Executor(),

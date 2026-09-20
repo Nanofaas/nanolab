@@ -43,7 +43,7 @@ from nanolab.tasks.provisioning import (
     scenario_context,
 )
 from nanolab.tasks.vm.models import VmRequest
-from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.paths import bundled_assets_root
 
 
 def _request(
@@ -112,7 +112,7 @@ def _role_requests_and_operations(
         scenario.workflow == "offload-loadtest" and "cloud" in environment.roles
     )
     dedicated_arm = "arm-builder" in environment.roles
-    assets_root = discover_tool_root() / "assets"
+    assets_root = bundled_assets_root()
 
     def context_for(request: VmRequest) -> ScenarioExecutionContext:
         # Plan against the resolved-equivalent request: after ensure the request
@@ -321,7 +321,7 @@ def provision_environment(
             provider,
             tuple(roles),
             repo_root=repo_root,
-            assets_root=discover_tool_root() / "assets",
+            assets_root=bundled_assets_root(),
             keep=keep,
             after_ensure=after_ensure,
         ):
