@@ -18,6 +18,7 @@ from pathlib import Path
 from threading import Event, Lock
 
 from nanolab.tasks.soak.processes import OwnedCommandRunner
+from nanolab.workspace.paths import bundled_assets_root
 
 
 def _json(value: object) -> bytes:
@@ -298,9 +299,7 @@ class K6WorkloadDriver:
                 "max_vus": vus if max_vus is None else max_vus,
             }
         )
-        self._script = (
-            Path(__file__).resolve().parents[4] / "assets/k6/soak-workload.js"
-        ).read_bytes()
+        self._script = (bundled_assets_root() / "k6/soak-workload.js").read_bytes()
         self._command = tuple(command)
         self._grace = float(graceful_stop_s)
         self._request_timeout = float(request_timeout_s)

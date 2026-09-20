@@ -7,11 +7,11 @@ capture and teardown. No image is pulled or built by this provisioner.
 ## Published runtime API
 
 ```python
-from pathlib import Path
 from nanolab.tasks.soak.diagnostic_helper import (
     DockerHelperSpec,
     LocalDockerDiagnosticProvisioner,
 )
+from nanolab.workspace.paths import bundled_assets_root
 
 # target is the existing Target, with the full container ID, HOST init PID,
 # Docker State.StartedAt and target image RepoDigest. output_root already exists.
@@ -29,7 +29,7 @@ spec = DockerHelperSpec(
     target_tmp_volume=owned_tmp_volume_name,  # already mounted on target /tmp
 )
 prepared = LocalDockerDiagnosticProvisioner(
-    assets_dir=Path("packages/nanolab/assets/soak"),
+    assets_dir=bundled_assets_root() / "soak",
 ).prepare(spec, timeout_s=60)
 adapter = prepared.adapter(
     budget=shared_diagnostic_budget,

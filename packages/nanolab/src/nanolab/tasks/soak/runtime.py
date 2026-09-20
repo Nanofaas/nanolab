@@ -67,6 +67,7 @@ from nanolab.tasks.soak.workflow import (
     write_policy_input,
     write_terminal_receipt,
 )
+from nanolab.workspace.paths import bundled_assets_root
 
 if TYPE_CHECKING:
     from nanolab.tasks.soak.containerd_runtime import (
@@ -741,7 +742,7 @@ class _MemoryHelperTransport:
         """Provision readers using observed credentials and architecture."""
         self.output_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         provisioner = LocalDockerDiagnosticProvisioner(
-            assets_dir=Path(__file__).resolve().parents[4] / "assets/soak",
+            assets_dir=bundled_assets_root() / "soak",
             cancelled=self.cancelled,
         )
         try:
@@ -974,10 +975,7 @@ def create_local_deployment(
         }
         if decision["runtime"] == "node":
             if controller is None:
-                source = (
-                    Path(__file__).resolve().parents[4]
-                    / "assets/soak/node-diagnostic-control.cjs"
-                )
+                source = bundled_assets_root() / "soak/node-diagnostic-control.cjs"
                 with source.open("rb") as stream:
                     body = stream.read(65537)
                 if not body or len(body) > 65536:
@@ -1309,7 +1307,7 @@ def create_soak_lifecycle(
             "max_vus": config.workload.max_vus,
         },
     )
-    script_path = Path(__file__).resolve().parents[4] / "assets/k6/soak-workload.js"
+    script_path = bundled_assets_root() / "k6/soak-workload.js"
     with script_path.open("rb") as source:
         script = source.read(128 * 1024 + 1)
     if len(script) > 128 * 1024 or len(script) >= config.artifact_limit_bytes:

@@ -9,9 +9,10 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 import pytest
+
+from nanolab.workspace.paths import bundled_assets_root
 
 
 def module():
@@ -304,6 +305,7 @@ def test_normal_parent_exit_cleans_detached_child_and_invalidates_completion(tmp
         tmp_path,
         """import subprocess, sys
 from pathlib import Path
+
 child=subprocess.Popen(
     [sys.executable,'-c','import time; time.sleep(60)'],start_new_session=True
 )
@@ -392,7 +394,7 @@ def test_actual_script_validates_body_and_streams_summary_without_http(tmp_path)
     node = shutil.which("node")
     if not node:
         pytest.skip("node unavailable")
-    script = Path(__file__).parents[2] / "assets/k6/soak-workload.js"
+    script = bundled_assets_root() / "k6/soak-workload.js"
     source = "\n".join(
         line
         for line in script.read_text().splitlines()

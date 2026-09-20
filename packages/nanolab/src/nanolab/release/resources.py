@@ -44,7 +44,7 @@ from nanolab.tasks.provisioning import (
 )
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
-from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.paths import bundled_assets_root
 
 T = TypeVar("T")
 
@@ -253,7 +253,7 @@ def _bootstrap_role(
             "home": info.home,
         }
     )
-    context = scenario_context(repo_root, resolved, discover_tool_root() / "assets")
+    context = scenario_context(repo_root, resolved, bundled_assets_root())
     if role == "stack":
         raw = (
             *plan_vm_provision_base(context, install_uv=True),

@@ -39,7 +39,6 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRATCH = REPO_ROOT / "build" / "diagnostic-helper-validation"
-ASSETS = REPO_ROOT / "packages" / "nanolab" / "assets" / "soak"
 RUN_ID = "helper-validation"
 VOLUME_LABEL = "nanolab.diagnostic.tmp"
 OWNER_LABEL = "nanolab.run"
@@ -275,6 +274,7 @@ def validate(
     )
     from nanolab.tasks.soak.diagnostics import DiagnosticBudget
     from nanolab.tasks.soak.models import Target
+    from nanolab.workspace.paths import bundled_assets_root
 
     run_dir = SCRATCH / "run"
     shutil.rmtree(run_dir, ignore_errors=True)
@@ -310,7 +310,8 @@ def validate(
         target_tmp_volume=VOLUME,
     )
     failures: list[str] = []
-    prepared = LocalDockerDiagnosticProvisioner(assets_dir=ASSETS).prepare(
+    assets = bundled_assets_root() / "soak"
+    prepared = LocalDockerDiagnosticProvisioner(assets_dir=assets).prepare(
         spec, timeout_s=TIMEOUT_S
     )
     try:

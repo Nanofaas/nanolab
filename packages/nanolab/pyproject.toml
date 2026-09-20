@@ -45,6 +45,12 @@ nanolab = [
     "tasks/infra/ansible_assets/ansible.cfg",
     "tasks/infra/ansible_assets/requirements.txt",
     "tasks/infra/ansible_assets/playbooks/*.yml",
+    # Bundled runtime assets, inside the package on purpose: they are shipped,
+    # unlike the caller's scenarios and run outputs, so they must resolve from
+    # the installed distribution and not from a checkout beside it.
+    "assets/k6/*",
+    "assets/soak/*",
+    "assets/containerd-rootless/*",
 ]
 
 [dependency-groups]
@@ -84,8 +90,14 @@ addopts = "--import-mode=importlib --cov=nanolab --cov-report=term-missing"
 target-version = "py312"
 line-length = 88
 # ruff's built-in exclude list has `dist` but not `build`, so a setuptools build
-# tree left in the package gets linted as if it were source.
-extend-exclude = ["build", "dist"]
+# tree left in the package gets linted as if it were source. The bundled assets
+# are the other exclusion: they are data that ships inside the wheel, and the
+# helper scripts in there run inside the diagnostic image against the stdlib that
+# image carries, so the library conventions -- docstrings on every function,
+# pathlib over the os module -- do not apply to them. basedpyright and bandit
+# exclude the same directory, and scripts/validate-diagnostic-helper.py is what
+# actually checks those files.
+extend-exclude = ["build", "dist", "src/nanolab/assets"]
 
 [tool.ruff.lint]
 select = [
@@ -125,11 +137,6 @@ known-first-party = ["nanolab"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/nanolab/tui/app.py" = ["SLF001"]
-# Not library code: this file is copied into the diagnostic helper image and is
-# its entrypoint. It reads /proc and juggles descriptors through the os module
-# on purpose, and it keeps its imports to the standard library the pinned image
-# ships, so the pathlib preferences do not apply to it.
-"assets/soak/diagnostic-worker.py" = ["PTH", "D103", "D101", "D102", "D107"]
 # Embeds a Gradle init script and a Node preload as source strings. Their
 # lines are Groovy and JavaScript, not Python: they cannot carry a "# noqa"
 # without it ending up in the generated build script, and rewrapping them
@@ -172,6 +179,13 @@ include = [
     "src/nanolab",
     "tests",
 ]
+exclude = [
+    # The bundled assets are data that ships inside the package, not library code.
+    # The helper scripts there run inside the diagnostic image against the stdlib
+    # that image carries; bringing them under src/ so the wheel can carry them
+    # would otherwise drag them into the type check they were never written for.
+    "src/nanolab/assets",
+]
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
 reportPrivateUsage = false
@@ -187,7 +201,9 @@ venv = ".venv"
 # individually.
 
 [tool.bandit]
-exclude_dirs = ["tests", ".venv"]
+# Same reason as the basedpyright exclude above: the assets are data, and the
+# helper scripts use /tmp because that is where the image runs them.
+exclude_dirs = ["tests", ".venv", "src/nanolab/assets"]
 skips = [
     "B404",
     "B603",

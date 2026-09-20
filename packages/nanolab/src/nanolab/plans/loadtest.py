@@ -92,7 +92,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteLoadtestSummary,
 )
 from nanolab.tasks.platform import Backend, Build, PlatformRequest
-from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.paths import bundled_assets_root
 from nanolab.workspace.provenance import source_fingerprint
 
 _REMOTE_DIR = "."
@@ -580,7 +580,6 @@ def _resolve_script_and_summary(
     dedicated: bool,
     remote_run_dir: Path | None,
     run_dir: Path,
-    tool_root: Path | None,
     script_name: str | None = None,
 ) -> tuple[Path, Path]:
     script_name = script_name or load_script_name(config)
@@ -592,8 +591,7 @@ def _resolve_script_and_summary(
         _validate_remote_run_dir(remote_run_dir, home)
         summary_path = output_dir / "k6-summary.json"
     else:
-        product_root = tool_root or discover_tool_root()
-        script_path = product_root / "assets" / "k6" / script_name
+        script_path = bundled_assets_root() / "k6" / script_name
         summary_path = run_dir / "k6-summary.json"
     return script_path, summary_path
 
@@ -1534,7 +1532,6 @@ def build_loadtest_plan(
         dedicated=dedicated,
         remote_run_dir=remote_run_dir,
         run_dir=run_dir,
-        tool_root=tool_root,
         script_name=script_name,
     )
     additional_modules = _additional_modules(
@@ -1560,9 +1557,7 @@ def build_loadtest_plan(
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)
     rootless_run = (
-        run_for_environment(root, tool_root or discover_tool_root(), environment)
-        if backend == "containerd"
-        else None
+        run_for_environment(root, environment) if backend == "containerd" else None
     )
     platform_requires = _build_platform_requires(
         backend,

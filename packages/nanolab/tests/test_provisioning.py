@@ -6,7 +6,7 @@ import pytest
 
 from nanolab.cli.provisioning import provision_environment
 from nanolab.config import EnvironmentConfig, ScenarioConfig
-from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.paths import bundled_assets_root
 
 
 @dataclass
@@ -154,7 +154,7 @@ def test_containerd_provisioning_installs_rootless_runtime_without_k3s(
         "provision-containerd-rootless.yml",
     ]
     commands = _commands(orchestrator)
-    asset_root = discover_tool_root() / "assets"
+    asset_root = bundled_assets_root()
     assert (asset_root / "containerd-rootless/provision.sh").is_file()
     assert (asset_root / "containerd-rootless/session.sh").is_file()
     assert (asset_root / "containerd-rootless/soak_collect.py").is_file()

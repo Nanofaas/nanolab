@@ -18,6 +18,7 @@ from nanolab.plans.offload_loadtest import (
     build_offload_loadtest_plan,
 )
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
+from nanolab.workspace.paths import bundled_assets_root
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -210,7 +211,7 @@ def test_local_provider_runs_k6_on_stack_without_fetch(tmp_path: Path) -> None:
     )
 
     assert preflight.execution_role == "stack"
-    assert str(tool_root / "assets/k6/offload-mixed.js") in k6
+    assert str(bundled_assets_root() / "k6/offload-mixed.js") in k6
 
 
 def test_local_provider_uses_one_compose_platform_with_distinct_endpoints(

@@ -64,6 +64,7 @@ from nanolab.tasks.soak.workflow import (
     make_workload_driver_factory,
     write_terminal_receipt,
 )
+from nanolab.workspace.paths import bundled_assets_root
 
 Status = Literal["PASS", "FAIL", "INCONCLUSIVE"]
 
@@ -454,7 +455,7 @@ class LocalHeapAnalysisSession:
         # nanolab.tasks.soak.runtime).
         output_root = self._root.absolute()
         provisioner = LocalDockerDiagnosticProvisioner(
-            assets_dir=Path(__file__).resolve().parents[4] / "assets/soak",
+            assets_dir=bundled_assets_root() / "soak",
             cancelled=self._cancelled,
         )
         helper = provisioner.prepare(

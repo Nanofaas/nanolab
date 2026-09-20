@@ -3,9 +3,10 @@
 import json
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
+
+from nanolab.workspace.paths import bundled_assets_root
 
 HARNESS = r"""
 const vm = require('node:vm');
@@ -92,7 +93,7 @@ def test_private_node_control_enforces_runtime_events_and_target_writer_bounds(
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node interpreter required for synthetic VM harness")
-    source = Path(__file__).parents[2] / "assets/soak/node-diagnostic-control.cjs"
+    source = bundled_assets_root() / "soak/node-diagnostic-control.cjs"
     result = subprocess.run(
         [node, "-e", HARNESS, str(source), scenario],
         capture_output=True,
@@ -118,7 +119,7 @@ def test_private_node_control_refuses_existing_inspector_listener():
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node interpreter required for synthetic VM harness")
-    source = Path(__file__).parents[2] / "assets/soak/node-diagnostic-control.cjs"
+    source = bundled_assets_root() / "soak/node-diagnostic-control.cjs"
     result = subprocess.run(
         [node, "-e", HARNESS, str(source), "public-inspector"],
         capture_output=True,
