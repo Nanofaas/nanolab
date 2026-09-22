@@ -35,14 +35,17 @@ from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from nanolab.tasks.soak.adapters import RoleBinding, RoleBoundProbe, SubprocessTransport
 from nanolab.tasks.soak.artifacts import (
     describe_artifact,
+    describe_tree,
     enforce_limit,
     fingerprint,
     measure_tree,
+    retained,
 )
 from nanolab.tasks.soak.collector import _docker_get, collect_procfs, read_bounded
 from nanolab.tasks.soak.diagnostic_helper import (
     DockerHelperSpec,
     LocalDockerDiagnosticProvisioner,
+    is_helper_log_dir,
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
@@ -927,6 +930,56 @@ def _reference(root: Path, path: Path) -> dict[str, Any]:
         **describe_artifact(path),
         "path": path.relative_to(root.absolute()).as_posix(),
     }
+
+
+def _tree_reference(root: Path, path: Path) -> dict[str, Any]:
+    """Bind a whole subtree as one entry that still hashes every file."""
+    return {
+        **describe_tree(root, path),
+        "path": path.relative_to(root.absolute()).as_posix(),
+    }
+
+
+def _inventory_entries(root: Path) -> list[dict[str, Any]]:
+    """Bind every retained artifact to an entry that fits one record.
+
+    Three kinds of subtree cannot be listed file by file, and for the same
+    reason each time: this inventory is one JSON record of bounded size, and
+    they hold thousands of files.
+
+    - `source/tree` is already inventoried, file by file, in
+      source-manifest.jsonl, which snapshot.json seals with manifest_sha256 and
+      both of which stay in this inventory. Listing its files again only
+      duplicates that chain;
+    - build workspaces and dot-directories are scratch the run does not retain
+      as evidence, and measure_tree excludes them from the budget as well;
+    - each helper's command-log tree has no sealed manifest of its own, so it
+      becomes one entry that still hashes every file and carries the exact byte
+      total the budget charges for. `is_helper_log_dir` is the marker those
+      directories are created with, not a guess at their prefix.
+
+    `retained` is the one rule deciding what is named and charged, so a grouped
+    tree counts exactly the files the per-file listing counted.
+    """
+    root = root.absolute()
+    entries: list[dict[str, Any]] = []
+    pending = [root]
+    while pending:
+        with os.scandir(pending.pop()) as items:
+            for item in items:
+                path = Path(item.path)
+                if path.is_symlink() or item.name.startswith((".", "workspace-")):
+                    continue
+                if item.is_dir(follow_symlinks=False):
+                    if path.is_relative_to(root / "source" / "tree"):
+                        continue
+                    if is_helper_log_dir(path):
+                        entries.append(_tree_reference(root, path))
+                    else:
+                        pending.append(path)
+                elif retained(root, path):
+                    entries.append(_reference(root, path))
+    return sorted(entries, key=lambda entry: str(entry["path"]))
 
 
 def _read_json(path: Path) -> dict:
@@ -1900,22 +1953,10 @@ def create_soak_lifecycle(
         switch = state.switch_receipt
         if switch is not None:
             manifest["scheduler_switch"] = _reference(root, switch)
-        # The captured source tree is already inventoried, file by file, in
-        # source-manifest.jsonl, which snapshot.json seals with manifest_sha256
-        # and both of which stay in this inventory. Listing its thousands of
-        # files again only duplicates that chain, and it overflows the
-        # single-record limit this document has to fit in.
-        entries = [
-            _reference(root, path)
-            for path in sorted(root.rglob("*"))
-            if (
-                path.is_file()
-                and not path.is_symlink()
-                and not path.name.startswith(".")
-                and not any(part.startswith("workspace-") for part in path.parts)
-                and not path.is_relative_to(root / "source" / "tree")
-            )
-        ]
+        # The inventory that has to fit one record: see `_inventory_entries` for
+        # what is listed per file, grouped as a tree, or left to a sealed
+        # manifest, and why.
+        entries = _inventory_entries(root)
         inventory = writer.write_json(
             "artifacts.json",
             {

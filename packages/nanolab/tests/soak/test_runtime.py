@@ -2378,3 +2378,102 @@ def test_artifact_inventory_defers_the_source_tree_to_its_own_manifest(tmp_path)
         "source/source-manifest.jsonl",
     ]
     assert len(json.dumps(listed).encode()) < MAX_RECORD_BYTES
+
+
+def test_artifact_inventory_groups_each_helper_command_log_tree(tmp_path):
+    """One entry per helper command-log tree, and not one byte of drift.
+
+    A p24 soak writes thousands of bound Docker command logs per helper, and the
+    inventory carrying them is a single record under MAX_RECORD_BYTES. Each tree
+    therefore becomes one entry that still hashes every file and carries the
+    exact byte total the per-file listing carried, because that total is what
+    `budget_exhausted` is computed from.
+    """
+    from nanolab.tasks.soak.acceptance import _inventory_reference
+    from nanolab.tasks.soak.artifacts import MAX_RECORD_BYTES, describe_tree
+    from nanolab.tasks.soak.diagnostic_helper import helper_log_dir, is_helper_log_dir
+    from nanolab.tasks.soak.runtime import _inventory_entries, _reference
+
+    root = tmp_path / "evidence"
+    helper = helper_log_dir(root, memory_only=False)
+    helper.mkdir(parents=True)
+    for index in range(12000):
+        (helper / f"docker-{index:032x}.log").write_bytes(b"log" * (index % 97))
+    for name in ("ownership.json", "provisioning.json", "observations.json"):
+        (helper / name).write_text("{}")
+    memory = helper_log_dir(root / "memory-helpers", memory_only=True)
+    memory.mkdir(parents=True)
+    for index in range(4):
+        (memory / f"docker-{index:032x}.log").write_bytes(b"memory")
+    # The near miss a prefix match would group: the run's own container for them.
+    assert not is_helper_log_dir(root / "memory-helpers")
+    assert is_helper_log_dir(helper) and is_helper_log_dir(memory)
+    # Scratch and a sealed manifest, excluded for the reasons already documented.
+    (root / "builds" / "workspace-0").mkdir(parents=True)
+    (root / "builds" / "workspace-0" / "scratch.class").write_bytes(b"x")
+    (root / "builds" / ".soak-owner").write_text("")
+    (root / "source" / "tree" / "platform").mkdir(parents=True)
+    (root / "source" / "tree" / "platform" / "Main.java").write_bytes(b"x")
+    (root / "source" / "snapshot.json").write_text('{"manifest_sha256": "a"}')
+    (root / "samples.jsonl").write_text("{}\n")
+
+    # The predicate as it stood before the grouping, applied to the same tree.
+    listed = [
+        _reference(root, path)
+        for path in sorted(root.rglob("*"))
+        if (
+            path.is_file()
+            and not path.is_symlink()
+            and not path.name.startswith(".")
+            and not any(part.startswith("workspace-") for part in path.parts)
+            and not path.is_relative_to(root / "source" / "tree")
+        )
+    ]
+    entries = _inventory_entries(root)
+    before = {record["path"]: record for record in listed}
+    after = {record["path"]: record for record in entries}
+    trees = {tree.relative_to(root).as_posix(): tree for tree in (helper, memory)}
+    assert set(before) - set(after) == {
+        f"{name}/{path.name}"
+        for name, directory in trees.items()
+        for path in directory.iterdir()
+    }
+    assert set(after) - set(before) == set(trees)
+    # One entry per tree, carrying the identical byte total and every file hashed.
+    for name, tree in trees.items():
+        assert after[name] == {**describe_tree(root, tree), "path": name}
+        assert after[name]["size_bytes"] == sum(
+            record["size_bytes"]
+            for record in listed
+            if Path(record["path"]).parent.as_posix() == name
+        )
+    assert sum(record["size_bytes"] for record in entries) == sum(
+        record["size_bytes"] for record in listed
+    )
+    # The digest covers each file's contents and each file's existence.
+    grouped = after[helper.relative_to(root).as_posix()]
+    log = sorted(helper.glob("docker-*.log"))[1]
+    original = log.read_bytes()
+    log.write_bytes(original + b"!")
+    assert describe_tree(root, helper)["sha256"] != grouped["sha256"]
+    log.write_bytes(original)
+    assert describe_tree(root, helper)["sha256"] == grouped["sha256"]
+    added = helper / f"docker-{'e' * 32}.log"
+    added.write_bytes(b"one log more")
+    grown = describe_tree(root, helper)
+    assert grown["sha256"] != grouped["sha256"]
+    assert grown["size_bytes"] == grouped["size_bytes"] + len(b"one log more")
+    added.unlink()
+    # 12000 command logs do not fit one record; their single entry does.
+    flat = json.dumps({"entries": listed}, sort_keys=True).encode()
+    record = json.dumps({"entries": entries}, sort_keys=True).encode()
+    assert len(flat) > MAX_RECORD_BYTES and len(record) < MAX_RECORD_BYTES
+    # The verifier reads back exactly what the producer wrote, tree entry and all.
+    limit = max(entry["size_bytes"] for entry in entries)
+    verified = [_inventory_reference(root, entry, limit) for entry in entries]
+    assert sorted(path for path, _ in verified if path.is_dir()) == sorted(
+        trees.values()
+    )
+    assert sum(size for _, size in verified) == sum(
+        entry["size_bytes"] for entry in entries
+    )
