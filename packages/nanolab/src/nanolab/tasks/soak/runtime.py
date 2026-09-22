@@ -148,6 +148,18 @@ _NODE_CONTROLLER = "/opt/nanolab/node-diagnostic-control.cjs"
 _NODE_PRELOAD = "--require=" + _NODE_CONTROLLER
 _DIAGNOSTIC_RECEIPT_BYTES = 65536
 _PREREQUISITE_SETTLEMENT_MARGIN_S = 5.0
+# The coverage IDs whose recipe the frozen deployment fully determines: an
+# invocation, a replay of it, and a renamed registration of the same EXTERNAL
+# container. Four of the other five assert an outcome the *deployed handler*
+# must produce — a declared error code, a dispatch timeout, a terminal TIMEOUT a
+# late callback can be ignored after, an in-flight window wide enough to cancel
+# inside — and nothing in this repository defines what would produce one. The
+# fifth, `async`, would need its SDK callback populations to settle, which no
+# profile has ever exercised. See the exclusion note in the scheduler-switch
+# scenario for the full reasoning.
+_DERIVED_PREREQUISITE_COVERAGE = frozenset(
+    {"sync", "idempotent-replay", "function-name-churn"}
+)
 
 
 def _close_all(leases: list[socket.socket]) -> None:
@@ -252,7 +264,15 @@ def _population_retention(config, population: str) -> float:
 
 
 def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
-    """Derive the built-in sync gate only after images and payloads are frozen."""
+    """Derive one built-in profile per requested coverage, after images freeze.
+
+    Every profile is *derived* from the frozen deployment, never supplied: the
+    deployment is fixed and shared with the measured platform, so a profile can
+    only describe a role this run deploys, and a supplied recipe could not
+    introduce one. A coverage with no derivation here is refused before any
+    lifetime is acquired, which is why the refusal names what is missing rather
+    than leaving eight profiles to fail one platform at a time.
+    """
     from nanolab.tasks.soak.prerequisites import (
         _inputs,
         _required_populations,
@@ -261,14 +281,17 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
 
     config = prepared.config
     coverage = frozenset(config.prerequisites.required_coverage)
-    if coverage != {"sync"}:
+    underivable = coverage - _DERIVED_PREREQUISITE_COVERAGE
+    if underivable:
         raise ValueError(
-            "built-in prerequisites support only sync; other profiles require "
-            "explicit fault-capable recipes"
+            "no built-in injection exists for "
+            + ", ".join(sorted(underivable))
+            + "; these assert an outcome the deployed handler must itself "
+            "produce, so they require explicit fault-capable recipes"
         )
     roles = [role for role in config.roles if role != "control-plane"]
     if not roles:
-        raise ValueError("sync prerequisite requires an SDK function role")
+        raise ValueError("prerequisite profiles require an SDK function role")
     role = next(
         (name for name in roles if config.roles[name].runtime == "jvm"), roles[0]
     )
@@ -279,33 +302,49 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
         {
             "schema": "nanolab-soak-prerequisite-script-v1",
             "implementation": "nanolab.tasks.soak.prerequisite_runtime",
-            "coverage": ["sync"],
+            "coverage": sorted(coverage),
         },
     )
     populations = _required_populations(
         prepared.images, coverage, config.metrics_profile
     )
-    profile: dict[str, Any] = {
-        "function": role,
-        "role": role,
-        "request": {"input": deepcopy(case["input"])},
-        "expected_output": deepcopy(case["expected"]),
-        "request_timeout_s": 3,
-        "exercise_timeout_s": 30,
-        "poll_interval_s": 0.05,
-    }
     # The scenario declares which configuration the prerequisite run had to be
     # frozen against, and acceptance compares each of those projections against
     # the live policy. A profile that carries none of them cannot pass that gate,
-    # so the sections are copied here, at the only place the built-in sync recipe
-    # is derived.
+    # so the sections are copied here, at the only place the built-in profiles
+    # are derived.
     normalized = config.model_dump(mode="json")
-    for key in config.prerequisites.relevant_config_keys["sync"]:
-        profile[key] = select_relevant_config(normalized, key)
+    profiles: dict[str, Any] = {}
+    for name in sorted(coverage):
+        profile: dict[str, Any] = {
+            "function": role,
+            "role": role,
+            "request": {"input": deepcopy(case["input"])},
+            "expected_output": deepcopy(case["expected"]),
+            "request_timeout_s": 3,
+            "exercise_timeout_s": 30,
+            "poll_interval_s": 0.05,
+        }
+        if name == "function-name-churn":
+            # A churned name is the same EXTERNAL container registered under
+            # another name, so its spec is that container's own manifest. The
+            # churn exercise overwrites the name before it registers; carrying
+            # the role's name here is what makes the frozen spec a real manifest
+            # rather than a body with a hole in it.
+            spec = next(
+                function.manifest().body()
+                for function in _external_functions(prepared)
+                if function.name == role
+            )
+            profile["function_spec"] = {**spec, "name": role}
+            profile["churn_count"] = 2
+        for key in config.prerequisites.relevant_config_keys[name]:
+            profile[key] = select_relevant_config(normalized, key)
+        profiles[name] = profile
     frozen = {
         "images": dict(prepared.images),
         "metrics_profile": config.metrics_profile,
-        "relevant_config": {"sync": profile},
+        "relevant_config": profiles,
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
@@ -993,6 +1032,28 @@ def _read_json(path: Path) -> dict:
     return value
 
 
+def _external_functions(prepared: PreparedSoak) -> tuple[_ExternalFunction, ...]:
+    """Return the EXTERNAL SDK functions this deployment registers, one per SDK role.
+
+    The endpoint URL is derived here and nowhere else. The frozen churn profile
+    registers a renamed function against the very container this returns the
+    manifest of, and the prerequisite factory rejects any spec whose
+    executionMode, image or endpointUrl differs from that manifest, so a second
+    copy of this formula would be a run-time failure waiting for a rename.
+    """
+    return tuple(
+        _ExternalFunction(
+            role,
+            prepared.images[role],
+            json.dumps(prepared.payloads[role][0]["input"]),
+            (),
+            endpoint=f"http://function-{index}:8080/invoke",
+        )
+        for index, role in enumerate(prepared.config.roles)
+        if role != "control-plane"
+    )
+
+
 def create_local_deployment(
     prepared: PreparedSoak,
     run_dir: Path,
@@ -1182,17 +1243,7 @@ def create_local_deployment(
         f"http://127.0.0.1:{ports['control-plane']}/actuator/health/readiness",
         build=False,
     )
-    functions = tuple(
-        _ExternalFunction(
-            role,
-            prepared.images[role],
-            json.dumps(prepared.payloads[role][0]["input"]),
-            (),
-            endpoint=f"http://function-{index}:8080/invoke",
-        )
-        for index, role in enumerate(config.roles)
-        if role != "control-plane"
-    )
+    functions = _external_functions(prepared)
 
     def acquire(inputs):
         # Port leases prevent other local preparers choosing these ports. Docker

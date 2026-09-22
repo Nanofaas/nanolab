@@ -151,16 +151,43 @@ soak:
       word-stats-javascript: node-full-gc-event
   prerequisites:
     mode: run
+    # Three of the eight atomic coverage IDs this policy could name, and
+    # deliberately not the other five. The exclusion is the point of this block,
+    # so it is spelled out rather than left to a reader's inference.
+    #
+    # `error`, `timeout`, `late-callback` and `cancellation` have no fault
+    # semantics defined anywhere in this repository. `_behavior` asserts an
+    # outcome the *deployed handler* must produce, and here the deployment is
+    # fixed and shared with the measured platform: the frozen payload is a
+    # millisecond invocation of a handler that only echoes. Nothing can make the
+    # 5000 ms dispatch deadline mature, or a terminal TIMEOUT appear for a late
+    # callback to be ignored after; `error` is returned by word-stats as a
+    # *successful* output; and a cancellation at that scale is a race between the
+    # invocation finishing and the client cancelling. The explicit-recipe route
+    # cannot substitute for them either: `_freeze_prerequisite_inputs` overwrites
+    # `frozen["images"]` with the prepared receipts and the factory requires
+    # `function == role`, so a supplied recipe can only describe the two
+    # word-stats roles this run already deploys, never a fault-capable one.
+    #
+    # `async` is the fifth omission and a different case. Its own assertions are
+    # 202, SUCCESS and the frozen output, which this deployment can produce — but
+    # it is the other half of the `async-late-callback` group, and it needs the
+    # SDK `callbacks` / `callback_bytes` populations to settle, a path no profile
+    # in this repository has ever exercised. It is not requested here, and this
+    # scenario claims nothing either way about whether it would pass.
+    #
+    # What is requested is what the campaign's criterion needs. #208 asks for two
+    # duration classes and function-name churn, with the populations held over the
+    # drain: `function-name-churn` is one of the three below, `sync` and
+    # `idempotent-replay` are the other two, and every profile's settlement
+    # asserts its retained populations — so the criterion is satisfied without any
+    # of the five above.
     required_coverage:
       - sync
-      - error-timeout-cancellation
-      - async-late-callback
       - idempotent-replay
       - function-name-churn
     relevant_config_keys:
       sync: [images, roles, retention_s, workload]
-      error-timeout-cancellation: [images, roles, retention_s, workload]
-      async-late-callback: [images, roles, retention_s, workload]
       idempotent-replay: [images, roles, retention_s, workload]
       function-name-churn: [images, roles, retention_s, workload]
     receipts: {}
