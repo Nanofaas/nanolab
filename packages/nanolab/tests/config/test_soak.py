@@ -308,6 +308,14 @@ def test_a_percentile_criterion_declares_the_quantile_it_derives(scenario_data):
     ],
 )
 def test_cross_field_contract_cannot_hide_missing_evidence(scenario_data, change):
+    # The two quantile rules are named, not merely counted: both of these
+    # mutations also break a *different* rule, so a bare `ValidationError` match
+    # stays green when the rule under test is deleted and the run is refused for
+    # something else entirely.
+    expected = {
+        "quantile_without_percentile": "quantile belongs only to percentile",
+        "percentile_without_quantile": "percentile requires the quantile it derives",
+    }.get(change, "validation error for ScenarioConfig")
     data = scenario_data["soak"]
     if change == "missing_image":
         del data["images"]["word-stats-java"]
@@ -368,7 +376,7 @@ def test_cross_field_contract_cannot_hide_missing_evidence(scenario_data, change
         data["criteria"][0]["quantile"] = 0.99
     elif change == "percentile_without_quantile":
         data["criteria"][0]["operation"] = "percentile"
-    with pytest.raises(ValidationError, match="validation error for ScenarioConfig"):
+    with pytest.raises(ValidationError, match=expected):
         ScenarioConfig.model_validate(scenario_data)
 
 
