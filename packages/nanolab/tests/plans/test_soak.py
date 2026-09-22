@@ -445,3 +445,32 @@ def test_the_switch_p99_criterion_carries_the_frozen_budget_and_its_quantile():
     roles = scenario["soak"]["roles"]
     for criterion in switch["criteria"]:
         assert criterion["metric"] in roles[criterion["role"]]["required_metrics"]
+
+
+def test_the_switch_soaks_gc_evidence_names_sources_the_worker_emits():
+    """A completion source the worker never writes can never be observed.
+
+    The declared name is compared three times over: against the helper's
+    `full_gc_source`, against the `source` the worker stamps into its
+    `full_gc_completed` event, and against that same event in the post-GC
+    acceptance gate. Anything outside `GC_SOURCES` fails all three, on every run,
+    for a collection that did happen -- so the declaration is pinned to the
+    vocabulary the worker actually speaks rather than to a plausible-looking
+    name.
+    """
+    from nanolab.tasks.soak.diagnostic_helper import GC_SOURCES
+
+    soak = yaml.safe_load(
+        (SCENARIOS / "memory-soak-scheduler-switch-container.yaml").read_text()
+    )["soak"]
+    declared = soak["diagnostics"]["gc_completion_evidence"]
+    assert set(declared) == {
+        role
+        for role, operations in soak["diagnostics"]["operations"].items()
+        if "gc" in operations
+    }
+    assert set(declared.values()) <= set(GC_SOURCES.values())
+    for role, source in declared.items():
+        runtime = soak["roles"][role]["runtime"]
+        if runtime in GC_SOURCES:
+            assert source == GC_SOURCES[runtime]
