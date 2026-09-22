@@ -35,14 +35,15 @@ resources:
 soak:
   purpose: p24
   # `soak` rather than `advanced`, because this run's contract includes the
-  # retained populations (records, physical input, leases, waiters, timers) and
-  # four of the five meters that answer them are registered only under this
-  # profile — `SoakMetricsConfiguration` is `@ConditionalOnProperty(...,
-  # havingValue = "soak")`. On `advanced` they are not published at all, and by
-  # this catalogue's own doctrine an absent series is indistinguishable from a
-  # probe that never fired. Nothing is lost by moving: the profile filter denies
-  # only under `basic`, and percentile histograms are enabled for every
-  # non-basic profile, so SOAK and ADVANCED filter and bucket identically.
+  # retained populations (records, physical input, leases, waiters, timers,
+  # retired generations) and every meter that answers them is registered only
+  # under this profile — `SoakMetricsConfiguration` holds all six and is
+  # `@ConditionalOnProperty(..., havingValue = "soak")`. On `advanced` they are
+  # not published at all, and by this catalogue's own doctrine an absent series
+  # is indistinguishable from a probe that never fired. Nothing is lost by
+  # moving: the profile filter denies only under `basic`, and percentile
+  # histograms are enabled for every non-basic profile, so SOAK and ADVANCED
+  # filter and bucket identically.
   metrics_profile: soak
   phases:
     warmup_s: 120
@@ -67,26 +68,27 @@ soak:
       runtime: jvm
       expected_cpu: 2
       memory_limit_bytes: 1073741824
-      # `scheduler_switch_duration_seconds_max` is declared because a criterion
-      # reads it, and `..._seconds_bucket` beside it for the same reason: a p99
-      # is derived from the bucket family, and no criterion may name a metric its
-      # role has not declared. `scheduler_active` and `scheduler_switch_total`
-      # are not: the switch step scrapes them from the exposition itself, and
-      # declaring a meter the soak has no criterion for would only add a sampling
-      # dependency to fail on.
+      # A metric is declared for one of two reasons and no others: a criterion
+      # reads it, or this run's contract already publishes it.
       #
-      # The five retained populations are declared for the other half of that
-      # sentence. This run's contract already includes them — moving the profile
-      # to `soak` was what made them publish at all — and until they were
-      # declared the sampler recorded them with unit "unknown", which is a series
-      # no `Criterion` can match on. Declaring one is what makes it usable by a
-      # criterion; undeclaring one is how a population this run measures stops
-      # being one it can be held to.
+      # `scheduler_switch_duration_seconds_max` and `..._seconds_bucket` are the
+      # first — a p99 is derived from the bucket family, and no criterion may
+      # name a metric its role has not declared. The six retained populations are
+      # the second: the `soak` profile is what makes them publish at all, and
+      # until they were declared the sampler recorded them with unit "unknown",
+      # which is a series no `Criterion` can match on. Declaring one is what
+      # makes it usable by a criterion; undeclaring one is how a population this
+      # run measures stops being one it can be held to.
+      #
+      # `scheduler_active` and `scheduler_switch_total` are neither: the switch
+      # step reads them from the exposition itself, and declaring a meter no
+      # criterion and no contract reads would only add a sampling dependency to
+      # fail on.
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes,
                          scheduler_switch_duration_seconds_max, scheduler_switch_duration_seconds_bucket,
                          invocation_execution_reservations, invocation_canonical_input_bytes,
                          invocation_physical_input_copy_bytes, execution_waiters_retained,
-                         execution_expiry_queue_depth]
+                         execution_expiry_queue_depth, function_capacity_retired_generations]
       required_capabilities: [procfs, docker-engine, gc, heap_dump]
       runtime_options: []
       collection_sources: [procfs, docker-engine, prometheus]

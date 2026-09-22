@@ -335,9 +335,9 @@ def test_the_switch_soak_declares_both_modules_and_the_step():
     assert soak is not None
 
     assert soak.purpose == "p24"
-    # `soak` and not `advanced`: four of the five retained-population meters this
-    # run's contract observes are registered only under the soak profile, and an
-    # absent series is indistinguishable from a probe that never fired.
+    # `soak` and not `advanced`: every retained-population meter this run's
+    # contract observes is registered only under the soak profile, and an absent
+    # series is indistinguishable from a probe that never fired.
     assert soak.metrics_profile == "soak"
     # The campaign's criterion is a soak of at least sixty minutes.
     assert soak.phases.steady_s >= 60 * 60
@@ -356,20 +356,33 @@ def test_the_switch_soak_declares_both_modules_and_the_step():
 def test_the_switch_soak_declares_the_populations_the_soak_profile_publishes():
     """A population nothing declares is one no criterion can be held to.
 
-    The five are registered by `SoakMetricsConfiguration` and the run's profile
+    The six are registered by `SoakMetricsConfiguration` and the run's profile
     publishes them, but the sampler takes a metric's unit from the declaration
     and a `Criterion` may only name a metric its role declared required. Left
     out, they are readable in `samples.jsonl` with unit "unknown" and unusable by
     the contract this run is judged against.
+
+    Both sides are held to the names nanolab already knows — the load-test
+    catalogue declines each of them for exactly one reason, this run's collector
+    — so the table and the scenario cannot agree merely by being emptied
+    together: a subset check an empty table satisfies is not a pin.
     """
     from nanolab.tasks.soak.runtime import POPULATION_UNITS
+    from tests.metrics.test_catalogue_coverage import _NOT_COLLECTED
 
+    known = {
+        name
+        for name, reason in _NOT_COLLECTED.items()
+        if reason == "sampled by the soak population collector"
+    }
     scenario = yaml.safe_load(
         (SCENARIOS / "memory-soak-scheduler-switch-container.yaml").read_text()
     )
     required = scenario["soak"]["roles"]["control-plane"]["required_metrics"]
 
-    assert set(POPULATION_UNITS) <= set(required)
+    assert len(known) == 6  # the catalogue's own declination, not this test's
+    assert set(POPULATION_UNITS) == known
+    assert known <= set(required)
 
 
 def test_the_switch_policy_keeps_the_shared_memory_contract():

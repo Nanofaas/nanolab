@@ -1285,20 +1285,23 @@ def _capture_owned_diagnostic(
             )
 
 
-# The retained populations only the soak metrics profile publishes, in the unit
-# a criterion reads them in. The soak's sampler records a metric's unit from the
-# criterion that names it — and a `Criterion` may only name a metric its role has
-# declared required — so a population nothing judges arrives in `samples.jsonl`
-# with unit "unknown" and no criterion can hold the run to it. Declared here
-# rather than left to the `_bytes` suffix, which is right for two of the five and
-# a guess for the other three; inferred units are how an unreadable series turns
-# into a confident one.
+# The six retained populations only the soak metrics profile publishes, in the
+# unit a criterion reads them in — all six `Gauge.builder(...)` beans of
+# nanoFaaS's `SoakMetricsConfiguration`, which is `@ConditionalOnProperty(
+# havingValue = "soak")` and this scenario's profile. The soak's sampler records
+# a metric's unit from the criterion that names it — and a `Criterion` may only
+# name a metric its role has declared required — so a population nothing judges
+# arrives in `samples.jsonl` with unit "unknown" and no criterion can hold the
+# run to it. Declared here rather than left to the `_bytes` suffix, which is
+# right for two of the six and a guess for the other four; inferred units are how
+# an unreadable series turns into a confident one.
 POPULATION_UNITS: Mapping[str, str] = {
     "invocation_execution_reservations": "count",
     "invocation_canonical_input_bytes": "bytes",
     "invocation_physical_input_copy_bytes": "bytes",
     "execution_waiters_retained": "count",
     "execution_expiry_queue_depth": "count",
+    "function_capacity_retired_generations": "count",
 }
 
 

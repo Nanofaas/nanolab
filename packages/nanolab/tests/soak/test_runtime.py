@@ -121,11 +121,22 @@ def test_the_sampler_declares_a_unit_for_every_population_it_records():
     nothing declares at all still gets no invented unit.
     """
     from nanolab.tasks.soak.runtime import POPULATION_UNITS, _metric_unit
+    from tests.metrics.test_catalogue_coverage import _NOT_COLLECTED
 
     declared = {("control-plane", "scheduler_switch_duration_seconds_max"): "seconds"}
+    # The names nanolab already knows, read from the catalogue that declines each
+    # of them for this run's collector. Iterating the table itself asserts
+    # nothing once the table is empty, which is the mutation this is here for.
+    known = {
+        name
+        for name, reason in _NOT_COLLECTED.items()
+        if reason == "sampled by the soak population collector"
+    }
 
-    for name, unit in POPULATION_UNITS.items():
-        assert _metric_unit(declared, "control-plane", name) == unit
+    assert set(POPULATION_UNITS) == known
+    for name in known:
+        assert _metric_unit(declared, "control-plane", name) == POPULATION_UNITS[name]
+        assert POPULATION_UNITS[name] != "unknown"
     # A criterion's own declaration still governs the metric it names.
     assert (
         _metric_unit(
