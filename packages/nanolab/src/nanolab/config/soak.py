@@ -131,6 +131,35 @@ class RolePolicy(_StrictModel):
         return self
 
 
+class SchedulerSwitchPolicy(_StrictModel):
+    """Declare the manual hot switch a soak drives under its own load.
+
+    The two strategy ids the step alternates between, in the order it uses.
+    Required rather than defaulted: a soak that silently skipped the switch
+    would look exactly like one that made a thousand of them.
+
+    A list rather than a tuple because these models are `strict=True` and a
+    scenario is YAML, which has no tuple literal: a `tuple[Text, Text]` field
+    rejects the sequence a scenario can actually write. The length and the
+    distinctness are what make it a pair, and both are checked here.
+
+    The budgets the step holds itself to are not here. They are frozen in
+    `nanolab.tasks.soak.scheduler_switch`, cited from the campaign's own
+    `budgets.json`, because a scenario that could restate them could also
+    quietly raise one.
+    """
+
+    strategies: list[Text]
+
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        """Alternating between one strategy and itself is not a switch."""
+        _unique(self.strategies, "strategies")
+        if len(self.strategies) != 2:
+            raise ValueError("scheduler switch requires exactly two strategies")
+        return self
+
+
 class Criterion(_StrictModel):
     """Specify a numerical policy before observing any candidate results."""
 
@@ -299,6 +328,9 @@ class SoakConfig(_StrictModel):
     criteria: list[Criterion] = Field(default_factory=list)
     diagnostics: DiagnosticPolicy
     prerequisites: PrerequisitePolicy
+    # Present only in a protocol whose run drives the hot switch. Absent leaves
+    # the admin surface off, which is the platform's default and stays it.
+    scheduler_switch: SchedulerSwitchPolicy | None = None
     sample_interval_s: PositiveNumber
     scrape_timeout_s: PositiveNumber
     max_observation_gap_s: PositiveNumber

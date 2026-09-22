@@ -13,7 +13,7 @@ def fake_config(**fields: object) -> SoakConfig:
     return cast(SoakConfig, SimpleNamespace(**fields))
 
 
-def make_lifecycle(tmp_path, events, failure=None):
+def make_lifecycle(tmp_path, events, failure=None, under_load=None):
     class Clock:
         now = 0
 
@@ -79,6 +79,7 @@ def make_lifecycle(tmp_path, events, failure=None):
         driver_factory=Driver,  # pyright: ignore[reportArgumentType]
         hooks=hooks,
         run_dir=tmp_path,
+        under_load=under_load,
     )
 
 
@@ -135,6 +136,56 @@ def test_cancellation_still_reports(tmp_path):
         Workflow("soak").add(task).run()
     assert task.state.aborted
     assert events == ["capture", "evaluate", "report"]
+
+
+def test_the_switch_step_runs_beside_the_steady_load(tmp_path):
+    """Both run in the same window, and the step's receipt is kept."""
+    events = []
+    seen: list[tuple[float, object]] = []
+
+    def under_load(window_s, cancelled):
+        seen.append((window_s, cancelled))
+        events.append("switch-steady")
+        return SimpleNamespace(committed=1000, live_indexes=2)
+
+    task = make_lifecycle(tmp_path, events, under_load=under_load)
+    Workflow("soak").add(task).run()
+
+    # The switch ran inside the steady window, not before or after it.
+    assert "switch-steady" in events
+    assert events.index("load-steady") < events.index("capture")
+    assert "switch-steady" in events[: events.index("capture")]
+    # It was handed the steady phase's own duration and the run's cancellation.
+    assert seen == [(5400, task.cancelled)]
+    assert task.state.switch_receipt.committed == 1000
+    assert task.state.workload_receipts["steady"].name == "receipt.json"
+
+
+def test_a_failed_switch_step_fails_the_run_with_the_load_receipt_beside_it(tmp_path):
+    """A switch that fails does not discard the load it ran under."""
+    events = []
+
+    def under_load(window_s, cancelled):
+        events.append("switch-steady")
+        raise RuntimeError("switches committed, budget 1000")
+
+    task = make_lifecycle(tmp_path, events, under_load=under_load)
+    with pytest.raises(RuntimeError, match="switches committed, budget 1000"):
+        Workflow("soak").add(task).run()
+
+    # The load's own receipt survived, and the run still finalized and reported.
+    assert task.state.workload_receipts["steady"].name == "receipt.json"
+    assert task.state.switch_receipt is None
+    assert events[-3:] == ["observer-stop", "evaluate", "report"]
+
+
+def test_a_soak_without_a_switch_step_runs_the_load_alone(tmp_path):
+    events = []
+    task = make_lifecycle(tmp_path, events)
+    Workflow("soak").add(task).run()
+
+    assert task.state.switch_receipt is None
+    assert events.count("load-steady") == 1
 
 
 def test_startup_budget_covers_all_sequential_scrapes():

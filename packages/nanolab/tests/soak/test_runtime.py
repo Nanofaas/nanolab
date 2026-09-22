@@ -172,6 +172,63 @@ def test_local_compose_uses_only_frozen_images_and_private_network(
     value.writer.close()
 
 
+def _control_plane_environment(tmp_path, monkeypatch, *, declares_switch):
+    """Build the compose environment for a protocol with or without the switch."""
+    from nanolab.config.soak import SchedulerSwitchPolicy
+
+    value = prepared(tmp_path)
+    value.config.diagnostics.operations = {role: [] for role in value.config.roles}
+    if declares_switch:
+        value.config.scheduler_switch = SchedulerSwitchPolicy(
+            strategies=["per-function", "shared-queue"]
+        )
+    leases = []
+
+    class Lease:
+        def __init__(self):
+            leases.append(self)
+
+        def bind(self, address):
+            assert address == ("127.0.0.1", 0)
+
+        def getsockname(self):
+            return "127.0.0.1", 20000 + len(leases)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("nanolab.tasks.soak.runtime.socket.socket", Lease)
+    create_local_deployment(value, tmp_path)
+    document = json.loads((tmp_path / "soak-compose.json").read_text())
+    value.writer.close()
+    return document["services"]["control-plane"]["environment"]
+
+
+def test_a_protocol_that_declares_the_switch_opens_the_admin_route(
+    tmp_path, monkeypatch
+):
+    """The switch needs the admin API, which the platform ships unmounted.
+
+    Measured on the 0.22.0 control plane: without this variable both
+    `/v1/admin/runtime-config` and its `scheduler` namespace answer 404 whatever
+    the artifact was built with.
+    """
+    environment = _control_plane_environment(
+        tmp_path, monkeypatch, declares_switch=True
+    )
+
+    assert environment["NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED"] == "true"
+
+
+def test_every_other_soak_keeps_the_admin_route_off(tmp_path, monkeypatch):
+    """Default-off is the platform's posture and a scenario must not move it."""
+    environment = _control_plane_environment(
+        tmp_path, monkeypatch, declares_switch=False
+    )
+
+    assert "NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED" not in environment
+
+
 def test_control_plane_gets_a_writable_catalog_directory(tmp_path, monkeypatch):
     """The soak runs containers as the host user, not the image's own user.
 

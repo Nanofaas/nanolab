@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -64,6 +65,9 @@ class LifecycleState:
     secondary_errors: list[tuple[str, BaseException]] = field(default_factory=list)
     windows: dict[str, tuple[float, float]] = field(default_factory=dict)
     workload_receipts: dict[str, Path] = field(default_factory=dict)
+    # Set only by a run whose protocol declares the hot switch: the step's own
+    # receipt, which is where its count, its pause and its index reading land.
+    switch_receipt: Any = None
     evaluation: Any = None
     report: Path | None = None
 
@@ -117,6 +121,7 @@ class SoakLifecycle(Task[LifecycleState]):
         hooks: LifecycleHooks,
         run_dir: Path,
         cancelled: Event | None = None,
+        under_load: Callable[[float, Event], Any] | None = None,
     ) -> None:
         """Bind the policy and runtime adapters for one measurement lifetime."""
         self.config = config
@@ -126,6 +131,7 @@ class SoakLifecycle(Task[LifecycleState]):
         self.hooks = hooks
         self.run_dir = run_dir
         self.cancelled = cancelled if cancelled is not None else Event()
+        self.under_load = under_load
         self.state = LifecycleState()
         self._driver: WorkloadDriver | None = None
         self._entered = False
@@ -156,11 +162,41 @@ class SoakLifecycle(Task[LifecycleState]):
         else:
             self.observer.set_phase(phase)
         self._driver = self.driver_factory(phase)
-        self.state.workload_receipts[phase] = self._driver.run(
-            self.run_dir / phase, duration, self.cancelled
-        )
+        under_load = self.under_load
+        if phase == "steady" and under_load is not None:
+            self._load_under_switching(self._driver, under_load, duration)
+        else:
+            self.state.workload_receipts[phase] = self._driver.run(
+                self.run_dir / phase, duration, self.cancelled
+            )
         self._stop_generator()
         self._check_cancelled()
+
+    def _load_under_switching(
+        self,
+        driver: WorkloadDriver,
+        under_load: Callable[[float, Event], Any],
+        duration: float,
+    ) -> None:
+        """Run the load and the switch step together, and keep both receipts.
+
+        The switch has to happen *under* the load, so the two cannot be
+        sequenced. They are two threads rather than one interleaved loop because
+        the switch is what this step is for: folding it into the workload driver
+        would put the perturbation inside the thing it perturbs, and make the
+        load's own receipt depend on the switch having succeeded.
+
+        A switch that fails does not cut the window short. The load still runs to
+        its own duration and its receipt is still written, so the failure reaches
+        the report with the evidence beside it rather than instead of it.
+        """
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            load = pool.submit(
+                driver.run, self.run_dir / "steady", duration, self.cancelled
+            )
+            switching = pool.submit(under_load, duration, self.cancelled)
+            self.state.workload_receipts["steady"] = load.result()
+            self.state.switch_receipt = switching.result()
 
     def _stop_generator(self) -> None:
         if self._driver is not None:

@@ -56,6 +56,7 @@ from nanolab.tasks.soak.preparation import (
     prepare_soak,
 )
 from nanolab.tasks.soak.report import write_report
+from nanolab.tasks.soak.scheduler_switch import SchedulerSwitchDriver
 from nanolab.tasks.soak.workflow import (
     LifecycleHooks,
     LifecycleState,
@@ -1020,6 +1021,13 @@ def create_local_deployment(
         }
         if policy.runtime == "jvm":
             env["NANOFAAS_METRICS_PROFILE"] = config.metrics_profile
+        if role == "control-plane" and config.scheduler_switch is not None:
+            # Only a protocol that declares the hot switch opens the admin route:
+            # every other soak keeps the platform's own default, which is off,
+            # and the route unmounted. Measured on the 0.22.0 control plane:
+            # without it both `/v1/admin/runtime-config` and its `scheduler`
+            # namespace answer 404 whatever the artifact was built with.
+            env["NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED"] = "true"
         if policy.runtime == "jvm" and policy.runtime_options:
             env["JAVA_TOOL_OPTIONS"] = " ".join(policy.runtime_options)
         elif policy.runtime == "node" and policy.runtime_options:
@@ -1950,7 +1958,40 @@ def create_soak_lifecycle(
         ),
         run_dir=run_dir,
         cancelled=cancelled,
+        under_load=scheduler_switch_step(config, deployment, clock),
     )
+
+
+def scheduler_switch_step(
+    config: SoakConfig, deployment: Any, clock: Any
+) -> Callable[[float, Event], Any] | None:
+    """Build the hot-switch step for a protocol that declares one, else nothing.
+
+    The callable this returns is what the lifecycle runs beside the steady load.
+    A protocol that declares no switch gets `None`, which is every other soak:
+    the step is opt-in, and the platform's admin surface — which is what the
+    PATCH needs and what ships off — stays off without it.
+    """
+    if config.scheduler_switch is None:
+        return None
+    policy = config.scheduler_switch
+    metrics_url = deployment.metrics_endpoints.get("control-plane")
+    if not metrics_url:
+        raise ValueError(
+            "the scheduler switch reads the platform's own switch meters from "
+            "the control plane's exposition, and this deployment exposes none"
+        )
+    driver = SchedulerSwitchDriver(
+        deployment.api_endpoint,
+        metrics_url,
+        (policy.strategies[0], policy.strategies[1]),
+        clock=clock,
+    )
+
+    def under_load(window_s: float, cancelled: Event) -> Any:
+        return driver.run(window_s=window_s, cancelled=cancelled)
+
+    return under_load
 
 
 class RunSingleVersionSoak(Task):

@@ -479,3 +479,42 @@ def test_existing_loadtest_keeps_its_original_contract():
         }
     )
     assert config.workflow == "loadtest"
+
+
+def test_a_soak_declares_the_switch_by_naming_two_distinct_strategies(scenario_data):
+    """The switch is opt-in: absent, and the admin route stays shut with it."""
+    assert parse_soak(scenario_data["soak"]).scheduler_switch is None
+
+    scenario_data["soak"]["scheduler_switch"] = {
+        "strategies": ["per-function", "shared-queue"]
+    }
+    policy = parse_soak(scenario_data["soak"]).scheduler_switch
+    assert policy is not None
+    assert policy.strategies == ["per-function", "shared-queue"]
+
+
+def test_alternating_between_one_strategy_and_itself_is_refused(scenario_data):
+    """Two names for the same strategy would be a switch that switches nothing."""
+    scenario_data["soak"]["scheduler_switch"] = {
+        "strategies": ["per-function", "per-function"]
+    }
+    with pytest.raises(ValidationError, match="must not contain duplicates"):
+        parse_soak(scenario_data["soak"])
+
+
+def test_the_switch_is_a_pair_not_a_list(scenario_data):
+    """One strategy is not an alternation and three is not one either."""
+    for strategies in (["per-function"], ["a", "b", "c"]):
+        scenario_data["soak"]["scheduler_switch"] = {"strategies": strategies}
+        with pytest.raises(ValidationError, match="exactly two strategies"):
+            parse_soak(scenario_data["soak"])
+
+
+def test_the_switch_carries_no_budget_of_its_own(scenario_data):
+    """The budgets are frozen in the step; a scenario cannot restate one."""
+    scenario_data["soak"]["scheduler_switch"] = {
+        "strategies": ["per-function", "shared-queue"],
+        "switches_in_soak": 1,
+    }
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        parse_soak(scenario_data["soak"])

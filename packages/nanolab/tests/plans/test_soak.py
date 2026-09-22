@@ -314,3 +314,70 @@ def test_containerd_soak_refuses_unimplemented_p24_diagnostics(tmp_path):
             repo_root=Path(os.environ["NANOFAAS_ROOT"]),
             tool_root=Path(__file__).parents[4],
         )
+
+
+SCENARIOS = Path(__file__).resolve().parents[2] / "scenarios-v2"
+
+
+def _load_soak_scenario(name: str) -> ScenarioConfig:
+    """Load a scenario file the way the CLI does, policy file and all."""
+    from nanolab.cli.soak import load_soak_policy
+
+    path = SCENARIOS / name
+    resolved, receipt = load_soak_policy(yaml.safe_load(path.read_text()), path)
+    assert receipt is not None
+    return ScenarioConfig.model_validate(resolved)
+
+
+def test_the_switch_soak_declares_both_modules_and_the_step():
+    """The scenario issue #208 runs: one version, two strategies, one hour."""
+    soak = _load_soak_scenario("memory-soak-scheduler-switch-container.yaml").soak
+    assert soak is not None
+
+    assert soak.purpose == "p24"
+    # The campaign's criterion is a soak of at least sixty minutes.
+    assert soak.phases.steady_s >= 60 * 60
+    assert soak.scheduler_switch is not None
+    assert soak.scheduler_switch.strategies == ["per-function", "shared-queue"]
+    # Two strategies are indexed only when both queue modules are built in, and
+    # the admin route is what the PATCH travels over.
+    modules = soak.images["control-plane"].modules
+    assert {"async-queue", "sync-queue", "runtime-config"} <= set(modules)
+    assert (
+        "scheduler_switch_duration_seconds_max"
+        in soak.roles["control-plane"].required_metrics
+    )
+
+
+def test_the_switch_policy_keeps_the_shared_memory_contract():
+    """The duplicated p24 criteria must not drift from the approved ones.
+
+    A scenario cannot attach one more criterion to a shared policy file: the
+    loader replaces the whole criteria list. So the switch soak restates the
+    contract, and this is what stops the two copies disagreeing about a budget.
+    """
+    shared = yaml.safe_load((SCENARIOS / "memory-soak-policy.yaml").read_text())
+    switch = yaml.safe_load(
+        (SCENARIOS / "scheduler-switch-soak-policy.yaml").read_text()
+    )
+    by_id = {criterion["id"]: criterion for criterion in switch["criteria"]}
+
+    for criterion in shared["criteria"]:
+        assert by_id[criterion["id"]] == criterion
+    assert set(by_id) - {c["id"] for c in shared["criteria"]} == {
+        "control-plane.scheduler-switch-pause"
+    }
+
+
+def test_the_switch_pause_criterion_carries_the_frozen_millisecond_budget():
+    """250 ms in the meter's unit, with the frozen number not raised."""
+    switch = yaml.safe_load(
+        (SCENARIOS / "scheduler-switch-soak-policy.yaml").read_text()
+    )
+    by_id = {criterion["id"]: criterion for criterion in switch["criteria"]}
+    pause = by_id["control-plane.scheduler-switch-pause"]
+
+    assert pause["metric"] == "scheduler_switch_duration_seconds_max"
+    assert pause["unit"] == "seconds"
+    assert pause["operation"] == "maximum"
+    assert pause["threshold"] * 1000 == 250
