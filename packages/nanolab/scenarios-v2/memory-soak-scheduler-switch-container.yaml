@@ -106,7 +106,10 @@ soak:
       memory_limit_bytes: 536870912
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
       required_capabilities: [procfs, docker-engine, gc, heap_dump]
-      runtime_options: []
+      # The node diagnostic controller is loaded by Node itself at startup, so
+      # the role has to declare the preload before build; the runtime refuses a
+      # node role with gc/heap_dump diagnostics that does not.
+      runtime_options: [--require=/opt/nanolab/node-diagnostic-control.cjs]
       collection_sources: [procfs, docker-engine]
   images:
     control-plane:
