@@ -12,7 +12,7 @@ from typing import Any, Protocol, cast
 from sonata_engine import Steps, Task, TaskInputs, TaskOutcome
 
 from nanolab.config.soak import SoakConfig
-from nanolab.tasks.soak.ports import Clock, WorkloadDriver
+from nanolab.tasks.soak.ports import WORKLOAD_RECEIPT, Clock, WorkloadDriver
 
 
 def phase_order() -> tuple[str, ...]:
@@ -221,16 +221,25 @@ class SoakLifecycle(Task[LifecycleState]):
         run's evidence, and losing it to the failure would leave the operator a
         verdict with nothing to read it against.
 
+        The load's receipt is recorded whether the load returned it or wrote it
+        and then raised. The driver persists the file before it re-raises, so a
+        generator that dies mid-phase still left one on disk, and a run that
+        fails is exactly the run whose evidence is wanted.
+
         The *first* failure is raised, not the loudest. When the load dies the
         switch then stops on the cancellation and reports a short count, which
         is a consequence of that death rather than a second, independent fault.
         """
-        for future in (switching, load):
+        for future, name in ((switching, "switch"), (load, "workload")):
             try:
-                receipt = future.result()
+                receipt: Path = future.result()
             except BaseException:
-                continue
-            if future is switching:
+                if name == "switch":
+                    continue
+                receipt = self.run_dir / "steady" / WORKLOAD_RECEIPT
+                if not receipt.is_file():
+                    continue
+            if name == "switch":
                 self.state.switch_receipt = receipt
             else:
                 self.state.workload_receipts["steady"] = receipt

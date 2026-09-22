@@ -277,6 +277,54 @@ def test_a_load_failure_is_the_one_reported_when_the_switch_then_stops(tmp_path)
     assert "switch-steady" in events
 
 
+def test_a_load_failure_keeps_the_receipt_the_load_wrote_before_it_died(tmp_path):
+    """The other half of the same hinge, on the load's side of it.
+
+    `K6WorkloadDriver` persists its receipt in a `finally` and re-raises after,
+    so a generator that dies mid-steady leaves `workload-receipt.json` on disk.
+    Reading only the future's result drops it: the manifest then references no
+    workload evidence for a run whose load is exactly what failed.
+    """
+    import time
+
+    events = []
+
+    class DyingLoad:
+        def __init__(self, phase):
+            self.phase = phase
+
+        def run(self, output, duration, cancelled):
+            events.append("load-" + self.phase)
+            output.mkdir(parents=True, exist_ok=True)
+            receipt = output / "workload-receipt.json"
+            if self.phase == "steady":
+                # What the driver does before it raises: the receipt is written
+                # and then the failure is surfaced.
+                receipt.write_text('{"kind": "workload"}')
+                raise RuntimeError("generator died")
+            receipt.write_text("{}")
+            return receipt
+
+        def stop(self, timeout):
+            events.append("stop-" + self.phase)
+
+    def under_load(window_s, cancelled):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not cancelled.wait(0.01):
+            pass
+        raise RuntimeError("0 switches committed, budget 1000")
+
+    task = make_lifecycle(
+        tmp_path, events, under_load=under_load, driver=DyingLoad, steady_s=20
+    )
+    with pytest.raises(RuntimeError, match="generator died"):
+        Workflow("soak").add(task).run()
+
+    kept = task.state.workload_receipts["steady"]
+    assert kept == tmp_path / "steady" / "workload-receipt.json"
+    assert kept.is_file()
+
+
 def test_a_soak_without_a_switch_step_runs_the_load_alone(tmp_path):
     events = []
     task = make_lifecycle(tmp_path, events)

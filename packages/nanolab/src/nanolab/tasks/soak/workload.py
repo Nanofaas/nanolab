@@ -17,6 +17,7 @@ from fractions import Fraction
 from pathlib import Path
 from threading import Event, Lock
 
+from nanolab.tasks.soak.ports import WORKLOAD_RECEIPT
 from nanolab.tasks.soak.processes import OwnedCommandRunner
 from nanolab.workspace.paths import bundled_assets_root
 
@@ -330,9 +331,9 @@ class K6WorkloadDriver:
 
     def _run(self, output_dir: Path, duration_s: float, cancelled: Event) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
-        receipt_path = output_dir / "workload-receipt.json"
+        receipt_path = output_dir / WORKLOAD_RECEIPT
         names = (
-            "workload-receipt.json",
+            WORKLOAD_RECEIPT,
             "workload-receipt.tmp",
             "workload-config.json",
             "workload-inputs.json",
