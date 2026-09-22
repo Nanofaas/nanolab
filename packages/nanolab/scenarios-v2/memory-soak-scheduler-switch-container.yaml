@@ -74,8 +74,19 @@ soak:
       # are not: the switch step scrapes them from the exposition itself, and
       # declaring a meter the soak has no criterion for would only add a sampling
       # dependency to fail on.
+      #
+      # The five retained populations are declared for the other half of that
+      # sentence. This run's contract already includes them — moving the profile
+      # to `soak` was what made them publish at all — and until they were
+      # declared the sampler recorded them with unit "unknown", which is a series
+      # no `Criterion` can match on. Declaring one is what makes it usable by a
+      # criterion; undeclaring one is how a population this run measures stops
+      # being one it can be held to.
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes,
-                         scheduler_switch_duration_seconds_max, scheduler_switch_duration_seconds_bucket]
+                         scheduler_switch_duration_seconds_max, scheduler_switch_duration_seconds_bucket,
+                         invocation_execution_reservations, invocation_canonical_input_bytes,
+                         invocation_physical_input_copy_bytes, execution_waiters_retained,
+                         execution_expiry_queue_depth]
       required_capabilities: [procfs, docker-engine, gc, heap_dump]
       runtime_options: []
       collection_sources: [procfs, docker-engine, prometheus]

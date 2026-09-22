@@ -16,7 +16,7 @@ import shutil
 import socket
 import stat
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
@@ -1285,6 +1285,38 @@ def _capture_owned_diagnostic(
             )
 
 
+# The retained populations only the soak metrics profile publishes, in the unit
+# a criterion reads them in. The soak's sampler records a metric's unit from the
+# criterion that names it — and a `Criterion` may only name a metric its role has
+# declared required — so a population nothing judges arrives in `samples.jsonl`
+# with unit "unknown" and no criterion can hold the run to it. Declared here
+# rather than left to the `_bytes` suffix, which is right for two of the five and
+# a guess for the other three; inferred units are how an unreadable series turns
+# into a confident one.
+POPULATION_UNITS: Mapping[str, str] = {
+    "invocation_execution_reservations": "count",
+    "invocation_canonical_input_bytes": "bytes",
+    "invocation_physical_input_copy_bytes": "bytes",
+    "execution_waiters_retained": "count",
+    "execution_expiry_queue_depth": "count",
+}
+
+
+def _metric_unit(declared: Mapping[tuple[str, str], str], role: str, name: str) -> str:
+    """Resolve the unit the sampler records a metric in from the narrowest declaration.
+
+    The criterion's own unit comes first, because that is what the criterion
+    will match on when the sample is read back. Then the soak profile's retained
+    populations, which no criterion names yet. Then the name, and only for
+    `_bytes`, which is a convention rather than a reading.
+    """
+    return (
+        declared.get((role, name))
+        or POPULATION_UNITS.get(name)
+        or ("bytes" if name.endswith("_bytes") else "unknown")
+    )
+
+
 def create_soak_lifecycle(
     prepared: PreparedSoak | PreparedContainerdSoak,
     *,
@@ -1398,9 +1430,7 @@ def create_soak_lifecycle(
     bindings = []
     for target in targets:
         metrics = {
-            name: units.get(
-                (target.role, name), "bytes" if name.endswith("_bytes") else "unknown"
-            )
+            name: _metric_unit(units, target.role, name)
             for name in config.roles[target.role].required_metrics
         }
         if target.role == "control-plane":

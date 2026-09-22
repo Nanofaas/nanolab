@@ -111,6 +111,39 @@ def prepared(
     )
 
 
+def test_the_sampler_declares_a_unit_for_every_population_it_records():
+    """A metric the sampler cannot describe is one no criterion can read.
+
+    The unit reaches the sampler from the criterion that names the metric, and a
+    criterion may only name a metric its role declared required — so a retained
+    population nothing declares arrives in `samples.jsonl` with unit "unknown"
+    and cannot be held to anything. The narrowest declaration wins, and a name
+    nothing declares at all still gets no invented unit.
+    """
+    from nanolab.tasks.soak.runtime import POPULATION_UNITS, _metric_unit
+
+    declared = {("control-plane", "scheduler_switch_duration_seconds_max"): "seconds"}
+
+    for name, unit in POPULATION_UNITS.items():
+        assert _metric_unit(declared, "control-plane", name) == unit
+    # A criterion's own declaration still governs the metric it names.
+    assert (
+        _metric_unit(
+            {("control-plane", "invocation_canonical_input_bytes"): "kilobytes"},
+            "control-plane",
+            "invocation_canonical_input_bytes",
+        )
+        == "kilobytes"
+    )
+    assert (
+        _metric_unit(declared, "control-plane", "scheduler_switch_duration_seconds_max")
+        == "seconds"
+    )
+    # The `_bytes` convention is a convention, not a licence to guess.
+    assert _metric_unit(declared, "control-plane", "some_bytes") == "bytes"
+    assert _metric_unit(declared, "control-plane", "process_threads") == "unknown"
+
+
 @pytest.mark.parametrize(
     ("scenario", "expected_profile"),
     [

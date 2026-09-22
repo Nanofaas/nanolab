@@ -83,10 +83,14 @@ class FrozenBudgets:
 
     switches_in_soak: int = 1000
     max_switch_pause_ms: float = 250
-    # Named and carried although nothing measures it: the platform publishes no
-    # percentile histogram for the switch timer under any metrics profile, so
-    # the p99 this budget names has no series behind it. Kept so the omission is
-    # a recorded fact rather than an oversight.
+    # The one budget of the four this step does not enforce itself: the switch
+    # policy carries it as `control-plane.scheduler-switch-pause-p99`, derived
+    # from the bucket family the platform publishes for this timer under every
+    # non-basic metrics profile. Repeated here so the frozen numbers sit
+    # together, and because the p99 was never unobservable — what did not exist,
+    # until `nanolab.config.soak` grew `percentile`, was a way to *express* it.
+    # "Unobservable" would have sent a reader off to write a metric that the
+    # platform already publishes.
     max_switch_pause_p99_ms: float = 100
     max_live_strategy_indexes: int = 2
 

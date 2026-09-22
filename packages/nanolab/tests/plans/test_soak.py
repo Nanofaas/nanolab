@@ -353,6 +353,25 @@ def test_the_switch_soak_declares_both_modules_and_the_step():
     )
 
 
+def test_the_switch_soak_declares_the_populations_the_soak_profile_publishes():
+    """A population nothing declares is one no criterion can be held to.
+
+    The five are registered by `SoakMetricsConfiguration` and the run's profile
+    publishes them, but the sampler takes a metric's unit from the declaration
+    and a `Criterion` may only name a metric its role declared required. Left
+    out, they are readable in `samples.jsonl` with unit "unknown" and unusable by
+    the contract this run is judged against.
+    """
+    from nanolab.tasks.soak.runtime import POPULATION_UNITS
+
+    scenario = yaml.safe_load(
+        (SCENARIOS / "memory-soak-scheduler-switch-container.yaml").read_text()
+    )
+    required = scenario["soak"]["roles"]["control-plane"]["required_metrics"]
+
+    assert set(POPULATION_UNITS) <= set(required)
+
+
 def test_the_switch_policy_keeps_the_shared_memory_contract():
     """The duplicated p24 criteria must not drift from the approved ones.
 
