@@ -2324,12 +2324,22 @@ def _duration_seconds(value: object) -> float:
     raise ValueError("effective duration format is unsupported")
 
 
+# /actuator/configprops keys a configuration-properties bean by its fully
+# qualified class name, and the control plane's is the Spring *binding* class:
+# `...nanofaas.controlplane.config.ExecutionStoreBindingProperties`. The runtime
+# record it converts to, `ExecutionStoreProperties` in the execution-runtime
+# module, is not a properties bean and never appears in the document. A selector
+# naming the record therefore matches nothing, and an unobserved retention is
+# indistinguishable from a store the run never used.
+EXECUTION_STORE_BEAN = "ExecutionStoreBindingProperties"
+
+
 def retention_from_configprops(document: dict) -> dict[str, float]:
-    """Read the actual bound ExecutionStoreProperties bean, including clamping."""
+    """Read the actual bound ExecutionStoreBindingProperties bean, with clamping."""
     matches = []
     for context in document.get("contexts", {}).values():
         for name, bean in context.get("beans", {}).items():
-            if name.endswith("ExecutionStoreProperties"):
+            if name.endswith(EXECUTION_STORE_BEAN):
                 matches.append(bean.get("properties", {}))
     if len(matches) != 1:
         raise ValueError("effective execution-store bean is absent or ambiguous")
@@ -2590,7 +2600,7 @@ def observe_local_configuration(
             if name == "configprops":
                 result["retention_s"] = retention_from_configprops(document)
                 result["retention_source"] = (
-                    "effective-configprops.json:ExecutionStoreProperties"
+                    "effective-configprops.json:" + EXECUTION_STORE_BEAN
                 )
             else:
                 raw = document.get("modules")

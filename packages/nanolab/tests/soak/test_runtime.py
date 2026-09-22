@@ -2477,3 +2477,57 @@ def test_artifact_inventory_groups_each_helper_command_log_tree(tmp_path):
     assert sum(size for _, size in verified) == sum(
         entry["size_bytes"] for entry in entries
     )
+
+
+def test_retention_reads_the_bean_the_control_plane_actually_publishes(nanofaas_root):
+    """The selector must name the binding bean, not the record it converts to.
+
+    `/actuator/configprops` keys a configuration-properties bean by its fully
+    qualified class name and the control plane's is the Spring binding class. The
+    runtime record it converts to is not a properties bean and never appears in
+    the document, so a selector naming the record matches nothing -- and an
+    unobserved retention reads exactly like a store the run never used.
+    """
+    from nanolab.tasks.soak.runtime import (
+        EXECUTION_STORE_BEAN,
+        retention_from_configprops,
+    )
+
+    # The key a real run's effective-configprops.json carried.
+    bean = (
+        "nanofaas.execution-store-it.unimib.datai.nanofaas.controlplane.config."
+        + EXECUTION_STORE_BEAN
+    )
+    # The class the platform declares, so a rename there fails here rather than
+    # silently in a run whose retention criterion could only ever be INCONCLUSIVE.
+    source = (
+        nanofaas_root
+        / "platform/control-plane/src/main/java/it/unimib/datai/nanofaas"
+        / "controlplane/config"
+        / f"{EXECUTION_STORE_BEAN}.java"
+    )
+    assert source.is_file(), (
+        f"nanoFaaS no longer declares {EXECUTION_STORE_BEAN}; the bean this "
+        "selector reads was renamed and the selector must move with it"
+    )
+    assert retention_from_configprops(
+        {
+            "contexts": {
+                "application": {
+                    "beans": {
+                        bean: {
+                            "properties": {
+                                "syncTtl": "PT30S",
+                                "ttl": "PT5M",
+                                "maxLifetime": "PT30M",
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ) == {
+        "unkeyed-sync-outcome": 30.0,
+        "terminal-key-and-readable-outcome": 300.0,
+        "live-key-and-execution": 1800.0,
+    }
