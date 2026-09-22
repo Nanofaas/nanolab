@@ -56,7 +56,10 @@ from nanolab.tasks.soak.preparation import (
     prepare_soak,
 )
 from nanolab.tasks.soak.report import write_report
-from nanolab.tasks.soak.scheduler_switch import SchedulerSwitchDriver
+from nanolab.tasks.soak.scheduler_switch import (
+    SchedulerSwitchDriver,
+    receipt_document,
+)
 from nanolab.tasks.soak.workflow import (
     LifecycleHooks,
     LifecycleState,
@@ -1858,6 +1861,12 @@ def create_soak_lifecycle(
             manifest["workload_script"] = _reference(root, root / "frozen-workload.js")
             workload = _read_json(receipt)
             manifest["traffic_stopped_s"] = workload.get("generator_end_s")
+        # The switch step's own receipt, referenced the same way and for the same
+        # reason: a passing soak has to carry the count, the window it happened
+        # over, the pause and the platform's own cross-check out of the run.
+        switch = state.switch_receipt
+        if switch is not None:
+            manifest["scheduler_switch"] = _reference(root, switch)
         # The captured source tree is already inventoried, file by file, in
         # source-manifest.jsonl, which snapshot.json seals with manifest_sha256
         # and both of which stay in this inventory. Listing its thousands of
@@ -1958,16 +1967,22 @@ def create_soak_lifecycle(
         ),
         run_dir=run_dir,
         cancelled=cancelled,
-        under_load=scheduler_switch_step(config, deployment, clock),
+        under_load=scheduler_switch_step(config, deployment, clock, root, writer),
     )
 
 
 def scheduler_switch_step(
-    config: SoakConfig, deployment: Any, clock: Any
+    config: SoakConfig, deployment: Any, clock: Any, run_dir: Path, writer: Any
 ) -> Callable[[float, Event], Any] | None:
     """Build the hot-switch step for a protocol that declares one, else nothing.
 
-    The callable this returns is what the lifecycle runs beside the steady load.
+    The callable this returns is what the lifecycle runs beside the steady load,
+    and it returns the path of the receipt it published. It publishes one because
+    the campaign's criterion is a count *and* a duration, and the run that
+    satisfies it has to be able to evidence both from its own artifacts - the
+    failing path already carries them in the error, which is no use to a soak
+    that passed.
+
     A protocol that declares no switch gets `None`, which is every other soak:
     the step is opt-in, and the platform's admin surface — which is what the
     PATCH needs and what ships off — stays off without it.
@@ -1988,8 +2003,9 @@ def scheduler_switch_step(
         clock=clock,
     )
 
-    def under_load(window_s: float, cancelled: Event) -> Any:
-        return driver.run(window_s=window_s, cancelled=cancelled)
+    def under_load(window_s: float, cancelled: Event) -> Path:
+        receipt = driver.run(window_s=window_s, cancelled=cancelled)
+        return writer.write_json("scheduler-switch.json", receipt_document(receipt))
 
     return under_load
 

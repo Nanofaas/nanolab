@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -66,8 +66,10 @@ class LifecycleState:
     windows: dict[str, tuple[float, float]] = field(default_factory=dict)
     workload_receipts: dict[str, Path] = field(default_factory=dict)
     # Set only by a run whose protocol declares the hot switch: the step's own
-    # receipt, which is where its count, its pause and its index reading land.
-    switch_receipt: Any = None
+    # receipt, published in the run root and referenced by the manifest, exactly
+    # as the workload receipt is. A passing soak has to be able to evidence the
+    # campaign's criterion from its own artifact.
+    switch_receipt: Path | None = None
     evaluation: Any = None
     report: Path | None = None
 
@@ -185,18 +187,55 @@ class SoakLifecycle(Task[LifecycleState]):
         the switch is what this step is for: folding it into the workload driver
         would put the perturbation inside the thing it perturbs, and make the
         load's own receipt depend on the switch having succeeded.
-
-        A switch that fails does not cut the window short. The load still runs to
-        its own duration and its receipt is still written, so the failure reaches
-        the report with the evidence beside it rather than instead of it.
         """
         with ThreadPoolExecutor(max_workers=2) as pool:
             load = pool.submit(
                 driver.run, self.run_dir / "steady", duration, self.cancelled
             )
             switching = pool.submit(under_load, duration, self.cancelled)
-            self.state.workload_receipts["steady"] = load.result()
-            self.state.switch_receipt = switching.result()
+            # Stop the other side as soon as either fails. Not a nicety: the
+            # executor's own shutdown waits for the survivor, so without this a
+            # switch that blows its budget one minute into a ninety-minute
+            # steady phase would be reported ninety minutes later, with the
+            # observer still sampling the process it is about to fail. An
+            # operator meets that with Ctrl-C, which turns a FAIL into an ABORT
+            # and loses the evidence - the worst outcome for the thing this step
+            # exists to measure.
+            done, _ = wait((load, switching), return_when=FIRST_EXCEPTION)
+            first = next((f for f in done if f.exception() is not None), None)
+            if first is not None:
+                self.cancelled.set()
+            wait((load, switching))
+            self._keep_receipts(load, switching, first)
+
+    def _keep_receipts(
+        self,
+        load: Future[Path],
+        switching: Future[Path],
+        first: Future[Path] | None,
+    ) -> None:
+        """Record both receipts, then surface the failure that caused the stop.
+
+        Each receipt is recorded before anything is raised, so a switch that
+        fails still leaves the load's receipt in the manifest: the load is the
+        run's evidence, and losing it to the failure would leave the operator a
+        verdict with nothing to read it against.
+
+        The *first* failure is raised, not the loudest. When the load dies the
+        switch then stops on the cancellation and reports a short count, which
+        is a consequence of that death rather than a second, independent fault.
+        """
+        for future in (switching, load):
+            try:
+                receipt = future.result()
+            except BaseException:
+                continue
+            if future is switching:
+                self.state.switch_receipt = receipt
+            else:
+                self.state.workload_receipts["steady"] = receipt
+        if first is not None:
+            first.result()  # re-raises the failure that stopped the window
 
     def _stop_generator(self) -> None:
         if self._driver is not None:

@@ -34,7 +34,16 @@ resources:
     limits: {cpu: 1, memoryMiB: 512}
 soak:
   purpose: p24
-  metrics_profile: advanced
+  # `soak` rather than `advanced`, because this run's contract includes the
+  # retained populations (records, physical input, leases, waiters, timers) and
+  # four of the five meters that answer them are registered only under this
+  # profile — `SoakMetricsConfiguration` is `@ConditionalOnProperty(...,
+  # havingValue = "soak")`. On `advanced` they are not published at all, and by
+  # this catalogue's own doctrine an absent series is indistinguishable from a
+  # probe that never fired. Nothing is lost by moving: the profile filter denies
+  # only under `basic`, and percentile histograms are enabled for every
+  # non-basic profile, so SOAK and ADVANCED filter and bucket identically.
+  metrics_profile: soak
   phases:
     warmup_s: 120
     baseline_drain_s: 2100

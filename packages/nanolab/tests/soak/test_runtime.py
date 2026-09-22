@@ -16,7 +16,7 @@ from sonata_tasks.execution.ports import CommandTaskExecutor
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.config.soak import SoakConfig
+from nanolab.config.soak import SchedulerSwitchPolicy, SoakConfig
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe
 from nanolab.tasks.soak.models import Target
@@ -28,6 +28,7 @@ from nanolab.tasks.soak.runtime import (
     create_local_deployment,
     create_soak_lifecycle,
 )
+from nanolab.tasks.soak.scheduler_switch import SwitchReceipt
 from nanolab.tasks.soak.sources import SourceSnapshot
 
 
@@ -174,8 +175,6 @@ def test_local_compose_uses_only_frozen_images_and_private_network(
 
 def _control_plane_environment(tmp_path, monkeypatch, *, declares_switch):
     """Build the compose environment for a protocol with or without the switch."""
-    from nanolab.config.soak import SchedulerSwitchPolicy
-
     value = prepared(tmp_path)
     value.config.diagnostics.operations = {role: [] for role in value.config.roles}
     if declares_switch:
@@ -460,6 +459,37 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     from nanolab.tasks.soak.models import Sample
 
     value = prepared(tmp_path)
+    # The run declares the hot switch, so the step runs and its receipt has to
+    # reach the manifest: a passing soak must be able to evidence the count and
+    # the window from its own artifacts.
+    value.config.scheduler_switch = SchedulerSwitchPolicy(
+        strategies=["per-function", "shared-queue"]
+    )
+
+    class FakeSwitch:
+        """Stand in for the driver, which its own tests cover."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, *, window_s, cancelled):
+            return SwitchReceipt(
+                strategies=("per-function", "shared-queue"),
+                initial="per-function",
+                final="per-function",
+                committed=1000,
+                refused=0,
+                stale=0,
+                live_indexes=2,
+                pause_max_ms=0.31,
+                platform_committed=1000.0,
+                restores=0,
+                window_s=window_s,
+                elapsed_s=window_s,
+            )
+
+    monkeypatch.setattr(module, "SchedulerSwitchDriver", FakeSwitch)
+
     root = value.evidence_dir
     (root / "builds").mkdir()
     (root / "source").mkdir()
@@ -598,7 +628,9 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     monkeypatch.setattr(module, "evaluate_run", evaluate_saved)
     deployment = fake_deployment(
         discover=lambda: targets,
-        metrics_endpoints={},
+        metrics_endpoints={
+            "control-plane": "http://127.0.0.1:10001/actuator/prometheus"
+        },
         observations=observed,
         api_endpoint="http://127.0.0.1:10000",
     )
@@ -624,6 +656,15 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     }
     assert manifest["completed"] is True
     assert manifest["workload"]["path"] == "steady/workload-receipt.json"
+    # The switch step's receipt is referenced the same way, and it carries the
+    # count *and* the window, so the criterion cannot be read from the artifact
+    # as a count without a duration.
+    assert manifest["scheduler_switch"]["path"] == "scheduler-switch.json"
+    switch = json.loads((root / "scheduler-switch.json").read_text())
+    assert switch["kind"] == "scheduler-switch"
+    assert switch["committed"] == 1000
+    assert switch["window_s"] == value.config.phases.steady_s
+    assert switch["platform_committed"] == 1000.0
     assert events == [
         "warmup",
         "load-warmup",

@@ -17,8 +17,15 @@ Two things it does *not* do, both because the soak cannot survive them:
   The switch step moves a knob the platform already documents as not surviving a
   restart; proving that belongs on a stack where the restart is the subject, as
   it already is in the procedure's own §5.5.
-* It does not own the invocation polling or the arrival counts. Those are the
-  workload driver's, and duplicating them would be a second copy of the load.
+* It does not poll invocations to a terminal status, and **nothing else does
+  either.** The procedure's §5.4 polls the ids it admitted to `success`; the
+  bundled k6 soak workload cannot stand in for it, because it drives one door
+  only — `assets/k6/soak-workload.js` exports a single `invoke()` that POSTs
+  `:invoke` and checks the synchronous response, with no `:enqueue`, no async
+  admission and no id to poll. So the "every admitted id returned its own
+  result across the switch" reading is a real gap in the soak, not something
+  this step inherits from the workload driver. Recording it here rather than
+  attributing it to a driver that does not do it.
 
 The three meters it reads back cannot be answered by the snapshot catalogue:
 `SchedulerConfiguration` registers them behind
@@ -30,7 +37,7 @@ switches this driver made, not the driver's own claim about itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from threading import Event
 from typing import Any
 
@@ -89,7 +96,15 @@ FROZEN_BUDGETS = FrozenBudgets()
 
 @dataclass(frozen=True, slots=True)
 class SwitchReceipt:
-    """What the step did, for the run's manifest and for the operator."""
+    """What the step did, published beside the workload's own receipt.
+
+    It reaches the run's acceptance manifest, so a passing soak can evidence the
+    campaign's criterion — "a soak of at least sixty minutes *with a thousand
+    switches*" — from the artifact rather than from a memory of the run. The two
+    durations are here to close the other half of that sentence: nothing floors
+    a soak's steady phase, so a receipt saying 1000 switches without saying over
+    how long would read the same for an hour and for three minutes.
+    """
 
     strategies: tuple[str, ...]
     initial: str
@@ -101,6 +116,11 @@ class SwitchReceipt:
     pause_max_ms: float | None
     platform_committed: float | None
     restores: int
+    # The window the step was given, which is the steady phase's own length.
+    window_s: float
+    # What it actually took, measured on the same clock that paced it. Recorded
+    # rather than derived: the two agree only while the platform keeps up.
+    elapsed_s: float
 
 
 def _series(
@@ -115,6 +135,22 @@ def _series(
         if metric == name
         and all(dict(row_labels).get(key) == item for key, item in labels.items())
     ]
+
+
+def receipt_document(receipt: SwitchReceipt) -> dict[str, Any]:
+    """Render the receipt as the record the run's manifest will reference.
+
+    `switches` and `window_s` sit beside each other on purpose. The campaign's
+    criterion is a count *and* a duration, and nothing floors a soak's steady
+    phase, so a document that carries the count without the window would let the
+    same thousand switches evidence an hour or three minutes.
+    """
+    return {
+        "schema": "nanolab-soak-v1",
+        "kind": "scheduler-switch",
+        **asdict(receipt),
+        "budgets": asdict(FROZEN_BUDGETS),
+    }
 
 
 class SchedulerSwitchDriver:
@@ -177,9 +213,11 @@ class SchedulerSwitchDriver:
                     f"the run started with {live_before} live strategy indexes, "
                     f"budget {self._budgets.max_live_strategy_indexes}"
                 )
+            window_started = self._clock.monotonic()
             committed, refused, stale = self._alternate(
                 client, initial, window_s, cancelled
             )
+            elapsed_s = self._clock.monotonic() - window_started
             restores = self._restore(client, initial)
             # Read back after the restore, so `applied` is every PATCH this step
             # landed: the count the platform publishes is the switches it
@@ -205,6 +243,8 @@ class SchedulerSwitchDriver:
                 pause_max_ms=pause,
                 platform_committed=counted,
                 restores=restores,
+                window_s=window_s,
+                elapsed_s=elapsed_s,
             )
 
     def _alternate(

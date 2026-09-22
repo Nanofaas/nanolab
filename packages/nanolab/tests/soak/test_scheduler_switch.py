@@ -18,6 +18,7 @@ from nanolab.tasks.soak.scheduler_switch import (
     FrozenBudgets,
     SchedulerSwitchDriver,
     SwitchError,
+    receipt_document,
 )
 
 STRATEGIES = ("per-function", "shared-queue")
@@ -230,6 +231,39 @@ def test_the_frozen_budgets_are_the_campaigns_cited_numbers():
     assert FROZEN_BUDGETS.max_switch_pause_ms == 250
     assert FROZEN_BUDGETS.max_switch_pause_p99_ms == 100
     assert FROZEN_BUDGETS.max_live_strategy_indexes == 2
+
+
+def test_the_receipt_records_the_window_the_switches_happened_over():
+    """A count without its window would read the same for an hour and a minute.
+
+    Nothing floors a soak's steady phase, so the artifact has to answer the
+    campaign's criterion itself: a thousand switches *and* how long that took.
+    """
+    platform = Platform()
+    receipt = driver(platform, FakeClock(), **small()).run(
+        window_s=5, cancelled=Event()
+    )
+
+    assert receipt.window_s == 5.0
+    assert 0 < receipt.elapsed_s <= receipt.window_s
+
+
+def test_the_receipt_document_is_what_the_manifest_references():
+    platform = Platform()
+    receipt = driver(platform, FakeClock(), **small()).run(
+        window_s=5, cancelled=Event()
+    )
+    document = receipt_document(receipt)
+
+    assert document["schema"] == "nanolab-soak-v1"
+    assert document["kind"] == "scheduler-switch"
+    assert document["committed"] == 5
+    assert document["window_s"] == 5.0
+    assert document["live_indexes"] == 2
+    assert document["platform_committed"] == 6.0
+    assert document["budgets"]["switches_in_soak"] == 1000
+    # JSON-ready, because the acceptance manifest encodes it.
+    assert json.loads(json.dumps(document))["committed"] == 5
 
 
 def test_two_identical_strategies_are_not_a_switch():

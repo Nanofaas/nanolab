@@ -335,6 +335,10 @@ def test_the_switch_soak_declares_both_modules_and_the_step():
     assert soak is not None
 
     assert soak.purpose == "p24"
+    # `soak` and not `advanced`: four of the five retained-population meters this
+    # run's contract observes are registered only under the soak profile, and an
+    # absent series is indistinguishable from a probe that never fired.
+    assert soak.metrics_profile == "soak"
     # The campaign's criterion is a soak of at least sixty minutes.
     assert soak.phases.steady_s >= 60 * 60
     assert soak.scheduler_switch is not None
