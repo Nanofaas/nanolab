@@ -417,11 +417,18 @@ print("\\n" + marker + ":START\\n" + json.dumps(summary)
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
-            t["role"]: {
-                p: {"limit": 0, "retention_s": 0}
-                for p in ("live_executions", "payload_bytes", "timers", "pending_http")
+            "sync": {
+                t["role"]: {
+                    p: {"limit": 0, "retention_s": 0}
+                    for p in (
+                        "live_executions",
+                        "payload_bytes",
+                        "timers",
+                        "pending_http",
+                    )
+                }
+                for t in targets
             }
-            for t in targets
         },
     }
     manifest["prerequisite_inputs"] = save(
@@ -438,7 +445,7 @@ print("\\n" + marker + ":START\\n" + json.dumps(summary)
         async def populations(self):
             return {
                 r: dict.fromkeys(policies, 0)
-                for r, policies in expected["settlement"].items()
+                for r, policies in expected["settlement"]["sync"].items()
             }
 
     @asynccontextmanager

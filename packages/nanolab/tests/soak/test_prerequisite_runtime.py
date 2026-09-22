@@ -107,16 +107,18 @@ def frozen(tmp_path):
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
-            role: {
-                name: {"limit": 0, "retention_s": 0}
-                for name in (
-                    "live_executions",
-                    "payload_bytes",
-                    "timers",
-                    "pending_http",
-                )
+            "sync": {
+                role: {
+                    name: {"limit": 0, "retention_s": 0}
+                    for name in (
+                        "live_executions",
+                        "payload_bytes",
+                        "timers",
+                        "pending_http",
+                    )
+                }
+                for role in ("control-plane", "javascript")
             }
-            for role in ("control-plane", "javascript")
         },
     }
 
@@ -246,19 +248,22 @@ async def platform(frozen, server, lifetime="lifetime-1"):
 def set_profile(frozen, coverage, **config):
     base = frozen["relevant_config"]["sync"]
     frozen["relevant_config"] = {coverage: {**base, **config}}
+    # The settlement deadline belongs to the profile, so it follows the coverage.
+    frozen["settlement"] = {coverage: next(iter(frozen["settlement"].values()))}
 
 
 def instrument_fixture(frozen, server):
     """Only the synthetic server exposes these explicitly named test gauges."""
+    roles = next(iter(frozen["settlement"].values()))
     bindings = {}
-    for role, policies in frozen["settlement"].items():
+    for role, policies in roles.items():
         bindings[role] = {}
         for population in policies:
             name = f"test_{population}"
             bindings[role][population] = [{"metric": name}]
     frozen["population_metrics"] = bindings
     server.extra_metrics = "".join(
-        f"test_{name} 0\n" for name in frozen["settlement"]["control-plane"]
+        f"test_{name} 0\n" for name in roles["control-plane"]
     )
 
 
@@ -547,7 +552,7 @@ def test_effective_config_mismatch_releases_factory(frozen):
 
 def test_default_ttls_are_not_shortened(frozen):
     original = deepcopy(frozen)
-    for index, policies in enumerate(frozen["settlement"].values()):
+    for index, policies in enumerate(frozen["settlement"]["sync"].values()):
         for policy in policies.values():
             policy["retention_s"] = (300, 1800)[index]
     before = deepcopy(frozen)

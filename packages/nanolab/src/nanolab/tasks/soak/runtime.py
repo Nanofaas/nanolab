@@ -160,6 +160,13 @@ _PREREQUISITE_SETTLEMENT_MARGIN_S = 5.0
 _DERIVED_PREREQUISITE_COVERAGE = frozenset(
     {"sync", "idempotent-replay", "function-name-churn"}
 )
+# The populations that hold whatever outcome a profile's exercise produced, and
+# the coverage whose exercise carries an idempotency key. A keyed outcome is
+# retained for the keyed lifetime, so these populations settle at a deadline the
+# *profile* determines, not the run: judging the replay profile at the keyless
+# deadline would read its legitimately held outcome as a leak.
+_OUTCOME_POPULATIONS = frozenset({"outcomes", "expiry_queue_depth"})
+_KEYED_OUTCOME_COVERAGE = frozenset({"idempotent-replay"})
 
 
 def _close_all(leases: list[socket.socket]) -> None:
@@ -248,13 +255,22 @@ def _check_prerequisite_resources(config, options: RuntimeOptions) -> None:
         )
 
 
-def _population_retention(config, population: str) -> float:
-    """Map retained owner populations to the declared authoritative lifetime."""
-    if population in {"outcomes", "expiry_queue_depth"}:
-        return (
-            config.retention_s["unkeyed-sync-outcome"]
-            + _PREREQUISITE_SETTLEMENT_MARGIN_S
+def _population_retention(config, coverage: str, population: str) -> float:
+    """Map one profile's retained populations to the lifetime they are held for.
+
+    The two outcome populations hold *this profile's* outcome, so their deadline
+    follows the key the profile's exercise carried: keyless profiles keep the
+    unkeyed lifetime, and the keyed profile the keyed one. Selecting by
+    population alone is what made the policy run-wide and judged the replay
+    profile by the keyless deadline.
+    """
+    if population in _OUTCOME_POPULATIONS:
+        owner = (
+            "terminal-key-and-readable-outcome"
+            if coverage in _KEYED_OUTCOME_COVERAGE
+            else "unkeyed-sync-outcome"
         )
+        return config.retention_s[owner] + _PREREQUISITE_SETTLEMENT_MARGIN_S
     if population == "idempotency_entries":
         return (
             config.retention_s["terminal-key-and-readable-outcome"]
@@ -348,14 +364,17 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
-            owner: {
-                population: {
-                    "limit": 0,
-                    "retention_s": _population_retention(config, population),
+            name: {
+                owner: {
+                    population: {
+                        "limit": 0,
+                        "retention_s": _population_retention(config, name, population),
+                    }
+                    for population in sorted(required)
                 }
-                for population in sorted(required)
+                for owner, required in populations.items()
             }
-            for owner, required in populations.items()
+            for name in sorted(coverage)
         },
     }
     _inputs(frozen, coverage)

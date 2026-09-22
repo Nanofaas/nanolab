@@ -81,7 +81,9 @@ def case(tmp_path, monkeypatch):
             }
         },
         "settlement": {
-            role: {"timers": {"limit": 0, "retention_s": 30}} for role in images
+            "sync": {
+                role: {"timers": {"limit": 0, "retention_s": 30}} for role in images
+            }
         },
         "payload": platform.describe_artifact(payload),
     }

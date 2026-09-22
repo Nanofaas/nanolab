@@ -165,7 +165,8 @@ def required_body_budget(inputs: dict[str, Any]) -> float:
     """Allow real exercise plus the longest frozen retention, without changing it."""
     delays = [
         p["retention_s"]
-        for role in inputs["settlement"].values()
+        for roles in inputs["settlement"].values()
+        for role in roles.values()
         for p in role.values()
     ]
     if any(
@@ -472,7 +473,7 @@ class LiveProfileSession:
         await self._configuration()
         result = {}
         gaps = []
-        for role, policies in self.inputs["settlement"].items():
+        for role, policies in self.inputs["settlement"][self.coverage].items():
             result[role] = {}
             try:
                 rows = await self._scrape(role)

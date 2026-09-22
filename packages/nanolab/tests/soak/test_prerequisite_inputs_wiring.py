@@ -138,7 +138,7 @@ def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_pat
     # Exactly the declared projections, which is what the acceptance gate reads.
     for key, section in declared.items():
         assert frozen["relevant_config"]["sync"][key] == section
-    assert frozen["settlement"]["control-plane"]["outcomes"] == {
+    assert frozen["settlement"]["sync"]["control-plane"]["outcomes"] == {
         "limit": 0,
         "retention_s": 35,
     }
@@ -174,16 +174,43 @@ def test_every_derivable_profile_is_emitted_for_its_own_coverage(tmp_path, cover
         assert profile["function_spec"]["endpointUrl"] == (
             "http://function-1:8080/invoke"
         )
-        assert frozen["settlement"]["control-plane"]["retired_owners"] == {
+        assert frozen["settlement"][coverage]["control-plane"]["retired_owners"] == {
             "limit": 0,
             "retention_s": 0,
         }
     if coverage == "idempotent-replay":
-        assert frozen["settlement"]["control-plane"]["idempotency_entries"] == {
+        assert frozen["settlement"][coverage]["control-plane"][
+            "idempotency_entries"
+        ] == {
             "limit": 0,
             "retention_s": 305,
         }
     _inputs(frozen, frozenset({coverage}))
+    writer.close()
+
+
+def test_settlement_follows_the_profile_and_not_the_run(tmp_path):
+    """The deadline a population is asserted at belongs to the profile.
+
+    This is the defect the run hit: one run-wide map asserted the replay
+    profile's `outcomes` and `expiry_queue_depth` at the keyless 35s deadline,
+    so a keyed outcome the store legitimately retains for its own keyed TTL read
+    as a leak. A run-wide map fails this, and so does widening the keyless
+    deadline to make the keyed profile fit.
+    """
+    coverage = ["sync", "idempotent-replay", "function-name-churn"]
+    frozen, _, _, writer = _freeze_fixture(tmp_path, coverage)
+    keyless = {"limit": 0, "retention_s": 35}
+    keyed = {"limit": 0, "retention_s": 305}
+    for name in ("sync", "function-name-churn"):
+        for population in ("outcomes", "expiry_queue_depth"):
+            assert frozen["settlement"][name]["control-plane"][population] == keyless
+    for population in ("outcomes", "expiry_queue_depth"):
+        assert (
+            frozen["settlement"]["idempotent-replay"]["control-plane"][population]
+            == keyed
+        )
+    _inputs(frozen, frozenset(coverage))
     writer.close()
 
 

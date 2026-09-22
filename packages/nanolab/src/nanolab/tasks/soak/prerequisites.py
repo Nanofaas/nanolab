@@ -9,7 +9,10 @@ must obtain these from the target; HTTP completion cannot replace populations.
 
 Inputs contain ``images`` (all application roles), ``relevant_config`` keyed by
 exact coverage IDs, artifact descriptors ``payload``/``script``, and
-``settlement``: role -> population -> {limit, retention_s}. The entire input
+``settlement``: coverage -> role -> population -> {limit, retention_s}. The
+settlement deadline belongs to the profile, not the run: the two outcome
+populations settle at the lifetime of the key that profile's own exercise used,
+so a keyed profile is never judged by the keyless deadline. The entire input
 object is fingerprinted; expected fingerprints must come from frozen run inputs.
 Output expectations belong to each relevant_config entry's ``expected_output``.
 Coverage-specific raw observation fields are documented in _behavior below.
@@ -220,25 +223,32 @@ def _inputs(inputs: dict, coverage: frozenset[str]) -> None:
     _artifact(inputs["payload"])
     _artifact(inputs["script"])
     policies = inputs["settlement"]
-    if not isinstance(policies, dict) or set(policies) != set(images):
-        raise ValueError("settlement policies must cover every image role")
+    if not isinstance(policies, dict) or set(policies) != coverage:
+        raise ValueError("settlement policies must cover exactly the required profiles")
     required = _required_populations(images, coverage, inputs["metrics_profile"])
-    for role, populations in policies.items():
-        if not isinstance(populations, dict) or not required[role].issubset(
-            populations
-        ):
-            raise ValueError("required retained-population policies missing")
-        for name, policy in populations.items():
-            if not isinstance(name, str) or not name or not isinstance(policy, dict):
-                raise ValueError("invalid population policy")
-            if set(policy) != {"limit", "retention_s"} or not all(
-                _number(v) for v in policy.values()
+    for roles in policies.values():
+        if not isinstance(roles, dict) or set(roles) != set(images):
+            raise ValueError("settlement policies must cover every image role")
+        for role, populations in roles.items():
+            if not isinstance(populations, dict) or not required[role].issubset(
+                populations
             ):
-                raise ValueError(
-                    "population policy requires finite limit and retention_s"
-                )
-            if name == "live_executions" and policy["limit"] != 0:
-                raise ValueError("physical handlers must settle to zero")
+                raise ValueError("required retained-population policies missing")
+            for name, policy in populations.items():
+                if (
+                    not isinstance(name, str)
+                    or not name
+                    or not isinstance(policy, dict)
+                ):
+                    raise ValueError("invalid population policy")
+                if set(policy) != {"limit", "retention_s"} or not all(
+                    _number(v) for v in policy.values()
+                ):
+                    raise ValueError(
+                        "population policy requires finite limit and retention_s"
+                    )
+                if name == "live_executions" and policy["limit"] != 0:
+                    raise ValueError("physical handlers must settle to zero")
 
 
 def _assertion(name: str, observed: object, expected: object, passed: bool) -> dict:
@@ -373,10 +383,13 @@ def _evaluate(raw: dict, inputs: dict) -> tuple[list[dict], str, str]:
     assertions = _behavior(
         coverage, raw["observations"], inputs["relevant_config"][coverage]
     )
+    # This profile's own settlement, not the run's: what its exercise retained is
+    # held for the lifetime that exercise's key implies.
+    policies = inputs["settlement"][coverage]
     expected_keys = {
         (role, name)
-        for role, policies in inputs["settlement"].items()
-        for name in policies
+        for role, by_population in policies.items()
+        for name in by_population
     }
     seen = set()
     for sample in raw["settlement"]:
@@ -384,7 +397,7 @@ def _evaluate(raw: dict, inputs: dict) -> tuple[list[dict], str, str]:
         if key not in expected_keys or key in seen:
             raise ValueError("unexpected or duplicate population evidence")
         seen.add(key)
-        policy = inputs["settlement"][key[0]][key[1]]
+        policy = policies[key[0]][key[1]]
         when, value = sample["observed_s"], sample["value"]
         if (
             not _number(when)
@@ -531,10 +544,11 @@ async def _profile_body(session, coverage, frozen, raw, connection) -> None:
             },
         },
     )
+    settlement = frozen["settlement"][coverage]
     deadlines = sorted(
         {
             policy["retention_s"]
-            for policies in frozen["settlement"].values()
+            for policies in settlement.values()
             for policy in policies.values()
         }
     )
@@ -542,7 +556,7 @@ async def _profile_body(session, coverage, frozen, raw, connection) -> None:
         await asyncio.sleep(max(0, raw["logical_finished_s"] + delay - monotonic()))
         populations = await session.populations()
         observed_s = monotonic()
-        for role, policies in frozen["settlement"].items():
+        for role, policies in settlement.items():
             for name, policy in policies.items():
                 if policy["retention_s"] == delay:
                     sample = {

@@ -62,9 +62,13 @@ def inputs(tmp_path):
         "relevant_config": {"sync": {"expected_output": {"value": 42}, "retry": 3}},
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
+        # Keyed by the profile that owns it: the deadline a population is
+        # asserted at belongs to the profile, not to the run.
         "settlement": {
-            role: {name: {"limit": 0, "retention_s": 0} for name in populations}
-            for role, populations in SOAK_POPULATIONS.items()
+            "sync": {
+                role: {name: {"limit": 0, "retention_s": 0} for name in populations}
+                for role, populations in SOAK_POPULATIONS.items()
+            }
         },
     }
 
@@ -75,11 +79,13 @@ class Session:
         self.leaking = leaking
         self.wrong_output = wrong_output
         self.crash = crash
+        self.coverage = next(iter(inputs["settlement"]))
 
     async def identities(self):
         return deepcopy(self.inputs["images"])
 
     async def exercise(self, coverage):
+        self.coverage = coverage
         if self.crash:
             raise RuntimeError("synthetic profile failure")
         observations = {
@@ -118,7 +124,7 @@ class Session:
                 name: (1 if self.leaking and name == "live_executions" else 0)
                 for name in policies
             }
-            for role, policies in self.inputs["settlement"].items()
+            for role, policies in self.inputs["settlement"][self.coverage].items()
         }
 
 
@@ -223,7 +229,9 @@ def test_legacy_http_500_error_remains_supported():
 
 def test_advanced_profile_requires_no_candidate_owner_settlement(inputs):
     inputs["metrics_profile"] = "advanced"
-    inputs["settlement"] = {role: {} for role in inputs["images"]}
+    inputs["settlement"] = {
+        name: {role: {} for role in inputs["images"]} for name in inputs["settlement"]
+    }
     assert api()._required_populations(
         inputs["images"], frozenset({"sync"}), "advanced"
     ) == {role: frozenset() for role in inputs["images"]}
@@ -232,7 +240,9 @@ def test_advanced_profile_requires_no_candidate_owner_settlement(inputs):
 
 def test_legacy_inputs_default_and_freeze_advanced_profile(tmp_path, inputs):
     del inputs["metrics_profile"]
-    inputs["settlement"] = {role: {} for role in inputs["images"]}
+    inputs["settlement"] = {
+        name: {role: {} for role in inputs["images"]} for name in inputs["settlement"]
+    }
 
     receipt, _ = execute(tmp_path, inputs)
 
@@ -260,18 +270,89 @@ def test_soak_role_matrix_and_coverage_additions_are_exact(inputs):
 
 
 def test_soak_rejects_missing_applicable_population_only(inputs):
-    del inputs["settlement"]["javascript"]["input_bytes"]
+    del inputs["settlement"]["sync"]["javascript"]["input_bytes"]
     with pytest.raises(
         ValueError, match="required retained-population policies missing"
     ):
         api()._inputs(inputs, frozenset({"sync"}))
 
-    inputs["settlement"]["javascript"]["input_bytes"] = {
+    inputs["settlement"]["sync"]["javascript"]["input_bytes"] = {
         "limit": 0,
         "retention_s": 0,
     }
-    inputs["settlement"]["java"].pop("callbacks")
+    inputs["settlement"]["sync"]["java"].pop("callbacks")
     api()._inputs(inputs, frozenset({"sync"}))
+
+
+def _raw(inputs, coverage, *, logical_finished_s, sampled_s):
+    """Minimal profile evidence whose populations settle at one common instant."""
+    policies = inputs["settlement"][coverage]
+    return {
+        "coverage": coverage,
+        "images": inputs["images"],
+        "released": True,
+        "started_s": 0.0,
+        "logical_finished_s": logical_finished_s,
+        "ended_s": 1000.0,
+        "stages": {
+            phase: {
+                "started_s": 0.0,
+                "ended_s": logical_finished_s,
+                "timeout_s": 1000.0,
+            }
+            for phase in ("acquire", "body", "release")
+        },
+        "worker": {"reaped": True, "forced_stop": False, "exit_code": 0},
+        "observations": {
+            "execution_ids": ["one", "one"],
+            "outputs": [{"value": 42}, {"value": 42}],
+        },
+        "settlement": [
+            {"role": role, "population": name, "observed_s": sampled_s, "value": 0}
+            for role, by_population in policies.items()
+            for name in by_population
+        ],
+    }
+
+
+def test_a_keyed_profile_is_not_judged_by_the_keyless_deadline(inputs):
+    """`_evaluate` reads this profile's settlement, never another profile's.
+
+    This is the defect the run hit: with one run-wide map the replay profile's
+    `outcomes` and `expiry_queue_depth` were asserted at the keyless deadline, so
+    its legitimately held keyed outcome read as a leak and the profile FAILed.
+    Sampled at that same keyless deadline the profile is now *refused*, and the
+    keyed deadline is what its evidence has to meet.
+    """
+    keyless = (
+        inputs["settlement"]["sync"]["control-plane"]["outcomes"]["retention_s"] + 0.07
+    )
+    inputs["relevant_config"]["idempotent-replay"] = deepcopy(
+        inputs["relevant_config"]["sync"]
+    )
+    inputs["settlement"]["idempotent-replay"] = {
+        role: deepcopy(policies)
+        for role, policies in inputs["settlement"]["sync"].items()
+    }
+    replay = inputs["settlement"]["idempotent-replay"]
+    for population in ("outcomes", "expiry_queue_depth"):
+        replay["control-plane"][population] = {"limit": 0, "retention_s": 305}
+    api()._inputs(inputs, frozenset({"sync", "idempotent-replay"}))
+
+    with pytest.raises(ValueError, match="sampled before retention"):
+        api()._evaluate(
+            _raw(
+                inputs, "idempotent-replay", logical_finished_s=0.0, sampled_s=keyless
+            ),
+            inputs,
+        )
+
+    assertions, status, _ = api()._evaluate(
+        _raw(inputs, "idempotent-replay", logical_finished_s=0.0, sampled_s=305.07),
+        inputs,
+    )
+    assert status == "PASS"
+    assert all(assertion["status"] == "PASS" for assertion in assertions)
 
 
 def test_positive_receipt_reopens_evidence_and_checks_every_role(tmp_path, inputs):
@@ -355,6 +436,7 @@ def test_http_completion_does_not_hide_bad_output_or_retained_population(
 
 def test_unsupported_coverage_is_reported_without_starting_resources(tmp_path, inputs):
     inputs["relevant_config"] = {"unsupported": {"retry": 3}}
+    inputs["settlement"] = {"unsupported": deepcopy(inputs["settlement"]["sync"])}
     receipt, lifetimes = execute(tmp_path, inputs, frozenset({"unsupported"}))
     result = api().validate_receipt(
         receipt, fingerprint(inputs), frozenset({"unsupported"})
@@ -394,9 +476,12 @@ def test_independent_profiles_assert_semantics_and_extra_retained_owners(
     inputs["relevant_config"] = {
         name: {"expected_output": {"value": 42}} for name in coverage
     }
-    inputs["settlement"]["control-plane"]["retired_owners"] = {
+    inputs["settlement"]["sync"]["control-plane"]["retired_owners"] = {
         "limit": 0,
         "retention_s": 0,
+    }
+    inputs["settlement"] = {
+        name: deepcopy(inputs["settlement"]["sync"]) for name in coverage
     }
     receipt, lifetimes = execute(tmp_path, inputs, coverage)
     assert (
