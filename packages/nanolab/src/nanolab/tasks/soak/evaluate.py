@@ -300,7 +300,7 @@ def _window(
         ORDER BY scheduled"""
     args = (criterion.role, criterion.metric, labels, phase, low, high)
     count, maximum, previous, largest_gap, missing = 0, None, low, 0.0, False
-    first = None
+    first, prior_value, decreased = None, None, False
     for scheduled, value, unit, available in connection.execute(query, args):
         if not available or unit != criterion.unit:
             missing = True
@@ -308,6 +308,10 @@ def _window(
         count += 1
         first = value if first is None else first
         maximum = value if maximum is None else max(maximum, value)
+        # A cumulative series may never fall. Only the operations that read one
+        # consult this; the gauges the other operations read are free to.
+        decreased = decreased or (prior_value is not None and value < prior_value)
+        prior_value = value
         largest_gap = max(largest_gap, scheduled - previous)
         previous = scheduled
     largest_gap = max(largest_gap, high - previous)
@@ -328,8 +332,16 @@ def _window(
         ).fetchall()
         median = sum(row[0] for row in values) / len(values)
     # `first` is read for the operations that need the window's own reading of a
-    # cumulative series rather than its level at the end of the window.
-    return {"complete": complete, "maximum": maximum, "first": first, "median": median}
+    # cumulative series rather than its level at the end of the window, and
+    # `decreased` for the one that must refuse the window when that series was
+    # reset inside it.
+    return {
+        "complete": complete,
+        "maximum": maximum,
+        "first": first,
+        "decreased": decreased,
+        "median": median,
+    }
 
 
 def bucket_quantile(quantile: float, buckets: dict[float, float]) -> float:
@@ -410,7 +422,9 @@ def _percentile(
     family that never answered, a family that carries no `le`, a family whose
     buckets are all zero, and a family without its `+Inf` bound. A percentile of
     nothing and a percentile of zero are the same reading downstream, and only
-    one of them is one.
+    one of them is one. A family whose count *fell* inside the window was reset
+    there, and its growth across the window subtracts one process's counter from
+    another's: refused for that reason, which is the one the operator can act on.
     """
     families: dict[str, dict[float, float]] = {}
     incomplete = False
@@ -428,6 +442,19 @@ def _percentile(
         ):
             continue
         bound = selector.pop("le", None)
+        reading = _window(
+            connection, criterion, labels, criterion.phase, low, high, policy
+        )
+        incomplete |= not reading["complete"]
+        if reading["first"] is None or reading["maximum"] is None:
+            # A label set the window holds no reading for is a tick the sampler
+            # could not fill rather than a series that answered: a scrape that
+            # missed a required metric is written as one unlabelled
+            # `unavailable` row, and this is that row's label set. Answered as a
+            # shape instead, it would take every family that did answer down
+            # with it, under a cause pointing at the exposition rather than at
+            # the scrape. `incomplete` carries the tick, which is what it is.
+            continue
         if bound is None:
             return CriterionResult(
                 criterion.id,
@@ -436,12 +463,15 @@ def _percentile(
                 "family and no percentile can be read from it",
                 evidence,
             )
-        reading = _window(
-            connection, criterion, labels, criterion.phase, low, high, policy
-        )
-        incomplete |= not reading["complete"]
-        if reading["first"] is None or reading["maximum"] is None:
-            continue
+        if reading["decreased"]:
+            return CriterionResult(
+                criterion.id,
+                "INCONCLUSIVE",
+                f"{criterion.metric}: a bucket count fell inside the window, so the "
+                "family was reset and its growth across the window is not a reading "
+                "of it",
+                evidence,
+            )
         family = families.setdefault(
             json.dumps(sorted(selector.items()), separators=(",", ":")), {}
         )

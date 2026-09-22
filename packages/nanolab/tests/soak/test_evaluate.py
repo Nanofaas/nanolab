@@ -354,36 +354,43 @@ def percentile_criterion(**changes):
     return value
 
 
-def make_bucket_run(tmp_path, *, observed=None, **changes):
-    """Build a run whose steady window carried one bucket family per scrape."""
-    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion(**changes)])
+def bucket_rows(by_stamp):
+    """One family per scrape, in time order, as the observer writes them."""
+    return [
+        Sample(
+            TARGET,
+            "steady",
+            stamp,
+            stamp,
+            stamp,
+            BUCKET_METRIC,
+            (("le", bound),),
+            "seconds",
+            value,
+            "observed",
+            "prometheus",
+            None,
+        )
+        for stamp, counts in by_stamp.items()
+        for bound, value in counts.items()
+    ]
+
+
+def bucket_scrapes(observed=None):
+    """Give the family's level at each scrape of the steady window."""
     observed = _THIS_WINDOW if observed is None else observed
     family = {bound: _ALREADY_THERE[bound] + grown for bound, grown in observed.items()}
     # Flat until the last scrape, which is what a family that only grows when a
     # switch is made actually looks like between two of them.
     by_stamp: dict[int, dict[str, int]] = dict.fromkeys((3, 4, 5, 6), _ALREADY_THERE)
     by_stamp[7] = family
-    rewrite_samples(
-        root,
-        [
-            Sample(
-                TARGET,
-                "steady",
-                stamp,
-                stamp,
-                stamp,
-                BUCKET_METRIC,
-                (("le", bound),),
-                "seconds",
-                value,
-                "observed",
-                "prometheus",
-                None,
-            )
-            for stamp, counts in by_stamp.items()
-            for bound, value in counts.items()
-        ],
-    )
+    return by_stamp
+
+
+def make_bucket_run(tmp_path, *, observed=None, **changes):
+    """Build a run whose steady window carried one bucket family per scrape."""
+    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion(**changes)])
+    rewrite_samples(root, bucket_rows(bucket_scrapes(observed)))
     return root
 
 
@@ -487,6 +494,101 @@ def test_a_metric_without_le_bounds_is_not_a_bucket_family(tmp_path):
     outcome = results(root)["p99"]
     assert outcome.status == "INCONCLUSIVE"
     assert "`le` bound" in outcome.reason
+
+
+def test_a_bucket_count_that_fell_inside_the_window_is_refused(tmp_path):
+    """A reset in the window is not a window that observed nothing.
+
+    The window's reading is the family's growth from its first sample, so a
+    control-plane restart inside the window leaves it subtracting one process's
+    counter from another's. Here the pre-reset level is read as the floor and the
+    post-reset counts never reach it, which made every growth zero: reported as
+    "no observation fell in the window", about a window that observed ten
+    thousand switches, and the one reason that sends an operator looking for a
+    series that is right there.
+    """
+    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion()])
+    before = dict.fromkeys(_ALREADY_THERE, 10000)
+    after = {"0.05": 900, "0.1": 985, "0.15": 1000, "0.25": 1000, "+Inf": 1000}
+    rewrite_samples(
+        root, bucket_rows({3: before, 4: after, 5: after, 6: after, 7: after})
+    )
+
+    outcome = results(root)["p99"]
+    assert outcome.status == "INCONCLUSIVE"
+    assert "fell inside the window" in outcome.reason
+    assert "no observation" not in outcome.reason
+
+
+def test_a_scrape_that_missed_a_metric_is_named_as_a_tick_not_a_shape(tmp_path):
+    """The unlabelled row a failed scrape leaves behind is not the family's shape.
+
+    A scrape that did not carry a required metric is written as one unlabelled
+    `unavailable` row, and that label set reached the operation as a series
+    without an `le` — answered as "not a bucket family", which discarded the good
+    samples every real family had contributed and pointed the operator at the
+    exposition instead of at the scrape.
+    """
+    root = make_bucket_run(tmp_path)
+    tick = Sample(
+        TARGET,
+        "steady",
+        4.0,
+        4.0,
+        4.0,
+        BUCKET_METRIC,
+        (),
+        "seconds",
+        None,
+        "unavailable",
+        "exposition",
+        "required metric absent from source",
+    )
+    rewrite_samples(
+        root,
+        sorted(
+            [*bucket_rows(bucket_scrapes()), tick],
+            key=lambda row: row.scheduled_s,
+        ),
+    )
+
+    outcome = results(root)["p99"]
+    assert outcome.status == "INCONCLUSIVE"
+    assert "not a bucket family" not in outcome.reason
+    # The family that did answer still contributed its reading: the p99 is what
+    # this criterion is for, and the tick is what is missing.
+    assert "labels=[]: 0.116667" in outcome.reason
+
+
+def test_a_window_that_lost_an_observation_does_not_pass(tmp_path):
+    """A gapped window is INCONCLUSIVE, not a pass on what it did read.
+
+    The value is still the window's own and still under the threshold, so the
+    operation has a number to answer with — and the one verdict it may not give
+    on a window the run has already lost samples of is a pass. The acceptance
+    gate re-checks the same evidence, so this cannot flip a run; what it decides
+    is whether the criterion says "PASS" about a window it did not observe whole.
+    """
+    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion()])
+    rewrite_samples(
+        root,
+        [
+            replace(
+                row,
+                value=None,
+                availability="unavailable",
+                reason="source failed on this tick",
+            )
+            if row.scheduled_s == 4.0 and ("le", "0.05") in row.labels
+            else row
+            for row in bucket_rows(bucket_scrapes())
+        ],
+    )
+
+    outcome = results(root)["p99"]
+    assert "p99=0.116667" in outcome.reason  # the number it would have answered
+    assert outcome.status == "INCONCLUSIVE"
+    assert "missing final samples" in outcome.reason
 
 
 def test_the_worst_bucket_family_decides_the_criterion(tmp_path):
