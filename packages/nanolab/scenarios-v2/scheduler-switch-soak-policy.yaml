@@ -86,9 +86,8 @@ criteria:
   # MetricOperation expresses them: `switchesInSoak: 1000` is a lower bound on a
   # counter that is always zero at the start, and `maxLiveStrategyIndexes: 2` is
   # the number of series a name has rather than any value one of them takes.
-  # maxSwitchPauseP99Ms: 100 is absent for a third reason — the platform
-  # publishes no percentile histogram for this timer under any metrics profile,
-  # so there is no p99 series to hold it against.
+  # maxSwitchPauseP99Ms: 100 is the third, carried by the percentile criterion
+  # further down.
   - id: control-plane.scheduler-switch-pause
     role: control-plane
     metric: scheduler_switch_duration_seconds_max
@@ -101,3 +100,35 @@ criteria:
     rationale: >-
       A hot switch must not pause the engine for more than budgets.json's
       maxSwitchPauseMs of 250, which this meter serves as 0.25 seconds.
+  # budgets.json's maxSwitchPauseP99Ms: 100, read from the same timer's bucket
+  # family rather than from its maximum.
+  #
+  # The p99 was never unobservable — this is the correction of a claim this file
+  # used to make. The platform publishes the timer's bucket family under every
+  # non-basic metrics profile, nanoFaaS asserts the buckets (`+Inf` included) are
+  # in the wired exposition from the first scrape, before any switch is made, and
+  # this scenario runs `soak`. What was missing was a way to *express* it: none of
+  # the other operations derives a percentile from a `le`-labelled family, so the
+  # budget had a series behind it and no criterion that could read one. Saying
+  # "unobservable" would send a reader off to write a metric that already exists.
+  #
+  # The quantile is named by the criterion, so it says which p99 it means, and
+  # the family is read the way Prometheus reads one: a percentile cannot be
+  # derived from any single series of it. A family that is absent, that carries
+  # no `le`, or whose buckets are all zero is answered with a reason rather than
+  # with a number, which is the whole point of the operation: a percentile of
+  # nothing and a percentile of zero are the same reading downstream, and only
+  # one of them is a reading.
+  - id: control-plane.scheduler-switch-pause-p99
+    role: control-plane
+    metric: scheduler_switch_duration_seconds_bucket
+    label_selector: {}
+    unit: seconds
+    operation: percentile
+    quantile: 0.99
+    phase: steady
+    window_s: 5400
+    threshold: 0.1
+    rationale: >-
+      A hot switch must not pause the engine for more than budgets.json's
+      maxSwitchPauseP99Ms of 100, which this meter serves as 0.1 seconds.

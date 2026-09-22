@@ -16,7 +16,7 @@ PREREQUISITE_GROUPS = {
     "async-late-callback": ("async", "late-callback"),
 }
 MetricOperation = Literal[
-    "maximum", "return_to_reference", "growth_review", "expected_zero"
+    "maximum", "return_to_reference", "growth_review", "expected_zero", "percentile"
 ]
 CriterionPhase = Literal["baseline", "steady", "drain", "diagnostic"]
 DiagnosticOperation = Literal[
@@ -175,6 +175,11 @@ class Criterion(_StrictModel):
     threshold: NonNegativeNumber | None = None
     absolute_tolerance: NonNegativeNumber | None = None
     relative_tolerance: Annotated[float, Field(ge=0, le=1)] | None = None
+    # The quantile a `percentile` criterion derives from its bucket family, as a
+    # fraction rather than a name, so the criterion says which p99 it means.
+    # Optional and exclusive to that operation: every other one reads either a
+    # single series or a window of one, and none of them needs a rank.
+    quantile: Annotated[float, Field(gt=0, lt=1)] | None = None
     rationale: Text
 
     @model_validator(mode="after")
@@ -182,6 +187,11 @@ class Criterion(_StrictModel):
         """Do not let an unused threshold or missing tolerance weaken a criterion."""
         if self.deadline_s is not None and self.window_s > self.deadline_s:
             raise ValueError("criterion window cannot extend before its phase begins")
+        if self.operation == "percentile":
+            if self.quantile is None:
+                raise ValueError("percentile requires the quantile it derives")
+        elif self.quantile is not None:
+            raise ValueError("quantile belongs only to percentile")
         if (
             self.metric in {"process_rss_bytes", "cgroup_memory_usage_bytes"}
             and self.unit != "bytes"
@@ -208,7 +218,9 @@ class Criterion(_StrictModel):
                 if self.threshold is not None:
                     raise ValueError("expected_zero does not consume threshold")
             elif self.threshold is None:
-                raise ValueError("maximum and growth_review require a threshold")
+                raise ValueError(
+                    "maximum, growth_review and percentile require a threshold"
+                )
         return self
 
 

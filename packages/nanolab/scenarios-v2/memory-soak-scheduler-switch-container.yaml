@@ -68,11 +68,14 @@ soak:
       expected_cpu: 2
       memory_limit_bytes: 1073741824
       # `scheduler_switch_duration_seconds_max` is declared because a criterion
-      # reads it. `scheduler_active` and `scheduler_switch_total` are not: the
-      # switch step scrapes them from the exposition itself, and declaring a
-      # meter the soak has no criterion for would only add a sampling
+      # reads it, and `..._seconds_bucket` beside it for the same reason: a p99
+      # is derived from the bucket family, and no criterion may name a metric its
+      # role has not declared. `scheduler_active` and `scheduler_switch_total`
+      # are not: the switch step scrapes them from the exposition itself, and
+      # declaring a meter the soak has no criterion for would only add a sampling
       # dependency to fail on.
-      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes, scheduler_switch_duration_seconds_max]
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes,
+                         scheduler_switch_duration_seconds_max, scheduler_switch_duration_seconds_bucket]
       required_capabilities: [procfs, docker-engine, gc, heap_dump]
       runtime_options: []
       collection_sources: [procfs, docker-engine, prometheus]

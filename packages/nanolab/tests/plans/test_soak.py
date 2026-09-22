@@ -369,7 +369,8 @@ def test_the_switch_policy_keeps_the_shared_memory_contract():
     for criterion in shared["criteria"]:
         assert by_id[criterion["id"]] == criterion
     assert set(by_id) - {c["id"] for c in shared["criteria"]} == {
-        "control-plane.scheduler-switch-pause"
+        "control-plane.scheduler-switch-pause",
+        "control-plane.scheduler-switch-pause-p99",
     }
 
 
@@ -385,3 +386,30 @@ def test_the_switch_pause_criterion_carries_the_frozen_millisecond_budget():
     assert pause["unit"] == "seconds"
     assert pause["operation"] == "maximum"
     assert pause["threshold"] * 1000 == 250
+
+
+def test_the_switch_p99_criterion_carries_the_frozen_budget_and_its_quantile():
+    """100 ms on the bucket family, with the frozen number not raised.
+
+    The two budgets are the same timer read two ways, so this pins both that the
+    p99 is derived from the family rather than from a single series, and that its
+    threshold is the frozen 100 ms in the unit Micrometer serves.
+    """
+    switch = yaml.safe_load(
+        (SCENARIOS / "scheduler-switch-soak-policy.yaml").read_text()
+    )
+    by_id = {criterion["id"]: criterion for criterion in switch["criteria"]}
+    p99 = by_id["control-plane.scheduler-switch-pause-p99"]
+
+    assert p99["metric"] == "scheduler_switch_duration_seconds_bucket"
+    assert p99["unit"] == "seconds"
+    assert p99["operation"] == "percentile"
+    assert p99["quantile"] == 0.99
+    assert p99["threshold"] * 1000 == 100
+    # Declared required for its role, without which no criterion may name it.
+    scenario = yaml.safe_load(
+        (SCENARIOS / "memory-soak-scheduler-switch-container.yaml").read_text()
+    )
+    roles = scenario["soak"]["roles"]
+    for criterion in switch["criteria"]:
+        assert criterion["metric"] in roles[criterion["role"]]["required_metrics"]
