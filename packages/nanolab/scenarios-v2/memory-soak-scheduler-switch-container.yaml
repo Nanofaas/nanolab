@@ -89,7 +89,16 @@ soak:
                          invocation_execution_reservations, invocation_canonical_input_bytes,
                          invocation_physical_input_copy_bytes, execution_waiters_retained,
                          execution_expiry_queue_depth, function_capacity_retired_generations]
-      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      # `capabilities` names what nanolab's own observation path reads off the
+      # process, which for this backend is procfs and the Docker engine. The two
+      # diagnostic operations are a separate declaration with a separate
+      # observation: `diagnostics.operations` below is compared against the
+      # helper's provisioning receipt, and that is where `gc` and `heap_dump` are
+      # proven available for this role. Naming them here as well would ask a
+      # different field for evidence it does not carry, and the criterion would
+      # read an empty list -- which is indistinguishable from a role that cannot
+      # be diagnosed at all.
+      required_capabilities: [procfs, docker-engine]
       runtime_options: []
       collection_sources: [procfs, docker-engine, prometheus]
     word-stats-java:
@@ -97,7 +106,7 @@ soak:
       expected_cpu: 2
       memory_limit_bytes: 1073741824
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
-      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      required_capabilities: [procfs, docker-engine]
       runtime_options: []
       collection_sources: [procfs, docker-engine, prometheus]
     word-stats-javascript:
@@ -105,7 +114,7 @@ soak:
       expected_cpu: 1
       memory_limit_bytes: 536870912
       required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
-      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      required_capabilities: [procfs, docker-engine]
       # The node diagnostic controller is loaded by Node itself at startup, so
       # the role has to declare the preload before build; the runtime refuses a
       # node role with gc/heap_dump diagnostics that does not.
@@ -116,7 +125,14 @@ soak:
       mode: build
       variant: jvm
       platform: linux/arm64
-      modules: [container-deployment-provider, async-queue, sync-queue, runtime-config]
+      # `build-metadata` is the fifth and is not decoration: it is the only
+      # module that serves `GET /modules/build-metadata`, which is the sole
+      # source of the compiled module list, and an explicit selector replaces
+      # the default set rather than adding to it -- the module is default-enabled
+      # and was dropped by enumerating the other four. Without it the preflight's
+      # `control-plane.modules` criterion has nothing to read, and a run cannot
+      # show that the image it measured carried both queue modules.
+      modules: [container-deployment-provider, async-queue, sync-queue, runtime-config, build-metadata]
       build_options: {}
     word-stats-java:
       mode: build
@@ -145,10 +161,17 @@ soak:
     executables:
       control-plane: [jcmd]
       word-stats-java: [jcmd]
+    # The `source` each runtime's own completion event carries: what the worker
+    # writes into the `full_gc_completed` event, what the helper's provisioning
+    # receipt reports as `full_gc_source`, and what the post-GC acceptance check
+    # compares the event against (`GC_SOURCES` in
+    # `tasks/soak/diagnostic_helper.py`). A name the worker never emits cannot be
+    # observed, so any other string fails the criterion on every run and the GC
+    # evidence the memory contract rests on could never be proven.
     gc_completion_evidence:
-      control-plane: jvm-full-gc-event
-      word-stats-java: jvm-full-gc-event
-      word-stats-javascript: node-full-gc-event
+      control-plane: jdk.GarbageCollection
+      word-stats-java: jdk.GarbageCollection
+      word-stats-javascript: node:perf_hooks:major-gc
   prerequisites:
     mode: run
     # Three of the eight atomic coverage IDs this policy could name, and
