@@ -120,6 +120,41 @@ _NOT_COLLECTED: dict[str, str] = {
     "removed_function_init_duration_ms": "private registry, never scraped",
     "removed_function_queue_wait_ms": "private registry, never scraped",
     "removed_function_e2e_latency_ms": "private registry, never scraped",
+    # The switch meters. `SchedulerConfiguration` registers them and is
+    # `@ConditionalOnBean(SchedulingStrategy.class)`; the only
+    # `SchedulingStrategy` beans on the classpath come from the `async-queue`
+    # and `sync-queue` modules. So they are gated on a module — on *either*
+    # queue module, which is a condition this catalogue cannot express, and one
+    # `core_queries` explicitly disclaims: "asked of every run, whatever modules
+    # the control plane was built with".
+    #
+    # Measured, on the 0.22.0 control plane, 2026-09-22. One artifact, both
+    # queue module jars deleted from `BOOT-INF/lib`: it serves **no**
+    # `scheduler_*` series at all, and its admin envelope (`revision` plus
+    # `namespaces`) lists no `scheduler` namespace. The same artifact with the
+    # jars present serves two `scheduler_active` gauges and the switch timer.
+    # Asking the snapshot catalogue for these would be the over-complete failure
+    # the catalogue exists to prevent: on the compose build the container soak
+    # scenario uses by default (`container-deployment-provider` alone) an empty
+    # series would mean "nobody could have answered", which is indistinguishable
+    # from "no switch happened".
+    #
+    # What reads them instead is the switch step's own driver
+    # (`nanolab.tasks.soak.scheduler_switch`), which scrapes the control plane's
+    # exposition for all three and holds them against the switches it made and
+    # the frozen budgets.
+    "scheduler_active": "queue-module gated; read by the switch step's own driver",
+    "scheduler_switch_duration": (
+        "queue-module gated; read by the switch step's own driver"
+    ),
+    # Gated the same way, and one property further: the observer registers this
+    # counter and increments it in the same expression, so it does not exist on
+    # an artifact that has switched zero times even with both queue modules
+    # loaded. Measured on the same run: absent at revision 0, then
+    # `scheduler_switch_total{outcome="committed"} 1.0` after one committed
+    # switch. That is the empty-is-not-zero hazard inside a single run, and it
+    # is why the switch step reads the count rather than assuming a series.
+    "scheduler_switch_total": "queue-module gated, and created by the first switch",
 }
 
 
