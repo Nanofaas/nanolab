@@ -47,6 +47,13 @@ class DiagnosticAdapter(Protocol):
         ...
 
 
+# The receipt a driver writes into the output directory it is handed. Part of
+# the contract rather than an implementation detail: `run` persists this file
+# before it raises, so a caller that only reads the return value loses the
+# evidence of the load that failed — which is the one whose evidence is wanted.
+WORKLOAD_RECEIPT = "workload-receipt.json"
+
+
 class WorkloadDriver(Protocol):
     """Own the generator and reap only its children on completion or cancellation."""
 

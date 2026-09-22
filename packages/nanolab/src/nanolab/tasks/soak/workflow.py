@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -11,7 +12,7 @@ from typing import Any, Protocol, cast
 from sonata_engine import Steps, Task, TaskInputs, TaskOutcome
 
 from nanolab.config.soak import SoakConfig
-from nanolab.tasks.soak.ports import Clock, WorkloadDriver
+from nanolab.tasks.soak.ports import WORKLOAD_RECEIPT, Clock, WorkloadDriver
 
 
 def phase_order() -> tuple[str, ...]:
@@ -64,6 +65,11 @@ class LifecycleState:
     secondary_errors: list[tuple[str, BaseException]] = field(default_factory=list)
     windows: dict[str, tuple[float, float]] = field(default_factory=dict)
     workload_receipts: dict[str, Path] = field(default_factory=dict)
+    # Set only by a run whose protocol declares the hot switch: the step's own
+    # receipt, published in the run root and referenced by the manifest, exactly
+    # as the workload receipt is. A passing soak has to be able to evidence the
+    # campaign's criterion from its own artifact.
+    switch_receipt: Path | None = None
     evaluation: Any = None
     report: Path | None = None
 
@@ -117,6 +123,7 @@ class SoakLifecycle(Task[LifecycleState]):
         hooks: LifecycleHooks,
         run_dir: Path,
         cancelled: Event | None = None,
+        under_load: Callable[[float, Event], Any] | None = None,
     ) -> None:
         """Bind the policy and runtime adapters for one measurement lifetime."""
         self.config = config
@@ -126,6 +133,7 @@ class SoakLifecycle(Task[LifecycleState]):
         self.hooks = hooks
         self.run_dir = run_dir
         self.cancelled = cancelled if cancelled is not None else Event()
+        self.under_load = under_load
         self.state = LifecycleState()
         self._driver: WorkloadDriver | None = None
         self._entered = False
@@ -156,11 +164,87 @@ class SoakLifecycle(Task[LifecycleState]):
         else:
             self.observer.set_phase(phase)
         self._driver = self.driver_factory(phase)
-        self.state.workload_receipts[phase] = self._driver.run(
-            self.run_dir / phase, duration, self.cancelled
-        )
+        under_load = self.under_load
+        if phase == "steady" and under_load is not None:
+            self._load_under_switching(self._driver, under_load, duration)
+        else:
+            self.state.workload_receipts[phase] = self._driver.run(
+                self.run_dir / phase, duration, self.cancelled
+            )
         self._stop_generator()
         self._check_cancelled()
+
+    def _load_under_switching(
+        self,
+        driver: WorkloadDriver,
+        under_load: Callable[[float, Event], Any],
+        duration: float,
+    ) -> None:
+        """Run the load and the switch step together, and keep both receipts.
+
+        The switch has to happen *under* the load, so the two cannot be
+        sequenced. They are two threads rather than one interleaved loop because
+        the switch is what this step is for: folding it into the workload driver
+        would put the perturbation inside the thing it perturbs, and make the
+        load's own receipt depend on the switch having succeeded.
+        """
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            load = pool.submit(
+                driver.run, self.run_dir / "steady", duration, self.cancelled
+            )
+            switching = pool.submit(under_load, duration, self.cancelled)
+            # Stop the other side as soon as either fails. Not a nicety: the
+            # executor's own shutdown waits for the survivor, so without this a
+            # switch that blows its budget one minute into a ninety-minute
+            # steady phase would be reported ninety minutes later, with the
+            # observer still sampling the process it is about to fail. An
+            # operator meets that with Ctrl-C, which turns a FAIL into an ABORT
+            # and loses the evidence - the worst outcome for the thing this step
+            # exists to measure.
+            done, _ = wait((load, switching), return_when=FIRST_EXCEPTION)
+            first = next((f for f in done if f.exception() is not None), None)
+            if first is not None:
+                self.cancelled.set()
+            wait((load, switching))
+            self._keep_receipts(load, switching, first)
+
+    def _keep_receipts(
+        self,
+        load: Future[Path],
+        switching: Future[Path],
+        first: Future[Path] | None,
+    ) -> None:
+        """Record both receipts, then surface the failure that caused the stop.
+
+        Each receipt is recorded before anything is raised, so a switch that
+        fails still leaves the load's receipt in the manifest: the load is the
+        run's evidence, and losing it to the failure would leave the operator a
+        verdict with nothing to read it against.
+
+        The load's receipt is recorded whether the load returned it or wrote it
+        and then raised. The driver persists the file before it re-raises, so a
+        generator that dies mid-phase still left one on disk, and a run that
+        fails is exactly the run whose evidence is wanted.
+
+        The *first* failure is raised, not the loudest. When the load dies the
+        switch then stops on the cancellation and reports a short count, which
+        is a consequence of that death rather than a second, independent fault.
+        """
+        for future, name in ((switching, "switch"), (load, "workload")):
+            try:
+                receipt: Path = future.result()
+            except BaseException:
+                if name == "switch":
+                    continue
+                receipt = self.run_dir / "steady" / WORKLOAD_RECEIPT
+                if not receipt.is_file():
+                    continue
+            if name == "switch":
+                self.state.switch_receipt = receipt
+            else:
+                self.state.workload_receipts["steady"] = receipt
+        if first is not None:
+            first.result()  # re-raises the failure that stopped the window
 
     def _stop_generator(self) -> None:
         if self._driver is not None:

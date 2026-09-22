@@ -1,0 +1,177 @@
+# The issue #208 soak: one NanoFaaS version, both queue modules, and the manual
+# hot switch driven under the run's own load.
+#
+# Single source snapshot; build every application role before measurement.
+# The policy file freezes the approved P24 memory contract plus the switch pause.
+#
+# This is the ≥60-minute soak with 1,000 switches the campaign has left to run.
+# Nothing here executes it; the operator does, when the machine is free.
+#
+# Two things distinguish this scenario from the other p24 containers, and both
+# come from docs/experiments/scheduler-switching-2026-09/NANOLAB.md:
+#
+# * the control plane is built with BOTH queue modules, because a strategy
+#   registry indexes one strategy per module and `scheduler_active` would carry
+#   a single series on a one-module artifact — nothing to alternate between. The
+#   module list is the one that file measured end to end:
+#   `container-deployment-provider,async-queue,sync-queue,runtime-config`,
+#   verbatim;
+# * the admin API is opened, which the platform ships unmounted. Runtime does it
+#   — and only it — for a protocol that declares `scheduler_switch`, so every
+#   other soak still starts with the route at 404.
+workflow: soak
+backend: container
+soakPolicyFile: ./scheduler-switch-soak-policy.yaml
+functions:
+  - word-stats-java
+  - word-stats-javascript
+resources:
+  control-plane:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-java:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-javascript:
+    limits: {cpu: 1, memoryMiB: 512}
+soak:
+  purpose: p24
+  # `soak` rather than `advanced`, because this run's contract includes the
+  # retained populations (records, physical input, leases, waiters, timers,
+  # retired generations) and every meter that answers them is registered only
+  # under this profile — `SoakMetricsConfiguration` holds all six and is
+  # `@ConditionalOnProperty(..., havingValue = "soak")`. On `advanced` they are
+  # not published at all, and by this catalogue's own doctrine an absent series
+  # is indistinguishable from a probe that never fired. Nothing is lost by
+  # moving: the profile filter denies only under `basic`, and percentile
+  # histograms are enabled for every non-basic profile, so SOAK and ADVANCED
+  # filter and bucket identically.
+  metrics_profile: soak
+  phases:
+    warmup_s: 120
+    baseline_drain_s: 2100
+    baseline_window_s: 120
+    steady_s: 5400
+    drain_s: 2100
+    cleanup_margin_s: 300
+  # The 1000 switches are spread across the whole steady window rather than
+  # fired as fast as the socket allows, so this is an hour of switching and not
+  # a burst followed by an idle hour. The count itself is frozen in the step.
+  scheduler_switch:
+    strategies: [per-function, shared-queue]
+  # Intended owner settings from NanoFaaS outcome/idempotency policy.
+  # Effective runtime values must be observed; this mapping does not set them.
+  retention_s:
+    unkeyed-sync-outcome: 30
+    terminal-key-and-readable-outcome: 300
+    live-key-and-execution: 1800
+  roles:
+    control-plane:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      # A metric is declared for one of two reasons and no others: a criterion
+      # reads it, or this run's contract already publishes it.
+      #
+      # `scheduler_switch_duration_seconds_max` and `..._seconds_bucket` are the
+      # first — a p99 is derived from the bucket family, and no criterion may
+      # name a metric its role has not declared. The six retained populations are
+      # the second: the `soak` profile is what makes them publish at all, and
+      # until they were declared the sampler recorded them with unit "unknown",
+      # which is a series no `Criterion` can match on. Declaring one is what
+      # makes it usable by a criterion; undeclaring one is how a population this
+      # run measures stops being one it can be held to.
+      #
+      # `scheduler_active` and `scheduler_switch_total` are neither: the switch
+      # step reads them from the exposition itself, and declaring a meter no
+      # criterion and no contract reads would only add a sampling dependency to
+      # fail on.
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes,
+                         scheduler_switch_duration_seconds_max, scheduler_switch_duration_seconds_bucket,
+                         invocation_execution_reservations, invocation_canonical_input_bytes,
+                         invocation_physical_input_copy_bytes, execution_waiters_retained,
+                         execution_expiry_queue_depth, function_capacity_retired_generations]
+      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine, prometheus]
+    word-stats-java:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes, jvm_memory_used_bytes]
+      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine, prometheus]
+    word-stats-javascript:
+      runtime: node
+      expected_cpu: 1
+      memory_limit_bytes: 536870912
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
+      required_capabilities: [procfs, docker-engine, gc, heap_dump]
+      runtime_options: []
+      collection_sources: [procfs, docker-engine]
+  images:
+    control-plane:
+      mode: build
+      variant: jvm
+      platform: linux/arm64
+      modules: [container-deployment-provider, async-queue, sync-queue, runtime-config]
+      build_options: {}
+    word-stats-java:
+      mode: build
+      variant: jvm
+      platform: linux/arm64
+      modules: []
+      build_options: {}
+    word-stats-javascript:
+      mode: build
+      variant: default
+      platform: linux/arm64
+      modules: []
+      build_options: {}
+  criteria: []
+  diagnostics:
+    # Required operations are not proof of available, compatible helpers.
+    # Native deliberately has no implicit JVM command or invented helper image.
+    operations:
+      control-plane: [gc, heap_dump]
+      word-stats-java: [gc, heap_dump]
+      word-stats-javascript: [gc, heap_dump]
+    timeout_s: 120
+    max_dumps: 3
+    max_dump_bytes: 3221225472
+    helper_images: {}
+    executables:
+      control-plane: [jcmd]
+      word-stats-java: [jcmd]
+    gc_completion_evidence:
+      control-plane: jvm-full-gc-event
+      word-stats-java: jvm-full-gc-event
+      word-stats-javascript: node-full-gc-event
+  prerequisites:
+    mode: run
+    required_coverage:
+      - sync
+      - error-timeout-cancellation
+      - async-late-callback
+      - idempotent-replay
+      - function-name-churn
+    relevant_config_keys:
+      sync: [images, roles, retention_s, workload]
+      error-timeout-cancellation: [images, roles, retention_s, workload]
+      async-late-callback: [images, roles, retention_s, workload]
+      idempotent-replay: [images, roles, retention_s, workload]
+      function-name-churn: [images, roles, retention_s, workload]
+    receipts: {}
+  sample_interval_s: 10
+  scrape_timeout_s: 3
+  max_observation_gap_s: 30
+  artifact_limit_bytes: 8589934592
+  cancellation_timeout_s: 30
+  workload:
+    # Explicit initial rates; validate actual offered work and capacity in preflight.
+    rates:
+      word-stats-java: 20
+      word-stats-javascript: 20
+    preallocated_vus: 200
+    max_vus: 200
+    max_error_ratio: 0
+    max_dropped_iterations: 0

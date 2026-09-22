@@ -16,7 +16,7 @@ import shutil
 import socket
 import stat
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
@@ -56,6 +56,10 @@ from nanolab.tasks.soak.preparation import (
     prepare_soak,
 )
 from nanolab.tasks.soak.report import write_report
+from nanolab.tasks.soak.scheduler_switch import (
+    SchedulerSwitchDriver,
+    receipt_document,
+)
 from nanolab.tasks.soak.workflow import (
     LifecycleHooks,
     LifecycleState,
@@ -1020,6 +1024,13 @@ def create_local_deployment(
         }
         if policy.runtime == "jvm":
             env["NANOFAAS_METRICS_PROFILE"] = config.metrics_profile
+        if role == "control-plane" and config.scheduler_switch is not None:
+            # Only a protocol that declares the hot switch opens the admin route:
+            # every other soak keeps the platform's own default, which is off,
+            # and the route unmounted. Measured on the 0.22.0 control plane:
+            # without it both `/v1/admin/runtime-config` and its `scheduler`
+            # namespace answer 404 whatever the artifact was built with.
+            env["NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED"] = "true"
         if policy.runtime == "jvm" and policy.runtime_options:
             env["JAVA_TOOL_OPTIONS"] = " ".join(policy.runtime_options)
         elif policy.runtime == "node" and policy.runtime_options:
@@ -1274,6 +1285,41 @@ def _capture_owned_diagnostic(
             )
 
 
+# The six retained populations only the soak metrics profile publishes, in the
+# unit a criterion reads them in — all six `Gauge.builder(...)` beans of
+# nanoFaaS's `SoakMetricsConfiguration`, which is `@ConditionalOnProperty(
+# havingValue = "soak")` and this scenario's profile. The soak's sampler records
+# a metric's unit from the criterion that names it — and a `Criterion` may only
+# name a metric its role has declared required — so a population nothing judges
+# arrives in `samples.jsonl` with unit "unknown" and no criterion can hold the
+# run to it. Declared here rather than left to the `_bytes` suffix, which is
+# right for two of the six and a guess for the other four; inferred units are how
+# an unreadable series turns into a confident one.
+POPULATION_UNITS: Mapping[str, str] = {
+    "invocation_execution_reservations": "count",
+    "invocation_canonical_input_bytes": "bytes",
+    "invocation_physical_input_copy_bytes": "bytes",
+    "execution_waiters_retained": "count",
+    "execution_expiry_queue_depth": "count",
+    "function_capacity_retired_generations": "count",
+}
+
+
+def _metric_unit(declared: Mapping[tuple[str, str], str], role: str, name: str) -> str:
+    """Resolve the unit the sampler records a metric in from the narrowest declaration.
+
+    The criterion's own unit comes first, because that is what the criterion
+    will match on when the sample is read back. Then the soak profile's retained
+    populations, which no criterion names yet. Then the name, and only for
+    `_bytes`, which is a convention rather than a reading.
+    """
+    return (
+        declared.get((role, name))
+        or POPULATION_UNITS.get(name)
+        or ("bytes" if name.endswith("_bytes") else "unknown")
+    )
+
+
 def create_soak_lifecycle(
     prepared: PreparedSoak | PreparedContainerdSoak,
     *,
@@ -1387,9 +1433,7 @@ def create_soak_lifecycle(
     bindings = []
     for target in targets:
         metrics = {
-            name: units.get(
-                (target.role, name), "bytes" if name.endswith("_bytes") else "unknown"
-            )
+            name: _metric_unit(units, target.role, name)
             for name in config.roles[target.role].required_metrics
         }
         if target.role == "control-plane":
@@ -1850,6 +1894,12 @@ def create_soak_lifecycle(
             manifest["workload_script"] = _reference(root, root / "frozen-workload.js")
             workload = _read_json(receipt)
             manifest["traffic_stopped_s"] = workload.get("generator_end_s")
+        # The switch step's own receipt, referenced the same way and for the same
+        # reason: a passing soak has to carry the count, the window it happened
+        # over, the pause and the platform's own cross-check out of the run.
+        switch = state.switch_receipt
+        if switch is not None:
+            manifest["scheduler_switch"] = _reference(root, switch)
         # The captured source tree is already inventoried, file by file, in
         # source-manifest.jsonl, which snapshot.json seals with manifest_sha256
         # and both of which stay in this inventory. Listing its thousands of
@@ -1950,7 +2000,47 @@ def create_soak_lifecycle(
         ),
         run_dir=run_dir,
         cancelled=cancelled,
+        under_load=scheduler_switch_step(config, deployment, clock, root, writer),
     )
+
+
+def scheduler_switch_step(
+    config: SoakConfig, deployment: Any, clock: Any, run_dir: Path, writer: Any
+) -> Callable[[float, Event], Any] | None:
+    """Build the hot-switch step for a protocol that declares one, else nothing.
+
+    The callable this returns is what the lifecycle runs beside the steady load,
+    and it returns the path of the receipt it published. It publishes one because
+    the campaign's criterion is a count *and* a duration, and the run that
+    satisfies it has to be able to evidence both from its own artifacts - the
+    failing path already carries them in the error, which is no use to a soak
+    that passed.
+
+    A protocol that declares no switch gets `None`, which is every other soak:
+    the step is opt-in, and the platform's admin surface — which is what the
+    PATCH needs and what ships off — stays off without it.
+    """
+    if config.scheduler_switch is None:
+        return None
+    policy = config.scheduler_switch
+    metrics_url = deployment.metrics_endpoints.get("control-plane")
+    if not metrics_url:
+        raise ValueError(
+            "the scheduler switch reads the platform's own switch meters from "
+            "the control plane's exposition, and this deployment exposes none"
+        )
+    driver = SchedulerSwitchDriver(
+        deployment.api_endpoint,
+        metrics_url,
+        (policy.strategies[0], policy.strategies[1]),
+        clock=clock,
+    )
+
+    def under_load(window_s: float, cancelled: Event) -> Path:
+        receipt = driver.run(window_s=window_s, cancelled=cancelled)
+        return writer.write_json("scheduler-switch.json", receipt_document(receipt))
+
+    return under_load
 
 
 class RunSingleVersionSoak(Task):

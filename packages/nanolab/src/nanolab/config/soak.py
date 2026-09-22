@@ -16,7 +16,7 @@ PREREQUISITE_GROUPS = {
     "async-late-callback": ("async", "late-callback"),
 }
 MetricOperation = Literal[
-    "maximum", "return_to_reference", "growth_review", "expected_zero"
+    "maximum", "return_to_reference", "growth_review", "expected_zero", "percentile"
 ]
 CriterionPhase = Literal["baseline", "steady", "drain", "diagnostic"]
 DiagnosticOperation = Literal[
@@ -131,6 +131,35 @@ class RolePolicy(_StrictModel):
         return self
 
 
+class SchedulerSwitchPolicy(_StrictModel):
+    """Declare the manual hot switch a soak drives under its own load.
+
+    The two strategy ids the step alternates between, in the order it uses.
+    Required rather than defaulted: a soak that silently skipped the switch
+    would look exactly like one that made a thousand of them.
+
+    A list rather than a tuple because these models are `strict=True` and a
+    scenario is YAML, which has no tuple literal: a `tuple[Text, Text]` field
+    rejects the sequence a scenario can actually write. The length and the
+    distinctness are what make it a pair, and both are checked here.
+
+    The budgets the step holds itself to are not here. They are frozen in
+    `nanolab.tasks.soak.scheduler_switch`, cited from the campaign's own
+    `budgets.json`, because a scenario that could restate them could also
+    quietly raise one.
+    """
+
+    strategies: list[Text]
+
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        """Alternating between one strategy and itself is not a switch."""
+        _unique(self.strategies, "strategies")
+        if len(self.strategies) != 2:
+            raise ValueError("scheduler switch requires exactly two strategies")
+        return self
+
+
 class Criterion(_StrictModel):
     """Specify a numerical policy before observing any candidate results."""
 
@@ -146,6 +175,11 @@ class Criterion(_StrictModel):
     threshold: NonNegativeNumber | None = None
     absolute_tolerance: NonNegativeNumber | None = None
     relative_tolerance: Annotated[float, Field(ge=0, le=1)] | None = None
+    # The quantile a `percentile` criterion derives from its bucket family, as a
+    # fraction rather than a name, so the criterion says which p99 it means.
+    # Optional and exclusive to that operation: every other one reads either a
+    # single series or a window of one, and none of them needs a rank.
+    quantile: Annotated[float, Field(gt=0, lt=1)] | None = None
     rationale: Text
 
     @model_validator(mode="after")
@@ -153,6 +187,11 @@ class Criterion(_StrictModel):
         """Do not let an unused threshold or missing tolerance weaken a criterion."""
         if self.deadline_s is not None and self.window_s > self.deadline_s:
             raise ValueError("criterion window cannot extend before its phase begins")
+        if self.operation == "percentile":
+            if self.quantile is None:
+                raise ValueError("percentile requires the quantile it derives")
+        elif self.quantile is not None:
+            raise ValueError("quantile belongs only to percentile")
         if (
             self.metric in {"process_rss_bytes", "cgroup_memory_usage_bytes"}
             and self.unit != "bytes"
@@ -179,7 +218,9 @@ class Criterion(_StrictModel):
                 if self.threshold is not None:
                     raise ValueError("expected_zero does not consume threshold")
             elif self.threshold is None:
-                raise ValueError("maximum and growth_review require a threshold")
+                raise ValueError(
+                    "maximum, growth_review and percentile require a threshold"
+                )
         return self
 
 
@@ -299,6 +340,9 @@ class SoakConfig(_StrictModel):
     criteria: list[Criterion] = Field(default_factory=list)
     diagnostics: DiagnosticPolicy
     prerequisites: PrerequisitePolicy
+    # Present only in a protocol whose run drives the hot switch. Absent leaves
+    # the admin surface off, which is the platform's default and stays it.
+    scheduler_switch: SchedulerSwitchPolicy | None = None
     sample_interval_s: PositiveNumber
     scrape_timeout_s: PositiveNumber
     max_observation_gap_s: PositiveNumber

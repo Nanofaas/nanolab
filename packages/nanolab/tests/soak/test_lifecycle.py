@@ -13,7 +13,9 @@ def fake_config(**fields: object) -> SoakConfig:
     return cast(SoakConfig, SimpleNamespace(**fields))
 
 
-def make_lifecycle(tmp_path, events, failure=None):
+def make_lifecycle(
+    tmp_path, events, failure=None, under_load=None, driver=None, steady_s=5400
+):
     class Clock:
         now = 0
 
@@ -58,7 +60,7 @@ def make_lifecycle(tmp_path, events, failure=None):
             warmup_s=10,
             baseline_drain_s=2100,
             baseline_window_s=30,
-            steady_s=5400,
+            steady_s=steady_s,
             drain_s=2100,
         ),
         cancellation_timeout_s=1,
@@ -76,9 +78,10 @@ def make_lifecycle(tmp_path, events, failure=None):
         config,
         observer=Observer(),  # pyright: ignore[reportArgumentType]
         clock=clock,  # pyright: ignore[reportArgumentType]
-        driver_factory=Driver,  # pyright: ignore[reportArgumentType]
+        driver_factory=driver or Driver,  # pyright: ignore[reportArgumentType]
         hooks=hooks,
         run_dir=tmp_path,
+        under_load=under_load,
     )
 
 
@@ -135,6 +138,200 @@ def test_cancellation_still_reports(tmp_path):
         Workflow("soak").add(task).run()
     assert task.state.aborted
     assert events == ["capture", "evaluate", "report"]
+
+
+def test_the_switch_step_runs_beside_the_steady_load(tmp_path):
+    """Both run in the same window, and the step's receipt is kept."""
+    events = []
+    seen: list[tuple[float, object]] = []
+
+    def under_load(window_s, cancelled):
+        seen.append((window_s, cancelled))
+        events.append("switch-steady")
+        receipt = tmp_path / "scheduler-switch.json"
+        receipt.write_text("{}")
+        return receipt
+
+    task = make_lifecycle(tmp_path, events, under_load=under_load)
+    Workflow("soak").add(task).run()
+
+    # The switch ran inside the steady window, not before or after it.
+    assert "switch-steady" in events
+    assert events.index("load-steady") < events.index("capture")
+    assert "switch-steady" in events[: events.index("capture")]
+    # It was handed the steady phase's own duration and the run's cancellation.
+    assert seen == [(5400, task.cancelled)]
+    # The receipt is the published path, not an in-memory object: it is what the
+    # manifest references, exactly as the workload receipt is.
+    assert task.state.switch_receipt == tmp_path / "scheduler-switch.json"
+    assert task.state.workload_receipts["steady"].name == "receipt.json"
+
+
+def test_a_failed_switch_step_fails_the_run_with_the_load_receipt_beside_it(tmp_path):
+    """A switch that fails does not discard the load it ran under."""
+    events = []
+
+    def under_load(window_s, cancelled):
+        events.append("switch-steady")
+        raise RuntimeError("switches committed, budget 1000")
+
+    task = make_lifecycle(tmp_path, events, under_load=under_load)
+    with pytest.raises(RuntimeError, match="switches committed, budget 1000"):
+        Workflow("soak").add(task).run()
+
+    # The load's own receipt survived, and the run still finalized and reported.
+    assert task.state.workload_receipts["steady"].name == "receipt.json"
+    assert task.state.switch_receipt is None
+    assert events[-3:] == ["observer-stop", "evaluate", "report"]
+
+
+def test_a_switch_failure_stops_the_load_instead_of_waiting_out_the_window(tmp_path):
+    """A failure one second in must not be held for the rest of the window.
+
+    The executor's shutdown waits for its survivors, so without the stop signal
+    a switch that blows its budget at t=0 in a ninety-minute steady phase is
+    reported eighty-nine minutes later with the observer still sampling. An
+    operator meets that with Ctrl-C, which turns a FAIL into an ABORT and loses
+    the evidence.
+    """
+    import time
+
+    events = []
+
+    class SlowLoad:
+        """Sleeps out the steady window unless it is cancelled first."""
+
+        def __init__(self, phase):
+            self.phase = phase
+
+        def run(self, output, duration, cancelled):
+            events.append("load-" + self.phase)
+            if self.phase == "steady":
+                deadline = time.monotonic() + duration
+                while time.monotonic() < deadline and not cancelled.wait(0.01):
+                    pass
+            events.append("returned-" + self.phase)
+            output.mkdir(parents=True, exist_ok=True)
+            receipt = output / "receipt.json"
+            receipt.write_text("{}")
+            return receipt
+
+        def stop(self, timeout):
+            events.append("stop-" + self.phase)
+
+    def under_load(window_s, cancelled):
+        events.append("switch-steady")
+        raise RuntimeError("switches committed, budget 1000")
+
+    task = make_lifecycle(
+        tmp_path, events, under_load=under_load, driver=SlowLoad, steady_s=20
+    )
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="budget 1000"):
+        Workflow("soak").add(task).run()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5.0, f"the failure was held for the whole window ({elapsed:.1f}s)"
+    assert "returned-steady" in events
+    assert task.state.workload_receipts["steady"].name == "receipt.json"
+
+
+def test_a_load_failure_is_the_one_reported_when_the_switch_then_stops(tmp_path):
+    """The switch's short count is a consequence, not a second fault."""
+    import time
+
+    events = []
+
+    class FailingLoad:
+        def __init__(self, phase):
+            self.phase = phase
+
+        def run(self, output, duration, cancelled):
+            events.append("load-" + self.phase)
+            if self.phase == "steady":
+                raise RuntimeError("generator died")
+            output.mkdir(parents=True, exist_ok=True)
+            receipt = output / "receipt.json"
+            receipt.write_text("{}")
+            return receipt
+
+        def stop(self, timeout):
+            events.append("stop-" + self.phase)
+
+    def under_load(window_s, cancelled):
+        events.append("switch-steady")
+        # Bounded, so a missing stop signal fails this test rather than hanging
+        # it: the whole point is that something has to set the cancellation.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not cancelled.wait(0.01):
+            pass
+        raise RuntimeError("0 switches committed, budget 1000")
+
+    task = make_lifecycle(
+        tmp_path, events, under_load=under_load, driver=FailingLoad, steady_s=20
+    )
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="generator died"):
+        Workflow("soak").add(task).run()
+    assert time.monotonic() - started < 5.0
+    assert "switch-steady" in events
+
+
+def test_a_load_failure_keeps_the_receipt_the_load_wrote_before_it_died(tmp_path):
+    """The other half of the same hinge, on the load's side of it.
+
+    `K6WorkloadDriver` persists its receipt in a `finally` and re-raises after,
+    so a generator that dies mid-steady leaves `workload-receipt.json` on disk.
+    Reading only the future's result drops it: the manifest then references no
+    workload evidence for a run whose load is exactly what failed.
+    """
+    import time
+
+    events = []
+
+    class DyingLoad:
+        def __init__(self, phase):
+            self.phase = phase
+
+        def run(self, output, duration, cancelled):
+            events.append("load-" + self.phase)
+            output.mkdir(parents=True, exist_ok=True)
+            receipt = output / "workload-receipt.json"
+            if self.phase == "steady":
+                # What the driver does before it raises: the receipt is written
+                # and then the failure is surfaced.
+                receipt.write_text('{"kind": "workload"}')
+                raise RuntimeError("generator died")
+            receipt.write_text("{}")
+            return receipt
+
+        def stop(self, timeout):
+            events.append("stop-" + self.phase)
+
+    def under_load(window_s, cancelled):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not cancelled.wait(0.01):
+            pass
+        raise RuntimeError("0 switches committed, budget 1000")
+
+    task = make_lifecycle(
+        tmp_path, events, under_load=under_load, driver=DyingLoad, steady_s=20
+    )
+    with pytest.raises(RuntimeError, match="generator died"):
+        Workflow("soak").add(task).run()
+
+    kept = task.state.workload_receipts["steady"]
+    assert kept == tmp_path / "steady" / "workload-receipt.json"
+    assert kept.is_file()
+
+
+def test_a_soak_without_a_switch_step_runs_the_load_alone(tmp_path):
+    events = []
+    task = make_lifecycle(tmp_path, events)
+    Workflow("soak").add(task).run()
+
+    assert task.state.switch_receipt is None
+    assert events.count("load-steady") == 1
 
 
 def test_startup_budget_covers_all_sequential_scrapes():

@@ -4,6 +4,7 @@ evaluation-input.json is a derived numerical projection, not an alternative run
 policy. Full-run acceptance additionally requires bound receipts and frozen policy.
 """
 
+import itertools
 import json
 import math
 import sqlite3
@@ -299,12 +300,18 @@ def _window(
         ORDER BY scheduled"""
     args = (criterion.role, criterion.metric, labels, phase, low, high)
     count, maximum, previous, largest_gap, missing = 0, None, low, 0.0, False
+    first, prior_value, decreased = None, None, False
     for scheduled, value, unit, available in connection.execute(query, args):
         if not available or unit != criterion.unit:
             missing = True
             continue
         count += 1
+        first = value if first is None else first
         maximum = value if maximum is None else max(maximum, value)
+        # A cumulative series may never fall. Only the operations that read one
+        # consult this; the gauges the other operations read are free to.
+        decreased = decreased or (prior_value is not None and value < prior_value)
+        prior_value = value
         largest_gap = max(largest_gap, scheduled - previous)
         previous = scheduled
     largest_gap = max(largest_gap, high - previous)
@@ -324,7 +331,190 @@ def _window(
             (*args, criterion.unit, 2 if count % 2 == 0 else 1, (count - 1) // 2),
         ).fetchall()
         median = sum(row[0] for row in values) / len(values)
-    return {"complete": complete, "maximum": maximum, "median": median}
+    # `first` is read for the operations that need the window's own reading of a
+    # cumulative series rather than its level at the end of the window, and
+    # `decreased` for the one that must refuse the window when that series was
+    # reset inside it.
+    return {
+        "complete": complete,
+        "maximum": maximum,
+        "first": first,
+        "decreased": decreased,
+        "median": median,
+    }
+
+
+def bucket_quantile(quantile: float, buckets: dict[float, float]) -> float:
+    """Interpolate one quantile out of a cumulative Prometheus bucket family.
+
+    `buckets` maps each `le` bound to the count observed at or below it. The
+    arithmetic is Prometheus' own `histogram_quantile`: the rank is `quantile *
+    total`, the containing bucket is the first whose count reaches it, and the
+    position inside that bucket is linear in the counts.
+
+    Every way of not answering raises instead of returning a number, because the
+    number it would return is indistinguishable from a measurement downstream. A
+    family without its `+Inf` bound is refused rather than approximated: the
+    value being asked for may sit above the largest finite bound, so the
+    interpolated answer would be an upper bound *below* the series it claims to
+    read — the one direction a budget may never be wrong in.
+    """
+    bounds = sorted(buckets)
+    if not bounds or bounds[-1] != math.inf:
+        raise ValueError(
+            "no +Inf bound, so a quantile above the largest finite bound cannot "
+            "be placed"
+        )
+    if len(bounds) < 2:
+        raise ValueError("only an open-ended bucket, so no quantile can be placed")
+    counts = [buckets[bound] for bound in bounds]
+    if any(later < earlier for earlier, later in itertools.pairwise(counts)):
+        raise ValueError("bucket counts are not cumulative")
+    total = counts[-1]
+    if total <= 0:
+        raise ValueError("no observation fell in the window")
+    rank = quantile * total
+    index = next(index for index, count in enumerate(counts) if count >= rank)
+    if index == len(bounds) - 1:
+        # The rank sits in the open-ended bucket, which has no upper bound to
+        # interpolate towards. Prometheus answers with the largest finite bound,
+        # which is also the only answer that cannot understate the reading.
+        return bounds[-2]
+    if index == 0 and bounds[0] <= 0:
+        # Prometheus' own guard: a rank inside a bucket whose upper bound is not
+        # positive cannot be interpolated upward from zero.
+        return bounds[0]
+    lower = 0.0 if index == 0 else bounds[index - 1]
+    below = 0.0 if index == 0 else counts[index - 1]
+    if counts[index] == below:
+        # An empty step of the cumulative function: the rank sits on the bound.
+        return bounds[index]
+    return lower + (bounds[index] - lower) * (rank - below) / (counts[index] - below)
+
+
+def _bound(value: str) -> float:
+    """Read one `le` bound, which is a number Prometheus writes `+Inf` for."""
+    return math.inf if value == "+Inf" else float(value)
+
+
+def _percentile(
+    connection: sqlite3.Connection,
+    criterion: Criterion,
+    policy: dict[str, Any],
+    low: float,
+    high: float,
+) -> CriterionResult:
+    """Derive a percentile from a bucket family and hold it against the budget.
+
+    A bucket family is one series per `le` bound, so the operation is about the
+    family rather than about any one of its series: the matching series are
+    grouped by the labels the criterion does not select, and each group is read
+    as a whole. A group without an `le` is not a histogram and is refused.
+
+    The buckets are cumulative counters, so the window's own reading is what the
+    family *grew by* across it — not the level it had reached by the end, which
+    would fold in every switch the process made before the window opened. The
+    first observed sample of the window is the floor, so up to one sampling
+    interval of the phase's own switches sit below it.
+
+    Every absence is answered with a reason rather than with a number, because
+    the number it would produce is indistinguishable from a measurement: a
+    family that never answered, a family that carries no `le`, a family whose
+    buckets are all zero, and a family without its `+Inf` bound. A percentile of
+    nothing and a percentile of zero are the same reading downstream, and only
+    one of them is one. A family whose count *fell* inside the window was reset
+    there, and its growth across the window subtracts one process's counter from
+    another's: refused for that reason, which is the one the operator can act on.
+    """
+    families: dict[str, dict[float, float]] = {}
+    incomplete = False
+    evidence = ("evaluation-input.json", "samples.jsonl")
+    quantile, threshold = criterion.quantile, criterion.threshold
+    assert quantile is not None and threshold is not None  # nosec B101 - required by Criterion
+    for (labels,) in connection.execute(
+        "SELECT DISTINCT labels FROM samples WHERE role=? AND metric=? ORDER BY labels",
+        (criterion.role, criterion.metric),
+    ):
+        selector = dict(json.loads(labels))
+        if any(
+            selector.get(key) != value
+            for key, value in criterion.label_selector.items()
+        ):
+            continue
+        bound = selector.pop("le", None)
+        reading = _window(
+            connection, criterion, labels, criterion.phase, low, high, policy
+        )
+        incomplete |= not reading["complete"]
+        if reading["first"] is None or reading["maximum"] is None:
+            # A label set the window holds no reading for is a tick the sampler
+            # could not fill rather than a series that answered: a scrape that
+            # missed a required metric is written as one unlabelled
+            # `unavailable` row, and this is that row's label set. Answered as a
+            # shape instead, it would take every family that did answer down
+            # with it, under a cause pointing at the exposition rather than at
+            # the scrape. `incomplete` carries the tick, which is what it is.
+            continue
+        if bound is None:
+            return CriterionResult(
+                criterion.id,
+                "INCONCLUSIVE",
+                f"{criterion.metric} carries no `le` bound, so it is not a bucket "
+                "family and no percentile can be read from it",
+                evidence,
+            )
+        if reading["decreased"]:
+            return CriterionResult(
+                criterion.id,
+                "INCONCLUSIVE",
+                f"{criterion.metric}: a bucket count fell inside the window, so the "
+                "family was reset and its growth across the window is not a reading "
+                "of it",
+                evidence,
+            )
+        family = families.setdefault(
+            json.dumps(sorted(selector.items()), separators=(",", ":")), {}
+        )
+        family[_bound(bound)] = reading["maximum"] - reading["first"]
+    if not families:
+        return CriterionResult(
+            criterion.id,
+            "INCONCLUSIVE",
+            "required role/metric/label series absent",
+            evidence,
+        )
+    readings = []
+    for name, buckets in sorted(families.items()):
+        try:
+            readings.append((name, bucket_quantile(quantile, buckets)))
+        except ValueError as error:
+            return CriterionResult(
+                criterion.id,
+                "INCONCLUSIVE",
+                f"{criterion.metric}: {error}",
+                evidence,
+            )
+    worst = max(value for _, value in readings)
+    failed = worst > threshold
+    if failed:
+        status, reason = "FAIL", "observed numerical limit violation"
+    elif incomplete:
+        status, reason = (
+            "INCONCLUSIVE",
+            "missing final samples, units or excessive observation gap",
+        )
+    else:
+        status, reason = (
+            "PASS",
+            "numerical window checks passed; not full-run acceptance",
+        )
+    details = "; ".join(f"labels={name or '{}'}: {value:g}" for name, value in readings)
+    return CriterionResult(
+        criterion.id,
+        status,
+        f"{reason}; p{quantile * 100:g}={worst:g} over the declared window; {details}",
+        evidence,
+    )
 
 
 def _criterion(
@@ -337,6 +527,8 @@ def _criterion(
         else window["end_s"]
     )
     low = high - criterion.window_s
+    if criterion.operation == "percentile":
+        return _percentile(connection, criterion, policy, low, high)
     baseline = policy["windows"]["baseline"]
     seen, failed, incomplete, growth = 0, False, False, False
     details = ""

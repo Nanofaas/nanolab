@@ -16,7 +16,7 @@ from sonata_tasks.execution.ports import CommandTaskExecutor
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.config.soak import SoakConfig
+from nanolab.config.soak import SchedulerSwitchPolicy, SoakConfig
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe
 from nanolab.tasks.soak.models import Target
@@ -28,6 +28,7 @@ from nanolab.tasks.soak.runtime import (
     create_local_deployment,
     create_soak_lifecycle,
 )
+from nanolab.tasks.soak.scheduler_switch import SwitchReceipt
 from nanolab.tasks.soak.sources import SourceSnapshot
 
 
@@ -110,6 +111,50 @@ def prepared(
     )
 
 
+def test_the_sampler_declares_a_unit_for_every_population_it_records():
+    """A metric the sampler cannot describe is one no criterion can read.
+
+    The unit reaches the sampler from the criterion that names the metric, and a
+    criterion may only name a metric its role declared required — so a retained
+    population nothing declares arrives in `samples.jsonl` with unit "unknown"
+    and cannot be held to anything. The narrowest declaration wins, and a name
+    nothing declares at all still gets no invented unit.
+    """
+    from nanolab.tasks.soak.runtime import POPULATION_UNITS, _metric_unit
+    from tests.metrics.test_catalogue_coverage import _NOT_COLLECTED
+
+    declared = {("control-plane", "scheduler_switch_duration_seconds_max"): "seconds"}
+    # The names nanolab already knows, read from the catalogue that declines each
+    # of them for this run's collector. Iterating the table itself asserts
+    # nothing once the table is empty, which is the mutation this is here for.
+    known = {
+        name
+        for name, reason in _NOT_COLLECTED.items()
+        if reason == "sampled by the soak population collector"
+    }
+
+    assert set(POPULATION_UNITS) == known
+    for name in known:
+        assert _metric_unit(declared, "control-plane", name) == POPULATION_UNITS[name]
+        assert POPULATION_UNITS[name] != "unknown"
+    # A criterion's own declaration still governs the metric it names.
+    assert (
+        _metric_unit(
+            {("control-plane", "invocation_canonical_input_bytes"): "kilobytes"},
+            "control-plane",
+            "invocation_canonical_input_bytes",
+        )
+        == "kilobytes"
+    )
+    assert (
+        _metric_unit(declared, "control-plane", "scheduler_switch_duration_seconds_max")
+        == "seconds"
+    )
+    # The `_bytes` convention is a convention, not a licence to guess.
+    assert _metric_unit(declared, "control-plane", "some_bytes") == "bytes"
+    assert _metric_unit(declared, "control-plane", "process_threads") == "unknown"
+
+
 @pytest.mark.parametrize(
     ("scenario", "expected_profile"),
     [
@@ -170,6 +215,61 @@ def test_local_compose_uses_only_frozen_images_and_private_network(
         for function in deployment.request.functions
     )
     value.writer.close()
+
+
+def _control_plane_environment(tmp_path, monkeypatch, *, declares_switch):
+    """Build the compose environment for a protocol with or without the switch."""
+    value = prepared(tmp_path)
+    value.config.diagnostics.operations = {role: [] for role in value.config.roles}
+    if declares_switch:
+        value.config.scheduler_switch = SchedulerSwitchPolicy(
+            strategies=["per-function", "shared-queue"]
+        )
+    leases = []
+
+    class Lease:
+        def __init__(self):
+            leases.append(self)
+
+        def bind(self, address):
+            assert address == ("127.0.0.1", 0)
+
+        def getsockname(self):
+            return "127.0.0.1", 20000 + len(leases)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("nanolab.tasks.soak.runtime.socket.socket", Lease)
+    create_local_deployment(value, tmp_path)
+    document = json.loads((tmp_path / "soak-compose.json").read_text())
+    value.writer.close()
+    return document["services"]["control-plane"]["environment"]
+
+
+def test_a_protocol_that_declares_the_switch_opens_the_admin_route(
+    tmp_path, monkeypatch
+):
+    """The switch needs the admin API, which the platform ships unmounted.
+
+    Measured on the 0.22.0 control plane: without this variable both
+    `/v1/admin/runtime-config` and its `scheduler` namespace answer 404 whatever
+    the artifact was built with.
+    """
+    environment = _control_plane_environment(
+        tmp_path, monkeypatch, declares_switch=True
+    )
+
+    assert environment["NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED"] == "true"
+
+
+def test_every_other_soak_keeps_the_admin_route_off(tmp_path, monkeypatch):
+    """Default-off is the platform's posture and a scenario must not move it."""
+    environment = _control_plane_environment(
+        tmp_path, monkeypatch, declares_switch=False
+    )
+
+    assert "NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED" not in environment
 
 
 def test_control_plane_gets_a_writable_catalog_directory(tmp_path, monkeypatch):
@@ -403,6 +503,37 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     from nanolab.tasks.soak.models import Sample
 
     value = prepared(tmp_path)
+    # The run declares the hot switch, so the step runs and its receipt has to
+    # reach the manifest: a passing soak must be able to evidence the count and
+    # the window from its own artifacts.
+    value.config.scheduler_switch = SchedulerSwitchPolicy(
+        strategies=["per-function", "shared-queue"]
+    )
+
+    class FakeSwitch:
+        """Stand in for the driver, which its own tests cover."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, *, window_s, cancelled):
+            return SwitchReceipt(
+                strategies=("per-function", "shared-queue"),
+                initial="per-function",
+                final="per-function",
+                committed=1000,
+                refused=0,
+                stale=0,
+                live_indexes=2,
+                pause_max_ms=0.31,
+                platform_committed=1000.0,
+                restores=0,
+                window_s=window_s,
+                elapsed_s=window_s,
+            )
+
+    monkeypatch.setattr(module, "SchedulerSwitchDriver", FakeSwitch)
+
     root = value.evidence_dir
     (root / "builds").mkdir()
     (root / "source").mkdir()
@@ -541,7 +672,9 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     monkeypatch.setattr(module, "evaluate_run", evaluate_saved)
     deployment = fake_deployment(
         discover=lambda: targets,
-        metrics_endpoints={},
+        metrics_endpoints={
+            "control-plane": "http://127.0.0.1:10001/actuator/prometheus"
+        },
         observations=observed,
         api_endpoint="http://127.0.0.1:10000",
     )
@@ -567,6 +700,15 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     }
     assert manifest["completed"] is True
     assert manifest["workload"]["path"] == "steady/workload-receipt.json"
+    # The switch step's receipt is referenced the same way, and it carries the
+    # count *and* the window, so the criterion cannot be read from the artifact
+    # as a count without a duration.
+    assert manifest["scheduler_switch"]["path"] == "scheduler-switch.json"
+    switch = json.loads((root / "scheduler-switch.json").read_text())
+    assert switch["kind"] == "scheduler-switch"
+    assert switch["committed"] == 1000
+    assert switch["window_s"] == value.config.phases.steady_s
+    assert switch["platform_committed"] == 1000.0
     assert events == [
         "warmup",
         "load-warmup",
