@@ -162,10 +162,10 @@ def case(tmp_path, monkeypatch):
                         "app": {
                             "beans": {
                                 # The key a real control plane publishes: the
-                                # Spring binding class by its qualified name.
+                                # configuration-properties record by its qualified name.
                                 "nanofaas.execution-store-it.unimib.datai.nanofaas"
                                 ".controlplane.config."
-                                "ExecutionStoreBindingProperties": {
+                                "ExecutionStoreProperties": {
                                     "properties": {
                                         "syncTtl": "PT30S",
                                         "ttl": "PT5M",
