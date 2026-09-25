@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from nanolab.tasks.loadtest.models import TimeWindow
 
 
-@runtime_checkable
 class RemoteFileFetcher(Protocol):
     """Pull a file from a remote machine onto the local filesystem."""
 
@@ -17,7 +16,6 @@ class RemoteFileFetcher(Protocol):
         ...
 
 
-@runtime_checkable
 class PrometheusClient(Protocol):
     """Read Prometheus range series and clock over its HTTP API."""
 

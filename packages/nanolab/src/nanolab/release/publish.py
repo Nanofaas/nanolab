@@ -17,7 +17,6 @@ from nanolab.release.model import ArtifactEvidence
 from nanolab.release.remote_retry import retry_on_connection_death
 from nanolab.release.versioning import normalize_version
 
-PUBLISH_PHASES = ("publish-architectures", "publish-manifests", "publish-aliases")
 GHCR_REPOSITORY = "ghcr.io/miciav/nanofaas"
 _REQUIRED_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
 # Provenance/attestation manifest rows report this pseudo-platform.

@@ -101,17 +101,6 @@ def prepare_operations(
     return tuple(operations)
 
 
-def pinned_function_images(functions: Sequence[Any]) -> dict[str, str]:
-    """Return the image tag each function was built under, keyed by catalogue key.
-
-    Keyed by `key`, the catalogue name, not by `name`: that is what
-    `_resolve_with_prebuilt_images` looks up, and the two differ for any function
-    whose registered name is not its catalogue key. A map keyed the other way
-    fails as "missing prebuilt function images" for every entry it in fact holds.
-    """
-    return {function.key: function.image for function in functions}
-
-
 # The control-plane API on the VM. The matrix reuses one cluster for every cell,
 # so a run that was interrupted leaves whatever the interrupted cell had already
 # registered — and the next run dies on its first cell with a 409, having done

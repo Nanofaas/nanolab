@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -143,20 +142,6 @@ class AnsibleAdapter:
             dry_run=dry_run,
         )
 
-    def provision_release_builder(
-        self,
-        request: VmRequest,
-        *,
-        dry_run: bool = False,
-    ) -> ShellExecutionResult:
-        """Install release-only image transport tools on the stack VM."""
-        return self.run_playbook(
-            "provision-release-builder.yml",
-            request,
-            extra_vars={"vm_user": request.user},
-            dry_run=dry_run,
-        )
-
     def provision_k3s(
         self,
         request: VmRequest,
@@ -212,99 +197,3 @@ class AnsibleAdapter:
             extra_vars=self._registry_extra_vars(registry=registry),
             dry_run=dry_run,
         )
-
-    def configure_registry(
-        self,
-        request: VmRequest,
-        *,
-        registry: str,
-        container_name: str = REGISTRY_CONTAINER_NAME,
-        dry_run: bool = False,
-    ) -> ShellExecutionResult:
-        """Ensure the registry container, then point k3s at the registry."""
-        ensure_result = self.ensure_registry_container(
-            request,
-            registry=registry,
-            container_name=container_name,
-            dry_run=dry_run,
-        )
-        if ensure_result.return_code != 0:
-            return ensure_result
-        return self.configure_k3s_registry(
-            request,
-            registry=registry,
-            dry_run=dry_run,
-        )
-
-
-@dataclass
-class RunPlaybook:
-    """Honest Task that runs an ansible playbook on the host via AnsibleAdapter.
-
-    Connectivity is parametric through the injected adapter (host_resolver +
-    private_key_path) and extra_vars (e.g. ansible_port for non-22 SSH).
-    Satisfies the sonata_tasks.Task protocol; raises on non-zero exit so
-    Workflow.run() stops and triggers cleanup.
-    """
-
-    task_id: str
-    title: str
-    adapter: AnsibleAdapter
-    playbook: str
-    request: VmRequest
-    extra_vars: dict[str, str] | None = None
-
-    def run(self) -> None:
-        """Run the playbook and raise its output if the exit code was non-zero."""
-        result = self.adapter.run_playbook(
-            self.playbook, self.request, extra_vars=self.extra_vars
-        )
-        if result.return_code != 0:
-            # Surface stdout AND stderr: ansible reports task failures on stdout
-            # (PLAY RECAP / "fatal: ... FAILED!") while benign warnings go to stderr,
-            # so stderr alone would mask the real error.
-            detail = "\n".join(
-                part for part in (result.stdout.strip(), result.stderr.strip()) if part
-            )
-            raise RuntimeError(
-                detail or f"{self.task_id} failed (exit {result.return_code})"
-            )
-
-
-def install_k6_task(
-    *,
-    task_id: str,
-    title: str,
-    repo_root: Path,
-    shell: ShellBackend,
-    host: str,
-    user: str,
-    private_key: Path | None = None,
-    port: int | None = None,
-) -> RunPlaybook:
-    """Build a RunPlaybook for the k6 install against a resolved VM endpoint.
-
-    The single, shared way to install k6 via ansible. Per-lifecycle connectivity
-    is captured as plain arguments:
-      - multipass: host=<resolved IP>, default user, multipass key, port=None
-      - proxmox:   host=<proxmox host>, port=<published SSH port>, proxmox key
-      - azure:     host=<public IP>, azure key, port=None
-    """
-    adapter = AnsibleAdapter(
-        repo_root=repo_root,
-        # AnsibleAdapter's ShellBackend argument, not the subprocess shell flag
-        # bandit's B604 looks for.
-        shell=shell,  # nosec B604
-        host_resolver=lambda request, dry_run=False: host,
-        private_key_path=private_key,
-    )
-    request = VmRequest(lifecycle="external", host=host, user=user)
-    extra_vars = {"ansible_port": str(port)} if port is not None else None
-    return RunPlaybook(
-        task_id=task_id,
-        title=title,
-        adapter=adapter,
-        playbook="install-k6.yml",
-        request=request,
-        extra_vars=extra_vars,
-    )

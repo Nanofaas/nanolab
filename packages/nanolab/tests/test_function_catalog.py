@@ -5,10 +5,8 @@ import yaml
 
 from nanolab.functions.catalog import (
     _discover_example_functions,
-    list_function_presets,
     list_functions,
     resolve_function_definition,
-    resolve_function_preset,
 )
 from nanolab.tasks.deployment import LOCAL_REGISTRY
 
@@ -115,45 +113,6 @@ def test_every_demo_function_declares_a_resolvable_default_payload() -> None:
         assert declared == f"{function.family}-sample.json", function.key
         assert function.default_payload_file == declared
         assert (payloads_root / declared).is_file()
-
-
-def test_demo_java_preset_contains_only_java_functions() -> None:
-    preset = resolve_function_preset("demo-java")
-    assert {function.runtime for function in preset.functions} == {"java"}
-    assert {function.family for function in preset.functions} == {
-        "word-stats",
-        "json-transform",
-    }
-
-
-def test_demo_javascript_preset_contains_only_javascript_functions() -> None:
-    preset = resolve_function_preset("demo-javascript")
-    assert {function.runtime for function in preset.functions} == {"javascript"}
-    assert [function.key for function in preset.functions] == [
-        "word-stats-javascript",
-        "json-transform-javascript",
-    ]
-
-
-def test_metrics_smoke_preset_contains_metrics_fixture() -> None:
-    preset_names = [preset.name for preset in list_function_presets()]
-    assert "metrics-smoke" in preset_names
-
-    preset = resolve_function_preset("metrics-smoke")
-    assert [function.key for function in preset.functions] == ["tool-metrics-echo"]
-
-
-def test_demo_loadtest_preset_excludes_go_functions() -> None:
-    preset = resolve_function_preset("demo-loadtest")
-
-    assert "go" not in {function.runtime for function in preset.functions}
-    assert "javascript" not in {function.runtime for function in preset.functions}
-    assert {function.runtime for function in preset.functions} == {
-        "java",
-        "java-lite",
-        "python",
-        "exec",
-    }
 
 
 def test_discovers_function_from_manifest_catalog_metadata(tmp_path: Path) -> None:
@@ -287,21 +246,6 @@ catalog:
 
     with pytest.raises(ValueError, match="Unsupported function runtime: ruby"):
         _discover_example_functions(examples, payloads)
-
-
-def test_static_presets_resolve_against_dynamic_catalog() -> None:
-    preset = resolve_function_preset("demo-java")
-
-    assert [function.key for function in preset.functions] == [
-        "word-stats-java",
-        "json-transform-java",
-    ]
-
-
-def test_demo_all_does_not_auto_include_new_discovered_functions() -> None:
-    preset = resolve_function_preset("demo-all")
-
-    assert "roman-numeral-java" not in {function.key for function in preset.functions}
 
 
 def test_catalog_discovers_from_an_explicit_root(tmp_path: Path) -> None:

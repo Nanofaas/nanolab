@@ -11,6 +11,7 @@ from sonata_engine import TaskInputs, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.cli.execution import build_role_bindings
 from nanolab.config.environment import EnvironmentConfig
@@ -20,7 +21,6 @@ from nanolab.tasks.containerd_rootless import (
     registry_resource,
 )
 from nanolab.tasks.resources import ContainerdResourceCheckTask
-from nanolab.tasks.vm.ports import VmCommandProvider
 
 
 @dataclass

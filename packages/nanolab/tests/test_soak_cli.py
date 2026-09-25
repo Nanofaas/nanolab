@@ -138,23 +138,23 @@ def test_policy_overlay_is_explicit_and_only_replaces_criteria(tmp_path):
 
 
 def test_policy_cannot_override_images_or_timing(tmp_path):
-    from nanolab.cli.soak import resolve_soak_policy
+    from nanolab.cli.soak import load_soak_policy
 
     (tmp_path / "policy.yaml").write_text(
         "schema: nanolab-soak-policy-v1\ncriteria: []\nimages: {}\n"
     )
     with pytest.raises(ValueError, match=r"soak policy must contain schema"):
-        resolve_soak_policy(
+        load_soak_policy(
             {"workflow": "soak", "soakPolicyFile": "policy.yaml", "soak": {}},
             tmp_path / "scenario.yaml",
         )
 
 
 def test_missing_policy_is_not_filled_with_permissive_defaults(tmp_path):
-    from nanolab.cli.soak import resolve_soak_policy
+    from nanolab.cli.soak import load_soak_policy
 
     with pytest.raises(ValueError, match="required soak policy file unavailable"):
-        resolve_soak_policy(
+        load_soak_policy(
             {"workflow": "soak", "soakPolicyFile": "missing.yaml", "soak": {}},
             tmp_path / "scenario.yaml",
         )

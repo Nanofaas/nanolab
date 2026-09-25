@@ -9,13 +9,13 @@ from types import MappingProxyType
 from typing import cast
 
 from multipass_vm_sdk import find_ssh_public_key
-from sonata_tasks.vm.ssh import find_ssh_private_key_path
+from sonata_tasks.vm.ssh import find_ssh_private_key_path, ssh_command
 
 from nanolab.tasks.components.context import ScenarioExecutionContext
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.vm.models import VmRequest
-from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
+from nanolab.tasks.vm.sync import repo_rsync_command
 
 _ASSETS_SYNC_TO_VM = "assets.sync_to_vm"
 
@@ -108,40 +108,6 @@ def _ansible_operation(
     )
 
 
-def plan_vm_ensure_running(
-    context: ScenarioExecutionContext,
-) -> tuple[RemoteCommandOperation, ...]:
-    """Boot the VM, or prove an external one already answers over SSH."""
-    vm_request = context.vm_request
-    if vm_request.lifecycle == "external":
-        return (
-            RemoteCommandOperation(
-                operation_id="vm.ensure_running",
-                summary="Ensure VM is running",
-                argv=("ssh", f"{vm_request.user}@{vm_request.host}", "true"),
-            ),
-        )
-
-    return (
-        RemoteCommandOperation(
-            operation_id="vm.ensure_running",
-            summary="Ensure VM is running",
-            argv=(
-                "multipass",
-                "launch",
-                "--name",
-                vm_request.name or DEFAULT_NAMESPACE,
-                "--cpus",
-                str(vm_request.cpus),
-                "--memory",
-                vm_request.memory,
-                "--disk",
-                vm_request.disk,
-            ),
-        ),
-    )
-
-
 def plan_vm_provision_base(
     context: ScenarioExecutionContext,
     *,
@@ -190,8 +156,8 @@ def _rsync_operation(
                 user=vm_request.user,
                 host=host,
                 destination=destination,
-                ssh_rsh=repo_sync_ssh_rsh(
-                    find_ssh_private_key_path(find_ssh_public_key())
+                ssh_rsh=ssh_command(
+                    private_key_path=find_ssh_private_key_path(find_ssh_public_key())
                     if discover_private_key
                     else None
                 ),
@@ -344,7 +310,7 @@ def retarget_bootstrap_operation(
             user=request.user,
             host=host,
             destination=destination,
-            ssh_rsh=repo_sync_ssh_rsh(private_key, port=port),
+            ssh_rsh=ssh_command(private_key_path=private_key, port=port),
         )
         return cast(RemoteCommandOperation, replace(operation, argv=tuple(argv)))
 

@@ -20,7 +20,7 @@ from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.registry import docker_registry_resource
-from sonata_tasks.vm.ssh import find_ssh_private_key_path
+from sonata_tasks.vm.ssh import find_ssh_private_key_path, ssh_command
 
 from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
@@ -65,7 +65,6 @@ from nanolab.tasks.deployment import (
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
-from nanolab.tasks.vm.sync import repo_sync_ssh_rsh
 
 LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
 # The runtime-config module carries both the admin API `control-plane config`
@@ -242,7 +241,7 @@ def _bootstrap_tasks(
             "--delete",
             "--relative",
             "-e",
-            repo_sync_ssh_rsh(resolve_private_key()),
+            ssh_command(private_key_path=resolve_private_key()),
             f"{repo_root}/./{_CLI_INSTALL_DIR}/",
             f"{info.user}@{info.host}:{destination}/",
         )

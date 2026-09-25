@@ -10,7 +10,7 @@ import subprocess
 import tarfile
 import tempfile
 import textwrap
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -43,8 +43,6 @@ _RUST_TOOLCHAIN = (
 
 _SHA256_PREFIX = "sha256:"
 _ARM64_BUILDER_ID = "release.arm64.builder"
-
-ArchiveBuilder = Callable[[Path, str, Path], ArtifactEvidence]
 
 
 def _provider_exec(

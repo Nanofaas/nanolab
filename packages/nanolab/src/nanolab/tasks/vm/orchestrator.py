@@ -10,10 +10,11 @@ from multipass_vm_sdk.models import VmState
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.providers.multipass import MultipassVmProvider
 from sonata_tasks.vm.results import successful_result
+from sonata_tasks.vm.ssh import ssh_command
 from subprocess_toolkit.backend import ShellExecutionResult
 
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
-from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
+from nanolab.tasks.vm.sync import repo_rsync_command
 
 if TYPE_CHECKING:
     from multipass_vm_sdk import MultipassClient
@@ -140,7 +141,7 @@ class VmOrchestrator(MultipassVmProvider):
                 user=request.user,
                 host=host,
                 destination=destination,
-                ssh_rsh=repo_sync_ssh_rsh(private_key),
+                ssh_rsh=ssh_command(private_key_path=private_key),
             ),
             dry_run=dry_run,
         )

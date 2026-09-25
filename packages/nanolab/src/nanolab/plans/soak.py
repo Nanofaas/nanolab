@@ -21,10 +21,6 @@ from nanolab.tasks.soak.owned_functions import (
 from nanolab.tasks.soak.retention import CleanupState, journaled_compose_resource
 
 
-class SoakIntegrationUnavailable(ValueError):  # noqa: N818
-    """The scenario cannot yet bind a complete executable evidence pipeline."""
-
-
 class _MeasurementControl(Protocol):
     observer: Any
 
