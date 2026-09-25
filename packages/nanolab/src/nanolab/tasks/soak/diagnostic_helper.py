@@ -39,6 +39,25 @@ NODE_SOCKET = "/tmp/nanolab-diagnostic.sock"  # nosec B108 - isolated container 
 GC_SOURCES = {"jvm": "jdk.GarbageCollection", "node": "node:perf_hooks:major-gc"}
 _DIGEST = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 _OPT_IN_RESPONSE_BYTES = 67108864
+# The directory one provisioner owns for one helper's command logs: this prefix
+# and a fresh `uuid4().hex`, named by `helper_log_dir` and nowhere else. The
+# acceptance inventory groups each of these trees into a single entry, because
+# `_DockerCommands` writes one bound log file per Docker call and a long soak
+# makes thousands of them. The marker is the whole name, not the prefix: the
+# run also keeps a `memory-helpers` directory, the near miss a prefix match
+# would wrongly group.
+_HELPER_LOG_DIR = re.compile(r"(?:memory-)?helper-[0-9a-f]{32}\Z")
+
+
+def helper_log_dir(output_root: Path, *, memory_only: bool) -> Path:
+    """Name the directory one provisioner will fill with its own command logs."""
+    prefix = "memory-helper-" if memory_only else "helper-"
+    return output_root / (prefix + uuid4().hex)
+
+
+def is_helper_log_dir(path: Path) -> bool:
+    """Report whether this is a directory `helper_log_dir` named."""
+    return _HELPER_LOG_DIR.fullmatch(path.name) is not None
 
 
 class MemoryCommandUnresolved(RuntimeError):  # noqa: N818
@@ -743,7 +762,7 @@ class LocalDockerDiagnosticProvisioner:
         if not 0 < timeout_s <= 300:
             raise ValueError("provision timeout must be in (0, 300]")
         deadline = time.monotonic() + timeout_s
-        root = spec.output_root / ("helper-" + uuid4().hex)
+        root = helper_log_dir(spec.output_root, memory_only=False)
         root.mkdir(mode=0o700)
         commands = _DockerCommands(spec, root, self.cancelled)
         commands.deadline = deadline
@@ -978,7 +997,7 @@ class LocalDockerDiagnosticProvisioner:
             raise ValueError(
                 "explicit memory_only specification and bounded timeout required"
             )
-        root = spec.output_root / ("memory-helper-" + uuid4().hex)
+        root = helper_log_dir(spec.output_root, memory_only=True)
         root.mkdir(mode=0o700)
         commands = _DockerCommands(spec, root, self.cancelled)
         commands.deadline = time.monotonic() + timeout_s

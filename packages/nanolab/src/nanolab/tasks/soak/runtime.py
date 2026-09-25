@@ -16,7 +16,7 @@ import shutil
 import socket
 import stat
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
@@ -35,14 +35,17 @@ from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from nanolab.tasks.soak.adapters import RoleBinding, RoleBoundProbe, SubprocessTransport
 from nanolab.tasks.soak.artifacts import (
     describe_artifact,
+    describe_tree,
     enforce_limit,
     fingerprint,
     measure_tree,
+    retained,
 )
 from nanolab.tasks.soak.collector import _docker_get, collect_procfs, read_bounded
 from nanolab.tasks.soak.diagnostic_helper import (
     DockerHelperSpec,
     LocalDockerDiagnosticProvisioner,
+    is_helper_log_dir,
 )
 from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
@@ -56,6 +59,10 @@ from nanolab.tasks.soak.preparation import (
     prepare_soak,
 )
 from nanolab.tasks.soak.report import write_report
+from nanolab.tasks.soak.scheduler_switch import (
+    SchedulerSwitchDriver,
+    receipt_document,
+)
 from nanolab.tasks.soak.workflow import (
     LifecycleHooks,
     LifecycleState,
@@ -141,6 +148,25 @@ _NODE_CONTROLLER = "/opt/nanolab/node-diagnostic-control.cjs"
 _NODE_PRELOAD = "--require=" + _NODE_CONTROLLER
 _DIAGNOSTIC_RECEIPT_BYTES = 65536
 _PREREQUISITE_SETTLEMENT_MARGIN_S = 5.0
+# The coverage IDs whose recipe the frozen deployment fully determines: an
+# invocation, a replay of it, and a renamed registration of the same EXTERNAL
+# container. Four of the other five assert an outcome the *deployed handler*
+# must produce — a declared error code, a dispatch timeout, a terminal TIMEOUT a
+# late callback can be ignored after, an in-flight window wide enough to cancel
+# inside — and nothing in this repository defines what would produce one. The
+# fifth, `async`, would need its SDK callback populations to settle, which no
+# profile has ever exercised. See the exclusion note in the scheduler-switch
+# scenario for the full reasoning.
+_DERIVED_PREREQUISITE_COVERAGE = frozenset(
+    {"sync", "idempotent-replay", "function-name-churn"}
+)
+# The populations that hold whatever outcome a profile's exercise produced, and
+# the coverage whose exercise carries an idempotency key. A keyed outcome is
+# retained for the keyed lifetime, so these populations settle at a deadline the
+# *profile* determines, not the run: judging the replay profile at the keyless
+# deadline would read its legitimately held outcome as a leak.
+_OUTCOME_POPULATIONS = frozenset({"outcomes", "expiry_queue_depth"})
+_KEYED_OUTCOME_COVERAGE = frozenset({"idempotent-replay"})
 
 
 def _close_all(leases: list[socket.socket]) -> None:
@@ -229,13 +255,22 @@ def _check_prerequisite_resources(config, options: RuntimeOptions) -> None:
         )
 
 
-def _population_retention(config, population: str) -> float:
-    """Map retained owner populations to the declared authoritative lifetime."""
-    if population in {"outcomes", "expiry_queue_depth"}:
-        return (
-            config.retention_s["unkeyed-sync-outcome"]
-            + _PREREQUISITE_SETTLEMENT_MARGIN_S
+def _population_retention(config, coverage: str, population: str) -> float:
+    """Map one profile's retained populations to the lifetime they are held for.
+
+    The two outcome populations hold *this profile's* outcome, so their deadline
+    follows the key the profile's exercise carried: keyless profiles keep the
+    unkeyed lifetime, and the keyed profile the keyed one. Selecting by
+    population alone is what made the policy run-wide and judged the replay
+    profile by the keyless deadline.
+    """
+    if population in _OUTCOME_POPULATIONS:
+        owner = (
+            "terminal-key-and-readable-outcome"
+            if coverage in _KEYED_OUTCOME_COVERAGE
+            else "unkeyed-sync-outcome"
         )
+        return config.retention_s[owner] + _PREREQUISITE_SETTLEMENT_MARGIN_S
     if population == "idempotency_entries":
         return (
             config.retention_s["terminal-key-and-readable-outcome"]
@@ -245,7 +280,15 @@ def _population_retention(config, population: str) -> float:
 
 
 def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
-    """Derive the built-in sync gate only after images and payloads are frozen."""
+    """Derive one built-in profile per requested coverage, after images freeze.
+
+    Every profile is *derived* from the frozen deployment, never supplied: the
+    deployment is fixed and shared with the measured platform, so a profile can
+    only describe a role this run deploys, and a supplied recipe could not
+    introduce one. A coverage with no derivation here is refused before any
+    lifetime is acquired, which is why the refusal names what is missing rather
+    than leaving eight profiles to fail one platform at a time.
+    """
     from nanolab.tasks.soak.prerequisites import (
         _inputs,
         _required_populations,
@@ -254,14 +297,17 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
 
     config = prepared.config
     coverage = frozenset(config.prerequisites.required_coverage)
-    if coverage != {"sync"}:
+    underivable = coverage - _DERIVED_PREREQUISITE_COVERAGE
+    if underivable:
         raise ValueError(
-            "built-in prerequisites support only sync; other profiles require "
-            "explicit fault-capable recipes"
+            "no built-in injection exists for "
+            + ", ".join(sorted(underivable))
+            + "; these assert an outcome the deployed handler must itself "
+            "produce, so they require explicit fault-capable recipes"
         )
     roles = [role for role in config.roles if role != "control-plane"]
     if not roles:
-        raise ValueError("sync prerequisite requires an SDK function role")
+        raise ValueError("prerequisite profiles require an SDK function role")
     role = next(
         (name for name in roles if config.roles[name].runtime == "jvm"), roles[0]
     )
@@ -272,44 +318,63 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
         {
             "schema": "nanolab-soak-prerequisite-script-v1",
             "implementation": "nanolab.tasks.soak.prerequisite_runtime",
-            "coverage": ["sync"],
+            "coverage": sorted(coverage),
         },
     )
     populations = _required_populations(
         prepared.images, coverage, config.metrics_profile
     )
-    profile: dict[str, Any] = {
-        "function": role,
-        "role": role,
-        "request": {"input": deepcopy(case["input"])},
-        "expected_output": deepcopy(case["expected"]),
-        "request_timeout_s": 3,
-        "exercise_timeout_s": 30,
-        "poll_interval_s": 0.05,
-    }
     # The scenario declares which configuration the prerequisite run had to be
     # frozen against, and acceptance compares each of those projections against
     # the live policy. A profile that carries none of them cannot pass that gate,
-    # so the sections are copied here, at the only place the built-in sync recipe
-    # is derived.
+    # so the sections are copied here, at the only place the built-in profiles
+    # are derived.
     normalized = config.model_dump(mode="json")
-    for key in config.prerequisites.relevant_config_keys["sync"]:
-        profile[key] = select_relevant_config(normalized, key)
+    profiles: dict[str, Any] = {}
+    for name in sorted(coverage):
+        profile: dict[str, Any] = {
+            "function": role,
+            "role": role,
+            "request": {"input": deepcopy(case["input"])},
+            "expected_output": deepcopy(case["expected"]),
+            "request_timeout_s": 3,
+            "exercise_timeout_s": 30,
+            "poll_interval_s": 0.05,
+        }
+        if name == "function-name-churn":
+            # A churned name is the same EXTERNAL container registered under
+            # another name, so its spec is that container's own manifest. The
+            # churn exercise overwrites the name before it registers; carrying
+            # the role's name here is what makes the frozen spec a real manifest
+            # rather than a body with a hole in it.
+            spec = next(
+                function.manifest().body()
+                for function in _external_functions(prepared)
+                if function.name == role
+            )
+            profile["function_spec"] = {**spec, "name": role}
+            profile["churn_count"] = 2
+        for key in config.prerequisites.relevant_config_keys[name]:
+            profile[key] = select_relevant_config(normalized, key)
+        profiles[name] = profile
     frozen = {
         "images": dict(prepared.images),
         "metrics_profile": config.metrics_profile,
-        "relevant_config": {"sync": profile},
+        "relevant_config": profiles,
         "payload": describe_artifact(payload),
         "script": describe_artifact(script),
         "settlement": {
-            owner: {
-                population: {
-                    "limit": 0,
-                    "retention_s": _population_retention(config, population),
+            name: {
+                owner: {
+                    population: {
+                        "limit": 0,
+                        "retention_s": _population_retention(config, name, population),
+                    }
+                    for population in sorted(required)
                 }
-                for population in sorted(required)
+                for owner, required in populations.items()
             }
-            for owner, required in populations.items()
+            for name in sorted(coverage)
         },
     }
     _inputs(frozen, coverage)
@@ -925,6 +990,56 @@ def _reference(root: Path, path: Path) -> dict[str, Any]:
     }
 
 
+def _tree_reference(root: Path, path: Path) -> dict[str, Any]:
+    """Bind a whole subtree as one entry that still hashes every file."""
+    return {
+        **describe_tree(root, path),
+        "path": path.relative_to(root.absolute()).as_posix(),
+    }
+
+
+def _inventory_entries(root: Path) -> list[dict[str, Any]]:
+    """Bind every retained artifact to an entry that fits one record.
+
+    Three kinds of subtree cannot be listed file by file, and for the same
+    reason each time: this inventory is one JSON record of bounded size, and
+    they hold thousands of files.
+
+    - `source/tree` is already inventoried, file by file, in
+      source-manifest.jsonl, which snapshot.json seals with manifest_sha256 and
+      both of which stay in this inventory. Listing its files again only
+      duplicates that chain;
+    - build workspaces and dot-directories are scratch the run does not retain
+      as evidence, and measure_tree excludes them from the budget as well;
+    - each helper's command-log tree has no sealed manifest of its own, so it
+      becomes one entry that still hashes every file and carries the exact byte
+      total the budget charges for. `is_helper_log_dir` is the marker those
+      directories are created with, not a guess at their prefix.
+
+    `retained` is the one rule deciding what is named and charged, so a grouped
+    tree counts exactly the files the per-file listing counted.
+    """
+    root = root.absolute()
+    entries: list[dict[str, Any]] = []
+    pending = [root]
+    while pending:
+        with os.scandir(pending.pop()) as items:
+            for item in items:
+                path = Path(item.path)
+                if path.is_symlink() or item.name.startswith((".", "workspace-")):
+                    continue
+                if item.is_dir(follow_symlinks=False):
+                    if path.is_relative_to(root / "source" / "tree"):
+                        continue
+                    if is_helper_log_dir(path):
+                        entries.append(_tree_reference(root, path))
+                    else:
+                        pending.append(path)
+                elif retained(root, path):
+                    entries.append(_reference(root, path))
+    return sorted(entries, key=lambda entry: str(entry["path"]))
+
+
 def _read_json(path: Path) -> dict:
     with path.open("rb") as stream:
         body = stream.read(1024 * 1024 + 1)
@@ -934,6 +1049,28 @@ def _read_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError("runtime receipt must be a JSON object")
     return value
+
+
+def _external_functions(prepared: PreparedSoak) -> tuple[_ExternalFunction, ...]:
+    """Return the EXTERNAL SDK functions this deployment registers, one per SDK role.
+
+    The endpoint URL is derived here and nowhere else. The frozen churn profile
+    registers a renamed function against the very container this returns the
+    manifest of, and the prerequisite factory rejects any spec whose
+    executionMode, image or endpointUrl differs from that manifest, so a second
+    copy of this formula would be a run-time failure waiting for a rename.
+    """
+    return tuple(
+        _ExternalFunction(
+            role,
+            prepared.images[role],
+            json.dumps(prepared.payloads[role][0]["input"]),
+            (),
+            endpoint=f"http://function-{index}:8080/invoke",
+        )
+        for index, role in enumerate(prepared.config.roles)
+        if role != "control-plane"
+    )
 
 
 def create_local_deployment(
@@ -1020,6 +1157,13 @@ def create_local_deployment(
         }
         if policy.runtime == "jvm":
             env["NANOFAAS_METRICS_PROFILE"] = config.metrics_profile
+        if role == "control-plane" and config.scheduler_switch is not None:
+            # Only a protocol that declares the hot switch opens the admin route:
+            # every other soak keeps the platform's own default, which is off,
+            # and the route unmounted. Measured on the 0.22.0 control plane:
+            # without it both `/v1/admin/runtime-config` and its `scheduler`
+            # namespace answer 404 whatever the artifact was built with.
+            env["NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED"] = "true"
         if policy.runtime == "jvm" and policy.runtime_options:
             env["JAVA_TOOL_OPTIONS"] = " ".join(policy.runtime_options)
         elif policy.runtime == "node" and policy.runtime_options:
@@ -1118,17 +1262,7 @@ def create_local_deployment(
         f"http://127.0.0.1:{ports['control-plane']}/actuator/health/readiness",
         build=False,
     )
-    functions = tuple(
-        _ExternalFunction(
-            role,
-            prepared.images[role],
-            json.dumps(prepared.payloads[role][0]["input"]),
-            (),
-            endpoint=f"http://function-{index}:8080/invoke",
-        )
-        for index, role in enumerate(config.roles)
-        if role != "control-plane"
-    )
+    functions = _external_functions(prepared)
 
     def acquire(inputs):
         # Port leases prevent other local preparers choosing these ports. Docker
@@ -1274,6 +1408,41 @@ def _capture_owned_diagnostic(
             )
 
 
+# The six retained populations only the soak metrics profile publishes, in the
+# unit a criterion reads them in — all six `Gauge.builder(...)` beans of
+# nanoFaaS's `SoakMetricsConfiguration`, which is `@ConditionalOnProperty(
+# havingValue = "soak")` and this scenario's profile. The soak's sampler records
+# a metric's unit from the criterion that names it — and a `Criterion` may only
+# name a metric its role has declared required — so a population nothing judges
+# arrives in `samples.jsonl` with unit "unknown" and no criterion can hold the
+# run to it. Declared here rather than left to the `_bytes` suffix, which is
+# right for two of the six and a guess for the other four; inferred units are how
+# an unreadable series turns into a confident one.
+POPULATION_UNITS: Mapping[str, str] = {
+    "invocation_execution_reservations": "count",
+    "invocation_canonical_input_bytes": "bytes",
+    "invocation_physical_input_copy_bytes": "bytes",
+    "execution_waiters_retained": "count",
+    "execution_expiry_queue_depth": "count",
+    "function_capacity_retired_generations": "count",
+}
+
+
+def _metric_unit(declared: Mapping[tuple[str, str], str], role: str, name: str) -> str:
+    """Resolve the unit the sampler records a metric in from the narrowest declaration.
+
+    The criterion's own unit comes first, because that is what the criterion
+    will match on when the sample is read back. Then the soak profile's retained
+    populations, which no criterion names yet. Then the name, and only for
+    `_bytes`, which is a convention rather than a reading.
+    """
+    return (
+        declared.get((role, name))
+        or POPULATION_UNITS.get(name)
+        or ("bytes" if name.endswith("_bytes") else "unknown")
+    )
+
+
 def create_soak_lifecycle(
     prepared: PreparedSoak | PreparedContainerdSoak,
     *,
@@ -1387,9 +1556,7 @@ def create_soak_lifecycle(
     bindings = []
     for target in targets:
         metrics = {
-            name: units.get(
-                (target.role, name), "bytes" if name.endswith("_bytes") else "unknown"
-            )
+            name: _metric_unit(units, target.role, name)
             for name in config.roles[target.role].required_metrics
         }
         if target.role == "control-plane":
@@ -1850,22 +2017,16 @@ def create_soak_lifecycle(
             manifest["workload_script"] = _reference(root, root / "frozen-workload.js")
             workload = _read_json(receipt)
             manifest["traffic_stopped_s"] = workload.get("generator_end_s")
-        # The captured source tree is already inventoried, file by file, in
-        # source-manifest.jsonl, which snapshot.json seals with manifest_sha256
-        # and both of which stay in this inventory. Listing its thousands of
-        # files again only duplicates that chain, and it overflows the
-        # single-record limit this document has to fit in.
-        entries = [
-            _reference(root, path)
-            for path in sorted(root.rglob("*"))
-            if (
-                path.is_file()
-                and not path.is_symlink()
-                and not path.name.startswith(".")
-                and not any(part.startswith("workspace-") for part in path.parts)
-                and not path.is_relative_to(root / "source" / "tree")
-            )
-        ]
+        # The switch step's own receipt, referenced the same way and for the same
+        # reason: a passing soak has to carry the count, the window it happened
+        # over, the pause and the platform's own cross-check out of the run.
+        switch = state.switch_receipt
+        if switch is not None:
+            manifest["scheduler_switch"] = _reference(root, switch)
+        # The inventory that has to fit one record: see `_inventory_entries` for
+        # what is listed per file, grouped as a tree, or left to a sealed
+        # manifest, and why.
+        entries = _inventory_entries(root)
         inventory = writer.write_json(
             "artifacts.json",
             {
@@ -1950,7 +2111,47 @@ def create_soak_lifecycle(
         ),
         run_dir=run_dir,
         cancelled=cancelled,
+        under_load=scheduler_switch_step(config, deployment, clock, root, writer),
     )
+
+
+def scheduler_switch_step(
+    config: SoakConfig, deployment: Any, clock: Any, run_dir: Path, writer: Any
+) -> Callable[[float, Event], Any] | None:
+    """Build the hot-switch step for a protocol that declares one, else nothing.
+
+    The callable this returns is what the lifecycle runs beside the steady load,
+    and it returns the path of the receipt it published. It publishes one because
+    the campaign's criterion is a count *and* a duration, and the run that
+    satisfies it has to be able to evidence both from its own artifacts - the
+    failing path already carries them in the error, which is no use to a soak
+    that passed.
+
+    A protocol that declares no switch gets `None`, which is every other soak:
+    the step is opt-in, and the platform's admin surface — which is what the
+    PATCH needs and what ships off — stays off without it.
+    """
+    if config.scheduler_switch is None:
+        return None
+    policy = config.scheduler_switch
+    metrics_url = deployment.metrics_endpoints.get("control-plane")
+    if not metrics_url:
+        raise ValueError(
+            "the scheduler switch reads the platform's own switch meters from "
+            "the control plane's exposition, and this deployment exposes none"
+        )
+    driver = SchedulerSwitchDriver(
+        deployment.api_endpoint,
+        metrics_url,
+        (policy.strategies[0], policy.strategies[1]),
+        clock=clock,
+    )
+
+    def under_load(window_s: float, cancelled: Event) -> Path:
+        receipt = driver.run(window_s=window_s, cancelled=cancelled)
+        return writer.write_json("scheduler-switch.json", receipt_document(receipt))
+
+    return under_load
 
 
 class RunSingleVersionSoak(Task):
@@ -2142,12 +2343,17 @@ def _duration_seconds(value: object) -> float:
     raise ValueError("effective duration format is unsupported")
 
 
+# /actuator/configprops keys the bound ExecutionStoreProperties bean by class
+# name. The pinned nanoFaaS source declares this record as @ConfigurationProperties.
+EXECUTION_STORE_BEAN = "ExecutionStoreProperties"
+
+
 def retention_from_configprops(document: dict) -> dict[str, float]:
-    """Read the actual bound ExecutionStoreProperties bean, including clamping."""
+    """Read the bound ExecutionStoreProperties bean, with clamping."""
     matches = []
     for context in document.get("contexts", {}).values():
         for name, bean in context.get("beans", {}).items():
-            if name.endswith("ExecutionStoreProperties"):
+            if name.endswith(EXECUTION_STORE_BEAN):
                 matches.append(bean.get("properties", {}))
     if len(matches) != 1:
         raise ValueError("effective execution-store bean is absent or ambiguous")
@@ -2408,7 +2614,7 @@ def observe_local_configuration(
             if name == "configprops":
                 result["retention_s"] = retention_from_configprops(document)
                 result["retention_source"] = (
-                    "effective-configprops.json:ExecutionStoreProperties"
+                    "effective-configprops.json:" + EXECUTION_STORE_BEAN
                 )
             else:
                 raw = document.get("modules")

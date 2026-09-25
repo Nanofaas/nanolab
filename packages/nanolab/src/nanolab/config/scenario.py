@@ -162,6 +162,7 @@ class ScenarioConfig(BaseModel):
         validation_alias=AliasChoices("asyncLoad", "async_load"),
     )
     persistent_recovery: bool = Field(default=False, alias="persistentRecovery")
+    retry_backoff_burst: bool = Field(default=False, alias="retryBackoffBurst")
     autoscaling: bool = False
     # The concurrency governor is not the autoscaler: it holds the replica count
     # still and moves the per-replica in-flight limit instead. Running both would
@@ -377,6 +378,14 @@ class ScenarioConfig(BaseModel):
             raise ValueError("soak protocol belongs only to the soak workflow")
         if self.workflow in ("validate", "cli") and self.backend is None:
             raise ValueError(f"backend is required for {self.workflow} workflow")
+        if self.retry_backoff_burst and (
+            self.workflow != "validate"
+            or self.backend != "k8s"
+            or self.functions != ["word-stats-java"]
+        ):
+            raise ValueError(
+                "retry backoff burst requires validate k8s with word-stats-java"
+            )
         if self.workflow == "offload" and self.backend is not None:
             raise ValueError("offload workflow does not take a backend")
         if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:

@@ -246,6 +246,36 @@ def test_protocol_rejects_unmeasurable_policy(scenario_data, key, value):
         parse_soak(data)
 
 
+def test_a_percentile_criterion_declares_the_quantile_it_derives(scenario_data):
+    """The operation is additive: it consumes a quantile, nothing else does."""
+    data = scenario_data["soak"]
+    data["roles"]["control-plane"]["required_metrics"].append(
+        "scheduler_switch_duration_seconds_bucket"
+    )
+    data["criteria"].append(
+        {
+            "id": "control-plane.pause-p99",
+            "role": "control-plane",
+            "metric": "scheduler_switch_duration_seconds_bucket",
+            "unit": "seconds",
+            "operation": "percentile",
+            "quantile": 0.99,
+            "phase": "steady",
+            "window_s": 5400,
+            "threshold": 0.1,
+            "rationale": "The frozen pause p99 budget",
+        }
+    )
+    config = parse_soak(data)
+
+    criterion = config.criteria[-1]
+    assert criterion.operation == "percentile"
+    assert criterion.quantile == 0.99
+    # Every other operation still refuses to carry one, and the shared memory
+    # contract is untouched by the addition.
+    assert all(item.quantile is None for item in config.criteria[:-1])
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -273,9 +303,19 @@ def test_protocol_rejects_unmeasurable_policy(scenario_data, key, value):
         "duplicate_capability",
         "duplicate_baseline_operation",
         "baseline_gc_without_evidence",
+        "quantile_without_percentile",
+        "percentile_without_quantile",
     ],
 )
 def test_cross_field_contract_cannot_hide_missing_evidence(scenario_data, change):
+    # The two quantile rules are named, not merely counted: both of these
+    # mutations also break a *different* rule, so a bare `ValidationError` match
+    # stays green when the rule under test is deleted and the run is refused for
+    # something else entirely.
+    expected = {
+        "quantile_without_percentile": "quantile belongs only to percentile",
+        "percentile_without_quantile": "percentile requires the quantile it derives",
+    }.get(change, "validation error for ScenarioConfig")
     data = scenario_data["soak"]
     if change == "missing_image":
         del data["images"]["word-stats-java"]
@@ -332,7 +372,11 @@ def test_cross_field_contract_cannot_hide_missing_evidence(scenario_data, change
         data["diagnostics"]["operations"] = {"control-plane": ["histogram"]}
         del data["diagnostics"]["gc_completion_evidence"]["control-plane"]
         data["diagnostics"]["baseline_operations"] = {"control-plane": ["gc"]}
-    with pytest.raises(ValidationError, match="validation error for ScenarioConfig"):
+    elif change == "quantile_without_percentile":
+        data["criteria"][0]["quantile"] = 0.99
+    elif change == "percentile_without_quantile":
+        data["criteria"][0]["operation"] = "percentile"
+    with pytest.raises(ValidationError, match=expected):
         ScenarioConfig.model_validate(scenario_data)
 
 
@@ -479,3 +523,42 @@ def test_existing_loadtest_keeps_its_original_contract():
         }
     )
     assert config.workflow == "loadtest"
+
+
+def test_a_soak_declares_the_switch_by_naming_two_distinct_strategies(scenario_data):
+    """The switch is opt-in: absent, and the admin route stays shut with it."""
+    assert parse_soak(scenario_data["soak"]).scheduler_switch is None
+
+    scenario_data["soak"]["scheduler_switch"] = {
+        "strategies": ["per-function", "shared-queue"]
+    }
+    policy = parse_soak(scenario_data["soak"]).scheduler_switch
+    assert policy is not None
+    assert policy.strategies == ["per-function", "shared-queue"]
+
+
+def test_alternating_between_one_strategy_and_itself_is_refused(scenario_data):
+    """Two names for the same strategy would be a switch that switches nothing."""
+    scenario_data["soak"]["scheduler_switch"] = {
+        "strategies": ["per-function", "per-function"]
+    }
+    with pytest.raises(ValidationError, match="must not contain duplicates"):
+        parse_soak(scenario_data["soak"])
+
+
+def test_the_switch_is_a_pair_not_a_list(scenario_data):
+    """One strategy is not an alternation and three is not one either."""
+    for strategies in (["per-function"], ["a", "b", "c"]):
+        scenario_data["soak"]["scheduler_switch"] = {"strategies": strategies}
+        with pytest.raises(ValidationError, match="exactly two strategies"):
+            parse_soak(scenario_data["soak"])
+
+
+def test_the_switch_carries_no_budget_of_its_own(scenario_data):
+    """The budgets are frozen in the step; a scenario cannot restate one."""
+    scenario_data["soak"]["scheduler_switch"] = {
+        "strategies": ["per-function", "shared-queue"],
+        "switches_in_soak": 1,
+    }
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        parse_soak(scenario_data["soak"])

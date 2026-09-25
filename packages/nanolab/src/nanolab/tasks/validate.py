@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Any
 from uuid import uuid4
 
@@ -15,6 +16,8 @@ from sonata_tasks.execution.bindings import (
     RoleBindings,
     RoleBoundCommandTaskExecutor,
 )
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.http import endpoint_argv
 
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.containerd_rootless import RootlessRun
@@ -81,6 +84,7 @@ class ValidateWorkflowRequest(PlatformRequest):
     queue_probe: PlatformFunction | None = None
     extended_k8s_checks: bool = False
     queue_burst_script: Path | None = None
+    retry_backoff_assets: Path | None = None
     envelope_checks: tuple[EnvelopeCheck, ...] = ()
     async_checks: tuple[AsyncCheck, ...] = ()
     persistent_recovery: bool = False
@@ -383,4 +387,56 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                 ),
                 requires=(*requires, *platform.resources, queue_registered),
             )
+    if request.retry_backoff_assets is not None:
+        assets = request.retry_backoff_assets
+        image = request.functions[0].image
+        namespace = request.namespace
+        workflow.add(
+            CommandTask(
+                title="Replay retry backoff immediate ready and warm bursts",
+                semantic_key=f"retry-backoff-burst:{image}:{namespace}",
+                argv=endpoint_argv(
+                    platform.endpoint,
+                    lambda endpoint: (
+                        "python3",
+                        str(assets / "retry_backoff_burst.py"),
+                        "--validate-candidate",
+                        "--url",
+                        endpoint,
+                        "--namespace",
+                        namespace,
+                        "--image",
+                        image,
+                        "--out",
+                        str(Path(gettempdir()) / f"nanolab-retry-burst-{run_id}"),
+                    ),
+                ),
+                executor=executor,
+                role=request.role,
+                options=CommandOptions(cwd=cwd),
+            ),
+            requires=(*requires, *platform.resources, platform.functions[0]),
+        )
+        workflow.add(
+            CommandTask(
+                title="Record upstream retry hint attempts",
+                semantic_key="retry-hint-probe-v1",
+                argv=endpoint_argv(
+                    platform.endpoint,
+                    lambda endpoint: (
+                        "python3",
+                        str(assets / "retry_hint_probe.py"),
+                        "--validate-candidate",
+                        "--url",
+                        endpoint,
+                        "--out",
+                        str(Path(gettempdir()) / f"nanolab-retry-hint-{run_id}"),
+                    ),
+                ),
+                executor=executor,
+                role=request.role,
+                options=CommandOptions(cwd=cwd),
+            ),
+            requires=(*requires, *platform.resources, platform.functions[0]),
+        )
     return workflow

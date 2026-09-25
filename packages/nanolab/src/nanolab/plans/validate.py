@@ -306,23 +306,43 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                 ),
                 concurrency=1,
             ),
-            queue_burst_script=queue_burst_script,
+            queue_burst_script=None
+            if config.retry_backoff_burst
+            else queue_burst_script,
+            retry_backoff_assets=queue_burst_script.parent.parent / "validation"
+            if config.retry_backoff_burst
+            else None,
         )
         # Both settings are what this workflow exists to exercise: the JUnit queue
         # contracts need admission on, and the metric assertions need the advanced
         # profile. Derived from the request so the chart and the pushed image can
         # never name different things.
-        request = replace(
-            request,
-            helm_values=helm_set_args(
-                control_plane_helm_values(
-                    namespace=request.namespace,
-                    control_plane_image=request.control_plane_image_reference(),
-                    metrics_profile="advanced",
-                    sync_queue_admission_enabled=True,
-                )
-            ),
+        values = control_plane_helm_values(
+            namespace=request.namespace,
+            control_plane_image=request.control_plane_image_reference(),
+            metrics_profile="advanced",
+            sync_queue_admission_enabled=not config.retry_backoff_burst,
+            sync_queue_max_depth=512 if config.retry_backoff_burst else None,
         )
+        if config.retry_backoff_burst:
+            # Keep depth bounded but do not reject a cold function on its infinite
+            # estimated wait before it has throughput samples.
+            overrides = {
+                "SYNC_QUEUE_MAX_QUEUE_WAIT": "30s",
+                "SYNC_QUEUE_MAX_ESTIMATED_WAIT": "10m",
+            }
+            for key, value in list(values.items()):
+                if key.endswith(".name") and value in overrides:
+                    values[key.removesuffix(".name") + ".value"] = overrides[value]
+            slot = sum(
+                key.startswith("controlPlane.extraEnv[") and key.endswith(".name")
+                for key in values
+            )
+            values[f"controlPlane.extraEnv[{slot}].name"] = (
+                "LOGGING_LEVEL_IT_UNIMIB_DATAI_NANOFAAS_EXECUTION"
+            )
+            values[f"controlPlane.extraEnv[{slot}].value"] = "DEBUG"
+        request = replace(request, helm_values=helm_set_args(values))
     requires = ()
     control_plane_process: Callable[[], Resource] | None = None
     if config.backend == "containerd":

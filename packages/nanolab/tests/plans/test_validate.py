@@ -711,3 +711,53 @@ def test_kubernetes_run_installs_the_chart_and_registers_the_service_address() -
     assert f"controlPlane.image.repository={push[-1].rsplit(':', 1)[0]}" in install
     # And the registration used the address read from the Service, not a guess.
     assert stack.argv_for("v1/functions")[-1] == "http://10.43.0.7:8080/v1/functions"
+
+
+def test_retry_backoff_validation_has_explicit_burst_and_hint_steps() -> None:
+    plan = _plan("k8s", retryBackoffBurst=True)
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Replay retry backoff immediate ready and warm bursts" in titles
+    assert "Record upstream retry hint attempts" in titles
+    assert "Burst the synchronous queue" not in titles
+
+
+def test_retry_backoff_validation_rejects_other_backends() -> None:
+    with pytest.raises(ValueError, match="retry backoff burst requires validate k8s"):
+        _plan("container", retryBackoffBurst=True)
+
+
+def test_retry_backoff_settings_have_no_sparse_helm_environment() -> None:
+    stack = RecordingExecutor()
+    plan = build_validate_plan(
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "validate",
+                "backend": "k8s",
+                "functions": ["word-stats-java"],
+                "retryBackoffBurst": True,
+            }
+        ),
+        RoleBindings({"host": RecordingExecutor(), "stack": stack}),
+    )
+    plan.run()
+    values = dict(
+        arg.split("=", 1)
+        for arg in stack.argv_for("helm upgrade")
+        if arg.startswith("controlPlane.extraEnv[")
+    )
+    names = {
+        int(key.split("[")[1].split("]")[0]): value
+        for key, value in values.items()
+        if key.endswith(".name")
+    }
+    assert sorted(names) == list(range(len(names)))
+    settings = {
+        name: values[f"controlPlane.extraEnv[{index}].value"]
+        for index, name in names.items()
+    }
+    assert settings["SYNC_QUEUE_ADMISSION_ENABLED"] == "false"
+    assert settings["SYNC_QUEUE_MAX_DEPTH"] == "512"
+    assert settings["SYNC_QUEUE_MAX_QUEUE_WAIT"] == "30s"
+    assert settings["LOGGING_LEVEL_IT_UNIMIB_DATAI_NANOFAAS_EXECUTION"] == "DEBUG"
+    assert "--validate-candidate" in stack.argv_for("retry_backoff_burst.py")
+    assert "--validate-candidate" in stack.argv_for("retry_hint_probe.py")

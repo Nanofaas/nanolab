@@ -244,6 +244,42 @@ def test_a_protocol_that_diagnoses_nothing_builds_no_helper(
     assert _stamp(tmp_path, config).diagnostics.helper_images == {}
 
 
+def _copy_sources(dockerfile: Path) -> list[str]:
+    """Return the context-relative source of every `COPY` that reads the context."""
+    # Join continuations first: a COPY split over lines is still one COPY.
+    text = dockerfile.read_text(encoding="utf-8").replace("\\\n", " ")
+    sources: list[str] = []
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields or fields[0].upper() != "COPY":
+            continue
+        if any(field.startswith("--from=") for field in fields[1:]):
+            # A stage copy reads from another image, not from the context, so it
+            # names no path the context has to hold.
+            continue
+        arguments = [field for field in fields[1:] if not field.startswith("--")]
+        sources += arguments[:-1]  # the last argument is the destination
+    return sources
+
+
+def test_every_copy_source_exists_in_the_build_context() -> None:
+    """A Dockerfile and its context can drift apart with every test still green.
+
+    They did: 420c3fd moved the assets under `src/nanolab` and repointed the
+    context at the module, but left one COPY on the old package-root convention,
+    so no single context satisfied all three sources and every helper build
+    failed -- for days, until a real `run` tried one. Each individual stub in
+    this file kept passing because each built its own context; nothing compared
+    the Dockerfile to the context the build actually passes. This does, and it
+    is the whole check: no build, no network.
+    """
+    sources = _copy_sources(BUILD_CONTEXT / DOCKERFILE)
+
+    assert sources, "the Dockerfile copies nothing from its build context"
+    missing = [source for source in sources if not (BUILD_CONTEXT / source).exists()]
+    assert not missing, f"COPY sources absent from {BUILD_CONTEXT}: {missing}"
+
+
 def test_request_rejects_a_context_without_the_dockerfile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

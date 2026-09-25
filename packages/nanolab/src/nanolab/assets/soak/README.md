@@ -206,7 +206,8 @@ produces a timeout rather than fabricated data.
 
 ## Source image builder contract
 
-`diagnostic-helper.Dockerfile` uses the `packages/nanolab` build context. Supply
+`diagnostic-helper.Dockerfile` uses the `src/nanolab` module as build context
+(`helper_build.BUILD_CONTEXT`). Supply
 digest-pinned `JDK_BASE` and `PYTHON_BASE` for linux/arm64. The JDK stage must expose
 a glibc-compatible JDK25 at `/opt/java/openjdk`; Python must be 3.12+ at
 `/usr/local/bin/python3`. The final image copies the existing `processes.py`

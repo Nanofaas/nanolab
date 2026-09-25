@@ -16,7 +16,7 @@ from sonata_tasks.execution.ports import CommandTaskExecutor
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.config.soak import SoakConfig
+from nanolab.config.soak import SchedulerSwitchPolicy, SoakConfig
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe
 from nanolab.tasks.soak.models import Target
@@ -28,6 +28,7 @@ from nanolab.tasks.soak.runtime import (
     create_local_deployment,
     create_soak_lifecycle,
 )
+from nanolab.tasks.soak.scheduler_switch import SwitchReceipt
 from nanolab.tasks.soak.sources import SourceSnapshot
 
 
@@ -110,6 +111,50 @@ def prepared(
     )
 
 
+def test_the_sampler_declares_a_unit_for_every_population_it_records():
+    """A metric the sampler cannot describe is one no criterion can read.
+
+    The unit reaches the sampler from the criterion that names the metric, and a
+    criterion may only name a metric its role declared required — so a retained
+    population nothing declares arrives in `samples.jsonl` with unit "unknown"
+    and cannot be held to anything. The narrowest declaration wins, and a name
+    nothing declares at all still gets no invented unit.
+    """
+    from nanolab.tasks.soak.runtime import POPULATION_UNITS, _metric_unit
+    from tests.metrics.test_catalogue_coverage import _NOT_COLLECTED
+
+    declared = {("control-plane", "scheduler_switch_duration_seconds_max"): "seconds"}
+    # The names nanolab already knows, read from the catalogue that declines each
+    # of them for this run's collector. Iterating the table itself asserts
+    # nothing once the table is empty, which is the mutation this is here for.
+    known = {
+        name
+        for name, reason in _NOT_COLLECTED.items()
+        if reason == "sampled by the soak population collector"
+    }
+
+    assert set(POPULATION_UNITS) == known
+    for name in known:
+        assert _metric_unit(declared, "control-plane", name) == POPULATION_UNITS[name]
+        assert POPULATION_UNITS[name] != "unknown"
+    # A criterion's own declaration still governs the metric it names.
+    assert (
+        _metric_unit(
+            {("control-plane", "invocation_canonical_input_bytes"): "kilobytes"},
+            "control-plane",
+            "invocation_canonical_input_bytes",
+        )
+        == "kilobytes"
+    )
+    assert (
+        _metric_unit(declared, "control-plane", "scheduler_switch_duration_seconds_max")
+        == "seconds"
+    )
+    # The `_bytes` convention is a convention, not a licence to guess.
+    assert _metric_unit(declared, "control-plane", "some_bytes") == "bytes"
+    assert _metric_unit(declared, "control-plane", "process_threads") == "unknown"
+
+
 @pytest.mark.parametrize(
     ("scenario", "expected_profile"),
     [
@@ -170,6 +215,61 @@ def test_local_compose_uses_only_frozen_images_and_private_network(
         for function in deployment.request.functions
     )
     value.writer.close()
+
+
+def _control_plane_environment(tmp_path, monkeypatch, *, declares_switch):
+    """Build the compose environment for a protocol with or without the switch."""
+    value = prepared(tmp_path)
+    value.config.diagnostics.operations = {role: [] for role in value.config.roles}
+    if declares_switch:
+        value.config.scheduler_switch = SchedulerSwitchPolicy(
+            strategies=["per-function", "shared-queue"]
+        )
+    leases = []
+
+    class Lease:
+        def __init__(self):
+            leases.append(self)
+
+        def bind(self, address):
+            assert address == ("127.0.0.1", 0)
+
+        def getsockname(self):
+            return "127.0.0.1", 20000 + len(leases)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("nanolab.tasks.soak.runtime.socket.socket", Lease)
+    create_local_deployment(value, tmp_path)
+    document = json.loads((tmp_path / "soak-compose.json").read_text())
+    value.writer.close()
+    return document["services"]["control-plane"]["environment"]
+
+
+def test_a_protocol_that_declares_the_switch_opens_the_admin_route(
+    tmp_path, monkeypatch
+):
+    """The switch needs the admin API, which the platform ships unmounted.
+
+    Measured on the 0.22.0 control plane: without this variable both
+    `/v1/admin/runtime-config` and its `scheduler` namespace answer 404 whatever
+    the artifact was built with.
+    """
+    environment = _control_plane_environment(
+        tmp_path, monkeypatch, declares_switch=True
+    )
+
+    assert environment["NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED"] == "true"
+
+
+def test_every_other_soak_keeps_the_admin_route_off(tmp_path, monkeypatch):
+    """Default-off is the platform's posture and a scenario must not move it."""
+    environment = _control_plane_environment(
+        tmp_path, monkeypatch, declares_switch=False
+    )
+
+    assert "NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED" not in environment
 
 
 def test_control_plane_gets_a_writable_catalog_directory(tmp_path, monkeypatch):
@@ -403,6 +503,37 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     from nanolab.tasks.soak.models import Sample
 
     value = prepared(tmp_path)
+    # The run declares the hot switch, so the step runs and its receipt has to
+    # reach the manifest: a passing soak must be able to evidence the count and
+    # the window from its own artifacts.
+    value.config.scheduler_switch = SchedulerSwitchPolicy(
+        strategies=["per-function", "shared-queue"]
+    )
+
+    class FakeSwitch:
+        """Stand in for the driver, which its own tests cover."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, *, window_s, cancelled):
+            return SwitchReceipt(
+                strategies=("per-function", "shared-queue"),
+                initial="per-function",
+                final="per-function",
+                committed=1000,
+                refused=0,
+                stale=0,
+                live_indexes=2,
+                pause_max_ms=0.31,
+                platform_committed=1000.0,
+                restores=0,
+                window_s=window_s,
+                elapsed_s=window_s,
+            )
+
+    monkeypatch.setattr(module, "SchedulerSwitchDriver", FakeSwitch)
+
     root = value.evidence_dir
     (root / "builds").mkdir()
     (root / "source").mkdir()
@@ -541,7 +672,9 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     monkeypatch.setattr(module, "evaluate_run", evaluate_saved)
     deployment = fake_deployment(
         discover=lambda: targets,
-        metrics_endpoints={},
+        metrics_endpoints={
+            "control-plane": "http://127.0.0.1:10001/actuator/prometheus"
+        },
         observations=observed,
         api_endpoint="http://127.0.0.1:10000",
     )
@@ -567,6 +700,15 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     }
     assert manifest["completed"] is True
     assert manifest["workload"]["path"] == "steady/workload-receipt.json"
+    # The switch step's receipt is referenced the same way, and it carries the
+    # count *and* the window, so the criterion cannot be read from the artifact
+    # as a count without a duration.
+    assert manifest["scheduler_switch"]["path"] == "scheduler-switch.json"
+    switch = json.loads((root / "scheduler-switch.json").read_text())
+    assert switch["kind"] == "scheduler-switch"
+    assert switch["committed"] == 1000
+    assert switch["window_s"] == value.config.phases.steady_s
+    assert switch["platform_committed"] == 1000.0
     assert events == [
         "warmup",
         "load-warmup",
@@ -2236,3 +2378,148 @@ def test_artifact_inventory_defers_the_source_tree_to_its_own_manifest(tmp_path)
         "source/source-manifest.jsonl",
     ]
     assert len(json.dumps(listed).encode()) < MAX_RECORD_BYTES
+
+
+def test_artifact_inventory_groups_each_helper_command_log_tree(tmp_path):
+    """One entry per helper command-log tree, and not one byte of drift.
+
+    A p24 soak writes thousands of bound Docker command logs per helper, and the
+    inventory carrying them is a single record under MAX_RECORD_BYTES. Each tree
+    therefore becomes one entry that still hashes every file and carries the
+    exact byte total the per-file listing carried, because that total is what
+    `budget_exhausted` is computed from.
+    """
+    from nanolab.tasks.soak.acceptance import _inventory_reference
+    from nanolab.tasks.soak.artifacts import MAX_RECORD_BYTES, describe_tree
+    from nanolab.tasks.soak.diagnostic_helper import helper_log_dir, is_helper_log_dir
+    from nanolab.tasks.soak.runtime import _inventory_entries, _reference
+
+    root = tmp_path / "evidence"
+    helper = helper_log_dir(root, memory_only=False)
+    helper.mkdir(parents=True)
+    for index in range(12000):
+        (helper / f"docker-{index:032x}.log").write_bytes(b"log" * (index % 97))
+    for name in ("ownership.json", "provisioning.json", "observations.json"):
+        (helper / name).write_text("{}")
+    memory = helper_log_dir(root / "memory-helpers", memory_only=True)
+    memory.mkdir(parents=True)
+    for index in range(4):
+        (memory / f"docker-{index:032x}.log").write_bytes(b"memory")
+    # The near miss a prefix match would group: the run's own container for them.
+    assert not is_helper_log_dir(root / "memory-helpers")
+    assert is_helper_log_dir(helper) and is_helper_log_dir(memory)
+    # Scratch and a sealed manifest, excluded for the reasons already documented.
+    (root / "builds" / "workspace-0").mkdir(parents=True)
+    (root / "builds" / "workspace-0" / "scratch.class").write_bytes(b"x")
+    (root / "builds" / ".soak-owner").write_text("")
+    (root / "source" / "tree" / "platform").mkdir(parents=True)
+    (root / "source" / "tree" / "platform" / "Main.java").write_bytes(b"x")
+    (root / "source" / "snapshot.json").write_text('{"manifest_sha256": "a"}')
+    (root / "samples.jsonl").write_text("{}\n")
+
+    # The predicate as it stood before the grouping, applied to the same tree.
+    listed = [
+        _reference(root, path)
+        for path in sorted(root.rglob("*"))
+        if (
+            path.is_file()
+            and not path.is_symlink()
+            and not path.name.startswith(".")
+            and not any(part.startswith("workspace-") for part in path.parts)
+            and not path.is_relative_to(root / "source" / "tree")
+        )
+    ]
+    entries = _inventory_entries(root)
+    before = {record["path"]: record for record in listed}
+    after = {record["path"]: record for record in entries}
+    trees = {tree.relative_to(root).as_posix(): tree for tree in (helper, memory)}
+    assert set(before) - set(after) == {
+        f"{name}/{path.name}"
+        for name, directory in trees.items()
+        for path in directory.iterdir()
+    }
+    assert set(after) - set(before) == set(trees)
+    # One entry per tree, carrying the identical byte total and every file hashed.
+    for name, tree in trees.items():
+        assert after[name] == {**describe_tree(root, tree), "path": name}
+        assert after[name]["size_bytes"] == sum(
+            record["size_bytes"]
+            for record in listed
+            if Path(record["path"]).parent.as_posix() == name
+        )
+    assert sum(record["size_bytes"] for record in entries) == sum(
+        record["size_bytes"] for record in listed
+    )
+    # The digest covers each file's contents and each file's existence.
+    grouped = after[helper.relative_to(root).as_posix()]
+    log = sorted(helper.glob("docker-*.log"))[1]
+    original = log.read_bytes()
+    log.write_bytes(original + b"!")
+    assert describe_tree(root, helper)["sha256"] != grouped["sha256"]
+    log.write_bytes(original)
+    assert describe_tree(root, helper)["sha256"] == grouped["sha256"]
+    added = helper / f"docker-{'e' * 32}.log"
+    added.write_bytes(b"one log more")
+    grown = describe_tree(root, helper)
+    assert grown["sha256"] != grouped["sha256"]
+    assert grown["size_bytes"] == grouped["size_bytes"] + len(b"one log more")
+    added.unlink()
+    # 12000 command logs do not fit one record; their single entry does.
+    flat = json.dumps({"entries": listed}, sort_keys=True).encode()
+    record = json.dumps({"entries": entries}, sort_keys=True).encode()
+    assert len(flat) > MAX_RECORD_BYTES and len(record) < MAX_RECORD_BYTES
+    # The verifier reads back exactly what the producer wrote, tree entry and all.
+    limit = max(entry["size_bytes"] for entry in entries)
+    verified = [_inventory_reference(root, entry, limit) for entry in entries]
+    assert sorted(path for path, _ in verified if path.is_dir()) == sorted(
+        trees.values()
+    )
+    assert sum(size for _, size in verified) == sum(
+        entry["size_bytes"] for entry in entries
+    )
+
+
+def test_retention_reads_the_bean_the_control_plane_actually_publishes(nanofaas_root):
+    """The selector must name the control plane configuration-properties bean."""
+    from nanolab.tasks.soak.runtime import (
+        EXECUTION_STORE_BEAN,
+        retention_from_configprops,
+    )
+
+    # The key a real run's effective-configprops.json carried.
+    bean = (
+        "nanofaas.execution-store-it.unimib.datai.nanofaas.controlplane.config."
+        + EXECUTION_STORE_BEAN
+    )
+    # The class in the CI-pinned nanoFaaS source must match the selector.
+    source = (
+        nanofaas_root
+        / "platform/control-plane/src/main/java/it/unimib/datai/nanofaas"
+        / "controlplane/config"
+        / f"{EXECUTION_STORE_BEAN}.java"
+    )
+    assert source.is_file(), (
+        f"nanoFaaS no longer declares {EXECUTION_STORE_BEAN}; the bean this "
+        "selector reads was renamed and the selector must move with it"
+    )
+    assert retention_from_configprops(
+        {
+            "contexts": {
+                "application": {
+                    "beans": {
+                        bean: {
+                            "properties": {
+                                "syncTtl": "PT30S",
+                                "ttl": "PT5M",
+                                "maxLifetime": "PT30M",
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ) == {
+        "unkeyed-sync-outcome": 30.0,
+        "terminal-key-and-readable-outcome": 300.0,
+        "live-key-and-execution": 1800.0,
+    }

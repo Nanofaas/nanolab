@@ -32,7 +32,9 @@ Producer contract (all JSON is nanolab-soak-v1):
     diagnostic.json uses the existing runtime adapter format and is checked
     against the target, declared operation/helper, the natural checkpoint of the
     phase the entry names and nested artifact checksums.
-  artifacts: complete, budget_exhausted, entries (references). Inventory must
+  artifacts: complete, budget_exhausted, entries (references). An entry is one
+    file, except a helper's command-log tree, which is one entry that hashes
+    every file under it and carries their summed byte count. Inventory must
     include samples.jsonl, evaluation-input.json, config and other top receipts.
 
 Optional attribution is a bound document with entries [{attribution, equal_work}].
@@ -61,6 +63,7 @@ from typing import Any, TypeGuard
 from nanolab.config.soak import Criterion, SoakConfig
 from nanolab.tasks.soak.artifacts import (
     describe_artifact,
+    describe_tree,
     fingerprint,
     measure_tree,
     read_records,
@@ -154,7 +157,8 @@ def _constant(value: str) -> None:
     raise ValueError("nonfinite JSON value: " + value)
 
 
-def _path(root: Path, name: str) -> Path:
+def _path(root: Path, name: str, *, tree: bool = False) -> Path:
+    """Resolve one recorded path. `tree` also admits an inventory tree entry."""
     _require(isinstance(name, str), "artifact path must be a string")
     relative = Path(name)
     _require(
@@ -168,7 +172,10 @@ def _path(root: Path, name: str) -> Path:
     for part in relative.parts:
         current /= part
         _require(not current.is_symlink(), "symlink evidence is unsupported")
-    _require(current.is_file(), "missing regular artifact: " + name)
+    _require(
+        current.is_file() or (tree and current.is_dir()),
+        "missing regular artifact: " + name,
+    )
     return current
 
 
@@ -201,6 +208,33 @@ def _reference(root: Path, record: dict[str, Any], limit: int) -> Path:
             "artifact size mismatch",
         )
     return path
+
+
+def _inventory_reference(
+    root: Path, record: dict[str, Any], limit: int
+) -> tuple[Path, int]:
+    """Verify one acceptance-inventory entry and charge the bytes it names.
+
+    Almost every entry is one file, verified by the shared `_reference`. A
+    helper's command-log tree is a single entry standing for thousands of
+    command logs, so it is verified the way the producer measured it: every
+    retained file hashed into one digest, and the exact byte total the per-file
+    entries carried, which is what the budget was charged.
+    """
+    name = Path(record["path"])
+    if name.is_absolute():
+        name = name.relative_to(root.absolute())
+    path = _path(root, str(name), tree=True)
+    if not path.is_dir():
+        return _reference(root, record, limit), path.stat().st_size
+    measured = describe_tree(root, path)
+    _require(
+        record.get("sha256") == measured["sha256"]
+        and _count(record.get("size_bytes"))
+        and record["size_bytes"] == measured["size_bytes"],
+        "artifact tree checksum mismatch",
+    )
+    return path, measured["size_bytes"]
 
 
 def verify_containerd_builds(
@@ -1587,10 +1621,10 @@ def evaluate_acceptance(
         )
         seen, total = set(), 0
         for ref in entries:
-            path = _reference(root, ref, config.artifact_limit_bytes)
+            path, size = _inventory_reference(root, ref, config.artifact_limit_bytes)
             _require(path not in seen, "duplicate artifact inventory entry")
             seen.add(path)
-            total += path.stat().st_size
+            total += size
         required = {root / "samples.jsonl", root / "evaluation-input.json"}
         required.update(
             root / manifest[name]["path"]

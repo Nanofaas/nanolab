@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 import yaml
 from sonata_tasks.execution.bindings import RoleBindings
 
@@ -62,14 +63,9 @@ def test_public_builder_declares_builtin_prerequisites_without_caller_options(
     assert preparation.prerequisite_provider_available is True
 
 
-def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_path):
-    import nanolab.tasks.soak.runtime as runtime
-
-    writer = ArtifactWriter(tmp_path, 8 * 1024 * 1024)
-    # The sections this scenario declares as relevant, as its dumped policy
-    # carries them. Acceptance compares each frozen projection against the live
-    # policy, so a profile that carries none of them cannot pass its gate.
-    declared = {
+def _declared_sections():
+    """Return the sections this scenario declares relevant, as its policy has them."""
+    return {
         "images": {
             "control-plane": {"mode": "build", "variant": "jvm"},
             "word-stats-java": {"mode": "build", "variant": "jvm"},
@@ -83,11 +79,26 @@ def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_pat
         },
         "workload": {"rates": {"word-stats-java": 100}, "preallocated_vus": 200},
     }
+
+
+_SDK_IMAGES = {
+    "control-plane": _DIGEST,
+    "word-stats-java": "sha256:" + "b" * 64,
+    "word-stats-javascript": "sha256:" + "c" * 64,
+}
+
+
+def _freeze_fixture(tmp_path, coverage):
+    """Return a prepared build whose requested coverage is exactly `coverage`."""
+    import nanolab.tasks.soak.runtime as runtime
+
+    writer = ArtifactWriter(tmp_path, 8 * 1024 * 1024)
+    declared = _declared_sections()
     config = SimpleNamespace(
         metrics_profile="soak",
         prerequisites=SimpleNamespace(
-            required_coverage=["sync"],
-            relevant_config_keys={"sync": list(declared)},
+            required_coverage=list(coverage),
+            relevant_config_keys={name: list(declared) for name in coverage},
         ),
         model_dump=lambda *, mode: dict(declared),
         retention_s={
@@ -103,11 +114,7 @@ def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_pat
     )
     prepared = SimpleNamespace(
         config=config,
-        images={
-            "control-plane": _DIGEST,
-            "word-stats-java": "sha256:" + "b" * 64,
-            "word-stats-javascript": "sha256:" + "c" * 64,
-        },
+        images=dict(_SDK_IMAGES),
         payloads={
             "word-stats-java": [
                 {"input": {"text": "hello"}, "expected": {"wordCount": 1}}
@@ -118,8 +125,11 @@ def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_pat
         },
         writer=writer,
     )
+    return runtime._freeze_prerequisite_inputs(prepared), prepared, declared, writer
 
-    frozen = runtime._freeze_prerequisite_inputs(prepared)
+
+def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_path):
+    frozen, prepared, declared, writer = _freeze_fixture(tmp_path, ["sync"])
 
     assert frozen["images"] == prepared.images
     assert set(frozen["relevant_config"]) == {"sync"}
@@ -128,12 +138,86 @@ def test_builtin_prerequisite_inputs_are_derived_from_frozen_preparation(tmp_pat
     # Exactly the declared projections, which is what the acceptance gate reads.
     for key, section in declared.items():
         assert frozen["relevant_config"]["sync"][key] == section
-    assert frozen["settlement"]["control-plane"]["outcomes"] == {
+    assert frozen["settlement"]["sync"]["control-plane"]["outcomes"] == {
         "limit": 0,
         "retention_s": 35,
     }
     _inputs(frozen, frozenset({"sync"}))
     writer.close()
+
+
+@pytest.mark.parametrize(
+    "coverage",
+    ["sync", "idempotent-replay", "function-name-churn"],
+)
+def test_every_derivable_profile_is_emitted_for_its_own_coverage(tmp_path, coverage):
+    """Each derivation the freeze claims is emitted, not just the first.
+
+    Removing any one branch of `_freeze_prerequisite_inputs` leaves this failing
+    with `relevant config must cover exactly the required profiles`, which is the
+    check that used to be a `coverage != {"sync"}` refusal instead.
+    """
+    frozen, prepared, declared, writer = _freeze_fixture(tmp_path, [coverage])
+
+    assert set(frozen["relevant_config"]) == {coverage}
+    profile = frozen["relevant_config"][coverage]
+    assert profile["role"] == profile["function"] == "word-stats-java"
+    assert profile["expected_output"] == {"wordCount": 1}
+    for key, section in declared.items():
+        assert profile[key] == section
+    # The churned names must land on this run's own EXTERNAL SDK container: the
+    # prerequisite factory rejects a spec that disagrees on any of these three,
+    # so they are what the profile has to carry and no recipe can invent.
+    if coverage == "function-name-churn":
+        assert profile["function_spec"]["image"] == prepared.images["word-stats-java"]
+        assert profile["function_spec"]["executionMode"] == "EXTERNAL"
+        assert profile["function_spec"]["endpointUrl"] == (
+            "http://function-1:8080/invoke"
+        )
+        assert frozen["settlement"][coverage]["control-plane"]["retired_owners"] == {
+            "limit": 0,
+            "retention_s": 0,
+        }
+    if coverage == "idempotent-replay":
+        assert frozen["settlement"][coverage]["control-plane"][
+            "idempotency_entries"
+        ] == {
+            "limit": 0,
+            "retention_s": 305,
+        }
+    _inputs(frozen, frozenset({coverage}))
+    writer.close()
+
+
+def test_settlement_follows_the_profile_and_not_the_run(tmp_path):
+    """The deadline a population is asserted at belongs to the profile.
+
+    This is the defect the run hit: one run-wide map asserted the replay
+    profile's `outcomes` and `expiry_queue_depth` at the keyless 35s deadline,
+    so a keyed outcome the store legitimately retains for its own keyed TTL read
+    as a leak. A run-wide map fails this, and so does widening the keyless
+    deadline to make the keyed profile fit.
+    """
+    coverage = ["sync", "idempotent-replay", "function-name-churn"]
+    frozen, _, _, writer = _freeze_fixture(tmp_path, coverage)
+    keyless = {"limit": 0, "retention_s": 35}
+    keyed = {"limit": 0, "retention_s": 305}
+    for name in ("sync", "function-name-churn"):
+        for population in ("outcomes", "expiry_queue_depth"):
+            assert frozen["settlement"][name]["control-plane"][population] == keyless
+    for population in ("outcomes", "expiry_queue_depth"):
+        assert (
+            frozen["settlement"]["idempotent-replay"]["control-plane"][population]
+            == keyed
+        )
+    _inputs(frozen, frozenset(coverage))
+    writer.close()
+
+
+def test_a_coverage_with_no_builtin_injection_is_refused_before_any_lifetime(tmp_path):
+    """The refusal stays cheap for the five profiles this machine cannot derive."""
+    with pytest.raises(ValueError, match="no built-in injection exists for timeout"):
+        _freeze_fixture(tmp_path, ["sync", "timeout"])
 
 
 def test_candidate_preset_is_runnable_at_two_hundred_requests_per_second():

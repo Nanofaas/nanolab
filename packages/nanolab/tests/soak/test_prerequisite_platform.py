@@ -81,7 +81,9 @@ def case(tmp_path, monkeypatch):
             }
         },
         "settlement": {
-            role: {"timers": {"limit": 0, "retention_s": 30}} for role in images
+            "sync": {
+                role: {"timers": {"limit": 0, "retention_s": 30}} for role in images
+            }
         },
         "payload": platform.describe_artifact(payload),
     }
@@ -159,7 +161,11 @@ def case(tmp_path, monkeypatch):
                     "contexts": {
                         "app": {
                             "beans": {
-                                "store-ExecutionStoreProperties": {
+                                # The key a real control plane publishes: the
+                                # configuration-properties record by its qualified name.
+                                "nanofaas.execution-store-it.unimib.datai.nanofaas"
+                                ".controlplane.config."
+                                "ExecutionStoreProperties": {
                                     "properties": {
                                         "syncTtl": "PT30S",
                                         "ttl": "PT5M",

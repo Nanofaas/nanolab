@@ -54,6 +54,48 @@ def describe_artifact(path: Path) -> dict[str, object]:
     return {"path": str(path), "size_bytes": size, "sha256": digest.hexdigest()}
 
 
+def retained(root: Path, path: Path) -> bool:
+    """Whether the acceptance inventory names and charges for ``path``.
+
+    One rule, applied the same way whether the inventory lists a file on its own
+    or measures a whole tree under one entry, so grouping a subtree can never
+    move the byte total it feeds `budget_exhausted` with. Build workspaces and
+    dot-directories are scratch the run does not retain as evidence, which is
+    also the exclusion `measure_tree` applies to the budget; the captured source
+    tree is inventoried file by file in `source-manifest.jsonl`, which
+    `snapshot.json` seals, and both of those stay in the inventory.
+    """
+    relative = path.relative_to(root)
+    return (
+        path.is_file()
+        and not path.is_symlink()
+        and not any(part.startswith(("workspace-", ".")) for part in relative.parts)
+        and not path.is_relative_to(root / "source" / "tree")
+    )
+
+
+def describe_tree(root: Path, path: Path) -> dict[str, Any]:
+    """Hash a whole retained tree as one artifact reference.
+
+    A helper's command-log tree holds thousands of `docker-*.log` files, and the
+    acceptance inventory is a single JSON record with a bounded size, so it
+    cannot list them one by one. Binding the tree as one entry keeps every file
+    hashed and counted: the digest covers each retained file's name and
+    contents, and `size_bytes` is the exact total the per-file entries carried.
+    """
+    digest = hashlib.sha256()
+    size = 0
+    for item in sorted(path.rglob("*")):
+        if not retained(root, item):
+            continue
+        digest.update(item.relative_to(path).as_posix().encode("utf-8") + b"\0")
+        with item.open("rb") as source:
+            while chunk := source.read(65536):
+                size += len(chunk)
+                digest.update(chunk)
+    return {"path": str(path), "size_bytes": size, "sha256": digest.hexdigest()}
+
+
 def measure_tree(root: Path) -> int:
     """Measure every generated file under ``root``, not only owned evidence.
 

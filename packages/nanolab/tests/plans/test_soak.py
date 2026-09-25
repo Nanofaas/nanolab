@@ -314,3 +314,163 @@ def test_containerd_soak_refuses_unimplemented_p24_diagnostics(tmp_path):
             repo_root=Path(os.environ["NANOFAAS_ROOT"]),
             tool_root=Path(__file__).parents[4],
         )
+
+
+SCENARIOS = Path(__file__).resolve().parents[2] / "scenarios-v2"
+
+
+def _load_soak_scenario(name: str) -> ScenarioConfig:
+    """Load a scenario file the way the CLI does, policy file and all."""
+    from nanolab.cli.soak import load_soak_policy
+
+    path = SCENARIOS / name
+    resolved, receipt = load_soak_policy(yaml.safe_load(path.read_text()), path)
+    assert receipt is not None
+    return ScenarioConfig.model_validate(resolved)
+
+
+def test_the_switch_soak_declares_both_modules_and_the_step():
+    """The scenario issue #208 runs: one version, two strategies, one hour."""
+    soak = _load_soak_scenario("memory-soak-scheduler-switch-container.yaml").soak
+    assert soak is not None
+
+    assert soak.purpose == "p24"
+    # `soak` and not `advanced`: every retained-population meter this run's
+    # contract observes is registered only under the soak profile, and an absent
+    # series is indistinguishable from a probe that never fired.
+    assert soak.metrics_profile == "soak"
+    # The campaign's criterion is a soak of at least sixty minutes.
+    assert soak.phases.steady_s >= 60 * 60
+    assert soak.scheduler_switch is not None
+    assert soak.scheduler_switch.strategies == ["per-function", "shared-queue"]
+    # Two strategies are indexed only when both queue modules are built in, and
+    # the admin route is what the PATCH travels over.
+    modules = soak.images["control-plane"].modules
+    assert {"async-queue", "sync-queue", "runtime-config"} <= set(modules)
+    assert (
+        "scheduler_switch_duration_seconds_max"
+        in soak.roles["control-plane"].required_metrics
+    )
+
+
+def test_the_switch_soak_declares_the_populations_the_soak_profile_publishes():
+    """A population nothing declares is one no criterion can be held to.
+
+    The six are registered by `SoakMetricsConfiguration` and the run's profile
+    publishes them, but the sampler takes a metric's unit from the declaration
+    and a `Criterion` may only name a metric its role declared required. Left
+    out, they are readable in `samples.jsonl` with unit "unknown" and unusable by
+    the contract this run is judged against.
+
+    Both sides are held to the names nanolab already knows — the load-test
+    catalogue declines each of them for exactly one reason, this run's collector
+    — so the table and the scenario cannot agree merely by being emptied
+    together: a subset check an empty table satisfies is not a pin.
+    """
+    from nanolab.tasks.soak.runtime import POPULATION_UNITS
+    from tests.metrics.test_catalogue_coverage import _NOT_COLLECTED
+
+    known = {
+        name
+        for name, reason in _NOT_COLLECTED.items()
+        if reason == "sampled by the soak population collector"
+    }
+    scenario = yaml.safe_load(
+        (SCENARIOS / "memory-soak-scheduler-switch-container.yaml").read_text()
+    )
+    required = scenario["soak"]["roles"]["control-plane"]["required_metrics"]
+
+    assert len(known) == 6  # the catalogue's own declination, not this test's
+    assert set(POPULATION_UNITS) == known
+    assert known <= set(required)
+
+
+def test_the_switch_policy_keeps_the_shared_memory_contract():
+    """The duplicated p24 criteria must not drift from the approved ones.
+
+    A scenario cannot attach one more criterion to a shared policy file: the
+    loader replaces the whole criteria list. So the switch soak restates the
+    contract, and this is what stops the two copies disagreeing about a budget.
+    """
+    shared = yaml.safe_load((SCENARIOS / "memory-soak-policy.yaml").read_text())
+    switch = yaml.safe_load(
+        (SCENARIOS / "scheduler-switch-soak-policy.yaml").read_text()
+    )
+    by_id = {criterion["id"]: criterion for criterion in switch["criteria"]}
+
+    for criterion in shared["criteria"]:
+        assert by_id[criterion["id"]] == criterion
+    assert set(by_id) - {c["id"] for c in shared["criteria"]} == {
+        "control-plane.scheduler-switch-pause",
+        "control-plane.scheduler-switch-pause-p99",
+    }
+
+
+def test_the_switch_pause_criterion_carries_the_frozen_millisecond_budget():
+    """250 ms in the meter's unit, with the frozen number not raised."""
+    switch = yaml.safe_load(
+        (SCENARIOS / "scheduler-switch-soak-policy.yaml").read_text()
+    )
+    by_id = {criterion["id"]: criterion for criterion in switch["criteria"]}
+    pause = by_id["control-plane.scheduler-switch-pause"]
+
+    assert pause["metric"] == "scheduler_switch_duration_seconds_max"
+    assert pause["unit"] == "seconds"
+    assert pause["operation"] == "maximum"
+    assert pause["threshold"] * 1000 == 250
+
+
+def test_the_switch_p99_criterion_carries_the_frozen_budget_and_its_quantile():
+    """100 ms on the bucket family, with the frozen number not raised.
+
+    The two budgets are the same timer read two ways, so this pins both that the
+    p99 is derived from the family rather than from a single series, and that its
+    threshold is the frozen 100 ms in the unit Micrometer serves.
+    """
+    switch = yaml.safe_load(
+        (SCENARIOS / "scheduler-switch-soak-policy.yaml").read_text()
+    )
+    by_id = {criterion["id"]: criterion for criterion in switch["criteria"]}
+    p99 = by_id["control-plane.scheduler-switch-pause-p99"]
+
+    assert p99["metric"] == "scheduler_switch_duration_seconds_bucket"
+    assert p99["unit"] == "seconds"
+    assert p99["operation"] == "percentile"
+    assert p99["quantile"] == 0.99
+    assert p99["threshold"] * 1000 == 100
+    # Declared required for its role, without which no criterion may name it.
+    scenario = yaml.safe_load(
+        (SCENARIOS / "memory-soak-scheduler-switch-container.yaml").read_text()
+    )
+    roles = scenario["soak"]["roles"]
+    for criterion in switch["criteria"]:
+        assert criterion["metric"] in roles[criterion["role"]]["required_metrics"]
+
+
+def test_the_switch_soaks_gc_evidence_names_sources_the_worker_emits():
+    """A completion source the worker never writes can never be observed.
+
+    The declared name is compared three times over: against the helper's
+    `full_gc_source`, against the `source` the worker stamps into its
+    `full_gc_completed` event, and against that same event in the post-GC
+    acceptance gate. Anything outside `GC_SOURCES` fails all three, on every run,
+    for a collection that did happen -- so the declaration is pinned to the
+    vocabulary the worker actually speaks rather than to a plausible-looking
+    name.
+    """
+    from nanolab.tasks.soak.diagnostic_helper import GC_SOURCES
+
+    soak = yaml.safe_load(
+        (SCENARIOS / "memory-soak-scheduler-switch-container.yaml").read_text()
+    )["soak"]
+    declared = soak["diagnostics"]["gc_completion_evidence"]
+    assert set(declared) == {
+        role
+        for role, operations in soak["diagnostics"]["operations"].items()
+        if "gc" in operations
+    }
+    assert set(declared.values()) <= set(GC_SOURCES.values())
+    for role, source in declared.items():
+        runtime = soak["roles"][role]["runtime"]
+        if runtime in GC_SOURCES:
+            assert source == GC_SOURCES[runtime]

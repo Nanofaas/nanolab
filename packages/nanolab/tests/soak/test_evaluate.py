@@ -1,4 +1,6 @@
 import json
+import math
+import re
 from dataclasses import asdict, replace
 
 import pytest
@@ -320,6 +322,308 @@ def test_baseline_samples_from_the_settling_drain_are_placed_by_label_extent():
 def _tick(samples, phase, at):
     """Build a sample shaped like the observer's, at one scheduled instant."""
     return replace(samples[0], phase=phase, scheduled_s=at, started_s=at, ended_s=at)
+
+
+BUCKET_METRIC = "scheduler_switch_duration_seconds_bucket"
+# A bucket family is cumulative, so the counts a window reads are what it grew
+# by across the window. These two shapes are deliberately far apart: the level
+# the family had already reached before the window opened is all in the slowest
+# bucket, while the window's own thousand observations are almost all fast. The
+# p99 of the window's own count is 0.1167 s; the p99 of the two shapes added
+# together is 0.2489 s, so a criterion that reads the wrong one answers with a
+# number that is a reading of something else rather than with an error.
+_ALREADY_THERE = {"0.05": 0, "0.1": 0, "0.15": 0, "0.25": 10000, "+Inf": 10000}
+_THIS_WINDOW = {"0.05": 900, "0.1": 985, "0.15": 1000, "0.25": 1000, "+Inf": 1000}
+
+
+def percentile_criterion(**changes):
+    value = {
+        "id": "p99",
+        "role": "cp",
+        "metric": BUCKET_METRIC,
+        "label_selector": {},
+        "unit": "seconds",
+        "operation": "percentile",
+        "quantile": 0.99,
+        "phase": "steady",
+        "window_s": 4,
+        "threshold": 0.12,
+        "rationale": "declared before run",
+    }
+    value.update(changes)
+    return value
+
+
+def bucket_rows(by_stamp):
+    """One family per scrape, in time order, as the observer writes them."""
+    return [
+        Sample(
+            TARGET,
+            "steady",
+            stamp,
+            stamp,
+            stamp,
+            BUCKET_METRIC,
+            (("le", bound),),
+            "seconds",
+            value,
+            "observed",
+            "prometheus",
+            None,
+        )
+        for stamp, counts in by_stamp.items()
+        for bound, value in counts.items()
+    ]
+
+
+def bucket_scrapes(observed=None):
+    """Give the family's level at each scrape of the steady window."""
+    observed = _THIS_WINDOW if observed is None else observed
+    family = {bound: _ALREADY_THERE[bound] + grown for bound, grown in observed.items()}
+    # Flat until the last scrape, which is what a family that only grows when a
+    # switch is made actually looks like between two of them.
+    by_stamp: dict[int, dict[str, int]] = dict.fromkeys((3, 4, 5, 6), _ALREADY_THERE)
+    by_stamp[7] = family
+    return by_stamp
+
+
+def make_bucket_run(tmp_path, *, observed=None, **changes):
+    """Build a run whose steady window carried one bucket family per scrape."""
+    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion(**changes)])
+    rewrite_samples(root, bucket_rows(bucket_scrapes(observed)))
+    return root
+
+
+def test_bucket_quantile_interpolates_inside_the_containing_bucket():
+    """The rank's position inside its bucket is linear in the counts.
+
+    The hand-computed answer: rank = 0.99 * 1000 = 990, the first bucket that
+    reaches it is `le=0.15` at 1000, so the value is 0.15 + (0.25 - 0.15) *
+    (990 - 600) / (1000 - 600) = 0.2475. Reading the bucket's own upper bound,
+    or the last finite bound, answers 0.25 instead.
+    """
+    from nanolab.tasks.soak.evaluate import bucket_quantile
+
+    buckets = {0.05: 0.0, 0.1: 100.0, 0.15: 600.0, 0.25: 1000.0, math.inf: 1000.0}
+    assert bucket_quantile(0.99, buckets) == pytest.approx(0.2475)
+
+
+def test_bucket_quantile_answers_the_largest_finite_bound_above_it():
+    """A rank inside the open-ended bucket has no bound to interpolate to.
+
+    Prometheus answers with the largest finite bound rather than with infinity,
+    which is also the only answer that cannot understate the reading.
+    """
+    from nanolab.tasks.soak.evaluate import bucket_quantile
+
+    buckets = {0.05: 0.0, 0.1: 100.0, 0.25: 200.0, math.inf: 1000.0}
+    assert bucket_quantile(0.99, buckets) == 0.25
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["no +Inf bound", "only an open-ended bucket", "not cumulative", "no observation"],
+)
+def test_bucket_quantile_refuses_a_family_it_cannot_place(reason):
+    """Every way of not answering raises.
+
+    Returning a number instead is what turns an absent series into a comfortable
+    zero downstream.
+    """
+    from nanolab.tasks.soak.evaluate import bucket_quantile
+
+    buckets = {
+        "no +Inf bound": {0.05: 0.0, 0.1: 5.0},
+        "only an open-ended bucket": {math.inf: 5.0},
+        "not cumulative": {0.05: 40.0, 0.1: 5.0, math.inf: 5.0},
+        "no observation": {0.05: 0.0, 0.1: 0.0, math.inf: 0.0},
+    }[reason]
+    with pytest.raises(ValueError, match=re.escape(reason)):
+        bucket_quantile(0.99, buckets)
+
+
+def test_the_percentile_is_read_from_the_window_not_the_process_lifetime(tmp_path):
+    """The window's own reading of a cumulative family, and interpolated.
+
+    Threshold 0.12 against a true window p99 of 0.1167 s. A criterion that read
+    the family's level instead of its growth, or that returned the containing
+    bucket's upper bound, both answer above the threshold and fail here.
+    """
+    root = make_bucket_run(tmp_path)
+    assert results(root)["p99"].status == "PASS"
+
+
+def test_a_percentile_over_the_budget_fails_the_run(tmp_path):
+    root = make_bucket_run(tmp_path, threshold=0.1)
+    outcome = results(root)["p99"]
+    assert outcome.status == "FAIL"
+    assert "p99=" in outcome.reason
+
+
+def test_an_absent_bucket_family_is_not_a_percentile_of_zero(tmp_path):
+    """The hazard this operation exists against, in its plainest form.
+
+    Nothing published the family, so there is nothing to derive a quantile from.
+    A criterion that answered zero would make a platform with no histogram look
+    like a platform whose pauses were instantaneous.
+    """
+    root = make_bucket_run(tmp_path, metric="scheduler_switch_duration_seconds_p99")
+    outcome = results(root)["p99"]
+    assert outcome.status == "INCONCLUSIVE"
+    assert "series absent" in outcome.reason
+
+
+def test_a_bucket_family_of_zeros_is_not_a_percentile_of_zero(tmp_path):
+    """A family that answered, with nothing in it, is still not a reading."""
+    root = make_bucket_run(tmp_path, observed=dict.fromkeys(_THIS_WINDOW, 0))
+    outcome = results(root)["p99"]
+    assert outcome.status == "INCONCLUSIVE"
+    assert "no observation" in outcome.reason
+
+
+def test_a_metric_without_le_bounds_is_not_a_bucket_family(tmp_path):
+    """Pointing the operation at a plain series is refused, not answered."""
+    root, _, samples = make_run(tmp_path, criteria=[percentile_criterion()])
+    rewrite_samples(
+        root,
+        [
+            replace(row, metric=BUCKET_METRIC, unit="seconds", value=1.0)
+            for row in samples
+        ],
+    )
+    outcome = results(root)["p99"]
+    assert outcome.status == "INCONCLUSIVE"
+    assert "`le` bound" in outcome.reason
+
+
+def test_a_bucket_count_that_fell_inside_the_window_is_refused(tmp_path):
+    """A reset in the window is not a window that observed nothing.
+
+    The window's reading is the family's growth from its first sample, so a
+    control-plane restart inside the window leaves it subtracting one process's
+    counter from another's. Here the pre-reset level is read as the floor and the
+    post-reset counts never reach it, which made every growth zero: reported as
+    "no observation fell in the window", about a window that observed ten
+    thousand switches, and the one reason that sends an operator looking for a
+    series that is right there.
+    """
+    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion()])
+    before = dict.fromkeys(_ALREADY_THERE, 10000)
+    after = {"0.05": 900, "0.1": 985, "0.15": 1000, "0.25": 1000, "+Inf": 1000}
+    rewrite_samples(
+        root, bucket_rows({3: before, 4: after, 5: after, 6: after, 7: after})
+    )
+
+    outcome = results(root)["p99"]
+    assert outcome.status == "INCONCLUSIVE"
+    assert "fell inside the window" in outcome.reason
+    assert "no observation" not in outcome.reason
+
+
+def test_a_scrape_that_missed_a_metric_is_named_as_a_tick_not_a_shape(tmp_path):
+    """The unlabelled row a failed scrape leaves behind is not the family's shape.
+
+    A scrape that did not carry a required metric is written as one unlabelled
+    `unavailable` row, and that label set reached the operation as a series
+    without an `le` — answered as "not a bucket family", which discarded the good
+    samples every real family had contributed and pointed the operator at the
+    exposition instead of at the scrape.
+    """
+    root = make_bucket_run(tmp_path)
+    tick = Sample(
+        TARGET,
+        "steady",
+        4.0,
+        4.0,
+        4.0,
+        BUCKET_METRIC,
+        (),
+        "seconds",
+        None,
+        "unavailable",
+        "exposition",
+        "required metric absent from source",
+    )
+    rewrite_samples(
+        root,
+        sorted(
+            [*bucket_rows(bucket_scrapes()), tick],
+            key=lambda row: row.scheduled_s,
+        ),
+    )
+
+    outcome = results(root)["p99"]
+    assert outcome.status == "INCONCLUSIVE"
+    assert "not a bucket family" not in outcome.reason
+    # The family that did answer still contributed its reading: the p99 is what
+    # this criterion is for, and the tick is what is missing.
+    assert "labels=[]: 0.116667" in outcome.reason
+
+
+def test_a_window_that_lost_an_observation_does_not_pass(tmp_path):
+    """A gapped window is INCONCLUSIVE, not a pass on what it did read.
+
+    The value is still the window's own and still under the threshold, so the
+    operation has a number to answer with — and the one verdict it may not give
+    on a window the run has already lost samples of is a pass. The acceptance
+    gate re-checks the same evidence, so this cannot flip a run; what it decides
+    is whether the criterion says "PASS" about a window it did not observe whole.
+    """
+    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion()])
+    rewrite_samples(
+        root,
+        [
+            replace(
+                row,
+                value=None,
+                availability="unavailable",
+                reason="source failed on this tick",
+            )
+            if row.scheduled_s == 4.0 and ("le", "0.05") in row.labels
+            else row
+            for row in bucket_rows(bucket_scrapes())
+        ],
+    )
+
+    outcome = results(root)["p99"]
+    assert "p99=0.116667" in outcome.reason  # the number it would have answered
+    assert outcome.status == "INCONCLUSIVE"
+    assert "missing final samples" in outcome.reason
+
+
+def test_the_worst_bucket_family_decides_the_criterion(tmp_path):
+    """One family over budget is not excused by another under it.
+
+    The rows are written in time order, as the observer writes them: the
+    evaluator's stream cursor is monotone per role, so a file grouped by series
+    instead of by tick reads as a torn timeline rather than as evidence.
+    """
+    root, _, _ = make_run(tmp_path, criteria=[percentile_criterion()])
+    fast = {"0.05": 900, "0.1": 985, "0.15": 1000, "0.25": 1000, "+Inf": 1000}
+    slow = {"0.05": 0, "0.1": 100, "0.15": 900, "0.25": 1000, "+Inf": 1000}
+    rows = [
+        Sample(
+            TARGET,
+            "steady",
+            stamp,
+            stamp,
+            stamp,
+            BUCKET_METRIC,
+            (("le", bound), ("strategy", strategy)),
+            "seconds",
+            _ALREADY_THERE[bound] + (grown[bound] if stamp == 7 else 0),
+            "observed",
+            "prometheus",
+            None,
+        )
+        for stamp in (3, 4, 5, 6, 7)
+        for strategy, grown in (("per-function", fast), ("shared-queue", slow))
+        for bound in sorted(_ALREADY_THERE)
+    ]
+    rewrite_samples(root, rows)
+    outcome = results(root)["p99"]
+    assert outcome.status == "FAIL"
+    assert "shared-queue" in outcome.reason
 
 
 def test_a_tick_stamped_after_its_phase_closed_cannot_pass(tmp_path):
