@@ -2480,14 +2480,7 @@ def test_artifact_inventory_groups_each_helper_command_log_tree(tmp_path):
 
 
 def test_retention_reads_the_bean_the_control_plane_actually_publishes(nanofaas_root):
-    """The selector must name the binding bean, not the record it converts to.
-
-    `/actuator/configprops` keys a configuration-properties bean by its fully
-    qualified class name and the control plane's is the Spring binding class. The
-    runtime record it converts to is not a properties bean and never appears in
-    the document, so a selector naming the record matches nothing -- and an
-    unobserved retention reads exactly like a store the run never used.
-    """
+    """The selector must name the control plane configuration-properties bean."""
     from nanolab.tasks.soak.runtime import (
         EXECUTION_STORE_BEAN,
         retention_from_configprops,
@@ -2498,8 +2491,7 @@ def test_retention_reads_the_bean_the_control_plane_actually_publishes(nanofaas_
         "nanofaas.execution-store-it.unimib.datai.nanofaas.controlplane.config."
         + EXECUTION_STORE_BEAN
     )
-    # The class the platform declares, so a rename there fails here rather than
-    # silently in a run whose retention criterion could only ever be INCONCLUSIVE.
+    # The class in the CI-pinned nanoFaaS source must match the selector.
     source = (
         nanofaas_root
         / "platform/control-plane/src/main/java/it/unimib/datai/nanofaas"

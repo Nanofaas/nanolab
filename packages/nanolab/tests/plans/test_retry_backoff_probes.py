@@ -14,6 +14,7 @@ def probes(monkeypatch):
     modules = []
     for name in ("retry_backoff_burst", "retry_hint_probe"):
         spec = importlib.util.spec_from_file_location(name, ASSETS / f"{name}.py")
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         monkeypatch.setitem(sys.modules, name, module)
         spec.loader.exec_module(module)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Any
 from uuid import uuid4
 
@@ -407,7 +408,7 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                         "--image",
                         image,
                         "--out",
-                        f"/tmp/nanolab-retry-burst-{run_id}",
+                        str(Path(gettempdir()) / f"nanolab-retry-burst-{run_id}"),
                     ),
                 ),
                 executor=executor,
@@ -429,7 +430,7 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                         "--url",
                         endpoint,
                         "--out",
-                        f"/tmp/nanolab-retry-hint-{run_id}",
+                        str(Path(gettempdir()) / f"nanolab-retry-hint-{run_id}"),
                     ),
                 ),
                 executor=executor,
