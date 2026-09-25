@@ -40,7 +40,6 @@ def test_context_holds_neutral_fields() -> None:
     assert ctx.scenario_name == "k3s-junit-curl"
     assert ctx.manifest_path is None
     assert ctx.release is None
-    assert ctx.loadgen_vm_request is None
 
 
 def test_resolved_scenario_view_is_satisfied_structurally() -> None:

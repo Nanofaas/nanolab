@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sonata_tasks.vm.ports import VmCommandProvider
+
 from nanolab.tasks.vm.models import VmRequest
-from nanolab.tasks.vm.ports import VmCommandProvider
 
 
 class VmFileFetcher:

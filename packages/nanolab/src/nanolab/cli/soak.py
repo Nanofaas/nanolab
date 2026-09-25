@@ -140,13 +140,6 @@ def load_soak_policy(
     return resolved, receipt
 
 
-def resolve_soak_policy(
-    data: dict[str, object], scenario_path: Path
-) -> dict[str, object]:
-    """Return only the resolved scenario, for callers that need no receipt."""
-    return load_soak_policy(data, scenario_path)[0]
-
-
 def install_soak_commands(app: typer.Typer) -> None:
     """Register the offline soak commands on the product CLI."""
 

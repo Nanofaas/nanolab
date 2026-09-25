@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import MappingProxyType
 
-from nanolab.tasks.components.context import ScenarioExecutionContext
-from nanolab.tasks.components.images import control_image
-from nanolab.tasks.components.operations import RemoteCommandOperation
-from nanolab.tasks.deployment import DEFAULT_NAMESPACE
+from nanolab.tasks.deployment import (
+    CONTROL_PLANE_NODE_PORT,
+    PROMETHEUS_NODE_PORT,
+)
 from nanolab.tasks.loadtest.two_vm import (
-    LOADTEST_SCENARIOS,
     TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT,
-    TWO_VM_CONTROL_PLANE_HTTP_NODE_PORT,
-    TWO_VM_PROMETHEUS_NODE_PORT,
 )
 
 
@@ -97,15 +93,13 @@ def control_plane_helm_values(  # NOSONAR (S3776): the flat key map needs condit
         values[f"controlPlane.extraEnv[{index}].value"] = value
     if expose_node_port:
         values["controlPlane.service.type"] = "NodePort"
-        values["controlPlane.service.nodePorts.http"] = str(
-            TWO_VM_CONTROL_PLANE_HTTP_NODE_PORT
-        )
+        values["controlPlane.service.nodePorts.http"] = str(CONTROL_PLANE_NODE_PORT)
         values["controlPlane.service.nodePorts.actuator"] = str(
             TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT
         )
         values["prometheus.create"] = "true"
         values["prometheus.service.type"] = "NodePort"
-        values["prometheus.service.nodePort"] = str(TWO_VM_PROMETHEUS_NODE_PORT)
+        values["prometheus.service.nodePort"] = str(PROMETHEUS_NODE_PORT)
     # Il chart mette 1 CPU di default, e un load test lo eredita in silenzio: un
     # run che non dichiara la risorsa piu' scarsa della cosa che misura lascia
     # decidere il risultato a un default di packaging. Qui i limiti arrivano
@@ -143,28 +137,6 @@ def control_plane_helm_values(  # NOSONAR (S3776): the flat key map needs condit
     return values
 
 
-def _frozen_env(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
-    return MappingProxyType(dict(env or {}))
-
-
-def _effective_namespace(context: ScenarioExecutionContext) -> str:
-    if context.namespace:
-        return context.namespace
-    if context.resolved_scenario is not None and context.resolved_scenario.namespace:
-        return context.resolved_scenario.namespace
-    return DEFAULT_NAMESPACE
-
-
-def _kubeconfig_path(context: ScenarioExecutionContext) -> str:
-    vm_request = context.vm_request
-    home = vm_request.home
-    if home:
-        return f"{home}/.kube/config"
-    if vm_request.user == "root":
-        return "/root/.kube/config"
-    return f"/home/{vm_request.user}/.kube/config"
-
-
 def helm_set_args(values: Mapping[str, str]) -> tuple[str, ...]:
     """Turn a value map into Helm's `--set key=value` arguments.
 
@@ -175,38 +147,3 @@ def helm_set_args(values: Mapping[str, str]) -> tuple[str, ...]:
     for key, value in values.items():
         args.extend(["--set", f"{key}={value}"])
     return tuple(args)
-
-
-def plan_deploy_control_plane(
-    context: ScenarioExecutionContext,
-) -> tuple[RemoteCommandOperation, ...]:
-    """Plan the `helm upgrade --install` that deploys the control plane."""
-    namespace = _effective_namespace(context)
-    loadtest = context.scenario_name in LOADTEST_SCENARIOS
-    values = control_plane_helm_values(
-        namespace=namespace,
-        control_plane_image=control_image(context.local_registry),
-        expose_node_port=loadtest,
-        metrics_profile="advanced" if loadtest else None,
-    )
-    return (
-        RemoteCommandOperation(
-            operation_id="helm.deploy_control_plane",
-            summary="Deploy control plane with Helm",
-            argv=(
-                "helm",
-                "upgrade",
-                "--install",
-                "control-plane",
-                "deploy/helm/nanofaas",
-                "-n",
-                namespace,
-                "--wait",
-                "--timeout",
-                "5m",
-                *helm_set_args(values),
-            ),
-            env=_frozen_env({"KUBECONFIG": _kubeconfig_path(context)}),
-            execution_target="vm",
-        ),
-    )

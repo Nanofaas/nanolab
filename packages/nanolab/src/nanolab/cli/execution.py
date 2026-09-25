@@ -30,6 +30,7 @@ from sonata_tasks.tasks.executors import (
     VmCommandTaskExecutor,
 )
 from sonata_tasks.vm.multipass import resolve_connection_host
+from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
@@ -38,7 +39,6 @@ from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PO
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.vm.models import VmRequest, vm_remote_home
 from nanolab.tasks.vm.orchestrator import VmOrchestrator
-from nanolab.tasks.vm.ports import VmCommandProvider
 from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.paths import default_tool_paths
 

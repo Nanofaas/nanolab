@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
+from nanolab.tasks.vm.sync import repo_rsync_command
 
 # One file per decision worth making, and the .gitignore that should decide it.
 KEEP = (
@@ -78,16 +78,6 @@ def test_the_command_reads_gitignore_per_directory() -> None:
     # are most of what a monorepo relies on.
     assert "--filter" in command
     assert command[command.index("--filter") + 1].startswith(":-")
-
-
-def test_sync_ssh_command_supports_key_and_non_default_port() -> None:
-    key = Path("/home/user/.ssh/id_ed25519")
-
-    command = repo_sync_ssh_rsh(key, port=20001)
-
-    assert "StrictHostKeyChecking=no" in command
-    assert "-p 20001" in command
-    assert f"-i {key}" in command
 
 
 def test_rsync_command_can_use_an_explicit_ssh_transport() -> None:

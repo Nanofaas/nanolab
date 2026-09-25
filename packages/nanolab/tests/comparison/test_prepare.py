@@ -5,7 +5,6 @@ from sonata_tasks.command import CommandTask
 from nanolab.comparison.prepare import (
     function_build_operations,
     leftover_cleanup_operations,
-    pinned_function_images,
     prepare_operations,
 )
 from nanolab.images.control_plane_variants import resolve_variants
@@ -95,18 +94,6 @@ def test_everything_prepared_runs_on_the_vm() -> None:
         modules=MODULES,
     ):
         assert op.execution_target == "vm", op.operation_id
-
-
-def test_pinned_images_are_keyed_by_catalogue_key() -> None:
-    """Pin images by catalogue key, not by display name.
-
-    `_resolve_with_prebuilt_images` looks up `key`; a map keyed by `name`
-    reports every entry it holds as missing.
-    """
-    assert pinned_function_images([JAVA, JS]) == {
-        "word-stats-java": JAVA.image,
-        "word-stats-javascript": JS.image,
-    }
 
 
 def test_native_builds_can_be_told_their_memory_budget() -> None:

@@ -16,7 +16,6 @@ from typing import Any
 from nanolab.release.metrics import render_history, render_release_record
 from nanolab.release.model import ArtifactEvidence, digest_path
 
-ATTEST_PHASES = ("attest", "finalize")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 

@@ -156,7 +156,7 @@ def build_runtime_comparison_plan(
     run_dir: Path,
     remote_run_dir: Path | None = None,
     remote_repo_root: Path | None = None,
-    fetcher: RemoteFileFetcher | object | None = None,
+    fetcher: RemoteFileFetcher | None = None,
     repo_root: Path | None = None,
     tool_root: Path | None = None,
     prebuilt_control_plane_image: str | None = None,

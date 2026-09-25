@@ -65,9 +65,9 @@ def fixture_criteria():
 
 
 def resolve(data, path):
-    from nanolab.cli.soak import resolve_soak_policy
+    from nanolab.cli.soak import load_soak_policy
 
-    return resolve_soak_policy(data, path)
+    return load_soak_policy(data, path)[0]
 
 
 def operator_fixture(tmp_path, name):

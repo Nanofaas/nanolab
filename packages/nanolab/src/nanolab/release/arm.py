@@ -12,7 +12,6 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 from nanolab.images.plan import ImageCell, ImagePlan, build_image_plan
 from nanolab.release.model import ArtifactEvidence
 
-ARM64_PHASES = ("arm64-build", "arm64-smoke")
 ARM64_PLATFORM = "linux/arm64"
 
 
