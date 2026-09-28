@@ -171,6 +171,8 @@ class RecipeMetadataCheckTask(Task[None]):
         )
         if response is None:
             raise RuntimeError("build metadata returned no response")
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        (self.run_dir / "build-metadata.json").write_text(response.stdout)
         try:
             data = json.loads(response.stdout)
         except json.JSONDecodeError as error:
@@ -193,8 +195,6 @@ class RecipeMetadataCheckTask(Task[None]):
                     raise RuntimeError(
                         f"Running control-plane {key} differs from recipe"
                     )
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-        (self.run_dir / "build-metadata.json").write_text(response.stdout)
         return TaskOutcome()
 
     @override
@@ -254,6 +254,10 @@ class RecipeImageCheckTask(Task[None]):
                 .run(inputs)
                 .value
             )
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            (self.run_dir / "compose-ps-control-plane.json").write_text(
+                json.dumps({"stdout": result.stdout if result else None}) + "\n"
+            )
             container = result.stdout.strip() if result else ""
         else:
             registration_name, recipe_name, sdk = self.function
@@ -272,11 +276,6 @@ class RecipeImageCheckTask(Task[None]):
             .value
         )
         actual = result.stdout.strip() if result else ""
-        if actual != component.image.id:
-            raise RuntimeError(
-                f"Running image of {container} is {actual!r}, "
-                f"distribution says {component.image.id!r}"
-            )
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / f"image-{component.kind}-{component.name}.json").write_text(
             json.dumps(
@@ -288,6 +287,11 @@ class RecipeImageCheckTask(Task[None]):
             )
             + "\n"
         )
+        if actual != component.image.id:
+            raise RuntimeError(
+                f"Running image of {container} is {actual!r}, "
+                f"distribution says {component.image.id!r}"
+            )
         return TaskOutcome()
 
     @override
