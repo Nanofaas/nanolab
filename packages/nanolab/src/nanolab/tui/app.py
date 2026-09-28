@@ -607,7 +607,7 @@ class NanofaasTUI:
             )
         if scenario.workflow == "offload-loadtest":
             return _workflow(scenario, environment, dry_run=dry_run)
-        return _workflow(scenario, environment)
+        return _workflow(scenario, environment, dry_run=dry_run)
 
     def _plan_rows(self, workflow: Any) -> list[tuple[str, str]]:
         """Return `(task_id, title)` pairs from a compiled Sonata workflow."""

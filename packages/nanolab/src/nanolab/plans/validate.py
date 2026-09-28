@@ -6,6 +6,7 @@ checkout ships, and each backend receives the resource graph it needs — a
 compose project on `container`, the Helm release and queue probe on `k8s`.
 """
 
+import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -33,6 +34,7 @@ from nanolab.tasks.containerd_rootless import (
 )
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.http_function import HttpFunctionExpectation
+from nanolab.tasks.recipe import recipe_distribution_resource
 from nanolab.tasks.validate import (
     AsyncCheck,
     EnvelopeCheck,
@@ -233,6 +235,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
     repo_root: Path | None = None,
     tool_root: Path | None = None,
     environment: EnvironmentConfig | None = None,
+    run_dir: Path | None = None,
 ) -> Workflow:
     """Compile the validate scenario into a Sonata workflow.
 
@@ -246,6 +249,12 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
     if config.workflow != "validate" or config.backend is None:
         raise ValueError("validate plan requires a validate scenario with a backend")
     root = repo_root or Path.cwd()
+    if (
+        config.recipe_profile is not None
+        and environment is not None
+        and environment.provider != "local"
+    ):
+        raise ValueError("recipeProfile currently requires a local environment")
     kubernetes = config.backend == "k8s"
     functions = {
         key: sonata_function(
@@ -277,7 +286,8 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             if config.backend == "containerd"
             else None
         ),
-        push_function_images=not kubernetes,
+        push_function_images=not kubernetes and config.recipe_profile is None,
+        build_images=config.recipe_profile is None,
         persistent_recovery=config.persistent_recovery,
     )
     if kubernetes:
@@ -381,6 +391,25 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                 else {}
             ),
         )
+        distribution = None
+        if config.recipe_profile is not None:
+            recipe_run_dir = (
+                run_dir or (tool_root or Path.cwd()) / "runs/recipe-preview"
+            )
+            tag = (
+                "recipe-"
+                + hashlib.sha256(str(recipe_run_dir.resolve()).encode()).hexdigest()[
+                    :12
+                ]
+            )
+            distribution = recipe_distribution_resource(
+                source=root,
+                recipe=config.recipe_profile,
+                run_dir=recipe_run_dir / "recipe",
+                tag=tag,
+                executor=RoleBoundCommandTaskExecutor(bindings),
+                requires=(registry,),
+            )
         cleanup = (
             managed_container_cleanup_resource(
                 tuple(function.name for function in functions.values()),
@@ -395,10 +424,16 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             project,
             executor=RoleBoundCommandTaskExecutor(bindings),
             cwd=root,
-            requires=(registry,) if cleanup is None else (registry, cleanup),
+            requires=tuple(
+                resource
+                for resource in (registry, distribution, cleanup)
+                if resource is not None
+            ),
         )
-        requires = (
-            (registry, compose) if cleanup is None else (registry, cleanup, compose)
+        requires = tuple(
+            resource
+            for resource in (registry, distribution, cleanup, compose)
+            if resource is not None
         )
         if config.persistent_recovery:
             request = replace(request, recovery_project=project)

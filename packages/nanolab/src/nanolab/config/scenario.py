@@ -8,6 +8,7 @@ discovered mid-run.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -144,6 +145,7 @@ class ScenarioConfig(BaseModel):
     workflow: WorkflowName
     backend: BackendName | None = None
     build: BuildStrategy = "docker"
+    recipe_profile: Path | None = Field(default=None, alias="recipeProfile")
     functions: list[str] = Field(min_length=1)
     resources: dict[str, ResourceSpec] = Field(default_factory=dict)
     payload_profile: PayloadProfile | None = Field(
@@ -252,6 +254,28 @@ class ScenarioConfig(BaseModel):
         concurrency governor and the load profile against what each supports,
         and returns the instance unchanged once every rule holds.
         """
+        if self.recipe_profile is not None:
+            if (
+                self.workflow != "validate"
+                or self.backend != "container"
+                or self.build != "docker"
+                or self.control_plane_image is not None
+                or self.control_plane_variant is not None
+                or self.function_images
+                or self.control_plane_runtime != "jvm"
+                or self.async_load
+                or self.handler_envelope
+                or self.persistent_recovery
+                or self.retry_backoff_burst
+            ):
+                raise ValueError(
+                    "recipeProfile is incompatible with these scenario options"
+                )
+            if not self.recipe_profile.is_absolute():
+                raise ValueError("recipeProfile must be an absolute resolved path")
+            if not self.recipe_profile.is_file():
+                raise ValueError(f"recipeProfile does not exist: {self.recipe_profile}")
+
         if self.workflow == "soak":
             if self.soak is None:
                 raise ValueError("soak workflow requires its protocol block")

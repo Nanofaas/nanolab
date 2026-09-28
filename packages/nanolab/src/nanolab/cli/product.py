@@ -15,6 +15,7 @@ from contextlib import ExitStack, nullcontext, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 import typer
 import yaml
@@ -99,6 +100,10 @@ def _read(path: Path) -> dict[str, object]:
 
 def _scenario(path: Path) -> ScenarioConfig:
     data = _read(path)
+    if "recipeProfile" in data:
+        data["recipeProfile"] = (
+            path.resolve().parent / str(data["recipeProfile"])
+        ).resolve()
     if data.get("workflow") == "soak" or "soakPolicyFile" in data:
         resolved, receipt = load_soak_policy(data, path)
         config = ScenarioConfig.model_validate(resolved)
@@ -208,12 +213,17 @@ def _workflow(
             tool_root=paths.tool_root,
         )
     if scenario.workflow == "validate":
+        if scenario.recipe_profile is not None and run_dir is None:
+            run_dir = paths.runs_dir / (
+                "recipe-preview" if dry_run else f"recipe-{uuid4().hex}"
+            )
         return build_validate_plan(
             scenario,
             bindings,
             repo_root=paths.nanofaas_root,
             tool_root=paths.tool_root,
             environment=environment,
+            run_dir=run_dir,
         )
     if scenario.workflow == "offload":
         return build_offload_plan(scenario, bindings, repo_root=paths.nanofaas_root)
@@ -971,6 +981,8 @@ def install_product_commands(
         effective_run_dir = _default_run_dir(
             run_dir, scenario_config.workflow, paths.runs_dir
         )
+        if scenario_config.recipe_profile is not None and effective_run_dir is None:
+            effective_run_dir = paths.runs_dir / f"recipe-{uuid4().hex}"
         if (
             scenario_config.workflow in ("soak", "heap-analysis")
             and effective_run_dir is not None
