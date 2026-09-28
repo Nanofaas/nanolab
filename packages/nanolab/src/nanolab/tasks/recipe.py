@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, override
 
+import yaml
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
@@ -81,6 +82,79 @@ def _string(value: object, label: str) -> str:
     return value
 
 
+def _verify_recipe_identity(
+    recipe: Path, tag: str, modules: list[str], components: list[RecipeComponent]
+) -> None:
+    """Compare the report's build selection to the actual profile inputs."""
+    profile = _object(yaml.safe_load(recipe.read_text(encoding="utf-8")), "profile")
+    control = _object(profile.get("controlPlane"), "profile controlPlane")
+    selected_modules = control.get("modules", [])
+    if sorted(modules) != sorted(selected_modules) or len(modules) != len(set(modules)):
+        raise ValueError("Recipe distribution modules differ from recipe")
+    registry = profile.get("registry")
+    if registry is None:
+        prefix = f"nanofaas/{_string(profile.get('name'), 'profile name')}"
+        image_tag = "local"
+    else:
+        prefix = _string(
+            _object(registry, "profile registry").get("repository"), "repository"
+        )
+        image_tag = tag
+
+    expected: dict[tuple[str, str, str], tuple[str | None, str]] = {}
+
+    def add(kind: str, item: dict[str, Any], name: str, sdk: str) -> None:
+        build = item.get("build")
+        mode = (
+            _object(build, f"{name} build").get("mode")
+            if build is not None
+            else "container"
+        )
+        container = _object(item.get("container"), f"{name} container")
+        image_name = _string(container.get("image"), f"{name} image")
+        expected[(kind, name, sdk)] = (mode, f"{prefix}/{image_name}:{image_tag}")
+
+    add("control-plane", control, "control-plane", "java")
+    for kind, field in (("function", "functions"), ("service", "services")):
+        for item in profile.get(field, []):
+            entry = _object(item, f"profile {field} entry")
+            add(
+                kind,
+                entry,
+                _string(entry.get("name"), "name"),
+                _string(entry.get("sdk"), "sdk"),
+            )
+    if set(expected) != {(c.kind, c.name, c.sdk) for c in components}:
+        raise ValueError("Recipe distribution components differ from recipe")
+    for component in components:
+        mode, reference = expected[(component.kind, component.name, component.sdk)]
+        if component.mode != mode or component.image.reference != reference:
+            raise ValueError(
+                f"Recipe distribution {component.name} differs from recipe"
+            )
+
+    build = _object(control.get("build"), "profile controlPlane build")
+    variant = build.get("variant")
+    native = _object(build.get("native", {}), "profile native build")
+    if variant is not None or "optimization" in native:
+        if build.get("mode") == "native":
+            optimization = str(native.get("optimization", "3"))
+        else:
+            jvm = _object(control.get("jvm", {}), "profile controlPlane jvm")
+            args = jvm.get("args", [])
+            optimization = "c1" if "-XX:TieredStopAtLevel=1" in args else "c2"
+    else:
+        optimization = None
+    control_component = next(c for c in components if c.kind == "control-plane")
+    if (
+        control_component.variant != variant
+        or control_component.optimization != optimization
+    ):
+        raise ValueError(
+            "Recipe distribution control-plane metadata differs from recipe"
+        )
+
+
 def read_distribution(
     report: Path, *, recipe: Path, tag: str, published: bool
 ) -> RecipeDistribution:
@@ -145,6 +219,7 @@ def read_distribution(
     source = data.get("source")
     if source is not None:
         source = _object(source, "source")
+    _verify_recipe_identity(recipe, tag, modules, components)
     return RecipeDistribution(
         report=report,
         recipe_sha256=expected_sha,

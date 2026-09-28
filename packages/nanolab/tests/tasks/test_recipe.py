@@ -17,6 +17,17 @@ from nanolab.tasks.recipe import (
 from nanolab.workspace.recipe import RecipeRun
 
 
+def _write_recipe(recipe: Path) -> None:
+    recipe.write_text(
+        "schemaVersion: 2\nname: test\n"
+        "registry: {repository: '127.0.0.1:5000/nanofaas', tag: 'base'}\n"
+        "controlPlane:\n"
+        "  modules: [build-metadata, container-deployment-provider]\n"
+        "  build: {mode: jvm, variant: recipe-v2-jvm}\n"
+        "  container: {image: control-plane}\n"
+    )
+
+
 def _report(recipe: Path, tag: str, status: str) -> dict[str, Any]:
     image = {
         "reference": f"127.0.0.1:5000/nanofaas/control-plane:{tag}",
@@ -83,7 +94,7 @@ def test_recipe_task_runs_one_gradle_target(
     tmp_path: Path, task_type, target: str, status: str
 ) -> None:
     recipe = tmp_path / "recipe.yaml"
-    recipe.write_text("schemaVersion: 2\n")
+    _write_recipe(recipe)
     run = RecipeRun(tmp_path / "source", recipe, tmp_path / "output", "run-1")
     executor = _Executor(
         run.output_dir / "distribution.json", _report(recipe, run.tag, status)
@@ -115,7 +126,7 @@ def test_report_rejects_wrong_image_status(
     tmp_path: Path, published: bool, status: str, digest: str | None
 ) -> None:
     recipe = tmp_path / "recipe.yaml"
-    recipe.write_text("schemaVersion: 2\n")
+    _write_recipe(recipe)
     data = _report(recipe, "run-1", status)
     image = data["components"][0]["image"]
     if digest is None:
@@ -128,7 +139,7 @@ def test_report_rejects_wrong_image_status(
 
 def test_failed_command_cannot_return_stale_report(tmp_path: Path) -> None:
     recipe = tmp_path / "recipe.yaml"
-    recipe.write_text("schemaVersion: 2\n")
+    _write_recipe(recipe)
     run = RecipeRun(tmp_path / "source", recipe, tmp_path / "output", "run-1")
     executor = _Executor(
         run.output_dir / "distribution.json",
@@ -137,3 +148,58 @@ def test_failed_command_cannot_return_stale_report(tmp_path: Path) -> None:
     )
     with pytest.raises(RuntimeError, match="failed"):
         PublishRecipeTask(run, executor=executor).run(TaskInputs.empty())
+
+
+@pytest.mark.parametrize("mutation", ["mode", "variant", "modules", "image-tag"])
+def test_report_rejects_identity_not_declared_by_recipe(
+    tmp_path: Path, mutation: str
+) -> None:
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    data = _report(recipe, "run-1", "published")
+    control_plane = data["components"][0]
+    if mutation == "mode":
+        control_plane["mode"] = "native"
+    elif mutation == "variant":
+        control_plane["variant"] = "wrong"
+    elif mutation == "modules":
+        data["modules"].append("unexpected")
+    else:
+        control_plane["image"]["reference"] = (
+            "127.0.0.1:5000/nanofaas/control-plane:old-tag"
+        )
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="recipe"):
+        read_distribution(report, recipe=recipe, tag="run-1", published=True)
+
+
+def test_report_accepts_container_function_selected_by_recipe(tmp_path: Path) -> None:
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    recipe.write_text(
+        recipe.read_text()
+        + "functions:\n"
+        + "  - {name: parser, sdk: python, container: {image: parser-python}}\n"
+    )
+    data = _report(recipe, "run-1", "published")
+    data["components"].append(
+        {
+            "kind": "function",
+            "name": "parser",
+            "sdk": "python",
+            "mode": "container",
+            "image": {
+                "reference": "127.0.0.1:5000/nanofaas/parser-python:run-1",
+                "id": "sha256:parser",
+                "status": "published",
+                "digest": "sha256:parser-digest",
+            },
+        }
+    )
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+
+    distribution = read_distribution(report, recipe=recipe, tag="run-1", published=True)
+
+    assert distribution.function("parser", "python").mode == "container"

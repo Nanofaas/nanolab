@@ -77,3 +77,43 @@ def test_prepare_recipe_run_rejects_symlink_outside_source(tmp_path: Path) -> No
     recipe.write_text("schemaVersion: 2\n")
     with pytest.raises(ValueError, match="symlink"):
         prepare_recipe_run(source, recipe, tmp_path / "run", "run-1")
+
+
+def test_prepare_recipe_run_rejects_new_tracked_external_symlink(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    _git(source, "config", "user.email", "test@example.com")
+    _git(source, "config", "user.name", "Test")
+    (source / "tracked").write_text("safe")
+    _git(source, "add", "tracked")
+    _git(source, "commit", "-qm", "initial")
+    (source / "new-link").symlink_to(tmp_path / "outside", target_is_directory=True)
+    _git(source, "add", "new-link")
+    recipe = tmp_path / "recipe.yaml"
+    recipe.write_text("schemaVersion: 2\n")
+    with pytest.raises(ValueError, match="symlink"):
+        prepare_recipe_run(source, recipe, tmp_path / "run", "run-1")
+
+
+def test_prepare_recipe_run_rejects_altered_staged_inputs(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    _git(source, "config", "user.email", "test@example.com")
+    _git(source, "config", "user.name", "Test")
+    (source / "tracked").write_text("original")
+    _git(source, "add", "tracked")
+    _git(source, "commit", "-qm", "initial")
+    recipe = tmp_path / "recipe.yaml"
+    recipe.write_text("schemaVersion: 2\n")
+    run = prepare_recipe_run(source, recipe, tmp_path / "run", "run-1")
+    (run.source_dir / "tracked").write_text("tampered")
+    with pytest.raises(ValueError, match="staged inputs"):
+        prepare_recipe_run(source, recipe, tmp_path / "run", "run-1")
+    (run.source_dir / "tracked").write_text("original")
+    run.recipe.write_text("schemaVersion: 1\n")
+    with pytest.raises(ValueError, match="staged inputs"):
+        prepare_recipe_run(source, recipe, tmp_path / "run", "run-1")
