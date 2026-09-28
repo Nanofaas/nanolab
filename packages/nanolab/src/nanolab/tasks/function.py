@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import Resource, Task, TaskInputs
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
+from sonata_tasks.tasks.models import TaskResult
 
 
 def function_resource(
     *,
     name: str,
-    register: CommandTask,
+    register: Task[TaskResult],
     delete: CommandTask,
     readiness: tuple[CommandTask, ...] = (),
     requires: tuple[Resource[Any], ...] = (),

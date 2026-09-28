@@ -19,6 +19,7 @@ from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.functions.catalog import resolve_function_definition
 from nanolab.plans.functions import (
     resolve_function,
     resolve_function_payloads,
@@ -34,7 +35,8 @@ from nanolab.tasks.containerd_rootless import (
 )
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.http_function import HttpFunctionExpectation
-from nanolab.tasks.recipe import recipe_distribution_resource
+from nanolab.tasks.recipe import RecipeBinding, recipe_distribution_resource
+from nanolab.tasks.recipe_validation import recipe_compose_resource
 from nanolab.tasks.validate import (
     AsyncCheck,
     EnvelopeCheck,
@@ -392,6 +394,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             ),
         )
         distribution = None
+        recipe_run_dir: Path | None = None
         if config.recipe_profile is not None:
             recipe_run_dir = (
                 run_dir or (tool_root or Path.cwd()) / "runs/recipe-preview"
@@ -408,6 +411,13 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                 run_dir=recipe_run_dir / "recipe",
                 tag=tag,
                 executor=RoleBoundCommandTaskExecutor(bindings),
+                functions=tuple(
+                    (
+                        resolve_function_definition(key, root).family,
+                        resolve_function_definition(key, root).runtime,
+                    )
+                    for key in config.functions
+                ),
                 requires=(registry,),
             )
         cleanup = (
@@ -420,16 +430,37 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             if config.persistent_recovery
             else None
         )
-        compose = docker_compose_resource(
-            project,
-            executor=RoleBoundCommandTaskExecutor(bindings),
-            cwd=root,
-            requires=tuple(
-                resource
-                for resource in (registry, distribution, cleanup)
-                if resource is not None
-            ),
-        )
+        if distribution is not None:
+            assert recipe_run_dir is not None
+            request = replace(
+                request,
+                recipe=RecipeBinding(
+                    distribution=distribution,
+                    functions={
+                        functions[key].name: (
+                            resolve_function_definition(key, root).family,
+                            resolve_function_definition(key, root).runtime,
+                        )
+                        for key in config.functions
+                    },
+                    project=project,
+                    run_dir=recipe_run_dir,
+                ),
+            )
+            compose = recipe_compose_resource(
+                project,
+                distribution=distribution,
+                executor=RoleBoundCommandTaskExecutor(bindings),
+                cwd=root,
+                requires=(registry,),
+            )
+        else:
+            compose = docker_compose_resource(
+                project,
+                executor=RoleBoundCommandTaskExecutor(bindings),
+                cwd=root,
+                requires=(registry,) if cleanup is None else (registry, cleanup),
+            )
         requires = tuple(
             resource
             for resource in (registry, distribution, cleanup, compose)

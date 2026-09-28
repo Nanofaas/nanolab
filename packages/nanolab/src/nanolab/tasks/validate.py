@@ -37,6 +37,10 @@ from nanolab.tasks.platform import (
     PlatformRequest,
     add_platform,
 )
+from nanolab.tasks.recipe_validation import (
+    RecipeImageCheckTask,
+    RecipeMetadataCheckTask,
+)
 from nanolab.tasks.resources import (
     ContainerdResourceCheckTask,
     ContainerResourceCheckTask,
@@ -176,6 +180,27 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
         requires=requires,
     )
 
+    if request.recipe is not None:
+        binding = request.recipe
+        workflow.add(
+            RecipeMetadataCheckTask(
+                binding.distribution,
+                executor=executor,
+                run_dir=binding.run_dir,
+                endpoint=local_endpoint,
+            ),
+            requires=(*requires, *platform.resources, binding.distribution),
+        )
+        workflow.add(
+            RecipeImageCheckTask(
+                binding.distribution,
+                executor=executor,
+                run_dir=binding.run_dir,
+                project=binding.project,
+                cwd=cwd or Path.cwd(),
+            ),
+            requires=(*requires, *platform.resources, binding.distribution),
+        )
     for function, registered in zip(
         request.functions, platform.functions, strict=False
     ):
@@ -228,6 +253,20 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
             ),
             requires=(*requires, *platform.resources, registered),
         )
+        if request.recipe is not None:
+            binding = request.recipe
+            recipe_name, sdk = binding.functions[function.name]
+            workflow.add(
+                RecipeImageCheckTask(
+                    binding.distribution,
+                    executor=executor,
+                    run_dir=binding.run_dir,
+                    project=binding.project,
+                    cwd=cwd or Path.cwd(),
+                    function=(function.name, recipe_name, sdk),
+                ),
+                requires=(*requires, registered, binding.distribution),
+            )
         workflow.add(
             _inspection_task(request, function, executor, cwd),
             requires=(*requires, registered),

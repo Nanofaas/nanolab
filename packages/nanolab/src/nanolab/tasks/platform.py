@@ -37,6 +37,8 @@ from nanolab.tasks.kubectl import (
     k8s_deployment_readiness,
 )
 from nanolab.tasks.manifest import FunctionManifest
+from nanolab.tasks.recipe import RecipeBinding
+from nanolab.tasks.recipe_validation import RecipeFunctionRegisterTask
 
 Backend = Literal["container", "containerd", "k8s"]
 Build = Literal["docker", "buildpack"]
@@ -99,6 +101,7 @@ class PlatformRequest:
     registry: str = LOCAL_REGISTRY
     additional_modules: tuple[str, ...] = ()
     build_images: bool = True
+    recipe: RecipeBinding | None = None
     build_control_plane: bool = True
     push_function_images: bool = False
     containerd_maven_repository: Path | None = None
@@ -445,12 +448,25 @@ def _function_resource(
             if request.backend == "k8s"
             else ()
         ),
-        register=HttpFunctionRegisterTask(
-            function.manifest(),
-            endpoint=endpoint,
-            executor=executor,
-            role=request.role,
-            cwd=cwd,
+        register=(
+            RecipeFunctionRegisterTask(
+                function,
+                recipe_name=request.recipe.functions[function.name][0],
+                sdk=request.recipe.functions[function.name][1],
+                distribution=request.recipe.distribution,
+                endpoint=cast(str, endpoint),
+                executor=executor,
+                role=request.role,
+                cwd=cwd,
+            )
+            if request.recipe is not None
+            else HttpFunctionRegisterTask(
+                function.manifest(),
+                endpoint=endpoint,
+                executor=executor,
+                role=request.role,
+                cwd=cwd,
+            )
         ),
         delete=HttpFunctionDeleteTask(
             function.name,

@@ -13,6 +13,8 @@ from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.gradle import GradleTask
 
+from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.deployment import LOCAL_REGISTRY
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
 
@@ -207,6 +209,49 @@ class PublishRecipeTask(_RecipeTask):
     published = True
 
 
+@dataclass(frozen=True, slots=True)
+class RecipeBinding:
+    """A published distribution and the selected runtime consumers."""
+
+    distribution: Resource[RecipeDistribution]
+    functions: dict[str, tuple[str, str]]
+    project: DockerComposeProject
+    run_dir: Path
+
+
+def require_validation_distribution(
+    distribution: RecipeDistribution,
+    *,
+    functions: tuple[tuple[str, str], ...],
+) -> None:
+    """Require the exact components and local registry used by container validation."""
+    control_planes = [
+        component
+        for component in distribution.components
+        if component.kind == "control-plane"
+    ]
+    selected = {
+        (component.name, component.sdk)
+        for component in distribution.components
+        if component.kind == "function"
+    }
+    if selected != set(functions) or len(selected) != len(functions):
+        raise ValueError("Recipe distribution differs from selected functions")
+    if len(control_planes) != 1 or any(
+        component.kind == "service" for component in distribution.components
+    ):
+        raise ValueError("Recipe distribution needs one control plane and no services")
+    if not {"build-metadata", "container-deployment-provider"}.issubset(
+        distribution.modules
+    ):
+        raise ValueError("Recipe distribution lacks required control-plane modules")
+    if any(
+        not component.image.reference.startswith(f"{LOCAL_REGISTRY}/")
+        for component in distribution.components
+    ):
+        raise ValueError("Recipe distribution images must use the local registry")
+
+
 def recipe_distribution_resource(
     *,
     source: Path,
@@ -214,6 +259,7 @@ def recipe_distribution_resource(
     run_dir: Path,
     tag: str,
     executor: CommandTaskExecutor,
+    functions: tuple[tuple[str, str], ...],
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[RecipeDistribution]:
     """Publish a recipe after prerequisites are acquired and retain its report."""
@@ -223,6 +269,7 @@ def recipe_distribution_resource(
         result = PublishRecipeTask(run, executor=executor).run(inputs).value
         if result is None:
             raise RuntimeError("publishRecipe produced no distribution")
+        require_validation_distribution(result, functions=functions)
         return result
 
     return Resource(
