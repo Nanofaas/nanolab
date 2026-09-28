@@ -179,7 +179,17 @@ class _RecipeTask(Task[RecipeDistribution]):
             options=CommandOptions(cwd=run.source_dir),
             title=self.title,
         )
-        _ = command.run(inputs)
+        log = run.output_dir.parent / "gradle.log"
+        try:
+            result = command.run(inputs).value
+        except RuntimeError as error:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(str(error) + "\n")
+            raise
+        if result is None:
+            raise RuntimeError(f"{self.target} produced no command result")
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(result.stdout + "\n" + result.stderr)
         return TaskOutcome(
             value=read_distribution(
                 run.output_dir / "distribution.json",

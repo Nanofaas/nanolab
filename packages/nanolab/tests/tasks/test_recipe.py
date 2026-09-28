@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sonata_engine import TaskInputs
@@ -16,7 +17,7 @@ from nanolab.tasks.recipe import (
 from nanolab.workspace.recipe import RecipeRun
 
 
-def _report(recipe: Path, tag: str, status: str) -> dict[str, object]:
+def _report(recipe: Path, tag: str, status: str) -> dict[str, Any]:
     image = {
         "reference": f"127.0.0.1:5000/nanofaas/control-plane:{tag}",
         "id": "sha256:abc",
@@ -50,7 +51,7 @@ def _report(recipe: Path, tag: str, status: str) -> dict[str, object]:
 
 class _Executor:
     def __init__(
-        self, report: Path, data: dict[str, object], *, fail: bool = False
+        self, report: Path, data: dict[str, Any], *, fail: bool = False
     ) -> None:
         self.report = report
         self.data = data
@@ -60,8 +61,8 @@ class _Executor:
     def binding_key(self, role: str) -> str:
         return role
 
-    def run(self, spec: CommandTaskSpec) -> TaskResult:
-        self.specs.append(spec)
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        self.specs.append(task)
         self.report.parent.mkdir(parents=True, exist_ok=True)
         self.report.write_text(json.dumps(self.data))
         return TaskResult(
@@ -92,6 +93,7 @@ def test_recipe_task_runs_one_gradle_target(
 
     assert distribution is not None
     assert distribution.control_plane().image.id == "sha256:abc"
+    assert (run.output_dir.parent / "gradle.log").is_file()
     assert len(executor.specs) == 1
     assert executor.specs[0].argv[1] == target
     assert executor.specs[0].options.cwd == run.source_dir
