@@ -308,6 +308,59 @@ def test_container_loadtest_uses_compose_without_kubernetes(
     ]
 
 
+def test_container_recipe_loadtest_publishes_once_and_checks_images(
+    tmp_path: Path, nanofaas_root: Path
+) -> None:
+    profile = (
+        Path(__file__).resolve().parents[2] / "recipes/loadtest-container-jvm.yaml"
+    )
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "container",
+            "autoscaling": True,
+            "functions": ["word-stats-java"],
+            "recipeProfile": str(profile),
+        }
+    )
+    executor = RecordingExecutor()
+
+    workflow = build_loadtest_plan(
+        config,
+        EnvironmentConfig(provider="local"),
+        RoleBindings({"host": executor, "stack": executor}),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path / "run",
+        repo_root=nanofaas_root,
+    )
+
+    titles = [unit.task.title for unit in workflow.compile().tasks]
+    assert titles[:3] == [
+        "Acquire local registry",
+        "Publish recipe loadtest-container-jvm.yaml",
+        "Acquire Docker Compose project nanofaas-loadtest from recipe",
+    ]
+    assert any("from recipe" in title and "Compose" in title for title in titles)
+    assert "Verify recipe build metadata" in titles
+    assert "Verify recipe control-plane image" in titles
+    assert "Verify recipe image of word-stats-java" in titles
+    assert "Run the load test" in titles
+    assert titles.index("Verify recipe build metadata") < titles.index(
+        "Run the load test"
+    )
+    assert titles.index("Verify recipe control-plane image") < titles.index(
+        "Run the load test"
+    )
+    assert titles.index("Verify recipe image of word-stats-java") < titles.index(
+        "Run the load test"
+    )
+    assert not any(
+        title.startswith("Build ") or title.startswith("Push ") for title in titles
+    )
+    assert not (tmp_path / "run/recipe").exists()
+
+
 def test_container_loadtest_rejects_remote_environment(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="requires a local environment"):
         build_loadtest_plan(

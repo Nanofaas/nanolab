@@ -12,6 +12,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
+from nanolab.tasks.http_function import HttpFunctionInvokeTask
 from nanolab.tasks.loadtest.autoscaling import (
     AutoscalingSummary,
     InitialReplicaCheck,
@@ -39,6 +40,10 @@ from nanolab.tasks.loadtest.tasks import (
     WriteLoadtestSummary,
 )
 from nanolab.tasks.platform import PlatformRequest, add_platform
+from nanolab.tasks.recipe_validation import (
+    RecipeImageCheckTask,
+    RecipeMetadataCheckTask,
+)
 
 # Sonata steps over the load-test implementations in the sibling submodules
 # (`.tasks`, `.autoscaling`, `.models`), which are ordinary classes with a
@@ -480,5 +485,55 @@ def build_loadtest_workflow(
         local_endpoint=local_endpoint,
         requires=requires,
     )
+    if request.recipe is not None:
+        binding = request.recipe
+        if binding.project is None:
+            raise ValueError("Container recipe load test requires a Compose project")
+        workflow.add(
+            RecipeMetadataCheckTask(
+                binding.distribution,
+                executor=executor,
+                run_dir=binding.run_dir,
+                endpoint=platform.endpoint,
+                role=request.role,
+            ),
+            requires=(*requires, *platform.resources, binding.distribution),
+        )
+        workflow.add(
+            RecipeImageCheckTask(
+                binding.distribution,
+                executor=executor,
+                run_dir=binding.run_dir,
+                project=binding.project,
+                cwd=cwd or Path.cwd(),
+            ),
+            requires=(*requires, *platform.resources, binding.distribution),
+        )
+        for function, registered in zip(
+            request.functions, platform.functions, strict=True
+        ):
+            recipe_name, sdk = binding.functions[function.name]
+            workflow.add(
+                HttpFunctionInvokeTask(
+                    function.name,
+                    payload=function.payload,
+                    endpoint=platform.endpoint,
+                    executor=executor,
+                    role=request.role,
+                    cwd=cwd,
+                ),
+                requires=(*requires, *platform.resources, registered),
+            )
+            workflow.add(
+                RecipeImageCheckTask(
+                    binding.distribution,
+                    executor=executor,
+                    run_dir=binding.run_dir,
+                    project=binding.project,
+                    cwd=cwd or Path.cwd(),
+                    function=(function.name, recipe_name, sdk),
+                ),
+                requires=(*requires, *platform.resources, registered),
+            )
     workflow.add(load, requires=(*requires, *platform.resources, *platform.functions))
     return workflow

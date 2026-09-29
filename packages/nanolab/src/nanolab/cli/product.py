@@ -51,7 +51,10 @@ from nanolab.cli.soak import (
     unique_soak_run_dir,
     validate_soak_selection,
 )
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.cli.vm_provider import (
+    provider_for_environment,
+    vm_request_for_role,
+)
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
@@ -71,7 +74,11 @@ from nanolab.plans.runtime_comparison import (
     build_runtime_comparison_plan,
     is_runtime_comparison,
 )
-from nanolab.plans.validate import build_validate_plan
+from nanolab.plans.validate import (
+    build_validate_plan,
+    recipe_run_tag,
+    require_recipe_environment,
+)
 from nanolab.release.environment import (
     ReleaseRunInProgressError,
     release_lock_path,
@@ -82,9 +89,16 @@ from nanolab.release.tasks import versioned_release_run_dir
 from nanolab.release.versioning import normalize_version
 from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
 from nanolab.tasks.provisioning.providers import provider_for
+from nanolab.tasks.recipe_remote import (
+    RemoteRecipeRun,
+    cleanup_remote_recipe_run,
+    remote_recipe_root,
+)
 from nanolab.tasks.telegram import telegram_observer_from_environment
+from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.paths import ToolPaths, default_tool_paths, discover_tool_root
 from nanolab.workspace.provenance import git_provenance
+from nanolab.workspace.recipe import RecipeRun
 
 _JOURNAL_FILENAME = "sonata.jsonl"
 _LOCAL_PROMETHEUS_URL = "http://127.0.0.1:9090"
@@ -179,8 +193,38 @@ def _workflow(
     run_dir: Path | None = None,
     dry_run: bool = False,
 ):
-    bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
+    if (
+        scenario.workflow in {"validate", "loadtest"}
+        and scenario.recipe_profile is not None
+        and run_dir is None
+    ):
+        run_dir = paths.runs_dir / (
+            "recipe-preview" if dry_run else f"recipe-{uuid4().hex}"
+        )
+    remote_project_root = None
+    if (
+        scenario.workflow == "validate"
+        and scenario.backend in {"k8s", "containerd"}
+        and scenario.recipe_profile is not None
+    ):
+        require_recipe_environment(scenario, environment)
+        if environment.provider == "multipass":
+            assert run_dir is not None
+            remote_project_root = str(
+                remote_recipe_root(
+                    vm_request_for_role(environment, "stack"), recipe_run_tag(run_dir)
+                )
+                / "source"
+            )
+    if remote_project_root is None:
+        bindings, fetcher = build_role_bindings(environment)
+    else:
+        bindings, fetcher = build_role_bindings(
+            environment,
+            repo_root=paths.nanofaas_root,
+            remote_project_root=remote_project_root,
+        )
     if scenario.workflow == "soak":
         from nanolab.plans.soak import build_soak_plan
 
@@ -213,10 +257,6 @@ def _workflow(
             tool_root=paths.tool_root,
         )
     if scenario.workflow == "validate":
-        if scenario.recipe_profile is not None and run_dir is None:
-            run_dir = paths.runs_dir / (
-                "recipe-preview" if dry_run else f"recipe-{uuid4().hex}"
-            )
         return build_validate_plan(
             scenario,
             bindings,
@@ -469,7 +509,7 @@ def _write_run_metadata(
 
 
 def _default_run_dir(
-    run_dir: Path | None, workflow: str, runs_dir: Path
+    run_dir: Path | None, workflow: str, runs_dir: Path, *, recipe: bool = False
 ) -> Path | None:
     if run_dir is None and workflow == "soak":
         return unique_soak_run_dir(runs_dir)
@@ -478,6 +518,8 @@ def _default_run_dir(
 
         return unique_heap_analysis_run_dir(runs_dir)
     if run_dir is None and workflow in ("loadtest", "offload-loadtest"):
+        if workflow == "loadtest" and recipe:
+            return runs_dir / f"recipe-{uuid4().hex}"
         return runs_dir / "latest"
     return run_dir
 
@@ -701,6 +743,7 @@ def _execute_workflow(
     # Command output routing (SubprocessShell._emit_output) reads the
     # same contextvar, so one bind covers the whole execution layer.
     with bind_workflow_sink(sink):
+        require_recipe_environment(scenario_config, environment_config)
         provisioning = _provisioning_context(
             scenario_config,
             environment_config,
@@ -738,6 +781,37 @@ def _execute_workflow(
                     selection=selection,
                     observers=observers,
                 )
+                if (
+                    scenario_config.workflow == "validate"
+                    and scenario_config.backend in {"k8s", "containerd"}
+                    and scenario_config.recipe_profile is not None
+                    and environment_config.provider == "multipass"
+                    and effective_run_dir is not None
+                    and all(value is None for value in (only, start, until))
+                ):
+                    request = vm_request_for_role(environment_config, "stack")
+                    tag = recipe_run_tag(effective_run_dir)
+                    local = RecipeRun(
+                        effective_run_dir / "recipe/source",
+                        effective_run_dir / "recipe/recipe.yaml",
+                        effective_run_dir / "recipe/distribution",
+                        tag,
+                    )
+                    provider = provider_for_environment(
+                        environment_config, paths.nanofaas_root
+                    )
+                    remote_root = remote_recipe_root(request, tag)
+                    if scenario_config.backend == "k8s":
+                        VmFileFetcher(provider, request).fetch_from(
+                            str(remote_root / "k8s-queue-burst.json"),
+                            effective_run_dir / "k8s-queue-burst.json",
+                        )
+                    if not keep:
+                        cleanup_remote_recipe_run(
+                            RemoteRecipeRun(local, remote_root),
+                            provider=provider,
+                            request=request,
+                        )
                 if (
                     scenario_config.workflow == "offload-loadtest"
                     and effective_run_dir is not None
@@ -979,7 +1053,10 @@ def install_product_commands(
         _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         paths = default_tool_paths()
         effective_run_dir = _default_run_dir(
-            run_dir, scenario_config.workflow, paths.runs_dir
+            run_dir,
+            scenario_config.workflow,
+            paths.runs_dir,
+            recipe=scenario_config.recipe_profile is not None,
         )
         if scenario_config.recipe_profile is not None and effective_run_dir is None:
             effective_run_dir = paths.runs_dir / f"recipe-{uuid4().hex}"

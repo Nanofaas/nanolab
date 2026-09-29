@@ -33,6 +33,7 @@ from nanolab.plans.functions import (
     resolve_function_definition,
     sonata_function,
 )
+from nanolab.plans.validate import recipe_run_tag, require_recipe_environment
 from nanolab.tasks.components.bootstrap import remote_project_dir
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
@@ -92,6 +93,8 @@ from nanolab.tasks.loadtest.tasks import (
     WriteLoadtestSummary,
 )
 from nanolab.tasks.platform import Backend, Build, PlatformRequest
+from nanolab.tasks.recipe import RecipeBinding, recipe_distribution_resource
+from nanolab.tasks.recipe_validation import recipe_compose_resource
 from nanolab.workspace.paths import bundled_assets_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -799,6 +802,72 @@ def _build_platform_requires(
     return platform_requires
 
 
+def _recipe_container_platform(
+    config: ScenarioConfig,
+    *,
+    executor: RoleBoundCommandTaskExecutor,
+    root: Path,
+    run_dir: Path,
+    functions: tuple[Any, ...],
+    additional_modules: tuple[str, ...],
+) -> tuple[RecipeBinding, tuple[Any, ...]]:
+    """Publish one staged distribution before starting the load-test stack."""
+    assert config.recipe_profile is not None
+    registry = docker_registry_resource(
+        executor=executor, role="host", container=REGISTRY_CONTAINER_NAME
+    )
+    selected = {
+        function.name: (
+            resolve_function_definition(key, root).family,
+            resolve_function_definition(key, root).runtime,
+        )
+        for key, function in zip(config.functions, functions, strict=True)
+    }
+    modules = frozenset(
+        compose_control_plane_modules(additional_modules).split(",")
+    ) | {"build-metadata"}
+    distribution = recipe_distribution_resource(
+        source=root,
+        recipe=config.recipe_profile,
+        run_dir=run_dir / "recipe",
+        tag=recipe_run_tag(run_dir),
+        executor=executor,
+        functions=tuple(selected.values()),
+        requires=(registry,),
+        required_modules=modules,
+        exact_modules=True,
+    )
+    project = DockerComposeProject(
+        name="nanofaas-loadtest",
+        file=Path("deploy/compose/compose.yaml"),
+        ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+        env={
+            "NANOFAAS_CONTROL_PLANE_MODULES": compose_control_plane_modules(
+                additional_modules
+            ),
+            "NANOFAAS_CONTAINER_LOCAL_CPUSET": shared_cpuset(config),
+            "NANOFAAS_CONCURRENCY_CONTROL_TOTAL_BUDGET": concurrency_budget(config),
+        },
+        build=False,
+    )
+    compose = recipe_compose_resource(
+        project,
+        distribution=distribution,
+        executor=executor,
+        cwd=root,
+        requires=(registry,),
+    )
+    return (
+        RecipeBinding(
+            distribution=distribution,
+            functions=selected,
+            run_dir=run_dir,
+            project=project,
+        ),
+        (registry, distribution, compose),
+    )
+
+
 def drain_checkpoints(drain_minutes: int) -> tuple[int, ...]:
     """Return the checkpoints to sample, in seconds, bounded by the drain window.
 
@@ -1492,7 +1561,12 @@ def build_loadtest_plan(
     and `k6_environment` at once, which put knowledge of each experiment into the
     code shared by all of them.
     """
+    require_recipe_environment(config, environment)
     backend = _validate_loadtest(config, environment)
+    if config.recipe_profile is not None and (
+        prebuilt_control_plane_image is not None or prebuilt_function_images is not None
+    ):
+        raise ValueError("recipeProfile cannot be combined with prebuilt images")
     hpa, replica_floor, scaling_config = _autoscaling_setup(config)
     scaling_config = scaling_config or _concurrency_control_setup(config)
     root = repo_root or Path.cwd()
@@ -1559,17 +1633,34 @@ def build_loadtest_plan(
     rootless_run = (
         run_for_environment(root, environment) if backend == "containerd" else None
     )
-    platform_requires = _build_platform_requires(
-        backend,
-        executor,
-        root,
-        additional_modules,
-        shared_cpuset(config),
-        concurrency_budget(config),
-        config.control_plane_runtime == "native",
-        control_plane_image=prebuilt_control_plane_image,
-        rootless_run=rootless_run,
-    )
+    if config.recipe_profile is not None:
+        binding, platform_requires = _recipe_container_platform(
+            config,
+            executor=executor,
+            root=root,
+            run_dir=run_dir,
+            functions=functions,
+            additional_modules=additional_modules,
+        )
+        request = replace(
+            request,
+            recipe=binding,
+            build_images=False,
+            push_function_images=False,
+            build_control_plane=False,
+        )
+    else:
+        platform_requires = _build_platform_requires(
+            backend,
+            executor,
+            root,
+            additional_modules,
+            shared_cpuset(config),
+            concurrency_budget(config),
+            config.control_plane_runtime == "native",
+            control_plane_image=prebuilt_control_plane_image,
+            rootless_run=rootless_run,
+        )
     run_k6 = _build_run_k6(
         executor=executor,
         load_role=load_role,

@@ -81,6 +81,20 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
     }
 
 
+def test_recipe_loadtest_gets_unique_default_run_directory(tmp_path: Path) -> None:
+    first = product_module._default_run_dir(None, "loadtest", tmp_path, recipe=True)
+    second = product_module._default_run_dir(None, "loadtest", tmp_path, recipe=True)
+
+    assert first is not None and second is not None
+    assert first != second
+    assert first.parent == second.parent == tmp_path
+    assert first.name.startswith("recipe-")
+    assert (
+        product_module._default_run_dir(None, "loadtest", tmp_path)
+        == tmp_path / "latest"
+    )
+
+
 def test_list_does_not_require_nanofaas_root(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NANOFAAS_ROOT", raising=False)
 
@@ -166,7 +180,9 @@ def test_plan_builds_shared_validate_workflow() -> None:
     )
 
     assert result.exit_code == 0
-    assert "005.build-application-artifact-word-stats-java" in result.stdout
+    assert "assemble-staged-recipe" in result.stdout
+    assert "load-recipe-images-into-selected-minikube" in result.stdout
+    assert "forward-recipe-api-from-minikube-to-host-loopback" in result.stdout
     assert "run-kubernetes-e2e-test" not in result.stdout
     assert "inspect-resources-of-fn-word-stats-java" in result.stdout
 
@@ -597,7 +613,7 @@ def test_plan_can_select_one_task() -> None:
     assert "build-image-word-stats-java" not in result.stdout
 
 
-def test_plan_accepts_external_ssh_environment(tmp_path: Path) -> None:
+def test_recipe_plan_rejects_external_ssh_environment(tmp_path: Path) -> None:
     environment = tmp_path / "external.yaml"
     environment.write_text(
         "provider: external\nroles:\n  stack:\n"
@@ -615,8 +631,8 @@ def test_plan_accepts_external_ssh_environment(tmp_path: Path) -> None:
         ],
     )
 
-    assert result.exit_code == 0
-    assert "001.check-kubectl-is-usable" in result.stdout
+    assert result.exit_code != 0
+    assert "does not support provider external" in str(result.exception)
 
 
 def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
@@ -702,3 +718,53 @@ def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
     assert result.exit_code != 0
     assert "no task matches slug 'cli.function.list'" in result.output
     assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("keep", [False, True])
+def test_containerd_recipe_staging_survives_kept_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, keep: bool
+) -> None:
+    """A kept systemd unit still needs its staged launcher and JAR."""
+    scenario_path = _PROJECT_ROOT / "scenarios-v2/deployment-lifecycle-containerd.yaml"
+    scenario = product_module._scenario(scenario_path)
+    environment = product_module.EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "rootless-stack"}},
+            "containerdMavenRepository": str(tmp_path),
+        }
+    )
+    workflow = MagicMock()
+    cleanup = MagicMock()
+    monkeypatch.setattr(
+        product_module, "_provisioning_context", lambda *_: nullcontext()
+    )
+    monkeypatch.setattr(product_module, "_build_run_workflow", lambda **_: workflow)
+    monkeypatch.setattr(
+        product_module, "_run_selected_workflow", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(product_module, "_workflow_observers", lambda _: ())
+    monkeypatch.setattr(product_module, "provider_for_environment", lambda *_: object())
+    monkeypatch.setattr(product_module, "cleanup_remote_recipe_run", cleanup)
+
+    product_module._execute_workflow(
+        sink=MagicMock(),
+        scenario_config=scenario,
+        environment_config=environment,
+        paths=product_module.default_tool_paths(),
+        keep=keep,
+        control_plane_url=None,
+        prometheus_url=None,
+        effective_run_dir=tmp_path / "run",
+        only=None,
+        start=None,
+        until=None,
+        scenario=scenario_path,
+        release_request=None,
+        release_provider=None,
+        release_journal=None,
+        resume=False,
+    )
+
+    assert workflow.keep is keep
+    assert cleanup.call_count == (0 if keep else 1)
