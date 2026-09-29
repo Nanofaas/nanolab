@@ -1143,16 +1143,10 @@ def create_local_deployment(
         service = "control-plane" if role == "control-plane" else f"function-{index}"
         env = {
             "MANAGEMENT_SERVER_PORT": "8081",
-            "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE": (
-                "health,prometheus,info,configprops"
-            ),
-            "MANAGEMENT_ENDPOINT_CONFIGPROPS_SHOW_VALUES": "always",
+            "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE": "health,prometheus,info",
             # The image entrypoint carries
             # -Dmanagement.endpoints.enabled-by-default=false, so exposure
-            # alone leaves configprops/info at 404: per-endpoint access has to
-            # override it. Read-only observes the effective configuration and
-            # sets nothing about the run.
-            "MANAGEMENT_ENDPOINT_CONFIGPROPS_ACCESS": "read-only",
+            # alone leaves info at 404: per-endpoint access has to override it.
             "MANAGEMENT_ENDPOINT_INFO_ACCESS": "read-only",
         }
         if policy.runtime == "jvm":
@@ -2343,21 +2337,11 @@ def _duration_seconds(value: object) -> float:
     raise ValueError("effective duration format is unsupported")
 
 
-# /actuator/configprops keys the bound ExecutionStoreProperties bean by class
-# name. The pinned nanoFaaS source declares this record as @ConfigurationProperties.
-EXECUTION_STORE_BEAN = "ExecutionStoreProperties"
-
-
-def retention_from_configprops(document: dict) -> dict[str, float]:
-    """Read the bound ExecutionStoreProperties bean, with clamping."""
-    matches = []
-    for context in document.get("contexts", {}).values():
-        for name, bean in context.get("beans", {}).items():
-            if name.endswith(EXECUTION_STORE_BEAN):
-                matches.append(bean.get("properties", {}))
-    if len(matches) != 1:
-        raise ValueError("effective execution-store bean is absent or ambiguous")
-    properties = matches[0]
+def retention_from_info(document: dict) -> dict[str, float]:
+    """Read the control plane's normalized execution-store retention."""
+    properties = document.get("executionStore")
+    if not isinstance(properties, dict):
+        raise ValueError("effective execution-store info is absent")
     return {
         "unkeyed-sync-outcome": _duration_seconds(properties.get("syncTtl")),
         "terminal-key-and-readable-outcome": _duration_seconds(properties.get("ttl")),
@@ -2594,10 +2578,8 @@ def observe_local_configuration(
     from nanolab.tasks.soak.collector import _NoRedirect, read_bounded
 
     result: dict[str, Any] = {"unavailable": {}}
-    # configprops is an actuator document; the compiled module list is not.
-    # Only the build-metadata module reports it, at /modules/build-metadata on
-    # the application port, so /actuator/info never carried it.
-    sources = {"configprops": management_url + "/actuator/configprops"}
+    # Build metadata still comes from its module on the application port.
+    sources = {"info": management_url + "/actuator/info"}
     if api_url is not None:
         sources["build-metadata"] = api_url + "/modules/build-metadata"
     for name, url in sources.items():
@@ -2611,11 +2593,9 @@ def observe_local_configuration(
             if not isinstance(document, dict):
                 raise ValueError("actuator observation must be an object")
             prepared.writer.write_json("effective-" + name + ".json", document)
-            if name == "configprops":
-                result["retention_s"] = retention_from_configprops(document)
-                result["retention_source"] = (
-                    "effective-configprops.json:" + EXECUTION_STORE_BEAN
-                )
+            if name == "info":
+                result["retention_s"] = retention_from_info(document)
+                result["retention_source"] = "effective-info.json:executionStore"
             else:
                 raw = document.get("modules")
                 if not isinstance(raw, (list, str)):

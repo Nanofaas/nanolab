@@ -2479,43 +2479,15 @@ def test_artifact_inventory_groups_each_helper_command_log_tree(tmp_path):
     )
 
 
-def test_retention_reads_the_bean_the_control_plane_actually_publishes(nanofaas_root):
-    """The selector must name the control plane configuration-properties bean."""
-    from nanolab.tasks.soak.runtime import (
-        EXECUTION_STORE_BEAN,
-        retention_from_configprops,
-    )
+def test_retention_reads_effective_values_from_info():
+    from nanolab.tasks.soak.runtime import retention_from_info
 
-    # The key a real run's effective-configprops.json carried.
-    bean = (
-        "nanofaas.execution-store-it.unimib.datai.nanofaas.controlplane.config."
-        + EXECUTION_STORE_BEAN
-    )
-    # The class in the CI-pinned nanoFaaS source must match the selector.
-    source = (
-        nanofaas_root
-        / "platform/control-plane/src/main/java/it/unimib/datai/nanofaas"
-        / "controlplane/config"
-        / f"{EXECUTION_STORE_BEAN}.java"
-    )
-    assert source.is_file(), (
-        f"nanoFaaS no longer declares {EXECUTION_STORE_BEAN}; the bean this "
-        "selector reads was renamed and the selector must move with it"
-    )
-    assert retention_from_configprops(
+    assert retention_from_info(
         {
-            "contexts": {
-                "application": {
-                    "beans": {
-                        bean: {
-                            "properties": {
-                                "syncTtl": "PT30S",
-                                "ttl": "PT5M",
-                                "maxLifetime": "PT30M",
-                            }
-                        }
-                    }
-                }
+            "executionStore": {
+                "syncTtl": "PT30S",
+                "ttl": "PT5M",
+                "maxLifetime": "PT30M",
             }
         }
     ) == {
@@ -2523,3 +2495,5 @@ def test_retention_reads_the_bean_the_control_plane_actually_publishes(nanofaas_
         "terminal-key-and-readable-outcome": 300.0,
         "live-key-and-execution": 1800.0,
     }
+    with pytest.raises(ValueError, match="execution-store"):
+        retention_from_info({})

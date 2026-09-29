@@ -51,7 +51,7 @@ from nanolab.tasks.soak.prerequisite_runtime import (
 from nanolab.tasks.soak.runtime import (
     create_local_deployment,
     observe_local_process,
-    retention_from_configprops,
+    retention_from_info,
 )
 from nanolab.tasks.soak.teardown import (
     LocalCleanupCommands,
@@ -532,18 +532,18 @@ class PrerequisitePlatformFactory:
                     endpoint = deployment.metrics_endpoints["control-plane"]
                     if not endpoint or not endpoint.endswith("/actuator/prometheus"):
                         raise UnsupportedPreflightError(
-                            "control-plane/configprops: management endpoint unavailable"
+                            "control-plane/info: management endpoint unavailable"
                         )
                     document = await _json(
-                        client, endpoint.removesuffix("prometheus") + "configprops"
+                        client, endpoint.removesuffix("prometheus") + "info"
                     )
                     writer.append(
                         "configuration-observations",
-                        {"source": "actuator/configprops", "document": document},
+                        {"source": "actuator/info", "document": document},
                     )
                     effective = {
                         "roles": roles,
-                        "retention_s": retention_from_configprops(document),
+                        "retention_s": retention_from_info(document),
                     }
                     result = {}
                     for coverage, recipe in frozen["relevant_config"].items():

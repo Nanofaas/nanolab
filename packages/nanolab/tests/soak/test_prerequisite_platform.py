@@ -154,26 +154,14 @@ def case(tmp_path, monkeypatch):
 
     def handle(request):
         calls.append(request.url.path)
-        if request.url.path == "/actuator/configprops":
+        if request.url.path == "/actuator/info":
             return httpx.Response(
                 200,
                 json={
-                    "contexts": {
-                        "app": {
-                            "beans": {
-                                # The key a real control plane publishes: the
-                                # configuration-properties record by its qualified name.
-                                "nanofaas.execution-store-it.unimib.datai.nanofaas"
-                                ".controlplane.config."
-                                "ExecutionStoreProperties": {
-                                    "properties": {
-                                        "syncTtl": "PT30S",
-                                        "ttl": "PT5M",
-                                        "maxLifetime": "PT30M",
-                                    }
-                                }
-                            }
-                        }
+                    "executionStore": {
+                        "syncTtl": "PT30S",
+                        "ttl": "PT5M",
+                        "maxLifetime": "PT30M",
                     }
                 },
             )
@@ -213,7 +201,7 @@ def test_inert_factory_and_real_observer_projection(case):
 
     asyncio.run(run())
     assert calls.count("acquire") == calls.count("release") == 1
-    assert "/actuator/configprops" in calls
+    assert "/actuator/info" in calls
     assert deployments[0].run_id != factory.prepared.run_id
 
 
