@@ -111,3 +111,16 @@ def test_container_loadtest_recipe_rejects_incompatible_options(
 
     with pytest.raises(ValueError, match="recipeProfile"):
         ScenarioConfig.model_validate(data)
+
+
+def test_autoscaling_container_scenario_selects_loadtest_recipe() -> None:
+    scenario = (
+        Path(__file__).resolve().parents[2]
+        / "scenarios-v2/autoscaling-cycle-container.yaml"
+    )
+
+    config = _scenario(scenario)
+
+    assert config.recipe_profile == (
+        scenario.parent.parent / "recipes/loadtest-container-jvm.yaml"
+    ).resolve()

@@ -12,7 +12,6 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
-from nanolab.tasks.http_function import HttpFunctionInvokeTask
 from nanolab.tasks.loadtest.autoscaling import (
     AutoscalingSummary,
     InitialReplicaCheck,
@@ -509,31 +508,5 @@ def build_loadtest_workflow(
             ),
             requires=(*requires, *platform.resources, binding.distribution),
         )
-        for function, registered in zip(
-            request.functions, platform.functions, strict=True
-        ):
-            recipe_name, sdk = binding.functions[function.name]
-            workflow.add(
-                HttpFunctionInvokeTask(
-                    function.name,
-                    payload=function.payload,
-                    endpoint=platform.endpoint,
-                    executor=executor,
-                    role=request.role,
-                    cwd=cwd,
-                ),
-                requires=(*requires, *platform.resources, registered),
-            )
-            workflow.add(
-                RecipeImageCheckTask(
-                    binding.distribution,
-                    executor=executor,
-                    run_dir=binding.run_dir,
-                    project=binding.project,
-                    cwd=cwd or Path.cwd(),
-                    function=(function.name, recipe_name, sdk),
-                ),
-                requires=(*requires, *platform.resources, registered),
-            )
     workflow.add(load, requires=(*requires, *platform.resources, *platform.functions))
     return workflow

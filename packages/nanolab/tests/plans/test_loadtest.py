@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from sonata_engine import Steps
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
@@ -344,15 +345,22 @@ def test_container_recipe_loadtest_publishes_once_and_checks_images(
     assert any("from recipe" in title and "Compose" in title for title in titles)
     assert "Verify recipe build metadata" in titles
     assert "Verify recipe control-plane image" in titles
-    assert "Verify recipe image of word-stats-java" in titles
+    assert "Verify recipe image of word-stats-java" not in titles
     assert "Run the load test" in titles
+    load = next(
+        unit.task
+        for unit in workflow.compile().tasks
+        if unit.task.title == "Run the load test"
+    )
+    assert isinstance(load, Steps)
+    nested_titles = [step.title for step in load._steps]
+    assert nested_titles.index("Run k6") < nested_titles.index(
+        "Verify recipe image of word-stats-java"
+    )
     assert titles.index("Verify recipe build metadata") < titles.index(
         "Run the load test"
     )
     assert titles.index("Verify recipe control-plane image") < titles.index(
-        "Run the load test"
-    )
-    assert titles.index("Verify recipe image of word-stats-java") < titles.index(
         "Run the load test"
     )
     assert not any(

@@ -94,7 +94,10 @@ from nanolab.tasks.loadtest.tasks import (
 )
 from nanolab.tasks.platform import Backend, Build, PlatformRequest
 from nanolab.tasks.recipe import RecipeBinding, recipe_distribution_resource
-from nanolab.tasks.recipe_validation import recipe_compose_resource
+from nanolab.tasks.recipe_validation import (
+    RecipeImageCheckTask,
+    recipe_compose_resource,
+)
 from nanolab.workspace.paths import bundled_assets_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -1723,6 +1726,24 @@ def build_loadtest_plan(
         snapshot_lead_seconds=snapshot_lead_seconds,
         heap_metrics_required=heap_metrics_required,
     )
+    if request.recipe is not None:
+        binding = request.recipe
+        if binding.project is None:
+            raise ValueError("Container recipe load test requires a Compose project")
+        after = [
+            SideCommandTask(
+                title=f"Verify recipe image of {function.name}",
+                command=RecipeImageCheckTask(
+                    binding.distribution,
+                    executor=executor,
+                    run_dir=binding.run_dir,
+                    project=binding.project,
+                    cwd=root,
+                    function=(function.name, *binding.functions[function.name]),
+                ),
+            )
+            for function in request.functions
+        ] + after
     prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
     preflight = _build_preflight(
         executor=executor,

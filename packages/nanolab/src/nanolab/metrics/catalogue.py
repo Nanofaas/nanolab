@@ -462,148 +462,22 @@ def runtime_queries(_function_name: str, *, heap_required: bool = True) -> Queri
 
 
 def _async_queue_queries(function_name: str) -> Queries:
-    """Depth of the per-function queue that `async-queue` owns.
+    """Queue and dispatch capacity published by the current scheduling engine.
 
-    Blind to synchronous traffic whenever `sync-queue` is also loaded: the sync
-    path never calls `QueueManager.enqueue`, so this reads 0 while the other
-    queue fills. See nanofaas#196.
+    NanoFaaS removed the retired queue implementations and their diagnostic
+    meters in 880c9419. These remaining gauges are published by workload-metrics
+    and were observed in the recipe-backed container load test.
     """
     function = _fn(function_name)
     return (
         PrometheusQuery("function_queue_depth", f"function_queue_depth{function}"),
         PrometheusQuery("function_inFlight", f"function_inFlight{function}"),
-        # How much of that one backlog is work nobody is waiting for. The depth above
-        # is a mixture whenever both doors are used: with sync-queue off the sync path
-        # calls the same enqueue the async path does, so one FunctionQueueState holds
-        # both. These two say which is which.
-        PrometheusQuery(
-            "function_queue_depth_sync",
-            f'function_queue_depth_by_path{{function="{function_name}",path="sync"}}',
-        ),
-        PrometheusQuery(
-            "function_queue_depth_async",
-            f'function_queue_depth_by_path{{function="{function_name}",path="async"}}',
-        ),
         PrometheusQuery(
             "function_effective_concurrency",
             f"function_effective_concurrency{function}",
         ),
         PrometheusQuery(
             "function_dispatchable_backlog", f"function_dispatchable_backlog{function}"
-        ),
-        PrometheusQuery(
-            "function_queue_offer_duration_count",
-            f"function_queue_offer_duration_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_queue_offer_duration_sum",
-            f"function_queue_offer_duration_seconds_sum{function}",
-        ),
-        PrometheusQuery(
-            "function_queue_poll_duration_count",
-            f"function_queue_poll_duration_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_queue_poll_duration_sum",
-            f"function_queue_poll_duration_seconds_sum{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_wakeup_delay_count",
-            f"function_scheduler_wakeup_delay_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_wakeup_delay_sum",
-            f"function_scheduler_wakeup_delay_seconds_sum{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_poll_delay_count",
-            f"function_scheduler_poll_delay_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_poll_delay_sum",
-            f"function_scheduler_poll_delay_seconds_sum{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_activation_bookkeeping_duration_count",
-            f"function_scheduler_activation_bookkeeping_duration_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_activation_bookkeeping_duration_sum",
-            f"function_scheduler_activation_bookkeeping_duration_seconds_sum{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_signal_enqueue_duration_count",
-            f"function_scheduler_signal_enqueue_duration_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_signal_enqueue_duration_sum",
-            f"function_scheduler_signal_enqueue_duration_seconds_sum{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_dispatch_submit_duration_count",
-            f"function_scheduler_dispatch_submit_duration_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_dispatch_submit_duration_sum",
-            f"function_scheduler_dispatch_submit_duration_seconds_sum{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_dispatch_submit_duration_all_count",
-            "sum(function_scheduler_dispatch_submit_duration_seconds_count)",
-        ),
-        PrometheusQuery(
-            "function_scheduler_dispatch_submit_duration_all_sum",
-            "sum(function_scheduler_dispatch_submit_duration_seconds_sum)",
-        ),
-        PrometheusQuery(
-            "function_dispatch_slot_hold_seconds_total",
-            f"function_dispatch_slot_hold_seconds_total{function}",
-        ),
-        PrometheusQuery(
-            "function_dispatch_slot_hold_events_total",
-            f"function_dispatch_slot_hold_events_total{function}",
-        ),
-        PrometheusQuery(
-            "function_dispatch_slot_hold_distribution_series",
-            'count({__name__=~"function_dispatch_slot_hold_.*(_max|_bucket)",'
-            f'function="{function_name}"}} or '
-            '{__name__=~"function_dispatch_slot_hold_.*",'
-            f'function="{function_name}",quantile=~".+"}}) or vector(0)',
-        ),
-        PrometheusQuery(
-            "function_scheduler_batch_limit_total",
-            f"function_scheduler_batch_limit_total{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_slot_blocked_total",
-            f"function_scheduler_slot_blocked_total{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_slot_blocked_all_total",
-            "sum(function_scheduler_slot_blocked_total)",
-        ),
-        PrometheusQuery(
-            "function_scheduler_signal_coalesced_total",
-            f"function_scheduler_signal_coalesced_total{function}",
-        ),
-        PrometheusQuery(
-            "function_scheduler_signal_coalesced_all_total",
-            "sum(function_scheduler_signal_coalesced_total)",
-        ),
-        # Untagged on purpose: one scheduler thread serves every function, so
-        # these two partition its wall clock and a `function` selector would
-        # return nothing. Their sum over a window must not exceed the window.
-        PrometheusQuery(
-            "scheduler_visit_duration_count", "scheduler_visit_duration_seconds_count"
-        ),
-        PrometheusQuery(
-            "scheduler_visit_duration_sum", "scheduler_visit_duration_seconds_sum"
-        ),
-        PrometheusQuery(
-            "scheduler_idle_duration_count", "scheduler_idle_duration_seconds_count"
-        ),
-        PrometheusQuery(
-            "scheduler_idle_duration_sum", "scheduler_idle_duration_seconds_sum"
         ),
     )
 

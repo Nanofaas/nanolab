@@ -4,7 +4,7 @@
 
 **Goal:** Run `autoscaling-cycle-container.yaml` from one published recipe distribution while preserving its k6 and measurement workflow.
 
-**Architecture:** Reuse the existing staged recipe, distribution reader, `RecipeBinding`, `recipe_compose_resource`, and platform registration path. The load-test plan will create a registry → publication → Compose dependency chain and pass the binding to `add_platform`; the load-test workflow will verify runtime metadata and image IDs before k6.
+**Architecture:** Reuse the existing staged recipe, distribution reader, `RecipeBinding`, `recipe_compose_resource`, and platform registration path. The load-test plan will create a registry → publication → Compose dependency chain and pass the binding to `add_platform`; the load-test workflow verifies metadata and the control-plane image before k6, then verifies the function image immediately after k6 while its container exists. A pre-load function invocation would alter the initial scale-to-zero observation.
 
 **Tech Stack:** Python 3.12+, Pydantic, Sonata resources/tasks, Gradle recipes v2, Docker Compose, k6, pytest.
 
@@ -85,4 +85,6 @@
 
 ## Execution evidence
 
-Record commands, results, run directory, report path, k6 summary and any unmet verification here during implementation.
+- `NANOFAAS_ROOT=/home/michele/Documenti/nanofaas/.worktrees/nanolab-merge-e7914be0 ./nanolab.sh run packages/nanolab/scenarios-v2/autoscaling-cycle-container.yaml --run-dir /tmp/nanolab-loadtest-recipe-e2e-3`: passed. Publication once, k6 130.4s, image checks, autoscaling, snapshot, thresholds and cleanup passed.
+- Evidence: `/tmp/nanolab-loadtest-recipe-e2e-3/recipe/distribution/distribution.json`, `recipe/gradle.log`, `k6-summary.json`, `metrics/prometheus-snapshot.json`, `report.html`, `summary.json`. The 69 snapshot queries have no missing required data; replicas start at 0, peak at 5, and return to 0.
+- E2E-1 exposed the pre-k6 warmup changing the initial replica state; E2E-2 exposed obsolete queue diagnostics removed by NanoFaaS commit `880c9419`. The checks and catalogue were corrected before E2E-3.

@@ -597,6 +597,16 @@ def test_inspect_renders_validated_configuration() -> None:
     assert '"workflow": "cli"' in result.stdout
 
 
+def test_inspect_renders_recipe_profile_as_json_path() -> None:
+    result = CliRunner().invoke(
+        app, ["inspect", "scenarios-v2/autoscaling-cycle-container.yaml"]
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["recipeProfile"].endswith("/recipes/loadtest-container-jvm.yaml")
+
+
 def test_plan_can_select_one_task() -> None:
     result = CliRunner().invoke(
         app,
