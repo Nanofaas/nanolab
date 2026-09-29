@@ -18,8 +18,8 @@ dependencies = [
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
-    "sonata-engine==0.6.2",
-    "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.2",
+    "sonata-engine==0.6.4",
+    "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.4",
     "tui-toolkit",
 ]
 

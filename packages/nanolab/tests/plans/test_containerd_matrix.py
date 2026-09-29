@@ -48,9 +48,10 @@ class Executor:
 def test_containerd_matrix_compiles_without_docker_lifecycle(
     filename: str, tmp_path: Path
 ) -> None:
-    config = ScenarioConfig.model_validate(
-        yaml.safe_load((SCENARIOS / filename).read_text())
-    )
+    scenario = yaml.safe_load((SCENARIOS / filename).read_text())
+    if "recipeProfile" in scenario:
+        scenario["recipeProfile"] = (SCENARIOS / scenario["recipeProfile"]).resolve()
+    config = ScenarioConfig.model_validate(scenario)
     environment = EnvironmentConfig.model_validate(
         {
             "provider": "multipass",
@@ -83,6 +84,13 @@ def test_containerd_matrix_compiles_without_docker_lifecycle(
     titles = [task.task.title for task in plan.compile().tasks]
     assert "Acquire rootless containerd test runtime" in titles
     assert not any("Docker Compose" in title for title in titles)
+    if config.recipe_profile is not None:
+        assert "Publish staged recipe in stack VM" in titles
+        assert not any(
+            title in {"Build control plane", "Build image word-stats-java"}
+            for title in titles
+        )
+        return
     build = next(
         task.task.argv
         for task in plan.compile().tasks

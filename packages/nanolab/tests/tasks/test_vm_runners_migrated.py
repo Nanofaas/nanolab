@@ -30,6 +30,23 @@ def test_vm_file_fetcher_calls_transfer_from(tmp_path: Path) -> None:
     )
 
 
+def test_vm_file_fetcher_creates_destination_parent(tmp_path: Path) -> None:
+    destination = tmp_path / "recipe" / "distribution" / "distribution.json"
+    orch = MagicMock()
+
+    def transfer(_request, *, source: str, destination: Path) -> _FakeResult:
+        assert source == "/remote/distribution.json"
+        destination.write_text("report")
+        return _FakeResult()
+
+    orch.transfer_from.side_effect = transfer
+    VmFileFetcher(vm=orch, request=MagicMock()).fetch_from(
+        "/remote/distribution.json", destination
+    )
+
+    assert destination.read_text() == "report"
+
+
 def test_vm_file_fetcher_raises_on_nonzero() -> None:
     orch = MagicMock()
     orch.transfer_from.return_value = _FakeResult(

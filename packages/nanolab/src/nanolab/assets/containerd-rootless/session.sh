@@ -240,6 +240,13 @@ PY
       --filter "label=io.nanofaas.function=$name" \
       --filter 'label=io.nanofaas.backend=containerd'
     ;;
+  image-inspect)
+    image_ref=${1:?image reference required}
+    [[ $image_ref == 127.0.0.1:5000/nanofaas/* ]] || {
+      echo "image reference is outside the run registry" >&2; exit 2;
+    }
+    nerdctl --namespace "$namespace" image inspect "$image_ref"
+    ;;
   inspect-owned)
     function_name=${1:?function name required}
     replica=${2:?replica index required}

@@ -15,8 +15,10 @@ from pathlib import Path
 
 from sonata_engine import Resource, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.kubectl import PinnedKubeconfigExecutor
 from sonata_tasks.registry import docker_registry_resource
 
+from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import resolve_function_definition
@@ -35,7 +37,23 @@ from nanolab.tasks.containerd_rootless import (
 )
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.http_function import HttpFunctionExpectation
-from nanolab.tasks.recipe import RecipeBinding, recipe_distribution_resource
+from nanolab.tasks.recipe import (
+    RecipeBinding,
+    assembled_recipe_distribution_resource,
+    recipe_distribution_resource,
+    recipe_run_resource,
+)
+from nanolab.tasks.recipe_kubernetes import (
+    minikube_images_resource,
+    minikube_target_resource,
+    queue_probe_image_resource,
+    recipe_namespace_resource,
+)
+from nanolab.tasks.recipe_remote import (
+    remote_recipe_distribution_resource,
+    remote_recipe_root,
+    remote_recipe_run_resource,
+)
 from nanolab.tasks.recipe_validation import recipe_compose_resource
 from nanolab.tasks.validate import (
     AsyncCheck,
@@ -88,6 +106,34 @@ _HANDLER_ENVELOPE_TARGETS = (
 )
 _EMPTY_INPUT_PAYLOAD = '{"input":{}}'
 _ASYNC_CONTROL_PLANE_MODULES = "container-deployment-provider,async-queue"
+
+
+def recipe_run_tag(run_dir: Path) -> str:
+    """Derive one stable, run-specific image tag from the selected evidence path."""
+    return "recipe-" + hashlib.sha256(str(run_dir.resolve()).encode()).hexdigest()[:12]
+
+
+def require_recipe_environment(
+    config: ScenarioConfig, environment: EnvironmentConfig
+) -> None:
+    """Reject recipe and environment combinations before provisioning."""
+    if config.recipe_profile is None:
+        return
+    allowed = (
+        {"local"}
+        if config.backend == "container"
+        else {"multipass"}
+        if config.backend == "containerd"
+        else {"local", "multipass"}
+    )
+    if (
+        config.backend not in {"container", "containerd", "k8s"}
+        or environment.provider not in allowed
+    ):
+        raise ValueError(
+            f"recipeProfile for {config.backend} does not support "
+            f"provider {environment.provider}"
+        )
 
 
 def _handler_envelope_checks(
@@ -251,12 +297,8 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
     if config.workflow != "validate" or config.backend is None:
         raise ValueError("validate plan requires a validate scenario with a backend")
     root = repo_root or Path.cwd()
-    if (
-        config.recipe_profile is not None
-        and environment is not None
-        and environment.provider != "local"
-    ):
-        raise ValueError("recipeProfile currently requires a local environment")
+    selected_environment = environment or EnvironmentConfig(provider="local")
+    require_recipe_environment(config, selected_environment)
     kubernetes = config.backend == "k8s"
     functions = {
         key: sonata_function(
@@ -264,6 +306,196 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         )
         for key in config.functions
     }
+    recipe_binding: RecipeBinding | None = None
+    recipe_requires: tuple[Resource, ...] = ()
+    recipe_namespace = None
+    recipe_chart = "deploy/helm/nanofaas"
+    recipe_role = None
+    recipe_tag = None
+    recipe_remote_root = None
+    containerd_recipe_run = None
+    containerd_recipe_registry = None
+    runtime_bindings = bindings
+    if kubernetes and config.recipe_profile is not None:
+        selected_run_dir = run_dir or (tool_root or Path.cwd()) / "runs/recipe-preview"
+        recipe_tag = recipe_run_tag(selected_run_dir)
+        recipe_namespace = f"nanofaas-recipe-{recipe_tag.removeprefix('recipe-')}"
+        executor = RoleBoundCommandTaskExecutor(bindings)
+        target = (
+            minikube_target_resource(
+                executor=executor,
+                kubeconfig=selected_run_dir / "selected-kubeconfig.json",
+            )
+            if selected_environment.provider == "local"
+            else None
+        )
+        if target is not None:
+            config_path = selected_run_dir / "selected-kubeconfig.json"
+            runtime_bindings = RoleBindings(
+                {
+                    role: PinnedKubeconfigExecutor(
+                        bindings.executor_for(role), config_path
+                    )
+                    for role in ("host", "stack")
+                }
+            )
+            executor = RoleBoundCommandTaskExecutor(runtime_bindings)
+        staged = recipe_run_resource(
+            source=root,
+            recipe=config.recipe_profile,
+            run_dir=selected_run_dir / "recipe",
+            tag=recipe_tag,
+            requires=(target,) if target is not None else (),
+        )
+        selected_functions = tuple(
+            (
+                resolve_function_definition(key, root).family,
+                resolve_function_definition(key, root).runtime,
+            )
+            for key in config.functions
+        )
+        modules = frozenset({"k8s-deployment-provider", "build-metadata", "sync-queue"})
+        if target is not None:
+            distribution = assembled_recipe_distribution_resource(
+                run=staged,
+                executor=executor,
+                functions=selected_functions,
+                required_modules=modules,
+            )
+            probe = queue_probe_image_resource(
+                run=staged,
+                tag=recipe_tag,
+                executor=executor,
+            )
+            images = minikube_images_resource(
+                target=target,
+                distribution=distribution,
+                probe_image=probe,
+                executor=executor,
+                run_dir=selected_run_dir,
+            )
+            namespace_resource = recipe_namespace_resource(
+                namespace=recipe_namespace,
+                executor=executor,
+                role="host",
+                target=target,
+                requires=(images,),
+            )
+            recipe_chart = str(
+                (selected_run_dir / "recipe/source/deploy/helm/nanofaas").resolve()
+            )
+            recipe_role = "host"
+        else:
+            vm_request = vm_request_for_role(selected_environment, "stack")
+            recipe_remote_root = remote_recipe_root(vm_request, recipe_tag)
+            provider = provider_for_environment(selected_environment, root)
+            remote = remote_recipe_run_resource(
+                run=staged,
+                provider=provider,
+                request=vm_request,
+                run_dir=selected_run_dir / "recipe",
+                tag=recipe_tag,
+            )
+            distribution = remote_recipe_distribution_resource(
+                run=remote,
+                provider=provider,
+                request=vm_request,
+                functions=selected_functions,
+                required_modules=modules,
+            )
+            probe = queue_probe_image_resource(
+                run=staged,
+                tag=recipe_tag,
+                executor=executor,
+                remote_run=remote,
+                provider=provider,
+                vm_request=vm_request,
+            )
+            namespace_resource = recipe_namespace_resource(
+                namespace=recipe_namespace,
+                executor=executor,
+                role="stack",
+                target=None,
+                requires=(distribution, probe),
+            )
+            recipe_chart = str(
+                remote_recipe_root(vm_request, recipe_tag)
+                / "source/deploy/helm/nanofaas"
+            )
+            recipe_role = "stack"
+        recipe_requires = (namespace_resource,)
+        recipe_binding = RecipeBinding(
+            distribution=distribution,
+            functions={
+                functions[key].name: (
+                    resolve_function_definition(key, root).family,
+                    resolve_function_definition(key, root).runtime,
+                )
+                for key in config.functions
+            },
+            run_dir=selected_run_dir,
+            target=target,
+            remote_root=recipe_remote_root,
+        )
+    if config.backend == "containerd" and config.recipe_profile is not None:
+        selected_run_dir = run_dir or (tool_root or Path.cwd()) / "runs/recipe-preview"
+        recipe_tag = recipe_run_tag(selected_run_dir)
+        vm_request = vm_request_for_role(selected_environment, "stack")
+        recipe_remote_root = remote_recipe_root(vm_request, recipe_tag)
+        containerd_recipe_run = replace(
+            run_for_environment(root, environment),
+            repo_root=Path(str(recipe_remote_root / "source")),
+        )
+        containerd_recipe_registry = registry_resource(
+            containerd_recipe_run,
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            role="stack",
+        )
+        staged = recipe_run_resource(
+            source=root,
+            recipe=config.recipe_profile,
+            run_dir=selected_run_dir / "recipe",
+            tag=recipe_tag,
+        )
+        provider = provider_for_environment(selected_environment, root)
+        remote = remote_recipe_run_resource(
+            run=staged,
+            provider=provider,
+            request=vm_request,
+            run_dir=selected_run_dir / "recipe",
+            tag=recipe_tag,
+            requires=(containerd_recipe_registry,),
+        )
+        selected_functions = tuple(
+            (
+                resolve_function_definition(key, root).family,
+                resolve_function_definition(key, root).runtime,
+            )
+            for key in config.functions
+        )
+        distribution = remote_recipe_distribution_resource(
+            run=remote,
+            provider=provider,
+            request=vm_request,
+            functions=selected_functions,
+            required_modules=frozenset(
+                {"containerd-deployment-provider", "build-metadata"}
+            ),
+            containerd_maven_repository=repository_for_build(selected_environment),
+        )
+        recipe_binding = RecipeBinding(
+            distribution=distribution,
+            functions={
+                functions[key].name: (
+                    resolve_function_definition(key, root).family,
+                    resolve_function_definition(key, root).runtime,
+                )
+                for key in config.functions
+            },
+            run_dir=selected_run_dir,
+            remote_root=recipe_remote_root,
+        )
+        recipe_requires = (containerd_recipe_registry, distribution)
     request = ValidateWorkflowRequest(
         backend=config.backend,
         build=config.build,
@@ -282,7 +514,8 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             else ()
         ),
         source_fingerprint=source_fingerprint(root),
-        build_control_plane=kubernetes or config.backend == "containerd",
+        build_control_plane=(kubernetes or config.backend == "containerd")
+        and config.recipe_profile is None,
         containerd_maven_repository=(
             repository_for_build(environment)
             if config.backend == "containerd"
@@ -290,6 +523,10 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         ),
         push_function_images=not kubernetes and config.recipe_profile is None,
         build_images=config.recipe_profile is None,
+        recipe=recipe_binding,
+        namespace=recipe_namespace or "nanofaas",
+        helm_chart=recipe_chart,
+        execution_role=recipe_role,
         persistent_recovery=config.persistent_recovery,
     )
     if kubernetes:
@@ -304,14 +541,14 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             request,
             queue_probe=SonataFunction(
                 name="k8s-sync-queue",
-                image=f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e",
+                image=f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:{recipe_tag or 'e2e'}",
                 payload='{"input":{"message":"warmup"}}',
                 build_argv=("./gradlew", ":services:java:warm-echo:bootJar", "--quiet"),
                 image_build_argv=(
                     "docker",
                     "build",
                     "-t",
-                    f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e",
+                    f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:{recipe_tag or 'e2e'}",
                     "-f",
                     "services/java/warm-echo/Dockerfile",
                     "services/java/warm-echo",
@@ -332,6 +569,9 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         values = control_plane_helm_values(
             namespace=request.namespace,
             control_plane_image=request.control_plane_image_reference(),
+            image_pull_policy="IfNotPresent"
+            if recipe_binding is not None
+            else "Always",
             metrics_profile="advanced",
             sync_queue_admission_enabled=not config.retry_backoff_burst,
             sync_queue_max_depth=512 if config.retry_backoff_burst else None,
@@ -355,23 +595,23 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             )
             values[f"controlPlane.extraEnv[{slot}].value"] = "DEBUG"
         request = replace(request, helm_values=helm_set_args(values))
-    requires = ()
+    requires = recipe_requires
     control_plane_process: Callable[[], Resource] | None = None
     if config.backend == "containerd":
-        run = run_for_environment(root, environment)
-        registry = registry_resource(
+        run = containerd_recipe_run or run_for_environment(root, environment)
+        registry = containerd_recipe_registry or registry_resource(
             run,
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="stack",
         )
-        requires = (registry,)
+        requires = recipe_requires or (registry,)
 
         control_plane_process = partial(
             control_plane_resource,
             run,
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="stack",
-            requires=(registry,),
+            requires=requires,
         )
 
         request = replace(request, rootless_run=run)
@@ -470,7 +710,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             request = replace(request, recovery_project=project)
     return build_validate_workflow(
         request,
-        bindings,
+        runtime_bindings,
         cwd=root,
         local_endpoint="http://127.0.0.1:8080",
         requires=requires,

@@ -12,6 +12,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.execution.models import CommandOptions, TaskResult
 from sonata_tasks.execution.ports import CommandTaskExecutor
+from sonata_tasks.http import Endpoint, endpoint_argv
 
 from nanolab.tasks.compose import (
     DestroyDockerCompose,
@@ -36,7 +37,7 @@ class RecipeFunctionRegisterTask(Task[TaskResult]):
         recipe_name: str,
         sdk: str,
         distribution: Resource[RecipeDistribution],
-        endpoint: str,
+        endpoint: Endpoint,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
         cwd: Path | None = None,
@@ -147,7 +148,8 @@ class RecipeMetadataCheckTask(Task[None]):
         *,
         executor: CommandTaskExecutor,
         run_dir: Path,
-        endpoint: str,
+        endpoint: Endpoint,
+        role: ExecutionRole = "host",
     ) -> None:
         """Store the distribution and endpoint for the runtime probe."""
         self.title = "Verify recipe build metadata"
@@ -155,6 +157,7 @@ class RecipeMetadataCheckTask(Task[None]):
         self.executor = executor
         self.run_dir = run_dir
         self.endpoint = endpoint
+        self.role = role
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
@@ -162,9 +165,13 @@ class RecipeMetadataCheckTask(Task[None]):
         response = (
             CommandTask(
                 title=self.title,
-                argv=("curl", "-fsS", f"{self.endpoint}/modules/build-metadata"),
+                argv=endpoint_argv(
+                    self.endpoint,
+                    lambda url: ("curl", "-fsS", f"{url}/modules/build-metadata"),
+                ),
                 executor=self.executor,
-                role="host",
+                role=self.role,
+                semantic_key=f"recipe-metadata:{self.distribution.title}",
             )
             .run(inputs)
             .value

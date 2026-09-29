@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from sonata_engine import Resource, Steps, Task, Workflow
@@ -36,6 +36,11 @@ from nanolab.tasks.platform import (
     PlatformFunction,
     PlatformRequest,
     add_platform,
+)
+from nanolab.tasks.recipe_containerd import RecipeContainerdImageCheckTask
+from nanolab.tasks.recipe_kubernetes import (
+    MinikubeTarget,
+    RecipeKubernetesImageCheckTask,
 )
 from nanolab.tasks.recipe_validation import (
     RecipeImageCheckTask,
@@ -94,6 +99,15 @@ class ValidateWorkflowRequest(PlatformRequest):
     persistent_recovery: bool = False
     recovery_project: DockerComposeProject | None = None
     rootless_run: RootlessRun | None = None
+
+
+def _queue_summary_path(request: ValidateWorkflowRequest, run_id: str) -> Path:
+    recipe = request.recipe
+    if recipe is None:
+        return Path(f"{run_id}-k8s-queue-burst.json")
+    if recipe.remote_root is not None:
+        return Path(str(recipe.remote_root)) / "k8s-queue-burst.json"
+    return recipe.run_dir / "k8s-queue-burst.json"
 
 
 def _inspection_task(
@@ -187,20 +201,45 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                 binding.distribution,
                 executor=executor,
                 run_dir=binding.run_dir,
-                endpoint=local_endpoint,
+                endpoint=platform.endpoint,
+                role=request.role,
             ),
             requires=(*requires, *platform.resources, binding.distribution),
         )
-        workflow.add(
-            RecipeImageCheckTask(
-                binding.distribution,
-                executor=executor,
-                run_dir=binding.run_dir,
-                project=binding.project,
-                cwd=cwd or Path.cwd(),
-            ),
-            requires=(*requires, *platform.resources, binding.distribution),
-        )
+        if request.backend == "k8s":
+            workflow.add(
+                RecipeKubernetesImageCheckTask(
+                    binding.distribution,
+                    namespace=request.namespace,
+                    deployment="nanofaas-control-plane",
+                    component=("control-plane", "control-plane", "java"),
+                    executor=executor,
+                    role=request.role,
+                    run_dir=binding.run_dir,
+                    target=cast(Resource[MinikubeTarget] | None, binding.target),
+                ),
+                requires=(
+                    *requires,
+                    *platform.resources,
+                    binding.distribution,
+                    *((binding.target,) if binding.target is not None else ()),
+                ),
+            )
+        elif request.backend == "container":
+            if binding.project is None:
+                raise ValueError(
+                    "Container recipe validation requires a Compose project"
+                )
+            workflow.add(
+                RecipeImageCheckTask(
+                    binding.distribution,
+                    executor=executor,
+                    run_dir=binding.run_dir,
+                    project=binding.project,
+                    cwd=cwd or Path.cwd(),
+                ),
+                requires=(*requires, *platform.resources, binding.distribution),
+            )
     for function, registered in zip(
         request.functions, platform.functions, strict=False
     ):
@@ -256,17 +295,56 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
         if request.recipe is not None:
             binding = request.recipe
             recipe_name, sdk = binding.functions[function.name]
-            workflow.add(
-                RecipeImageCheckTask(
-                    binding.distribution,
-                    executor=executor,
-                    run_dir=binding.run_dir,
-                    project=binding.project,
-                    cwd=cwd or Path.cwd(),
-                    function=(function.name, recipe_name, sdk),
-                ),
-                requires=(*requires, registered, binding.distribution),
-            )
+            if request.backend == "k8s":
+                workflow.add(
+                    RecipeKubernetesImageCheckTask(
+                        binding.distribution,
+                        namespace=request.namespace,
+                        deployment=f"fn-{function.name}",
+                        component=("function", recipe_name, sdk),
+                        executor=executor,
+                        role=request.role,
+                        run_dir=binding.run_dir,
+                        target=cast(Resource[MinikubeTarget] | None, binding.target),
+                    ),
+                    requires=(
+                        *requires,
+                        registered,
+                        binding.distribution,
+                        *((binding.target,) if binding.target is not None else ()),
+                    ),
+                )
+            elif request.backend == "containerd":
+                if request.rootless_run is None:
+                    raise ValueError("Containerd recipe requires a rootless run")
+                workflow.add(
+                    RecipeContainerdImageCheckTask(
+                        binding.distribution,
+                        function=(function.name, recipe_name, sdk),
+                        run=request.rootless_run,
+                        executor=executor,
+                        role=request.role,
+                        run_dir=binding.run_dir,
+                        cwd=cwd,
+                    ),
+                    requires=(*requires, registered, binding.distribution),
+                )
+            elif request.backend == "container":
+                if binding.project is None:
+                    raise ValueError(
+                        "Container recipe validation requires a Compose project"
+                    )
+                workflow.add(
+                    RecipeImageCheckTask(
+                        binding.distribution,
+                        executor=executor,
+                        run_dir=binding.run_dir,
+                        project=binding.project,
+                        cwd=cwd or Path.cwd(),
+                        function=(function.name, recipe_name, sdk),
+                    ),
+                    requires=(*requires, registered, binding.distribution),
+                )
         workflow.add(
             _inspection_task(request, function, executor, cwd),
             requires=(*requires, registered),
@@ -410,7 +488,7 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                     K6Config(
                         script_path=request.queue_burst_script,
                         target_url=platform.endpoint,
-                        summary_output_path=Path(f"{run_id}-k8s-queue-burst.json"),
+                        summary_output_path=_queue_summary_path(request, run_id),
                         vus=12,
                         duration="2s",
                         env={

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from sonata_engine import Resource, Steps, Workflow
+from sonata_engine import Resource, Steps, TaskInputs, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.docker import DockerBuildTask, DockerPushTask
@@ -38,6 +38,10 @@ from nanolab.tasks.kubectl import (
 )
 from nanolab.tasks.manifest import FunctionManifest
 from nanolab.tasks.recipe import RecipeBinding
+from nanolab.tasks.recipe_kubernetes import (
+    MinikubeTarget,
+    kubernetes_api_endpoint_resource,
+)
 from nanolab.tasks.recipe_validation import RecipeFunctionRegisterTask
 
 Backend = Literal["container", "containerd", "k8s"]
@@ -135,6 +139,7 @@ class PlatformRequest:
             self.backend == "k8s"
             and not self.build_images
             and self.control_plane_image is None
+            and self.recipe is None
         ):
             raise ValueError(
                 "control_plane_image is required when build_images is false"
@@ -232,6 +237,66 @@ def _helm_release_with_endpoint(
     exposes a ClusterIP fail the acquire — and therefore uninstall — instead of
     leaving a release behind for a later task to trip over.
     """
+    if request.recipe is not None:
+        distribution = request.recipe.distribution
+
+        def resolved_spec(inputs: TaskInputs) -> HelmReleaseSpec:
+            image = inputs.resource(distribution).control_plane().image.reference
+            repository, tag = image.rsplit(":", 1)
+            values = list(request.helm_values)
+            for index, value in enumerate(values):
+                if value.startswith("controlPlane.image.repository="):
+                    values[index] = f"controlPlane.image.repository={repository}"
+                elif value.startswith("controlPlane.image.tag="):
+                    values[index] = f"controlPlane.image.tag={tag}"
+            return HelmReleaseSpec(
+                release=request.helm_release,
+                chart=request.helm_chart,
+                namespace=request.namespace,
+                values=tuple(values),
+            )
+
+        def acquire_recipe(inputs: TaskInputs) -> str:
+            spec = resolved_spec(inputs)
+            HelmInstallTask(
+                spec,
+                executor=executor,
+                role=request.role,
+                options=CommandOptions(cwd=cwd),
+            ).run(inputs)
+            response = (
+                KubectlTask(
+                    "get",
+                    "service",
+                    CONTROL_PLANE_SERVICE,
+                    "-o=jsonpath={.spec.clusterIP}",
+                    executor=executor,
+                    role=request.role,
+                    namespace=request.namespace,
+                    options=CommandOptions(cwd=cwd),
+                )
+                .run(inputs)
+                .value
+            )
+            address = response.stdout.strip() if response is not None else ""
+            if not address:
+                raise RuntimeError("Recipe control-plane Service has no ClusterIP")
+            return f"http://{address}:{CONTROL_PLANE_PORT}"
+
+        return compensated_resource(
+            title=request.titled(
+                f"Acquire Helm release {request.helm_release} from recipe"
+            ),
+            acquire=acquire_recipe,
+            compensate=lambda inputs: HelmUninstallTask(
+                resolved_spec(inputs),
+                executor=executor,
+                role=request.role,
+                options=CommandOptions(cwd=cwd),
+            ).run(inputs),
+            requires=(*requires, distribution),
+        )
+
     spec = HelmReleaseSpec(
         release=request.helm_release,
         chart=request.helm_chart,
@@ -416,7 +481,17 @@ def _resolve_platform_endpoint(
     endpoint: Endpoint = local_endpoint
     if request.backend == "k8s":
         release = _helm_release_with_endpoint(request, executor, cwd, requires)
-        resources, endpoint = (release,), release
+        if request.recipe is not None and request.recipe.target is not None:
+            forwarded = kubernetes_api_endpoint_resource(
+                release=release,
+                namespace=request.namespace,
+                target=cast(Resource[MinikubeTarget], request.recipe.target),
+                executor=executor,
+                run_dir=request.recipe.run_dir,
+            )
+            resources, endpoint = (release, forwarded), forwarded
+        else:
+            resources, endpoint = (release,), release
     elif control_plane_process is not None:
         resources = (control_plane_process(),)
     return resources, endpoint
@@ -454,12 +529,12 @@ def _function_resource(
                 recipe_name=request.recipe.functions[function.name][0],
                 sdk=request.recipe.functions[function.name][1],
                 distribution=request.recipe.distribution,
-                endpoint=cast(str, endpoint),
+                endpoint=endpoint,
                 executor=executor,
                 role=request.role,
                 cwd=cwd,
             )
-            if request.recipe is not None
+            if request.recipe is not None and function.name in request.recipe.functions
             else HttpFunctionRegisterTask(
                 function.manifest(),
                 endpoint=endpoint,
@@ -475,7 +550,11 @@ def _function_resource(
             role=request.role,
             cwd=cwd,
         ),
-        requires=(*requires, *resources),
+        requires=(
+            *requires,
+            *resources,
+            *((request.recipe.distribution,) if request.recipe is not None else ()),
+        ),
     )
 
 

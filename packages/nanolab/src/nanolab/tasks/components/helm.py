@@ -24,6 +24,7 @@ def control_plane_helm_values(  # NOSONAR (S3776): the flat key map needs condit
     *,
     namespace: str,
     control_plane_image: str,
+    image_pull_policy: str = "Always",
     expose_node_port: bool = False,
     metrics_profile: str | None = None,
     sync_queue_admission_enabled: bool = False,
@@ -48,7 +49,7 @@ def control_plane_helm_values(  # NOSONAR (S3776): the flat key map needs condit
         "namespace.name": namespace,
         "controlPlane.image.repository": repository,
         "controlPlane.image.tag": tag,
-        "controlPlane.image.pullPolicy": "Always",
+        "controlPlane.image.pullPolicy": image_pull_policy,
         "demos.enabled": "false",
         "prometheus.create": "false",
     }

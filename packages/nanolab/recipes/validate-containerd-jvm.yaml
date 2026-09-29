@@ -1,0 +1,30 @@
+schemaVersion: 2
+name: validate-containerd-jvm
+
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: recipe-v2-containerd-jvm
+
+controlPlane:
+  modules: [containerd-deployment-provider, build-metadata]
+  build:
+    mode: jvm
+    variant: recipe-v2-containerd-jvm
+  jvm:
+    args: ["-XX:+UseSerialGC", "-Xmx256m"]
+  container:
+    image: control-plane
+  config:
+    nanofaas:
+      deployment:
+        default-backend: containerd
+      metrics:
+        profile: advanced
+
+functions:
+  - name: word-stats
+    sdk: java
+    build:
+      mode: jvm
+    container:
+      image: word-stats-java
