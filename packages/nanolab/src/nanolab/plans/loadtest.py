@@ -53,6 +53,7 @@ from nanolab.tasks.loadtest import (
     EvaluateGateTask,
     FetchResultsTask,
     ObserveDrainStep,
+    RecordRecipeImageTask,
     ReportCoTenancyTask,
     RunK6Task,
     SideCommandTask,
@@ -1731,8 +1732,7 @@ def build_loadtest_plan(
         if binding.project is None:
             raise ValueError("Container recipe load test requires a Compose project")
         after = [
-            SideCommandTask(
-                title=f"Verify recipe image of {function.name}",
+            RecordRecipeImageTask(
                 command=RecipeImageCheckTask(
                     binding.distribution,
                     executor=executor,

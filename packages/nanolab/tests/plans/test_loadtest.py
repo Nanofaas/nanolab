@@ -357,6 +357,9 @@ def test_container_recipe_loadtest_publishes_once_and_checks_images(
     assert nested_titles.index("Run k6") < nested_titles.index(
         "Verify recipe image of word-stats-java"
     )
+    assert nested_titles.index("Verify recipe image of word-stats-java") < (
+        nested_titles.index("Capture Prometheus snapshot")
+    )
     assert titles.index("Verify recipe build metadata") < titles.index(
         "Run the load test"
     )

@@ -17,6 +17,7 @@ from nanolab.tasks.loadtest import (
     CapturePrometheusTask,
     EvaluateGateTask,
     LoadtestOutcome,
+    RecordRecipeImageTask,
     RunK6Task,
     VerifyAutoscalingTask,
     WriteReportTask,
@@ -240,6 +241,31 @@ def test_the_gate_fails_a_run_whose_snapshot_had_gaps() -> None:
                 )
             )
         )
+
+
+def test_recipe_image_failure_is_deferred_to_gate() -> None:
+    events: list[str] = []
+
+    class WrongImage(Task[None]):
+        title = "Verify recipe image"
+
+        def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+            del inputs
+            events.append("image")
+            raise RuntimeError("Running image differs from distribution")
+
+    outcome = (
+        RecordRecipeImageTask(command=WrongImage())
+        .run(_inputs(LoadtestOutcome(k6=_k6())))
+        .value
+    )
+    assert outcome is not None
+    assert outcome.runtime_identity_error == (
+        "RuntimeError: Running image differs from distribution"
+    )
+    with pytest.raises(RuntimeError, match="Running image differs"):
+        _ = EvaluateGateTask().run(_inputs(outcome))
+    assert events == ["image"]
 
 
 def test_the_gate_passes_a_clean_run() -> None:

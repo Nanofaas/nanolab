@@ -72,6 +72,7 @@ class LoadtestOutcome:
     # - including the replica trajectory - are written by the tasks after this
     # one, and they are what explains an empty series.
     snapshot_gaps: str | None = None
+    runtime_identity_error: str | None = None
     report: Path | None = None
     summary: Path | None = None
 
@@ -373,6 +374,8 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
             reasons.append(f"{autoscaling.verdict_error}; see summary.json")
         if outcome.snapshot_gaps:
             reasons.append(outcome.snapshot_gaps)
+        if outcome.runtime_identity_error:
+            reasons.append(outcome.runtime_identity_error)
         if reasons:
             raise RuntimeError(" | ".join(reasons))
         if not outcome.k6.passed:
@@ -397,6 +400,29 @@ class SideCommandTask(Task[LoadtestOutcome]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         _ = self._command.run(inputs)
+        return TaskOutcome(value=outcome)
+
+
+class RecordRecipeImageTask(Task[LoadtestOutcome]):
+    """Inspect the live function now; defer a mismatch until reports are written."""
+
+    def __init__(self, *, command: Task[None]) -> None:
+        """Keep the runtime check so it runs while the function is still live."""
+        self.title = command.title
+        self._command = command
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = load_outcome(inputs, self.title)
+        try:
+            _ = self._command.run(inputs)
+        except Exception as error:
+            return TaskOutcome(
+                value=replace(
+                    outcome,
+                    runtime_identity_error=f"{type(error).__name__}: {error}",
+                )
+            )
         return TaskOutcome(value=outcome)
 
 

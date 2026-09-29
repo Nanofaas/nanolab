@@ -1340,7 +1340,9 @@ def install_product_commands(
         scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
     ) -> None:
         typer.echo(
-            json.dumps(_scenario(scenario).model_dump(by_alias=True, mode="json"), indent=2)
+            json.dumps(
+                _scenario(scenario).model_dump(by_alias=True, mode="json"), indent=2
+            )
         )
 
     @app.command("doctor")
