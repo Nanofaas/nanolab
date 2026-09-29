@@ -256,8 +256,13 @@ class ScenarioConfig(BaseModel):
         """
         if self.recipe_profile is not None:
             if (
-                self.workflow != "validate"
-                or self.backend != "container"
+                not (
+                    (
+                        self.workflow == "validate"
+                        and self.backend in {"container", "containerd", "k8s"}
+                    )
+                    or (self.workflow == "loadtest" and self.backend == "container")
+                )
                 or self.build != "docker"
                 or self.control_plane_image is not None
                 or self.control_plane_variant is not None

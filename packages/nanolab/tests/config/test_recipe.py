@@ -31,7 +31,6 @@ def test_scenario_resolves_recipe_relative_to_yaml(
 @pytest.mark.parametrize(
     "settings",
     [
-        {"backend": "k8s"},
         {"build": "buildpack"},
         {"controlPlaneImage": "custom"},
         {"asyncLoad": True},
@@ -47,5 +46,68 @@ def test_recipe_rejects_unsupported_scenario_options(
         "recipeProfile": str(tmp_path / "profile.yaml"),
     }
     data.update(settings)
+    with pytest.raises(ValueError, match="recipeProfile"):
+        ScenarioConfig.model_validate(data)
+
+
+def test_kubernetes_recipe_profile_is_accepted(tmp_path: Path) -> None:
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("schemaVersion: 2\n")
+
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": "k8s",
+            "build": "docker",
+            "functions": ["word-stats-java"],
+            "recipeProfile": str(profile),
+        }
+    )
+
+    assert config.recipe_profile == profile
+
+
+def test_container_loadtest_accepts_recipe_profile(tmp_path: Path) -> None:
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("schemaVersion: 2\n")
+
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "container",
+            "functions": ["word-stats-java"],
+            "autoscaling": True,
+            "recipeProfile": str(profile),
+        }
+    )
+
+    assert config.recipe_profile == profile
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"backend": "containerd"},
+        {"backend": "k8s"},
+        {"controlPlaneImage": "custom"},
+        {"controlPlaneVariant": "jvm"},
+        {"functionImages": {"word-stats-java": "custom"}},
+        {"controlPlaneRuntime": "native"},
+        {"build": "buildpack"},
+    ],
+)
+def test_container_loadtest_recipe_rejects_incompatible_options(
+    tmp_path: Path, settings: dict[str, object]
+) -> None:
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("schemaVersion: 2\n")
+    data: dict[str, object] = {
+        "workflow": "loadtest",
+        "backend": "container",
+        "functions": ["word-stats-java"],
+        "recipeProfile": str(profile),
+    }
+    data.update(settings)
+
     with pytest.raises(ValueError, match="recipeProfile"):
         ScenarioConfig.model_validate(data)

@@ -33,10 +33,9 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: miciav/nanofaas
-        # nanofaas main at the CLI control-plane alignment merge.
-        # Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin, and it
-        # keeps everything that pin carried (build-metadata, the modular
-        # OpenAPI contract at /openapi.yaml, the native-image Caffeine fix).
+        # nanofaas main at the recipe v2 merge. It includes validateRecipe,
+        # container build profiles and the CLI/control-plane alignment.
+        # Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin.
         # New with this pin, in the order that matters to this repository:
         #   - the CLI dropped --namespace and grew control-plane info|contract,
         #     control-plane config get|validate|patch, fn update, fn replicas,
@@ -47,7 +46,7 @@ runs:
         #     update came back HTTP 400.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: 4605a0a8ef2eba5e3e0af5e5e056675b30fa961d
+        ref: e7914be065e844776af57fe9e449bce7f12e03c5
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 

@@ -159,6 +159,7 @@ jobs:
         if: ${{ steps.sync.outputs.nanofaas == 'true' }}
         run: |
           uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
+          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/local.yaml
           uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
           uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml --control-plane-url http://control-plane.example:30080
           # Without the ordinal: the gate is that the plan releases the control
@@ -198,6 +199,16 @@ jobs:
             grep -nE 'registry' "$provisioned_plan" >&2
             exit 1
           fi
+
+      - name: Validate the checked-in recipe profiles
+        if: ${{ steps.sync.outputs.nanofaas == 'true' }}
+        working-directory: .nanofaas-source
+        run: |
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-jvm.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-native.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-k8s-jvm.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-containerd-jvm.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/loadtest-container-jvm.yaml"
 
   smoke:
     runs-on: ubuntu-latest
