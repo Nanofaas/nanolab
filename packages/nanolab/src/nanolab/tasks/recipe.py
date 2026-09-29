@@ -5,14 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, override
+from pathlib import Path, PurePosixPath
+from typing import Any, Literal, override
 
 import yaml
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
-from sonata_tasks.gradle import GradleTask
 
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.deployment import LOCAL_REGISTRY
@@ -231,7 +231,7 @@ def read_distribution(
 
 
 class _RecipeTask(Task[RecipeDistribution]):
-    target: str
+    target: Literal["assembleRecipe", "publishRecipe"]
     published: bool
 
     def __init__(self, run: RecipeRun, *, executor: CommandTaskExecutor) -> None:
@@ -242,15 +242,17 @@ class _RecipeTask(Task[RecipeDistribution]):
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[RecipeDistribution]:
         run = self.run_config
-        command = GradleTask(
-            self.target,
+        report = run.output_dir / "distribution.json"
+        report.unlink(missing_ok=True)
+        command = CommandTask(
+            argv=recipe_command(
+                self.target,
+                recipe=str(run.recipe),
+                output=str(run.output_dir),
+                tag=run.tag,
+            ),
             executor=self.executor,
             role="host",
-            properties={
-                "recipe": str(run.recipe),
-                "recipeTag": run.tag,
-                "recipeOutput": str(run.output_dir),
-            },
             options=CommandOptions(cwd=run.source_dir),
             title=self.title,
         )
@@ -267,7 +269,7 @@ class _RecipeTask(Task[RecipeDistribution]):
         log.write_text(result.stdout + "\n" + result.stderr)
         return TaskOutcome(
             value=read_distribution(
-                run.output_dir / "distribution.json",
+                report,
                 recipe=run.recipe,
                 tag=run.tag,
                 published=self.published,
@@ -294,20 +296,53 @@ class PublishRecipeTask(_RecipeTask):
     published = True
 
 
+def recipe_command(
+    target: Literal["assembleRecipe", "publishRecipe"],
+    *,
+    recipe: str,
+    output: str,
+    tag: str,
+    containerd_maven_repository: Path | None = None,
+) -> tuple[str, ...]:
+    """Build a recipe with the selected backend dependencies."""
+    return (
+        "./gradlew",
+        target,
+        f"-Precipe={recipe}",
+        f"-PrecipeTag={tag}",
+        f"-PrecipeOutput={output}",
+        *(
+            (
+                "-PcontainerdMavenLocal=true",
+                f"-Dmaven.repo.local={containerd_maven_repository}",
+            )
+            if containerd_maven_repository is not None
+            else ()
+        ),
+        "--no-daemon",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RecipeBinding:
     """A published distribution and the selected runtime consumers."""
 
     distribution: Resource[RecipeDistribution]
     functions: dict[str, tuple[str, str]]
-    project: DockerComposeProject
     run_dir: Path
+    project: DockerComposeProject | None = None
+    target: Resource[Any] | None = None
+    remote_root: PurePosixPath | None = None
 
 
 def require_validation_distribution(
     distribution: RecipeDistribution,
     *,
     functions: tuple[tuple[str, str], ...],
+    required_modules: frozenset[str] = frozenset(
+        {"build-metadata", "container-deployment-provider"}
+    ),
+    exact_modules: bool = False,
 ) -> None:
     """Require the exact components and local registry used by container validation."""
     control_planes = [
@@ -326,10 +361,10 @@ def require_validation_distribution(
         component.kind == "service" for component in distribution.components
     ):
         raise ValueError("Recipe distribution needs one control plane and no services")
-    if not {"build-metadata", "container-deployment-provider"}.issubset(
-        distribution.modules
-    ):
+    if not required_modules.issubset(distribution.modules):
         raise ValueError("Recipe distribution lacks required control-plane modules")
+    if exact_modules and set(distribution.modules) != required_modules:
+        raise ValueError("Recipe distribution has unexpected control-plane modules")
     if any(
         not component.image.reference.startswith(f"{LOCAL_REGISTRY}/")
         for component in distribution.components
@@ -346,6 +381,10 @@ def recipe_distribution_resource(
     executor: CommandTaskExecutor,
     functions: tuple[tuple[str, str], ...],
     requires: tuple[Resource[Any], ...] = (),
+    required_modules: frozenset[str] = frozenset(
+        {"build-metadata", "container-deployment-provider"}
+    ),
+    exact_modules: bool = False,
 ) -> Resource[RecipeDistribution]:
     """Publish a recipe after prerequisites are acquired and retain its report."""
 
@@ -354,7 +393,12 @@ def recipe_distribution_resource(
         result = PublishRecipeTask(run, executor=executor).run(inputs).value
         if result is None:
             raise RuntimeError("publishRecipe produced no distribution")
-        require_validation_distribution(result, functions=functions)
+        require_validation_distribution(
+            result,
+            functions=functions,
+            required_modules=required_modules,
+            exact_modules=exact_modules,
+        )
         return result
 
     return Resource(
@@ -362,4 +406,49 @@ def recipe_distribution_resource(
         acquire=acquire,
         release=lambda _inputs, _value: None,
         requires=requires,
+    )
+
+
+def recipe_run_resource(
+    *,
+    source: Path,
+    recipe: Path,
+    run_dir: Path,
+    tag: str,
+    requires: tuple[Resource[Any], ...] = (),
+) -> Resource[RecipeRun]:
+    """Capture the selected source only when the workflow acquires it."""
+    return Resource(
+        title=f"Stage recipe {recipe.name}",
+        acquire=lambda _inputs: prepare_recipe_run(source, recipe, run_dir, tag),
+        release=lambda _inputs, _value: None,
+        requires=requires,
+    )
+
+
+def assembled_recipe_distribution_resource(
+    *,
+    run: Resource[RecipeRun],
+    executor: CommandTaskExecutor,
+    functions: tuple[tuple[str, str], ...],
+    required_modules: frozenset[str],
+    requires: tuple[Resource[Any], ...] = (),
+) -> Resource[RecipeDistribution]:
+    """Build a staged recipe and expose its checked local distribution."""
+
+    def acquire(inputs: TaskInputs) -> RecipeDistribution:
+        staged = inputs.resource(run)
+        result = AssembleRecipeTask(staged, executor=executor).run(inputs).value
+        if result is None:
+            raise RuntimeError("assembleRecipe produced no distribution")
+        require_validation_distribution(
+            result, functions=functions, required_modules=required_modules
+        )
+        return result
+
+    return Resource(
+        title="Assemble staged recipe",
+        acquire=acquire,
+        release=lambda _inputs, _value: None,
+        requires=(run, *requires),
     )

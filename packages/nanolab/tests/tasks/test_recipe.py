@@ -13,6 +13,8 @@ from nanolab.tasks.recipe import (
     AssembleRecipeTask,
     PublishRecipeTask,
     read_distribution,
+    recipe_distribution_resource,
+    require_validation_distribution,
 )
 from nanolab.workspace.recipe import RecipeRun
 
@@ -203,3 +205,116 @@ def test_report_accepts_container_function_selected_by_recipe(tmp_path: Path) ->
     distribution = read_distribution(report, recipe=recipe, tag="run-1", published=True)
 
     assert distribution.function("parser", "python").mode == "container"
+
+
+def test_kubernetes_required_modules_are_checked(tmp_path: Path) -> None:
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    data = _report(recipe, "run-1", "built")
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+    distribution = read_distribution(
+        report, recipe=recipe, tag="run-1", published=False
+    )
+    with pytest.raises(ValueError, match="modules"):
+        require_validation_distribution(
+            distribution,
+            functions=(),
+            required_modules=frozenset({"build-metadata", "k8s-deployment-provider"}),
+        )
+
+
+@pytest.mark.parametrize(
+    "modules",
+    [
+        [
+            "container-deployment-provider",
+            "autoscaler",
+            "async-queue",
+            "build-metadata",
+        ],
+        ["container-deployment-provider", "autoscaler", "build-metadata"],
+        ["container-deployment-provider", "async-queue", "build-metadata"],
+        [
+            "container-deployment-provider",
+            "autoscaler",
+            "async-queue",
+            "build-metadata",
+            "sync-queue",
+        ],
+    ],
+)
+def test_loadtest_requires_exact_modules(tmp_path: Path, modules: list[str]) -> None:
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    recipe.write_text(
+        recipe.read_text().replace(
+            "[build-metadata, container-deployment-provider]", str(modules)
+        )
+    )
+    data = _report(recipe, "run-1", "published")
+    data["modules"] = modules
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+    distribution = read_distribution(report, recipe=recipe, tag="run-1", published=True)
+    expected = frozenset(
+        {"container-deployment-provider", "autoscaler", "async-queue", "build-metadata"}
+    )
+
+    if set(modules) == expected:
+        require_validation_distribution(
+            distribution, functions=(), required_modules=expected, exact_modules=True
+        )
+    else:
+        with pytest.raises(ValueError, match="modules"):
+            require_validation_distribution(
+                distribution,
+                functions=(),
+                required_modules=expected,
+                exact_modules=True,
+            )
+
+
+def test_published_resource_accepts_exact_module_contract(tmp_path: Path) -> None:
+    resource = recipe_distribution_resource(
+        source=tmp_path,
+        recipe=tmp_path / "recipe.yaml",
+        run_dir=tmp_path / "run",
+        tag="run-1",
+        executor=_Executor(tmp_path / "report.json", {}),
+        functions=(),
+        exact_modules=True,
+    )
+
+    assert resource.title.startswith("Publish recipe")
+
+
+@pytest.mark.parametrize("change", ["tag", "profile-hash"])
+def test_published_report_rejects_stale_identity(tmp_path: Path, change: str) -> None:
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    data = _report(recipe, "run-1", "published")
+    if change == "tag":
+        data["tag"] = "prior-run"
+    else:
+        data["recipe"]["sha256"] = "prior-profile"
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match=r"tag|hash"):
+        read_distribution(report, recipe=recipe, tag="run-1", published=True)
+
+
+def test_published_report_rejects_different_selected_function(tmp_path: Path) -> None:
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    data = _report(recipe, "run-1", "published")
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+    distribution = read_distribution(report, recipe=recipe, tag="run-1", published=True)
+
+    with pytest.raises(ValueError, match="functions"):
+        require_validation_distribution(
+            distribution,
+            functions=(("word-stats", "java"),),
+        )
