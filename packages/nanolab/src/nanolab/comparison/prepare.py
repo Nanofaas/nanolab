@@ -319,7 +319,7 @@ def prepare_comparison(
                     request,
                     (command,),
                     remote_dir=stage.remote_root / "source",
-                    remote_log=stage.remote_root / "logs" / f"{key}.gradle.log",
+                    remote_log=stage.remote_root / f"{key}.gradle.log",
                     local_log=evidence_dir / "gradle.log",
                 )
             except BaseException:

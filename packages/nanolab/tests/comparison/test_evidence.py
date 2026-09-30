@@ -364,7 +364,7 @@ def resume_case(publication, tmp_path):
                 assert "-PnativeBuildMemory=4g" in argv[2]
                 assert "-PnativeParallelism=2" in argv[2]
             publications.append(key)
-            provider.files[str(stage.remote_root / "logs" / f"{key}.gradle.log")] = (
+            provider.files[str(stage.remote_root / f"{key}.gradle.log")] = (
                 "published\n"
             )
             return SimpleNamespace(return_code=0, stdout="", stderr="")
