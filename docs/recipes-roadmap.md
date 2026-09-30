@@ -60,6 +60,14 @@ le differenze reali fra backend e tipi di verifica.
    Bash, servizi e poi multiarch. Fatto quando ciascun caso ha un profilo e
    una verifica delle evidenze adatte; per multiarch usare digest e manifest,
    non un image ID locale.
+   - [x] Bash: `validate-container-bash.yaml` e scenario
+     `deployment-lifecycle-container-bash.yaml`, verificati il 30 settembre 2026
+     con Docker sull'host e NanoFaaS `e7914be0`. Recipe validata, una
+     pubblicazione, metadati, immagini, invocazione, risorse e cleanup passati.
+     Mapping condiviso `exec` → SDK recipe `bash`; nessun nuovo task.
+     Evidenze: `/tmp/nanolab-recipe-bash-e2e-20260930/`, log `.log` a lato.
+   - [ ] Servizi: profili e verifiche delle relative evidenze.
+   - [ ] Multiarch: profili, manifest e digest per piattaforma.
 3. **Affrontare soak e release.** Migrare soltanto le parti equivalenti del
    processo di build. Fatto quando restano validi gli snapshot immutabili, la
    provenienza, la firma e i contratti operativi esistenti.

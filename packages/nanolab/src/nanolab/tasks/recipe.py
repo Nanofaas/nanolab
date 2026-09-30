@@ -59,8 +59,8 @@ class RecipeDistribution:
         return self._component("control-plane", "control-plane", "java")
 
     def function(self, name: str, sdk: str) -> RecipeComponent:
-        """Find a selected function by recipe name and SDK."""
-        return self._component("function", name, sdk)
+        """Find a function, accepting catalog exec as the recipe Bash SDK."""
+        return self._component("function", name, "bash" if sdk == "exec" else sdk)
 
     def _component(self, kind: str, name: str, sdk: str) -> RecipeComponent:
         matches = [
@@ -369,7 +369,8 @@ def require_validation_distribution(
         for component in distribution.components
         if component.kind == "function"
     }
-    if selected != set(functions) or len(selected) != len(functions):
+    expected = {(name, "bash" if sdk == "exec" else sdk) for name, sdk in functions}
+    if selected != expected or len(selected) != len(functions):
         raise ValueError("Recipe distribution differs from selected functions")
     if len(control_planes) != 1 or any(
         component.kind == "service" for component in distribution.components

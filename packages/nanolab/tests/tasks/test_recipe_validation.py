@@ -436,3 +436,59 @@ def test_recipe_failure_releases_acquired_resources(
         assert deletes[0] < down[-1]
     else:
         assert not deletes
+
+
+@pytest.mark.parametrize("catalog_sdk", ["exec", "bash"])
+def test_bash_recipe_registers_published_image_for_exec_catalog(
+    tmp_path: Path, catalog_sdk: str
+) -> None:
+    from dataclasses import replace
+
+    from nanolab.tasks.recipe import require_validation_distribution
+
+    original = distribution(tmp_path)
+    function_component = replace(
+        original.components[1],
+        sdk="bash",
+        mode="container",
+        image=replace(
+            original.components[1].image,
+            reference="127.0.0.1:5000/nanofaas/bash-word-stats:run-1",
+        ),
+    )
+    control_plane = replace(
+        original.components[0],
+        image=replace(
+            original.components[0].image,
+            reference="127.0.0.1:5000/nanofaas/control-plane:run-1",
+        ),
+    )
+    value = replace(original, components=(control_plane, function_component))
+    require_validation_distribution(value, functions=(("word-stats", catalog_sdk),))
+    resource = Resource(
+        title="Bash distribution",
+        acquire=lambda _inputs: value,
+        release=lambda _inputs, _value: None,
+    )
+    executor = RecordingExecutor()
+    function = PlatformFunction(
+        name="word-stats-exec",
+        image="wrong-default:tag",
+        payload="{}",
+        build_argv=("true",),
+    )
+    RecipeFunctionRegisterTask(
+        function,
+        recipe_name="word-stats",
+        sdk=catalog_sdk,
+        distribution=resource,
+        endpoint="http://127.0.0.1:8080",
+        executor=executor,
+        role="host",
+    ).run(TaskInputs._for_resources({resource: value}, {resource}))
+    registration = executor.specs[-1]
+    payload = json.loads(registration.argv[registration.argv.index("--data") + 1])
+    assert payload["image"] == "127.0.0.1:5000/nanofaas/bash-word-stats:run-1"
+    assert payload["name"] == "word-stats-exec"
+    with pytest.raises(ValueError, match="selected functions"):
+        require_validation_distribution(value, functions=(("word-stats", "python"),))

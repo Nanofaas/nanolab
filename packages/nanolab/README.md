@@ -239,3 +239,10 @@ Native profiles compile with the host builder on the measured VM; Oracle GraalVM
 is required for G1. Profile validation and fake native tests do not establish
 successful native publication. Other load-test backends remain outside this
 comparison migration.
+
+## Bash recipe validation
+
+Run `deployment-lifecycle-container-bash.yaml` for the same local Docker
+validation cycle with Bash word-stats. The reusable recipe is
+`recipes/validate-container-bash.yaml`; the catalog calls its runtime `exec`.
+See [profile, command and evidence](recipes/README.md#bash-container-validation).

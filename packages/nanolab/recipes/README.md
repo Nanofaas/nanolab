@@ -7,6 +7,7 @@ this directory.
 | Profile | Control plane | Function | Purpose |
 | --- | --- | --- | --- |
 | `validate-container-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats | JVM container lifecycle validation |
+| `validate-container-bash.yaml` | JVM, container provider, build metadata | Bash word-stats | Bash container lifecycle validation |
 | `validate-container-native.yaml` | Native container builder, container provider, build metadata | Java native word-stats | Native container lifecycle validation |
 | `validate-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Kubernetes lifecycle validation on Minikube or Multipass |
 | `validate-containerd-jvm.yaml` | JVM, containerd provider, build metadata | Java JVM word-stats | Rootless containerd lifecycle validation on Multipass |
@@ -16,8 +17,7 @@ All profiles use the repository `127.0.0.1:5000/nanofaas` and single-platform
 Docker images. The native profile compiles the control plane and word-stats
 inside the container builder. The Kubernetes profile uses `IfNotPresent` so
 Minikube can run images loaded from the host; Multipass publishes images to its
-VM-local registry. These profiles do not cover services, bash functions, or
-multi-platform publication.
+VM-local registry. Services and multi-platform publication remain uncovered.
 
 ## Use directly
 
@@ -133,3 +133,24 @@ Native comparison profiles use the host builder on the measured VM. G1 requires
 Oracle GraalVM and records effective JFR monitoring. These profiles have passed
 `validateRecipe`; native publication and the complete native matrix remain to be
 verified. See [runtime comparison usage and evidence](../README.md#recipe-runtime-comparison).
+
+## Bash container validation
+
+`validate-container-bash.yaml` publishes the JVM control plane and the existing
+Bash word-stats image. `deployment-lifecycle-container-bash.yaml` selects catalog
+function `word-stats-exec`; NanoLab matches catalog runtime `exec` to recipe SDK
+`bash` when checking and reading the distribution. Invocation settings remain
+those of the catalog function.
+
+```bash
+export NANOFAAS_ROOT=/path/to/nanofaas
+./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-bash.yaml \
+  --run-dir /tmp/nanolab-bash-my-run
+```
+
+The workflow uses the same publication, registration, metadata/image checks,
+resource inspection and cleanup as JVM container validation. It runs Docker on
+the host and needs no VM. The CI recipe validation step includes this profile.
+The Docker cycle passed on 30 September 2026 against NanoFaaS `e7914be0`;
+evidence is in `/tmp/nanolab-recipe-bash-e2e-20260930/`, with the execution log
+at `/tmp/nanolab-recipe-bash-e2e-20260930.log`.
