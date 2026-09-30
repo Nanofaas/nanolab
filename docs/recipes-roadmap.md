@@ -73,7 +73,17 @@ le differenze reali fra backend e tipi di verifica.
        metadati, tre immagini, invocazioni, output echo esatto, ispezione dei
        container e cleanup passati. Nessun nuovo task o campo di scenario.
        Evidenze: `/tmp/nanolab-recipe-services-e2e-20260930/`, log `.log` a lato.
-     - [ ] Servizi native e selezione della build indipendente dal control plane.
+     - [x] Servizi native e selezione della build indipendente dal control plane:
+       profili `validate-container-jvm-service-native.yaml` e
+       `validate-container-native-service-jvm.yaml`, con scenari omonimi
+       `deployment-lifecycle-container-*`. Entrambi i cicli Docker locali
+       sono passati il 30 settembre 2026 su NanoFaaS `e7914be0`, mantenendo
+       word-stats JVM: una pubblicazione per ciclo, modalità indipendenti,
+       metadati, tre immagini, invocazioni, output echo esatto, ispezione e
+       cleanup. Builder container Community, Serial GC e ottimizzazione 3.
+       Evidenze: `/tmp/nanolab-jvm-service-native-e2e-20260930/` e
+       `/tmp/nanolab-native-service-jvm-e2e-20260930/`, log `.log` a lato.
+       Nessuna modifica ai task; la matrice runtime native resta da verificare.
      - [ ] Servizi Dockerfile, a partire dal watchdog.
    - [ ] Multiarch: profili, manifest e digest per piattaforma.
 3. **Affrontare soak e release.** Migrare soltanto le parti equivalenti del

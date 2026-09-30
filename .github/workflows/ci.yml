@@ -207,6 +207,8 @@ jobs:
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-bash.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-services-jvm.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-jvm-service-native.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-native-service-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-native.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-k8s-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-containerd-jvm.yaml"

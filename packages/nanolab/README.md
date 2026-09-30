@@ -254,3 +254,8 @@ alongside JVM word-stats with Docker on the host. Java services selected by the
 recipe use the same managed registration and cleanup cycle as functions, with
 their own distribution component and image checks. See
 [profile, command and evidence](recipes/README.md#java-service-container-validation).
+
+The mixed scenarios `deployment-lifecycle-container-jvm-service-native.yaml`
+and `deployment-lifecycle-container-native-service-jvm.yaml` exercise independent
+control-plane and service modes. See
+[mixed build profiles and commands](recipes/README.md#independent-service-build-modes).

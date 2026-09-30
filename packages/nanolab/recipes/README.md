@@ -9,6 +9,8 @@ this directory.
 | `validate-container-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats | JVM container lifecycle validation |
 | `validate-container-bash.yaml` | JVM, container provider, build metadata | Bash word-stats | Bash container lifecycle validation |
 | `validate-container-services-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats and warm-echo service | Managed Java service lifecycle validation |
+| `validate-container-jvm-service-native.yaml` | JVM, container provider, build metadata | Java JVM word-stats and native warm-echo | Native service with a JVM control plane |
+| `validate-container-native-service-jvm.yaml` | Native container builder, container provider, build metadata | Java JVM word-stats and JVM warm-echo | JVM service with a native control plane |
 | `validate-container-native.yaml` | Native container builder, container provider, build metadata | Java native word-stats | Native container lifecycle validation |
 | `validate-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Kubernetes lifecycle validation on Minikube or Multipass |
 | `validate-containerd-jvm.yaml` | JVM, containerd provider, build metadata | Java JVM word-stats | Rootless containerd lifecycle validation on Multipass |
@@ -18,8 +20,9 @@ All profiles use the repository `127.0.0.1:5000/nanofaas` and single-platform
 Docker images. The native profile compiles the control plane and word-stats
 inside the container builder. The Kubernetes profile uses `IfNotPresent` so
 Minikube can run images loaded from the host; Multipass publishes images to its
-VM-local registry. The services profile covers JVM warm-echo; Dockerfile services,
-native services and multi-platform publication remain to be verified.
+VM-local registry. The services profiles cover JVM and native warm-echo with
+independent control-plane modes. Dockerfile services and multi-platform
+publication remain to be verified.
 
 ## Use directly
 
@@ -185,5 +188,39 @@ container exists. CI validates the reusable profile with `validateRecipe`.
 The Docker cycle passed on 30 September 2026 against NanoFaaS `e7914be0`.
 Evidence is in `/tmp/nanolab-recipe-services-e2e-20260930/`, including
 `image-service-warm-echo.json`; the log is
-`/tmp/nanolab-recipe-services-e2e-20260930.log`. Native services and the
-Dockerfile watchdog require separate verification.
+`/tmp/nanolab-recipe-services-e2e-20260930.log`. Mixed JVM/native modes are
+covered below; the Dockerfile watchdog requires separate verification.
+
+## Independent service build modes
+
+The two mixed profiles keep word-stats on the JVM and choose the control plane
+and warm-echo modes independently. Native components use `builder: container`,
+so the host needs Docker with BuildKit and does not need a local GraalVM.
+
+```bash
+export NANOFAAS_ROOT=/path/to/nanofaas
+./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-jvm-service-native.yaml \
+  --run-dir /tmp/nanolab-jvm-service-native-my-run
+./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-native-service-jvm.yaml \
+  --run-dir /tmp/nanolab-native-service-jvm-my-run
+```
+
+Run these scenarios sequentially: they use the existing local validation ports
+and Docker network. The same tasks publish the recipe, compare each component's
+reported mode to the profile, verify the running image IDs, invoke both managed
+workloads, check warm-echo's exact output, inspect containers and clean up.
+CI runs `validateRecipe` on both reusable profiles.
+
+Both Docker cycles passed on 30 September 2026 against the clean NanoFaaS
+revision `e7914be0`. Each published one recipe and verified metadata, all three
+image IDs, invocations, exact echo output, container inspection and cleanup.
+`distribution.json` records the JVM/native modes independently. Native
+components record Community GraalVM, Serial GC, optimization 3 and the
+container builder; the control-plane metadata reports JVM/C2 or native/3
+respectively.
+
+Evidence roots are `/tmp/nanolab-jvm-service-native-e2e-20260930/` and
+`/tmp/nanolab-native-service-jvm-e2e-20260930/`, with matching `.log` files
+beside them. No NanoLab task implementation changes were needed for these
+profiles. This verification does not cover the native runtime comparison
+matrix or Oracle G1 builds.
