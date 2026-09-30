@@ -11,7 +11,14 @@ from typing import Any
 
 import yaml
 
-from nanolab.tasks.recipe import _object, _string, _verify_recipe_identity
+from nanolab.tasks.recipe import (
+    RecipeComponent,
+    RecipeDistribution,
+    RecipeImage,
+    _object,
+    _string,
+    _verify_recipe_identity,
+)
 
 MULTIARCH_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
 
@@ -174,4 +181,49 @@ def read_multiarch_distribution(
     _verify_recipe_identity(recipe, tag, modules, components)
     return MultiarchDistribution(
         report, expected_sha, tag, source, tuple(modules), tuple(components)
+    )
+
+
+def project_host_distribution(
+    distribution: MultiarchDistribution,
+    *,
+    platform: str,
+    configs: dict[str, dict[str, str]],
+) -> RecipeDistribution:
+    """Adapt verified host artifacts to existing runtime consumers."""
+    if platform not in MULTIARCH_PLATFORMS:
+        raise ValueError("Unsupported host platform")
+    components = []
+    for component in distribution.components:
+        image = component.image
+        if image.reference not in configs or set(configs[image.reference]) != set(
+            image.platforms
+        ):
+            raise ValueError("Incomplete verified platform configuration map")
+        manifest = sha256_digest(image.manifests[platform])
+        config = sha256_digest(configs[image.reference][platform])
+        components.append(
+            RecipeComponent(
+                component.kind,
+                component.name,
+                component.sdk,
+                component.mode,
+                RecipeImage(
+                    image.reference.rsplit(":", 1)[0] + "@" + manifest,
+                    config,
+                    "published",
+                    manifest,
+                ),
+                component.variant,
+                component.optimization,
+                component.native,
+            )
+        )
+    return RecipeDistribution(
+        distribution.report,
+        distribution.recipe_sha256,
+        distribution.tag,
+        distribution.source,
+        distribution.modules,
+        tuple(components),
     )
