@@ -132,6 +132,26 @@ class MultiarchDistribution:
 def read_multiarch_distribution(
     report: Path, *, recipe: Path, tag: str, expected_source: dict[str, object]
 ) -> MultiarchDistribution:
+    """Keep the two-platform validation contract without provenance unchanged."""
+    return read_buildx_distribution(
+        report,
+        recipe=recipe,
+        tag=tag,
+        expected_source=expected_source,
+        platforms=MULTIARCH_PLATFORMS,
+        provenance=False,
+    )
+
+
+def read_buildx_distribution(
+    report: Path,
+    *,
+    recipe: Path,
+    tag: str,
+    expected_source: dict[str, object],
+    platforms: frozenset[str],
+    provenance: bool,
+) -> MultiarchDistribution:
     """Validate publication identity without requiring or inventing local IDs."""
     try:
         data = _object(
@@ -142,14 +162,17 @@ def read_multiarch_distribution(
         raise ValueError(f"Cannot read multiarch distribution {report}") from error
     profile = _object(yaml.safe_load(recipe.read_text()), "profile")
     registry = _object(profile.get("registry"), "registry")
-    platforms = registry.get("platforms")
+    selected_platforms = registry.get("platforms")
     if (
-        not isinstance(platforms, list)
-        or len(platforms) != 2
-        or set(platforms) != MULTIARCH_PLATFORMS
+        not platforms
+        or not platforms.issubset(MULTIARCH_PLATFORMS)
+        or not isinstance(selected_platforms, list)
+        or not all(isinstance(item, str) for item in selected_platforms)
+        or len(selected_platforms) != len(platforms)
+        or set(selected_platforms) != platforms
     ):
-        raise ValueError("Multiarch recipe requires linux/amd64 and linux/arm64")
-    if registry.get("provenance", False) is not False:
+        raise ValueError("Multiarch recipe platforms differ from required platforms")
+    if registry.get("provenance", False) is not provenance:
         raise ValueError("Multiarch recipe provenance is not supported")
     if type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 2:
         raise ValueError("Unsupported multiarch distribution schemaVersion")
@@ -192,7 +215,8 @@ def read_multiarch_distribution(
         selected = image.get("platforms")
         if (
             not isinstance(selected, list)
-            or len(selected) != 2
+            or not all(isinstance(item, str) for item in selected)
+            or len(selected) != len(platforms)
             or set(selected) != set(platforms)
         ):
             raise ValueError("Multiarch image platforms differ from recipe")
@@ -201,7 +225,7 @@ def read_multiarch_distribution(
             raise ValueError("Multiarch manifest platforms differ from recipe")
         if (
             image.get("status") != "published"
-            or image.get("provenance") is not False
+            or image.get("provenance") is not provenance
             or "id" in image
         ):
             raise ValueError(
@@ -222,7 +246,7 @@ def read_multiarch_distribution(
                         platform: sha256_digest(digest)
                         for platform, digest in manifests.items()
                     },
-                    False,
+                    provenance,
                 ),
                 variant=item.get("variant"),
                 optimization=item.get("optimization"),

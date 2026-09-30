@@ -88,13 +88,13 @@ Expected result: all required capabilities demonstrated, with the concrete mecha
 
 **Files:** Create `tasks/soak/recipe_registry.py` and `tests/soak/test_recipe_registry.py`; share existing `tasks/recipe_registry.py` byte-fetching helpers where compatible without changing its multiarch contract.
 
-**Interfaces:** Define frozen `VerifiedSoakImage` with `publication_digest: str`, `manifest_digest: str`, `config_digest: str`, `provenance: tuple[dict[str, object], ...]`. Add `verify_soak_registry(distribution: MultiarchDistribution, *, platform: str, evidence_dir: Path, fetch: RegistryFetch) -> dict[str, VerifiedSoakImage]`, keyed by the existing soak role names.
+**Interfaces:** Define frozen `VerifiedSoakImage` with `publication_digest: str`, `manifest_digest: str`, `config_digest: str`, `provenance: tuple[dict[str, object], ...]`. Add `verify_soak_registry(distribution: MultiarchDistribution, *, platform: str, evidence_dir: Path, fetch: RegistryFetch, artifact_limit_bytes: int = 16 * 1024 * 1024) -> dict[str, VerifiedSoakImage]`, keyed by the existing soak role names.
 
-- [ ] Write `test_attested_publication_selects_only_executable_manifest`: assert selected host platform/config digest and attestation-to-manifest binding; retain index identity separately. Include direct executable manifests only when independently verifiable provenance still meets the required contract.
-- [ ] Write parameterized `test_invalid_publication_fails_before_runtime` covering wrong byte hash, duplicate JSON keys, descriptor size/type, platform/CPU variant, duplicate executable descriptors, missing/foreign attestation, wrong subject, changed tag and absent material evidence. Require rejection of missing/wrong maximum-provenance contents through existing collector checks.
-- [ ] Run the new test file and confirm failures. Implement content-byte verification for index, manifest, configuration and attestation blobs; persist raw verified objects and their identity map. Accept only local registry references; preserve existing timeout/no-proxy/no-redirect restrictions and evidence quotas.
-- [ ] Run `uv run --locked --package nanolab pytest packages/nanolab/tests/soak/test_recipe_registry.py packages/nanolab/tests/tasks/test_recipe_registry.py -q`; expect all pass and the previous multiarch descriptor restrictions unchanged.
-- [ ] Commit Task 3 files: `Verify attested recipe images for soak`.
+- [x] Write `test_attested_publication_selects_only_executable_manifest`: assert selected host platform/config digest and attestation-to-manifest binding; retain index identity separately. Include direct executable manifests only when independently verifiable provenance still meets the required contract.
+- [x] Write parameterized `test_invalid_publication_fails_before_runtime` covering wrong byte hash, duplicate JSON keys, descriptor size/type, platform/CPU variant, duplicate executable descriptors, missing/foreign attestation, wrong subject, changed tag and absent material evidence. Require rejection of missing/wrong maximum-provenance contents through existing collector checks.
+- [x] Run the new test file and confirm failures. Implement content-byte verification for index, manifest, configuration and attestation blobs; persist raw verified objects and their identity map. Accept only local registry references; preserve existing timeout/no-proxy/no-redirect restrictions and evidence quotas.
+- [x] Run `uv run --locked --package nanolab pytest packages/nanolab/tests/soak/test_recipe_registry.py packages/nanolab/tests/tasks/test_recipe_registry.py -q`; expect all pass and the previous multiarch descriptor restrictions unchanged.
+- [x] Commit Task 3 files: `Verify attested recipe images for soak`.
 
 ## Task 4: Publish once and preserve observed build receipts
 
