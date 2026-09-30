@@ -14,33 +14,53 @@ pay for a fresh k3s and would also destroy the images the prepare phase built.
 
 from __future__ import annotations
 
+import json
+import subprocess
 import threading
-from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
+from uuid import uuid4
 
 import typer
 from sonata_engine.workflow.context import bind_workflow_sink
-from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
+from sonata_tasks.vm.ports import VmCommandProvider
 
-from nanolab.cli.execution import build_role_bindings
 from nanolab.cli.progress import ConsoleProgressSink
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
+from nanolab.comparison.evidence import require_recorded_publications
+from nanolab.comparison.manifest import (
+    ComparisonManifest,
+    capture_comparison_inputs,
+    new_comparison_manifest,
+    read_comparison_manifest,
+    require_matching_inputs,
+    write_comparison_manifest,
+)
 from nanolab.comparison.matrix import (
     ComparisonCell,
     build_matrix,
     pending,
-    write_manifest,
 )
-from nanolab.comparison.prepare import prepare_operations, prepare_workflow
+from nanolab.comparison.prepare import (
+    comparison_remote_command,
+    leftover_cleanup_operations,
+    prepare_comparison,
+    stage_comparison,
+)
+from nanolab.comparison.profiles import (
+    COMPARISON_FUNCTIONS,
+    PreparedComparison,
+    comparison_profiles,
+)
+from nanolab.comparison.target import read_comparison_target, require_comparison_target
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
+from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
 from nanolab.plans.functions import resolve_function
-from nanolab.plans.runtime_comparison import COMPARISON_MODULES
-from nanolab.tasks.components.bootstrap import remote_project_dir
-from nanolab.tasks.deployment import LOCAL_REGISTRY
 from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
+from nanolab.tasks.recipe_remote import remote_recipe_root
+from nanolab.tasks.vm.models import VmRequest
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
 
@@ -81,44 +101,31 @@ def _heartbeat(summary: str, interval: float = HEARTBEAT_SECONDS) -> Iterator[No
 
 
 def _run_prepare(
-    scenario_config: ScenarioConfig,
-    environment_config: EnvironmentConfig,
     *,
-    variants: tuple[str, ...],
-    repo_root: Path,
-    tool_root: Path | None,
-    bindings: object,
-    build_memory: str | None,
-    parallelism: int | None,
-) -> None:
-    """Compile the functions and every control-plane build, on the VM, once."""
-    functions = tuple(
-        resolve_function(
-            scenario_config, key, source_root=repo_root, tool_root=tool_root
-        )
-        for key in scenario_config.functions
-    )
-    operations = prepare_operations(
-        functions=functions,
-        variants=resolve_variants(variants),
-        registry=LOCAL_REGISTRY,
-        modules=",".join(COMPARISON_MODULES),
-        build_memory=build_memory,
-        parallelism=parallelism,
-    )
-    workflow = prepare_workflow(
-        operations,
-        executor=RoleBoundCommandTaskExecutor(bindings),  # type: ignore[arg-type]
-        # Said rather than inherited: the executor defaults to the checkout only
-        # on multipass, and to the home directory on Azure and Proxmox.
-        remote_dir=remote_project_dir(vm_request_for_role(environment_config, "stack")),
-    )
-    # log_lines=True because this phase is where the long commands live: an
-    # image build reports its own progress and there is nothing else to read it.
-    # The heartbeat stays as the backstop for a step that prints nothing at all —
-    # a quiet minute is then the only thing separating "working" from "dead".
+    source: Path,
+    profiles: Mapping[str, Path],
+    root: Path,
+    manifest: ComparisonManifest,
+    provider: VmCommandProvider,
+    request: VmRequest,
+) -> PreparedComparison:
+    """Stage one source and publish verified recipes with progress and heartbeat."""
     with bind_workflow_sink(ConsoleProgressSink(log_lines=True)), _heartbeat("prepare"):
-        _ = workflow.run()
+        stage = stage_comparison(
+            source=source,
+            profiles=profiles,
+            root=root,
+            tag=str(manifest.identity["tag"]),
+            provider=provider,
+            request=request,
+        )
+        return prepare_comparison(
+            stage=stage,
+            manifest=manifest,
+            root=root,
+            provider=provider,
+            request=request,
+        )
 
 
 # One retry, not more. A cell is safe to re-run — it has produced no summary
@@ -142,12 +149,16 @@ def _run_cell(
     environment_config: EnvironmentConfig,
     paths: object,
     root: Path,
+    prepared: PreparedComparison,
+    before_attempt: Callable[[], None] | None = None,
 ) -> None:
     """Run one cell, retrying once if the attempt dies rather than fails."""
     from nanolab.cli.product import _execute_workflow, _prepare_run
 
     cell_dir = cell.run_dir(root)
     for attempt in range(1, CELL_ATTEMPTS + 1):
+        if before_attempt is not None:
+            before_attempt()
         lifetime = ExitStack()
         try:
             sink, *_rest = _prepare_run(
@@ -179,6 +190,8 @@ def _run_cell(
                 release_provider=None,
                 release_journal=None,
                 resume=False,
+                prepared_comparison=prepared,
+                provision=False,
             )
             return
         except Exception as error:
@@ -253,56 +266,113 @@ def register(app: typer.Typer) -> None:
 
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
-        if scenario_config.load_profile not in ("comparison", "mixed"):
+        if (
+            scenario_config.workflow != "loadtest"
+            or scenario_config.backend != "k8s"
+            or scenario_config.load_profile not in ("comparison", "mixed")
+        ):
             raise typer.BadParameter(
-                "compare requires a scenario with loadProfile: comparison or mixed"
+                "compare requires a Kubernetes comparison or mixed loadtest"
+            )
+        if environment_config.provider == "local":
+            raise typer.BadParameter("compare requires a VM environment")
+        if (
+            set(scenario_config.functions) != set(COMPARISON_FUNCTIONS)
+            or scenario_config.control_plane_image
+            or scenario_config.function_images
+            or scenario_config.recipe_profile
+        ):
+            raise typer.BadParameter(
+                "compare requires the Java/JavaScript function pair "
+                "without prebuilt image overrides"
+            )
+        if repetitions < 1 or (
+            native_parallelism is not None and native_parallelism < 1
+        ):
+            raise typer.BadParameter(
+                "repetitions and native parallelism must be positive"
             )
         selected = tuple(part.strip() for part in variants.split(",") if part.strip())
-        resolve_variants(selected)  # fail here, not forty minutes into the matrix
         paths = default_tool_paths()
-        root = run_dir or paths.runs_dir / "comparison"
-        cells = build_matrix(resolve_variants(selected), repetitions)
-        write_manifest(
-            root,
-            cells,
-            functions=tuple(scenario_config.functions),
-            registry=LOCAL_REGISTRY,
-            regime={
-                # Tutti i limiti, non la sola CPU: il braccio di memoria di
-                # agosto ha misurato tre tetti diversi, e un archivio che non
-                # dice sotto quale tetto e' stata presa una cella non e'
-                # rileggibile.
-                "control_plane_resources": (
-                    scenario_config.resources[CONTROL_PLANE_RESOURCES].model_dump(
-                        by_alias=True, exclude_none=True
-                    )
-                    if CONTROL_PLANE_RESOURCES in scenario_config.resources
-                    else None
-                ),
-                "load_scale": scenario_config.load_scale,
-                "load_vus": scenario_config.load_vus,
-                "load_profile": scenario_config.load_profile,
-                "backend": scenario_config.backend,
-                "scenario": str(scenario),
-            },
-        )
+        try:
+            profiles = comparison_profiles(paths.tool_root, selected)
+            cells = build_matrix(resolve_variants(selected), repetitions)
+            root = (run_dir or paths.runs_dir / "comparison").resolve()
+            manifest = read_comparison_manifest(root)
+            new_run = manifest is None
+            tag = (
+                f"recipe-{uuid4().hex}"
+                if manifest is None
+                else str(manifest.identity["tag"])
+            )
+            nanolab_root = Path(
+                subprocess.check_output(
+                    ("git", "rev-parse", "--show-toplevel"),
+                    cwd=paths.tool_root,
+                    text=True,
+                ).strip()
+            )
 
-        # One cluster and one registry for the whole matrix. Tearing down between
-        # cells would make each one pay for a fresh k3s and would destroy the
-        # images the prepare phase just built.
-        with _provisioning_context(
-            scenario_config, environment_config, paths, True
-        ) as _:
-            bindings, _fetcher = build_role_bindings(environment_config)
-            _run_prepare(
-                scenario_config,
-                environment_config,
-                variants=selected,
-                repo_root=paths.nanofaas_root,
-                tool_root=paths.tool_root,
-                bindings=bindings,
-                build_memory=native_build_memory,
-                parallelism=native_parallelism,
+            def capture() -> dict[str, object]:
+                return capture_comparison_inputs(
+                    scenario=_scenario(scenario),
+                    environment=_environment(environment),
+                    nanofaas_root=paths.nanofaas_root,
+                    nanolab_root=nanolab_root,
+                    profiles=profiles,
+                    variants=selected,
+                    repetitions=repetitions,
+                    tag=tag,
+                    build_memory=native_build_memory,
+                    parallelism=native_parallelism,
+                )
+
+            inputs = capture()
+            if manifest is not None:
+                require_matching_inputs(manifest, inputs)
+                if manifest.target is None:
+                    raise ValueError(
+                        "Comparison manifest has no original target identity; "
+                        "use a new run directory"
+                    )
+            else:
+                manifest = new_comparison_manifest(inputs, cells)
+                write_comparison_manifest(root, manifest)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        provider = provider_for_environment(environment_config, paths.nanofaas_root)
+        requests = {
+            role: vm_request_for_role(environment_config, role, loadtest=True)
+            for role in ("stack", "loadgen")
+        }
+        request = requests["stack"]
+        provisioning = (
+            _provisioning_context(scenario_config, environment_config, paths, True)
+            if new_run
+            else nullcontext()
+        )
+        with provisioning:
+            target = read_comparison_target(provider, requests)
+            if new_run:
+                manifest.target = target
+                (root / "prepare").mkdir(parents=True, exist_ok=True)
+                (root / "prepare/target.json").write_text(
+                    json.dumps(target, indent=2) + "\n"
+                )
+                write_comparison_manifest(root, manifest)
+            else:
+                assert manifest.target is not None
+                require_comparison_target(manifest.target, target)
+                require_recorded_publications(
+                    manifest=manifest, provider=provider, request=request, root=root
+                )
+            prepared = _run_prepare(
+                source=paths.nanofaas_root,
+                profiles=profiles,
+                root=root,
+                manifest=manifest,
+                provider=provider,
+                request=request,
             )
             todo = cells if fresh else pending(cells, root)
             if len(todo) < len(cells):
@@ -310,6 +380,24 @@ def register(app: typer.Typer) -> None:
                     f"resuming: {len(cells) - len(todo)} of {len(cells)} cells "
                     "already have results"
                 )
+
+            def before_attempt() -> None:
+                require_matching_inputs(manifest, capture())
+                require_comparison_target(
+                    target, read_comparison_target(provider, requests)
+                )
+                names = [
+                    resolve_function(
+                        scenario_config,
+                        key,
+                        source_root=paths.nanofaas_root,
+                        tool_root=paths.tool_root,
+                    ).name
+                    for key in scenario_config.functions
+                ]
+                for operation in leftover_cleanup_operations(names):
+                    _ = comparison_remote_command(provider, request, operation.argv)
+
             for index, cell in enumerate(todo, start=1):
                 typer.echo(f"[{index}/{len(todo)}] {cell.label}")
                 _run_cell(
@@ -320,15 +408,19 @@ def register(app: typer.Typer) -> None:
                     environment_config=environment_config,
                     paths=paths,
                     root=root,
+                    prepared=prepared,
+                    before_attempt=before_attempt,
                 )
-        # Written after the cells, outside the provisioning context: the report
-        # reads the run directories and nothing else, so it survives a cluster
-        # that has already gone away — and a matrix interrupted partway through
-        # still renders from whatever cells did finish.
+            owned = remote_recipe_root(request, tag)
+            if prepared.remote_source != owned / "source":
+                raise ValueError(
+                    "Comparison cleanup source is outside its owned staging"
+                )
+            _ = comparison_remote_command(
+                provider, request, ("rm", "-rf", "--", str(owned))
+            )
         report = WriteComparisonReport(
-            task_id="",
-            title="Control-plane build comparison",
-            root=root,
+            task_id="", title="Control-plane build comparison", root=root
         ).run()
         typer.echo(f"matrix complete: {root}")
         typer.echo(f"report: {report}")

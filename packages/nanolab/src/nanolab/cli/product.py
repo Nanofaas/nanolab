@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 from contextlib import ExitStack, nullcontext, suppress
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -55,6 +56,7 @@ from nanolab.cli.vm_provider import (
     provider_for_environment,
     vm_request_for_role,
 )
+from nanolab.comparison.profiles import PreparedComparison
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
@@ -192,6 +194,7 @@ def _workflow(
     prometheus_url: str = _LOCAL_PROMETHEUS_URL,
     run_dir: Path | None = None,
     dry_run: bool = False,
+    prepared_comparison: PreparedComparison | None = None,
 ):
     paths = default_tool_paths()
     if (
@@ -202,7 +205,15 @@ def _workflow(
         run_dir = paths.runs_dir / (
             "recipe-preview" if dry_run else f"recipe-{uuid4().hex}"
         )
-    remote_project_root = None
+    if prepared_comparison is not None and (
+        scenario.workflow != "loadtest" or not is_runtime_comparison(scenario)
+    ):
+        raise ValueError("prepared comparison can only be used by runtime comparison")
+    remote_project_root = (
+        str(prepared_comparison.remote_source)
+        if prepared_comparison is not None
+        else None
+    )
     if (
         scenario.workflow == "validate"
         and scenario.backend in {"k8s", "containerd"}
@@ -294,6 +305,8 @@ def _workflow(
         if is_runtime_comparison(scenario)
         else build_loadtest_plan
     )
+    if prepared_comparison is not None:
+        builder = partial(build_runtime_comparison_plan, prepared=prepared_comparison)
     return builder(
         scenario,
         environment,
@@ -673,9 +686,22 @@ def _build_run_workflow(
     control_plane_url: str | None,
     prometheus_url: str | None,
     effective_run_dir: Path | None,
+    prepared_comparison: PreparedComparison | None = None,
 ) -> SonataWorkflow:
     if release_request is not None:
         return build_release_workflow(release_request, provider=release_provider)
+    if prepared_comparison is not None:
+        return cast(
+            SonataWorkflow,
+            _workflow(
+                scenario_config,
+                environment_config,
+                control_plane_url=control_plane_url,
+                prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
+                run_dir=effective_run_dir,
+                prepared_comparison=prepared_comparison,
+            ),
+        )
     return cast(
         SonataWorkflow,
         _workflow(
@@ -739,16 +765,17 @@ def _execute_workflow(
     release_provider: object | None,
     release_journal: JournalConfig | None,
     resume: bool,
+    prepared_comparison: PreparedComparison | None = None,
+    provision: bool = True,
 ) -> None:
     # Command output routing (SubprocessShell._emit_output) reads the
     # same contextvar, so one bind covers the whole execution layer.
     with bind_workflow_sink(sink):
         require_recipe_environment(scenario_config, environment_config)
-        provisioning = _provisioning_context(
-            scenario_config,
-            environment_config,
-            paths,
-            keep,
+        provisioning = (
+            _provisioning_context(scenario_config, environment_config, paths, keep)
+            if provision
+            else nullcontext()
         )
         with provisioning, ExitStack() as forwarding:
             if scenario_config.workflow == "loadtest":
@@ -767,6 +794,11 @@ def _execute_workflow(
                 control_plane_url=control_plane_url,
                 prometheus_url=prometheus_url,
                 effective_run_dir=effective_run_dir,
+                **(
+                    {"prepared_comparison": prepared_comparison}
+                    if prepared_comparison is not None
+                    else {}
+                ),
             )
             sonata_workflow.keep = keep
             selection = Selection(only=only, start=start, until=until)
