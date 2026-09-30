@@ -151,7 +151,7 @@ def test_container_recipe_services_join_existing_validation_cycle(
 @pytest.mark.parametrize(
     ("entries", "message"),
     [
-        ([{"name": "watchdog", "sdk": "dockerfile"}], "Java invocation"),
+        ([{"name": "unsupported", "sdk": "dockerfile"}], "Java invocation"),
         ([{"name": "missing", "sdk": "java"}], "lacks function.yaml"),
         ([{"name": "../warm-echo", "sdk": "java"}], "simple component name"),
         ([{"name": "warm-echo", "sdk": "java"}] * 2, "unique registration"),
@@ -172,3 +172,38 @@ def test_invalid_recipe_service_fails_before_provisioning(
             source_root=Path(os.environ["NANOFAAS_ROOT"]),
             tool_root=Path(__file__).resolve().parents[2],
         )
+
+
+def test_watchdog_recipe_uses_artifact_probe_instead_of_registration(
+    tmp_path: Path,
+) -> None:
+    import yaml
+
+    base = Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
+    data = yaml.safe_load(base.read_text())
+    data["services"] = [
+        {"name": "watchdog", "sdk": "dockerfile", "container": {"image": "watchdog"}}
+    ]
+    profile = tmp_path / "watchdog.yaml"
+    profile.write_text(yaml.safe_dump(data))
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": "container",
+            "functions": ["word-stats-java"],
+            "recipeProfile": str(profile),
+        }
+    )
+    executor = RecordingExecutor()
+    workflow = build_validate_plan(
+        config,
+        RoleBindings({"host": executor}),
+        repo_root=Path(os.environ["NANOFAAS_ROOT"]),
+        tool_root=Path(__file__).resolve().parents[2],
+        run_dir=tmp_path / "run",
+    )
+    titles = [step.task.title for step in workflow.compile().tasks]
+    assert "Verify recipe watchdog artifact" in titles
+    assert "Invoke word-stats-java" in titles
+    assert not any(title in {"Acquire watchdog", "Invoke watchdog"} for title in titles)
+    assert not executor.seen

@@ -11,6 +11,7 @@ this directory.
 | `validate-container-services-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats and warm-echo service | Managed Java service lifecycle validation |
 | `validate-container-jvm-service-native.yaml` | JVM, container provider, build metadata | Java JVM word-stats and native warm-echo | Native service with a JVM control plane |
 | `validate-container-native-service-jvm.yaml` | Native container builder, container provider, build metadata | Java JVM word-stats and JVM warm-echo | JVM service with a native control plane |
+| `validate-container-watchdog.yaml` | JVM, container provider, build metadata | Java JVM word-stats and Dockerfile watchdog | Published watchdog artifact validation |
 | `validate-container-native.yaml` | Native container builder, container provider, build metadata | Java native word-stats | Native container lifecycle validation |
 | `validate-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Kubernetes lifecycle validation on Minikube or Multipass |
 | `validate-containerd-jvm.yaml` | JVM, containerd provider, build metadata | Java JVM word-stats | Rootless containerd lifecycle validation on Multipass |
@@ -21,8 +22,8 @@ Docker images. The native profile compiles the control plane and word-stats
 inside the container builder. The Kubernetes profile uses `IfNotPresent` so
 Minikube can run images loaded from the host; Multipass publishes images to its
 VM-local registry. The services profiles cover JVM and native warm-echo with
-independent control-plane modes. Dockerfile services and multi-platform
-publication remain to be verified.
+independent control-plane modes, and the watchdog profile checks the Dockerfile
+artifact. Multi-platform publication remains to be verified.
 
 ## Use directly
 
@@ -175,8 +176,8 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 ```
 
 This support is limited to local Docker `validate` runs and Java services with
-a `DEPLOYMENT` invocation manifest. Unsupported SDKs, missing manifests and
-conflicting registration names are rejected. Services are registered through
+a `DEPLOYMENT` invocation manifest. Missing manifests and conflicting
+registration names are rejected. Java services are registered through
 the ordinary function API; component selection and image evidence retain
 their recipe kind `service`.
 
@@ -189,7 +190,8 @@ The Docker cycle passed on 30 September 2026 against NanoFaaS `e7914be0`.
 Evidence is in `/tmp/nanolab-recipe-services-e2e-20260930/`, including
 `image-service-warm-echo.json`; the log is
 `/tmp/nanolab-recipe-services-e2e-20260930.log`. Mixed JVM/native modes are
-covered below; the Dockerfile watchdog requires separate verification.
+covered below; the Dockerfile watchdog uses the artifact verification described
+in [watchdog artifact validation](#watchdog-artifact-validation).
 
 ## Independent service build modes
 
@@ -224,3 +226,36 @@ Evidence roots are `/tmp/nanolab-jvm-service-native-e2e-20260930/` and
 beside them. No NanoLab task implementation changes were needed for these
 profiles. This verification does not cover the native runtime comparison
 matrix or Oracle G1 builds.
+
+## Watchdog artifact validation
+
+`validate-container-watchdog.yaml` builds and publishes the JVM control plane,
+word-stats and the standalone Dockerfile watchdog. Its Docker build context is
+`runtimes/watchdog`, as required by the recipe `sdk: dockerfile` contract.
+
+```bash
+export NANOFAAS_ROOT=/path/to/nanofaas
+./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-watchdog.yaml \
+  --run-dir /tmp/nanolab-watchdog-my-run
+```
+
+The local `validate` workflow resolves `watchdog/dockerfile` separately from
+managed Java services. It runs the published image with `--version`, compares
+the output with the staged `Cargo.toml` version, checks the stopped container's
+image ID against `distribution.json` and requires process exit code zero.
+Evidence is saved as `image-service-watchdog.json`, including the expected and
+actual versions. Cleanup uses only the container ID returned by this run's
+successful create; a name collision leaves the existing container untouched.
+The probe reuses Sonata Docker tasks and compensated resources.
+
+Control-plane metadata/image checks, word-stats invocation and image/resource
+inspection still use the existing validation cycle. Dockerfile services other
+than watchdog remain unsupported by this workflow. This probe verifies the
+published binary artifact; HTTP, STDIO, FILE and supervision behavior require
+the separate watchdog runtime tests.
+
+The full Docker cycle passed on 30 September 2026 against clean NanoFaaS
+`e7914be0`: one publication, three image identities, watchdog version `0.22.0`
+and exit code zero, platform invocation and cleanup. CI validates the profile.
+Evidence is in `/tmp/nanolab-recipe-watchdog-e2e-20260930/`, with log
+`/tmp/nanolab-recipe-watchdog-e2e-20260930.log`.

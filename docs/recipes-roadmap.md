@@ -66,7 +66,7 @@ le differenze reali fra backend e tipi di verifica.
      pubblicazione, metadati, immagini, invocazione, risorse e cleanup passati.
      Mapping condiviso `exec` → SDK recipe `bash`; nessun nuovo task.
      Evidenze: `/tmp/nanolab-recipe-bash-e2e-20260930/`, log `.log` a lato.
-   - [ ] Servizi: completare la copertura dei tipi e delle build.
+   - [x] Servizi: copertura mirata di Java JVM/native e artefatto Dockerfile.
      - [x] Java JVM: `validate-container-services-jvm.yaml` e scenario
        `deployment-lifecycle-container-services.yaml`, verificati con Docker
        locale il 30 settembre 2026 su NanoFaaS `e7914be0`. Una pubblicazione,
@@ -84,7 +84,16 @@ le differenze reali fra backend e tipi di verifica.
        Evidenze: `/tmp/nanolab-jvm-service-native-e2e-20260930/` e
        `/tmp/nanolab-native-service-jvm-e2e-20260930/`, log `.log` a lato.
        Nessuna modifica ai task; la matrice runtime native resta da verificare.
-     - [ ] Servizi Dockerfile, a partire dal watchdog.
+     - [x] Servizi Dockerfile: `validate-container-watchdog.yaml` e scenario
+       `deployment-lifecycle-container-watchdog.yaml`, verificati con Docker
+       locale il 30 settembre 2026 su NanoFaaS `e7914be0`. Una pubblicazione,
+       contesto `runtimes/watchdog`, tre image ID, versione watchdog `0.22.0`
+       coerente con Cargo.toml, exit code zero, invocazione della funzione e
+       cleanup passati. Riutilizzati i task Docker Sonata; collisioni sul nome
+       del container e cleanup dei soli ID creati verificati nei test.
+       Evidenze: `/tmp/nanolab-recipe-watchdog-e2e-20260930/`, log `.log` a lato.
+       Questa tappa verifica l'artefatto; i comportamenti del supervisore
+       restano coperti dai test specifici del runtime watchdog.
    - [ ] Multiarch: profili, manifest e digest per piattaforma.
 3. **Affrontare soak e release.** Migrare soltanto le parti equivalenti del
    processo di build. Fatto quando restano validi gli snapshot immutabili, la

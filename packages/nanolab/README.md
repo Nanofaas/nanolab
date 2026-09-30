@@ -259,3 +259,10 @@ The mixed scenarios `deployment-lifecycle-container-jvm-service-native.yaml`
 and `deployment-lifecycle-container-native-service-jvm.yaml` exercise independent
 control-plane and service modes. See
 [mixed build profiles and commands](recipes/README.md#independent-service-build-modes).
+
+## Recipe watchdog artifact validation
+
+Run `deployment-lifecycle-container-watchdog.yaml` to publish the Dockerfile
+watchdog and verify its executable version, image identity and exit code,
+alongside the usual JVM platform validation. See
+[profile, command, scope and evidence](recipes/README.md#watchdog-artifact-validation).

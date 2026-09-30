@@ -148,11 +148,13 @@ def _payload(definition: FunctionDefinition, tool_root: Path | None = None) -> s
 
 def resolve_recipe_services(
     recipe: Path, *, source_root: Path, tool_root: Path | None = None
-) -> dict[str, SonataFunction]:
-    """Resolve recipe Java services that expose the managed invocation contract."""
+) -> tuple[dict[str, SonataFunction], tuple[str, ...]]:
+    """Resolve managed Java services and the standalone watchdog artifact."""
     profile = yaml.safe_load(recipe.read_text(encoding="utf-8"))
     services: dict[str, SonataFunction] = {}
     registration_names: set[str] = set()
+    component_names: set[str] = set()
+    standalone: list[str] = []
     for entry in profile.get("services", []):
         name = entry.get("name")
         if (
@@ -162,6 +164,16 @@ def resolve_recipe_services(
             or name in {".", ".."}
         ):
             raise ValueError("Recipe service needs a simple component name")
+        if name in component_names:
+            raise ValueError(
+                "Recipe services need unique registration and component names"
+            )
+        component_names.add(name)
+        if (name, entry.get("sdk")) == ("watchdog", "dockerfile"):
+            if not (source_root / "runtimes/watchdog/Dockerfile").is_file():
+                raise ValueError("Recipe watchdog lacks Dockerfile")
+            standalone.append(name)
+            continue
         if entry.get("sdk") != "java":
             raise ValueError(
                 f"Recipe service {name} needs the Java invocation contract"
@@ -194,7 +206,7 @@ def resolve_recipe_services(
             payload=_payload(definition, tool_root),
             build_argv=("./gradlew", f":services:java:{name}:bootJar", "--quiet"),
         )
-    return services
+    return services, tuple(standalone)
 
 
 def resolve_function(

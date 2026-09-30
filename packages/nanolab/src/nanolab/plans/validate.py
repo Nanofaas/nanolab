@@ -55,7 +55,10 @@ from nanolab.tasks.recipe_remote import (
     remote_recipe_root,
     remote_recipe_run_resource,
 )
-from nanolab.tasks.recipe_validation import recipe_compose_resource
+from nanolab.tasks.recipe_validation import (
+    recipe_compose_resource,
+    recipe_watchdog_resource,
+)
 from nanolab.tasks.validate import (
     AsyncCheck,
     EnvelopeCheck,
@@ -307,12 +310,12 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         )
         for key in config.functions
     }
-    services = (
+    services, standalone_services = (
         resolve_recipe_services(
             config.recipe_profile, source_root=root, tool_root=tool_root
         )
         if config.recipe_profile is not None and config.backend == "container"
-        else {}
+        else ({}, ())
     )
     if {service.name for service in services.values()} & {
         function.name for function in functions.values()
@@ -685,7 +688,10 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                     )
                     for key in config.functions
                 ),
-                services=tuple((name, "java") for name in services),
+                services=(
+                    *((name, "java") for name in services),
+                    *((name, "dockerfile") for name in standalone_services),
+                ),
                 requires=(registry,),
             )
         cleanup = (
@@ -736,9 +742,22 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                 cwd=root,
                 requires=(registry,) if cleanup is None else (registry, cleanup),
             )
+        watchdog = (
+            recipe_watchdog_resource(
+                distribution=distribution,
+                executor=RoleBoundCommandTaskExecutor(bindings),
+                source=recipe_run_dir / "recipe/source",
+                run_dir=recipe_run_dir,
+                container=f"nanolab-watchdog-{recipe_run_tag(recipe_run_dir)}",
+            )
+            if standalone_services
+            and distribution is not None
+            and recipe_run_dir is not None
+            else None
+        )
         requires = tuple(
             resource
-            for resource in (registry, distribution, cleanup, compose)
+            for resource in (registry, distribution, watchdog, cleanup, compose)
             if resource is not None
         )
         if config.persistent_recovery:

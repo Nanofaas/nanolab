@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, override
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, override
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
+from sonata_tasks.docker import DockerInspectTask, DockerTask
 from sonata_tasks.execution.models import CommandOptions, TaskResult
 from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.http import Endpoint, endpoint_argv
@@ -25,6 +27,107 @@ from nanolab.tasks.recipe import RecipeDistribution
 
 if TYPE_CHECKING:
     from nanolab.tasks.platform import PlatformFunction
+
+
+def recipe_watchdog_resource(
+    *,
+    distribution: Resource[RecipeDistribution],
+    executor: CommandTaskExecutor,
+    source: Path,
+    run_dir: Path,
+    container: str,
+) -> Resource[str]:
+    """Run the published watchdog binary and retain its image/version evidence."""
+    owned_id: str | None = None
+
+    def remove(_inputs: TaskInputs, container_id: str | None) -> None:
+        if container_id is not None:
+            _ = DockerTask(
+                "rm",
+                "-f",
+                container_id,
+                executor=executor,
+                role="host",
+                title="Remove owned watchdog probe",
+            ).run(_inputs)
+
+    def acquire(inputs: TaskInputs) -> str:
+        nonlocal owned_id
+        owned_id = None
+        component = inputs.resource(distribution).service("watchdog", "dockerfile")
+        manifest = tomllib.loads(
+            (source / "runtimes/watchdog/Cargo.toml").read_text(encoding="utf-8")
+        )
+        expected_version = f"nanofaas-watchdog {manifest['package']['version']}"
+        created = (
+            DockerTask(
+                "create",
+                "--name",
+                container,
+                component.image.reference,
+                "--version",
+                executor=executor,
+                role="host",
+                title="Create recipe watchdog probe",
+            )
+            .run(inputs)
+            .value
+        )
+        owned_id = created.stdout.strip() if created else None
+        if not owned_id:
+            raise RuntimeError("watchdog create returned no container ID")
+        result = (
+            DockerTask(
+                "start",
+                "-a",
+                owned_id,
+                executor=executor,
+                role="host",
+                title="Run recipe watchdog version probe",
+            )
+            .run(inputs)
+            .value
+        )
+        inspection = (
+            DockerInspectTask(
+                container=owned_id,
+                fmt="{{json .}}",
+                executor=executor,
+                role="host",
+                title="Inspect recipe watchdog artifact",
+            )
+            .run(inputs)
+            .value
+        )
+        actual = json.loads(inspection.stdout) if inspection else {}
+        version = result.stdout.strip() if result else ""
+        evidence = {
+            "container": owned_id,
+            "reference": component.image.reference,
+            "imageId": actual.get("Image"),
+            "exitCode": actual.get("State", {}).get("ExitCode"),
+            "version": version,
+            "expectedVersion": expected_version,
+        }
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "image-service-watchdog.json").write_text(
+            json.dumps(evidence) + "\n", encoding="utf-8"
+        )
+        if evidence["imageId"] != component.image.id:
+            raise RuntimeError("watchdog image differs from the recipe distribution")
+        if evidence["exitCode"] != 0:
+            raise RuntimeError("watchdog process exited with failure")
+        if version != expected_version:
+            raise RuntimeError("watchdog version differs from the selected source")
+        return owned_id
+
+    return compensated_resource(
+        title="Verify recipe watchdog artifact",
+        acquire=acquire,
+        compensate=lambda inputs: remove(inputs, owned_id),
+        release=remove,
+        requires=(distribution,),
+    )
 
 
 class RecipeFunctionRegisterTask(Task[TaskResult]):
