@@ -195,3 +195,150 @@ def test_local_reader_still_rejects_multiarch(tmp_path: Path) -> None:
     recipe, report, _ = multiarch_fixture(tmp_path)
     with pytest.raises(ValueError, match="Multi-platform"):
         read_distribution(report, recipe=recipe, tag="run-1", published=True)
+
+
+def test_builder_property_is_forwarded_only_when_selected() -> None:
+    from nanolab.tasks.recipe import recipe_command
+
+    base = {"recipe": "recipe.yaml", "output": "distribution", "tag": "run-1"}
+    original = recipe_command("publishRecipe", **base)
+    selected = recipe_command("publishRecipe", **base, builder="owned-builder")
+    assert "-PrecipeBuilder=owned-builder" in selected
+    assert (
+        tuple(arg for arg in selected if not arg.startswith("-PrecipeBuilder="))
+        == original
+    )
+    assert not any(arg.startswith("-PrecipeBuilder=") for arg in original)
+
+
+def publication_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None = None
+):
+    from sonata_engine import Resource, TaskInputs
+    from sonata_tasks.execution.models import TaskResult
+
+    from nanolab.tasks.recipe_builder import RecipeBuilder
+    from nanolab.tasks.recipe_multiarch import multiarch_recipe_distribution_resource
+    from tests.tasks.test_recipe_registry import fixture_fetch, registry_fixture
+    from tests.workspace.test_recipe import _git
+
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    distribution, blobs = registry_fixture(fixture)
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    _git(source, "config", "user.email", "test@example.com")
+    _git(source, "config", "user.name", "Test")
+    (source / "tracked").write_text("initial")
+    _git(source, "add", ".")
+    _git(source, "commit", "-qm", "initial")
+    run_dir = tmp_path / "run"
+    commands = []
+
+    class Executor:
+        def binding_key(self, role):
+            return role
+
+        def run(self, task, *, dry_run=False):
+            commands.append(task)
+            if task.argv[0] == "./gradlew":
+                output = Path(
+                    next(
+                        arg.split("=", 1)[1]
+                        for arg in task.argv
+                        if arg.startswith("-PrecipeOutput=")
+                    )
+                )
+                output.mkdir(parents=True, exist_ok=True)
+                data = json.loads(distribution.report.read_bytes())
+                data["source"] = {
+                    "revision": _git(task.options.cwd, "rev-parse", "HEAD"),
+                    "dirty": False,
+                }
+                if failure == "parser":
+                    data["tag"] = "incorrect"
+                (output / "distribution.json").write_text(json.dumps(data))
+            return TaskResult(
+                task_id="",
+                status="failed" if failure == "command" else "passed",
+                return_code=1 if failure == "command" else 0,
+                stdout="publication output",
+                stderr="publication failure" if failure == "command" else "",
+            )
+
+    def fetch(repository, kind, reference):
+        assert not (run_dir / "runtime-images.json").exists()
+        if failure == "registry":
+            raise ValueError("registry verification failed")
+        return fixture_fetch(blobs)(repository, kind, reference)
+
+    monkeypatch.setattr("nanolab.tasks.recipe_registry.fetch_local_registry", fetch)
+    builder = Resource(
+        title="builder",
+        acquire=lambda _: RecipeBuilder("owned-builder", "linux/arm64"),
+        release=lambda *_: None,
+    )
+    value = RecipeBuilder("owned-builder", "linux/arm64")
+    inputs = TaskInputs._for_resources({builder: value}, {builder})
+    publication = multiarch_recipe_distribution_resource(
+        source=source,
+        recipe=fixture / "recipe.yaml",
+        run_dir=run_dir,
+        tag="run-1",
+        executor=Executor(),
+        functions=(("word-stats", "java"),),
+        builder=builder,
+    )
+    return publication, inputs, commands, run_dir
+
+
+def test_multiarch_publication_runs_once_before_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publication, inputs, commands, run_dir = publication_fixture(tmp_path, monkeypatch)
+    result = publication.acquire(inputs)
+    gradle = [task for task in commands if task.argv[0] == "./gradlew"]
+    assert len(gradle) == 1
+    assert gradle[0].argv[1] == "publishRecipe"
+    assert "-PrecipeBuilder=owned-builder" in gradle[0].argv
+    assert gradle[0].options.cwd == run_dir / "recipe/source"
+    assert (run_dir / "recipe/gradle.log").read_text().startswith("publication output")
+    assert (run_dir / "recipe/recipe-inputs.json").is_file()
+    assert all("@sha256:" in item.image.reference for item in result.components)
+    assert len([task for task in commands if task.argv[:2] == ("docker", "pull")]) == 2
+    mapping = json.loads((run_dir / "runtime-images.json").read_text())
+    assert mapping["platform"] == "linux/arm64"
+    assert len(mapping["images"]) == 2
+    assert "id" not in json.loads(result.report.read_text())["components"][0]["image"]
+
+
+@pytest.mark.parametrize("failure", ["command", "parser", "registry"])
+def test_failed_publication_invalidates_previous_runtime_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    publication, inputs, _, run_dir = publication_fixture(
+        tmp_path, monkeypatch, failure
+    )
+    run_dir.mkdir()
+    mapping = run_dir / "runtime-images.json"
+    mapping.write_text('{"old": true}')
+    with pytest.raises(
+        (ValueError, RuntimeError), match=r"publication|hash|tag|registry"
+    ):
+        publication.acquire(inputs)
+    assert not mapping.exists()
+    assert (run_dir / "recipe/gradle.log").exists()
+
+
+def test_multiarch_source_change_fails_before_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publication, inputs, commands, run_dir = publication_fixture(tmp_path, monkeypatch)
+    publication.acquire(inputs)
+    (run_dir / "recipe/source/tracked").write_text("tampered")
+    commands.clear()
+    with pytest.raises(ValueError, match="staged inputs"):
+        publication.acquire(inputs)
+    assert not commands
+    assert not (run_dir / "runtime-images.json").exists()

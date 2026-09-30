@@ -255,31 +255,9 @@ class _RecipeTask(Task[RecipeDistribution]):
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[RecipeDistribution]:
         run = self.run_config
-        report = run.output_dir / "distribution.json"
-        report.unlink(missing_ok=True)
-        command = CommandTask(
-            argv=recipe_command(
-                self.target,
-                recipe=str(run.recipe),
-                output=str(run.output_dir),
-                tag=run.tag,
-            ),
-            executor=self.executor,
-            role="host",
-            options=CommandOptions(cwd=run.source_dir),
-            title=self.title,
+        report = execute_recipe(
+            run, target=self.target, executor=self.executor, inputs=inputs
         )
-        log = run.output_dir.parent / "gradle.log"
-        try:
-            result = command.run(inputs).value
-        except RuntimeError as error:
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text(str(error) + "\n")
-            raise
-        if result is None:
-            raise RuntimeError(f"{self.target} produced no command result")
-        log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text(result.stdout + "\n" + result.stderr)
         return TaskOutcome(
             value=read_distribution(
                 report,
@@ -309,6 +287,44 @@ class PublishRecipeTask(_RecipeTask):
     published = True
 
 
+def execute_recipe(
+    run: RecipeRun,
+    *,
+    target: Literal["assembleRecipe", "publishRecipe"],
+    executor: CommandTaskExecutor,
+    inputs: TaskInputs,
+    builder: str | None = None,
+) -> Path:
+    """Run Gradle once and retain diagnostics outside regenerated output."""
+    report = run.output_dir / "distribution.json"
+    report.unlink(missing_ok=True)
+    command = CommandTask(
+        argv=recipe_command(
+            target,
+            recipe=str(run.recipe),
+            output=str(run.output_dir),
+            tag=run.tag,
+            builder=builder,
+        ),
+        executor=executor,
+        role="host",
+        options=CommandOptions(cwd=run.source_dir),
+        title=f"{target} {run.recipe.name}",
+    )
+    log = run.output_dir.parent / "gradle.log"
+    try:
+        result = command.run(inputs).value
+    except RuntimeError as error:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(str(error) + "\n")
+        raise
+    if result is None:
+        raise RuntimeError(f"{target} produced no command result")
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(result.stdout + "\n" + result.stderr)
+    return report
+
+
 def recipe_command(
     target: Literal["assembleRecipe", "publishRecipe"],
     *,
@@ -318,6 +334,7 @@ def recipe_command(
     containerd_maven_repository: Path | None = None,
     native_build_memory: str | None = None,
     native_parallelism: int | None = None,
+    builder: str | None = None,
 ) -> tuple[str, ...]:
     """Build a recipe with the selected backend dependencies."""
     return (
@@ -326,6 +343,7 @@ def recipe_command(
         f"-Precipe={recipe}",
         f"-PrecipeTag={tag}",
         f"-PrecipeOutput={output}",
+        *((f"-PrecipeBuilder={builder}",) if builder is not None else ()),
         *(
             (
                 "-PcontainerdMavenLocal=true",

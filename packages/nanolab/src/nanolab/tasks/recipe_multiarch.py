@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from sonata_engine import Resource, TaskInputs
+from sonata_tasks.docker import DockerTask
+from sonata_tasks.execution.ports import CommandTaskExecutor
 
 from nanolab.tasks.recipe import (
     RecipeComponent,
@@ -18,7 +21,11 @@ from nanolab.tasks.recipe import (
     _object,
     _string,
     _verify_recipe_identity,
+    execute_recipe,
+    require_validation_distribution,
 )
+from nanolab.tasks.recipe_builder import RecipeBuilder
+from nanolab.workspace.recipe import prepare_recipe_run
 
 MULTIARCH_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
 
@@ -226,4 +233,106 @@ def project_host_distribution(
         distribution.source,
         distribution.modules,
         tuple(components),
+    )
+
+
+def multiarch_recipe_distribution_resource(
+    *,
+    source: Path,
+    recipe: Path,
+    run_dir: Path,
+    tag: str,
+    executor: CommandTaskExecutor,
+    functions: tuple[tuple[str, str], ...],
+    builder: Resource[RecipeBuilder],
+) -> Resource[RecipeDistribution]:
+    """Publish once, prove registry identity, then expose only verified host images."""
+
+    def acquire(inputs: TaskInputs) -> RecipeDistribution:
+        from nanolab.tasks.recipe_registry import (
+            fetch_local_registry,
+            verify_multiarch_registry,
+        )
+
+        mapping = run_dir / "runtime-images.json"
+        mapping.unlink(missing_ok=True)
+        run = prepare_recipe_run(source, recipe, run_dir / "recipe", tag)
+        captured = json.loads((run_dir / "recipe/recipe-inputs.json").read_bytes())
+        selected_builder = inputs.resource(builder)
+        report = execute_recipe(
+            run,
+            target="publishRecipe",
+            executor=executor,
+            inputs=inputs,
+            builder=selected_builder.name,
+        )
+        publication = read_multiarch_distribution(
+            report,
+            recipe=run.recipe,
+            tag=tag,
+            expected_source={
+                "revision": captured["revision"],
+                "dirty": captured["patchSha256"] != hashlib.sha256(b"").hexdigest(),
+            },
+        )
+        if (
+            set(publication.modules)
+            != {"build-metadata", "container-deployment-provider"}
+            or {
+                (item.kind, item.name, item.sdk, item.mode)
+                for item in publication.components
+            }
+            != {
+                ("control-plane", "control-plane", "java", "jvm"),
+                ("function", "word-stats", "java", "jvm"),
+            }
+            or functions != (("word-stats", "java"),)
+        ):
+            raise ValueError("Unsupported multiarch validation components or modules")
+        configs = verify_multiarch_registry(
+            publication, fetch=fetch_local_registry, evidence_dir=run_dir / "registry"
+        )
+        runtime = project_host_distribution(
+            publication, platform=selected_builder.platform, configs=configs
+        )
+        require_validation_distribution(
+            runtime, functions=functions, exact_modules=True
+        )
+        images = []
+        for component, published in zip(
+            runtime.components, publication.components, strict=True
+        ):
+            _ = DockerTask(
+                "pull",
+                component.image.reference,
+                executor=executor,
+                role="host",
+                title=f"Pull verified recipe {component.name}",
+            ).run(inputs)
+            images.append(
+                {
+                    "kind": component.kind,
+                    "name": component.name,
+                    "sdk": component.sdk,
+                    "reference": component.image.reference,
+                    "configurationDigest": component.image.id,
+                    "indexDigest": published.image.digest,
+                    "manifests": published.image.manifests,
+                }
+            )
+        temporary = mapping.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(
+                {"platform": selected_builder.platform, "images": images}, indent=2
+            )
+            + "\n"
+        )
+        temporary.replace(mapping)
+        return runtime
+
+    return Resource(
+        title=f"Publish recipe {recipe.name} for both platforms",
+        acquire=acquire,
+        release=lambda _inputs, _value: None,
+        requires=(builder,),
     )
