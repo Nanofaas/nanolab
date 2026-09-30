@@ -44,11 +44,17 @@ from nanolab.tasks.recipe import (
     recipe_distribution_resource,
     recipe_run_resource,
 )
+from nanolab.tasks.recipe_builder import recipe_builder_resource
 from nanolab.tasks.recipe_kubernetes import (
     minikube_images_resource,
     minikube_target_resource,
     queue_probe_image_resource,
     recipe_namespace_resource,
+)
+from nanolab.tasks.recipe_multiarch import (
+    is_multiarch_recipe,
+    multiarch_recipe_distribution_resource,
+    require_multiarch_validation_profile,
 )
 from nanolab.tasks.recipe_remote import (
     remote_recipe_distribution_resource,
@@ -123,6 +129,17 @@ def require_recipe_environment(
     """Reject recipe and environment combinations before provisioning."""
     if config.recipe_profile is None:
         return
+    if is_multiarch_recipe(config.recipe_profile):
+        if (
+            config.workflow != "validate"
+            or config.backend != "container"
+            or environment.provider != "local"
+            or config.functions != ["word-stats-java"]
+        ):
+            raise ValueError(
+                "Multiarch recipes support local container JVM validation only"
+            )
+        require_multiarch_validation_profile(config.recipe_profile)
     allowed = (
         {"local"}
         if config.backend == "container"
@@ -675,25 +692,42 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                     :12
                 ]
             )
-            distribution = recipe_distribution_resource(
-                source=root,
-                recipe=config.recipe_profile,
-                run_dir=recipe_run_dir / "recipe",
-                tag=tag,
-                executor=RoleBoundCommandTaskExecutor(bindings),
-                functions=tuple(
-                    (
-                        resolve_function_definition(key, root).family,
-                        resolve_function_definition(key, root).runtime,
-                    )
-                    for key in config.functions
-                ),
-                services=(
-                    *((name, "java") for name in services),
-                    *((name, "dockerfile") for name in standalone_services),
-                ),
-                requires=(registry,),
-            )
+            if is_multiarch_recipe(config.recipe_profile):
+                builder = recipe_builder_resource(
+                    executor=RoleBoundCommandTaskExecutor(bindings),
+                    run_dir=recipe_run_dir,
+                    tag=tag,
+                    requires=(registry,),
+                )
+                distribution = multiarch_recipe_distribution_resource(
+                    source=root,
+                    recipe=config.recipe_profile,
+                    run_dir=recipe_run_dir,
+                    tag=tag,
+                    executor=RoleBoundCommandTaskExecutor(bindings),
+                    functions=(("word-stats", "java"),),
+                    builder=builder,
+                )
+            else:
+                distribution = recipe_distribution_resource(
+                    source=root,
+                    recipe=config.recipe_profile,
+                    run_dir=recipe_run_dir / "recipe",
+                    tag=tag,
+                    executor=RoleBoundCommandTaskExecutor(bindings),
+                    functions=tuple(
+                        (
+                            resolve_function_definition(key, root).family,
+                            resolve_function_definition(key, root).runtime,
+                        )
+                        for key in config.functions
+                    ),
+                    services=(
+                        *((name, "java") for name in services),
+                        *((name, "dockerfile") for name in standalone_services),
+                    ),
+                    requires=(registry,),
+                )
         cleanup = (
             managed_container_cleanup_resource(
                 tuple(function.name for function in functions.values()),

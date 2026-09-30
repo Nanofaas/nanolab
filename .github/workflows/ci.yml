@@ -205,6 +205,7 @@ jobs:
         working-directory: .nanofaas-source
         run: |
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-jvm.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-multiarch-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-bash.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-services-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-container-jvm-service-native.yaml"

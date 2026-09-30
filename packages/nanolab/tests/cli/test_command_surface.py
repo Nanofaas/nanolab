@@ -20,6 +20,29 @@ from nanolab.workspace.provenance import git_provenance
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("option", ["--resume", "--keep", "--teardown"])
+def test_multiarch_rejects_incomplete_cleanup_or_resume_before_provisioning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, option: str
+) -> None:
+    from tests.plans.test_recipe_validate import multiarch_profile
+
+    profile = multiarch_profile(tmp_path)
+    scenario = tmp_path / "scenario.yaml"
+    scenario.write_text(
+        "workflow: validate\nbackend: container\nfunctions: [word-stats-java]\n"
+        f"recipeProfile: {profile}\n"
+    )
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Must reject unsupported selection before provisioning")
+
+    monkeypatch.setattr(product_module, "_provisioning_context", unexpected)
+    monkeypatch.setattr(product_module, "_run_teardown", unexpected)
+    result = CliRunner().invoke(app, ["run", str(scenario), option])
+    assert result.exit_code == 2
+    assert "unsupported" in result.output or "supported" in result.output
+
+
 @pytest.fixture(autouse=True)
 def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)

@@ -4,12 +4,123 @@ import os
 from pathlib import Path
 
 import pytest
+import yaml
 from sonata_tasks.execution.bindings import RoleBindings
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.validate import build_validate_plan, require_recipe_environment
 from tests.plans.test_validate import RecordingExecutor
+
+
+def multiarch_profile(tmp_path: Path, **overrides) -> Path:
+    base = Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
+    data = yaml.safe_load(base.read_text())
+    data["registry"].update(platforms=["linux/amd64", "linux/arm64"], provenance=False)
+    data.update(overrides)
+    profile = tmp_path / "multiarch.yaml"
+    profile.write_text(yaml.safe_dump(data))
+    return profile
+
+
+def test_multiarch_plan_reuses_container_lifecycle_without_builds(
+    tmp_path: Path,
+) -> None:
+    profile = multiarch_profile(tmp_path)
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": "container",
+            "functions": ["word-stats-java"],
+            "recipeProfile": str(profile),
+        }
+    )
+    executor = RecordingExecutor()
+    run_dir = tmp_path / "run"
+    workflow = build_validate_plan(
+        config,
+        RoleBindings({"host": executor}),
+        repo_root=Path(os.environ["NANOFAAS_ROOT"]),
+        run_dir=run_dir,
+    )
+    titles = [step.task.title for step in workflow.compile().tasks]
+    assert any("multiarch recipe builder" in title for title in titles)
+    assert any("both platforms" in title for title in titles)
+    assert any("image" in title.lower() for title in titles)
+    assert any("metadata" in title.lower() for title in titles)
+    assert any("Invoke" in title for title in titles)
+    assert not any("Build image" in title for title in titles)
+    assert not executor.seen
+    assert not run_dir.exists()
+
+
+def test_multiarch_planning_has_no_host_side_effects(tmp_path: Path) -> None:
+    test_multiarch_plan_reuses_container_lifecycle_without_builds(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "k8s",
+        "containerd",
+        "multipass",
+        "services",
+        "provenance",
+        "platforms",
+        "native",
+        "loadtest",
+    ],
+)
+def test_unsupported_multiarch_workflow_fails_before_resources(
+    tmp_path: Path, failure: str
+) -> None:
+    profile = multiarch_profile(tmp_path)
+    data = yaml.safe_load(profile.read_text())
+    if failure == "services":
+        data["services"] = [
+            {
+                "name": "extra",
+                "sdk": "java",
+                "build": {"mode": "jvm"},
+                "container": {"image": "extra"},
+            }
+        ]
+    elif failure == "provenance":
+        data["registry"]["provenance"] = True
+    elif failure == "platforms":
+        data["registry"]["platforms"] = ["linux/arm64"]
+    elif failure == "native":
+        data["controlPlane"]["build"]["mode"] = "native"
+    profile.write_text(yaml.safe_dump(data))
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest" if failure == "loadtest" else "validate",
+            "backend": failure if failure in {"k8s", "containerd"} else "container",
+            "functions": ["word-stats-java"],
+            "recipeProfile": str(profile),
+        }
+    )
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "test-stack"}}}
+        if failure == "multipass"
+        else {"provider": "local"}
+    )
+    with pytest.raises(ValueError, match=r"multiarch|Multiarch"):
+        require_recipe_environment(config, environment)
+
+
+def test_multiarch_profile_matches_existing_jvm_contract() -> None:
+    root = Path(__file__).resolve().parents[2]
+    base = yaml.safe_load((root / "recipes/validate-container-jvm.yaml").read_text())
+    profile = yaml.safe_load(
+        (root / "recipes/validate-container-multiarch-jvm.yaml").read_text()
+    )
+    assert profile["controlPlane"]["modules"] == base["controlPlane"]["modules"]
+    assert profile["controlPlane"]["jvm"] == base["controlPlane"]["jvm"]
+    assert profile["controlPlane"]["config"] == base["controlPlane"]["config"]
+    assert profile["functions"] == base["functions"]
+    assert profile["registry"]["platforms"] == ["linux/amd64", "linux/arm64"]
+    assert profile["registry"]["provenance"] is False
 
 
 def test_recipe_plan_schedules_publish_without_legacy_builds(tmp_path: Path) -> None:

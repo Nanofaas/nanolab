@@ -91,6 +91,7 @@ from nanolab.release.tasks import versioned_release_run_dir
 from nanolab.release.versioning import normalize_version
 from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
 from nanolab.tasks.provisioning.providers import provider_for
+from nanolab.tasks.recipe_multiarch import is_multiarch_recipe
 from nanolab.tasks.recipe_remote import (
     RemoteRecipeRun,
     cleanup_remote_recipe_run,
@@ -976,6 +977,18 @@ def install_product_commands(
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        try:
+            if scenario_config.recipe_profile is not None and is_multiarch_recipe(
+                scenario_config.recipe_profile
+            ):
+                require_recipe_environment(scenario_config, environment_config)
+                if resume or keep or teardown:
+                    raise ValueError(
+                        "Multiarch validation requires automatic owned cleanup; "
+                        "--resume, --keep and --teardown are unsupported"
+                    )
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from None
         release = scenario_config.workflow == "release"
         if scenario_config.workflow == "soak":
             try:

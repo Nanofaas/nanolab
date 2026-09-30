@@ -30,6 +30,50 @@ from nanolab.workspace.recipe import prepare_recipe_run
 MULTIARCH_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
 
 
+def is_multiarch_recipe(recipe: Path) -> bool:
+    """Recognize the Buildx contract without performing staging or execution."""
+    profile = _object(yaml.safe_load(recipe.read_text()), "profile")
+    registry = profile.get("registry")
+    return isinstance(registry, dict) and "platforms" in registry
+
+
+def require_multiarch_validation_profile(recipe: Path) -> None:
+    """Require the first supported JVM container subset before provisioning."""
+    profile = _object(yaml.safe_load(recipe.read_text()), "profile")
+    registry = _object(profile.get("registry"), "registry")
+    platforms = registry.get("platforms")
+    if (
+        not isinstance(platforms, list)
+        or len(platforms) != 2
+        or not all(isinstance(value, str) for value in platforms)
+        or set(platforms) != MULTIARCH_PLATFORMS
+    ):
+        raise ValueError("Multiarch recipe requires linux/amd64 and linux/arm64")
+    control = _object(profile.get("controlPlane"), "controlPlane")
+    functions = profile.get("functions")
+    if (
+        registry.get("repository") != "127.0.0.1:5000/nanofaas"
+        or registry.get("provenance", False) is not False
+        or profile.get("services")
+        or control.get("modules")
+        not in (
+            ["container-deployment-provider", "build-metadata"],
+            ["build-metadata", "container-deployment-provider"],
+        )
+        or _object(control.get("build"), "build").get("mode") != "jvm"
+        or not isinstance(functions, list)
+        or len(functions) != 1
+    ):
+        raise ValueError("Unsupported multiarch JVM validation profile")
+    function = _object(functions[0], "function")
+    if (
+        function.get("name"),
+        function.get("sdk"),
+        _object(function.get("build"), "build").get("mode"),
+    ) != ("word-stats", "java", "jvm"):
+        raise ValueError("Unsupported multiarch validation function")
+
+
 def sha256_digest(value: object) -> str:
     """Require a complete lowercase SHA-256 registry identity."""
     if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):

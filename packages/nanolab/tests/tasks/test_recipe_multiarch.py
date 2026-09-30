@@ -201,8 +201,16 @@ def test_builder_property_is_forwarded_only_when_selected() -> None:
     from nanolab.tasks.recipe import recipe_command
 
     base = {"recipe": "recipe.yaml", "output": "distribution", "tag": "run-1"}
-    original = recipe_command("publishRecipe", **base)
-    selected = recipe_command("publishRecipe", **base, builder="owned-builder")
+    original = recipe_command(
+        "publishRecipe", recipe=base["recipe"], output=base["output"], tag=base["tag"]
+    )
+    selected = recipe_command(
+        "publishRecipe",
+        recipe=base["recipe"],
+        output=base["output"],
+        tag=base["tag"],
+        builder="owned-builder",
+    )
     assert "-PrecipeBuilder=owned-builder" in selected
     assert (
         tuple(arg for arg in selected if not arg.startswith("-PrecipeBuilder="))
