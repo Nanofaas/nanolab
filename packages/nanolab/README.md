@@ -266,3 +266,51 @@ Run `deployment-lifecycle-container-watchdog.yaml` to publish the Dockerfile
 watchdog and verify its executable version, image identity and exit code,
 alongside the usual JVM platform validation. See
 [profile, command, scope and evidence](recipes/README.md#watchdog-artifact-validation).
+
+## Multiarch recipe container validation
+
+Run the JVM control plane and Java word-stats lifecycle from a publication for
+both AMD64 and ARM64:
+
+```bash
+NANOFAAS_ROOT=/path/to/pinned/nanofaas ./nanolab.sh run \
+  packages/nanolab/scenarios-v2/deployment-lifecycle-container-multiarch.yaml \
+  --run-dir /tmp/nanolab-multiarch-run
+```
+
+Run this command from the NanoLab repository root. The reusable profile is
+`recipes/validate-container-multiarch-jvm.yaml`; CI validates it against its
+NanoFaaS pin. The host needs Linux Docker on AMD64 or ARM64, Buildx, the Java
+toolchain required by the pinned Gradle project, and access to the image
+registries. NanoLab uses host Docker directly and provisions no VM.
+
+The run creates an owned local registry and a dedicated `docker-container`
+builder, passed explicitly to Gradle without changing the selected builder.
+It uses a digest-pinned binfmt installer when the foreign architecture lacks
+a registration. Registration inspection/setup uses a scoped privileged
+container; only the required foreign architecture is installed. Existing
+functioning registrations are reused. Disabled or incompatible registrations
+fail preflight. A daemon-scoped lock serializes NanoLab runs using this path;
+a concurrent run receives a busy-lock error and can retry after cleanup.
+
+One `publishRecipe` builds and publishes both platforms. NanoLab checks the
+index, each child manifest and each configuration against their SHA-256
+digests, then pulls and deploys the native host manifests by immutable digest.
+Both platform artifacts are verified; HTTP invocation runs on the host
+architecture only. The scenario covers JVM builds with provenance disabled.
+
+Evidence under the run directory includes `builder.json`,
+`buildkitd.toml`, `recipe/recipe-inputs.json`, the captured profile/source,
+`recipe/distribution/distribution.json`, `recipe/gradle.log`, raw registry
+bytes and verification records under `registry/`, and `runtime-images.json`
+with the selected host references and configuration digests. The original
+multiarch report contains no local image IDs; existing runtime checks use
+configuration digests derived from verified manifests.
+
+Cleanup releases runtime resources, the owned builder/registry, and any
+unchanged binfmt registration created by the run. Changed registrations are
+preserved with a cleanup conflict recorded in `builder-cleanup.json`.
+Publication or invocation failure retains diagnostics and releases owned
+resources. Use automatic cleanup: `--keep`, `--teardown` and `--resume` are
+unsupported for this scenario. Start a new run directory for a fresh proof;
+runtime mappings are written only after complete artifact verification.
