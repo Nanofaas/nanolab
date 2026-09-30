@@ -94,7 +94,18 @@ le differenze reali fra backend e tipi di verifica.
        Evidenze: `/tmp/nanolab-recipe-watchdog-e2e-20260930/`, log `.log` a lato.
        Questa tappa verifica l'artefatto; i comportamenti del supervisore
        restano coperti dai test specifici del runtime watchdog.
-   - [ ] Multiarch: profili, manifest e digest per piattaforma.
+   - [x] Multiarch JVM: `validate-container-multiarch-jvm.yaml` e scenario
+     `deployment-lifecycle-container-multiarch.yaml`, verificati il 30 settembre
+     2026 con Docker sull'host ARM64 e NanoFaaS `e7914be0`. Una pubblicazione,
+     indice e manifest/configurazioni AMD64/ARM64 verificati sui byte originali,
+     immagini host fissate per digest, metadati, invocazione word-stats e
+     cleanup passati (15 task). Builder dedicato e QEMU AMD64 temporaneo;
+     preservati builder selezionato e risorse preesistenti. La prova runtime
+     riguarda ARM64; build native e invocazioni su entrambe le architetture
+     restano fuori da questo sottoinsieme.
+     Evidenze: `/tmp/nanolab-multiarch-recipe-e2e-20260930/run-3/`, log
+     `e2e-3.log` a lato; regressione JVM ordinaria passata (13 task). Il primo tentativo ha verificato la compensazione
+     dopo il fallimento del probe; corretto il pin dei probe per piattaforma.
 3. **Affrontare soak e release.** Migrare soltanto le parti equivalenti del
    processo di build. Fatto quando restano validi gli snapshot immutabili, la
    provenienza, la firma e i contratti operativi esistenti.
