@@ -66,30 +66,64 @@ def _registry_identity(
 ) -> dict[str, object]:
     digest = _digest(image.digest)
     config = _digest(image.id)
-    reported = command(
-        (
-            "docker",
-            "buildx",
-            "imagetools",
-            "inspect",
-            "--format",
-            "{{.Manifest.Digest}}",
-            image.reference,
-        ),
-    ).strip()
+    reported = json.loads(
+        command(
+            (
+                "docker",
+                "buildx",
+                "imagetools",
+                "inspect",
+                "--format",
+                "{{json .Manifest}}",
+                image.reference,
+            ),
+        )
+    )["digest"]
     if reported != digest:
         raise ValueError("Comparison image registry digest differs from report")
     reference = image.reference.rsplit(":", 1)[0] + "@" + digest
     raw = command(
         ("docker", "buildx", "imagetools", "inspect", "--raw", reference),
     )
-    descriptor = json.loads(raw)
-    if descriptor.get("config", {}).get("digest") != config:
+    index = json.loads(raw)
+    descriptor = index
+    if "config" not in index:
+        manifests = index.get("manifests", [])
+        executable = [
+            item
+            for item in manifests
+            if item.get("annotations", {}).get("vnd.docker.reference.type")
+            != "attestation-manifest"
+        ]
+        if len(executable) != 1:
+            raise ValueError("Comparison registry image is not single-platform")
+        platform = _digest(executable[0].get("digest"))
+        if any(
+            item.get("annotations", {}).get("vnd.docker.reference.digest") != platform
+            for item in manifests
+            if item not in executable
+        ):
+            raise ValueError("Comparison registry attestation targets another image")
+        descriptor = json.loads(
+            command(
+                (
+                    "docker",
+                    "buildx",
+                    "imagetools",
+                    "inspect",
+                    "--raw",
+                    image.reference.rsplit(":", 1)[0] + "@" + platform,
+                )
+            )
+        )
+    actual_config = _digest(descriptor.get("config", {}).get("digest"))
+    if config not in (digest, actual_config):
         raise ValueError("Comparison image registry configuration differs from report")
     return {
         "reference": image.reference,
         "digest": digest,
-        "config": config,
+        "config": actual_config,
+        "index": index,
         "manifest": descriptor,
     }
 

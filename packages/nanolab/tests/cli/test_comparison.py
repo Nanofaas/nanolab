@@ -69,7 +69,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
                     }
                 )
             elif "--format" in argv:
-                stdout = "sha256:" + "a" * 64
+                stdout = json.dumps({"digest": "sha256:" + "a" * 64})
             elif "--raw" in argv:
                 stdout = json.dumps({"config": {"digest": "sha256:" + "b" * 64}})
             elif argv[:2] == ("rm", "-rf"):

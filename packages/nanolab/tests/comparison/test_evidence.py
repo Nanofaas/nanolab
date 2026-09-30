@@ -55,7 +55,7 @@ class Publisher:
                 state["patchSha256"] = self.patch_override
                 stdout = json.dumps(state)
         elif argv[:5] == ("docker", "buildx", "imagetools", "inspect", "--format"):
-            stdout = self.digest
+            stdout = json.dumps({"digest": self.digest})
         elif argv[:5] == ("docker", "buildx", "imagetools", "inspect", "--raw"):
             stdout = json.dumps(
                 {"schemaVersion": 2, "config": {"digest": self.config}, "layers": []}
@@ -364,9 +364,7 @@ def resume_case(publication, tmp_path):
                 assert "-PnativeBuildMemory=4g" in argv[2]
                 assert "-PnativeParallelism=2" in argv[2]
             publications.append(key)
-            provider.files[str(stage.remote_root / f"{key}.gradle.log")] = (
-                "published\n"
-            )
+            provider.files[str(stage.remote_root / f"{key}.gradle.log")] = "published\n"
             return SimpleNamespace(return_code=0, stdout="", stderr="")
         return original_exec(request, argv, **kwargs)
 
@@ -473,3 +471,58 @@ def test_recorded_receipt_must_match_immutable_inputs(resume_case, change):
     with pytest.raises(ValueError, match=r"Comparison|comparison"):
         prepare_comparison(**kwargs)
     assert publications == []
+
+
+@pytest.mark.parametrize("indexed_id", [False, True])
+@pytest.mark.parametrize("multi_platform", [False, True])
+def test_single_platform_index_with_attestation_has_verified_config(
+    indexed_id, multi_platform
+):
+    from nanolab.comparison.evidence import _registry_identity
+    from nanolab.tasks.recipe import RecipeImage
+
+    digest = "sha256:" + "a" * 64
+    config = "sha256:" + "b" * 64
+    platform = "sha256:" + "c" * 64
+    index = {
+        "manifests": [
+            {"digest": platform, "platform": {"os": "linux", "architecture": "arm64"}},
+            {
+                "digest": "sha256:" + "d" * 64,
+                "platform": {"os": "unknown", "architecture": "unknown"},
+                "annotations": {
+                    "vnd.docker.reference.type": "attestation-manifest",
+                    "vnd.docker.reference.digest": platform,
+                },
+            },
+        ]
+    }
+
+    def command(argv):
+        if "--format" in argv:
+            assert argv[-2] == "{{json .Manifest}}"
+            return json.dumps({"digest": digest})
+        if argv[-1].endswith(platform):
+            return json.dumps({"config": {"digest": config}})
+        return json.dumps(index)
+
+    if multi_platform:
+        index["manifests"].append(
+            {
+                "digest": "sha256:" + "e" * 64,
+                "platform": {"os": "linux", "architecture": "amd64"},
+            }
+        )
+    image = RecipeImage(
+        reference="registry/image:tag",
+        id=digest if indexed_id else config,
+        digest=digest,
+        status="published",
+    )
+    if multi_platform:
+        with pytest.raises(ValueError, match="single-platform"):
+            _registry_identity(image, command)
+        return
+    result = _registry_identity(image, command)
+    assert result["config"] == config
+    assert result["digest"] == digest

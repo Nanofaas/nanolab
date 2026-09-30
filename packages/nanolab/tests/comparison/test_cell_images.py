@@ -163,7 +163,13 @@ def test_prepared_cell_verifies_all_identities_before_k6(
                 self.k6_calls.append(argv)
                 stdout = ""
             elif "--format" in argv:
-                stdout = "sha256:" + "e" * 64 if failure == "registry" else digest
+                stdout = json.dumps(
+                    {
+                        "digest": "sha256:" + "e" * 64
+                        if failure == "registry"
+                        else digest
+                    }
+                )
             elif "--raw" in argv:
                 stdout = json.dumps({"config": {"digest": config_id}, "layers": []})
             elif argv[0] == "curl" and argv[-1].endswith("build-metadata"):
