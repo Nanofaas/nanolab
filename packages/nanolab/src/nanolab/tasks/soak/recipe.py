@@ -6,12 +6,23 @@ import hashlib
 import json
 import re
 import subprocess
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import yaml
 
 from nanolab.config.soak import SoakConfig
 from nanolab.tasks.recipe import _object
+from nanolab.tasks.recipe_registry import fetch_local_registry
+from nanolab.tasks.soak.artifacts import ArtifactWriter, enforce_limit
+from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
+from nanolab.tasks.soak.build_provenance import _materials, _predicate
+from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe, freeze_build_receipt
+from nanolab.tasks.soak.recipe_observation import (
+    observe_soak_recipe,
+    verify_recipe_source,
+)
+from nanolab.tasks.soak.recipe_registry import verify_soak_registry
 from nanolab.tasks.soak.sources import (
     SourceSnapshot,
     materialize_snapshot,
@@ -96,7 +107,7 @@ def prepare_soak_recipe_run(
     verify_snapshot(snapshot)
     profile_bytes = profile.read_bytes()
     run_dir.mkdir(parents=True, exist_ok=False)
-    source = materialize_snapshot(snapshot, run_dir / "source")
+    source = materialize_snapshot(snapshot, run_dir / "workspace-recipe")
     staged_profile = run_dir / "recipe.yaml"
     staged_profile.write_bytes(profile_bytes)
     for argv in (
@@ -141,3 +152,105 @@ def prepare_soak_recipe_run(
         + "\n"
     )
     return RecipeRun(source, staged_profile, run_dir / "distribution", tag)
+
+
+def publish_soak_recipe(
+    snapshot: SourceSnapshot,
+    profile: Path,
+    config: SoakConfig,
+    *,
+    run_dir: Path,
+    tag: str,
+    builder: str,
+    executor: OwnedBuildCommandExecutor,
+    artifact_limit_bytes: int,
+) -> tuple[BuildReceipt, ...]:
+    """Publish once, verify every role, then freeze executable image receipts."""
+    platform = config.images["control-plane"].platform
+    validate_soak_recipe(profile, config, platform=platform)
+    writer = ArtifactWriter(run_dir, artifact_limit_bytes)
+    try:
+        run = prepare_soak_recipe_run(snapshot, profile, run_dir / "recipe", tag)
+        publication, observed = observe_soak_recipe(
+            run,
+            snapshot,
+            executor=executor,
+            builder=builder,
+            artifact_limit_bytes=artifact_limit_bytes,
+        )
+        verified = verify_soak_registry(
+            publication,
+            platform=platform,
+            evidence_dir=run_dir / "registry",
+            fetch=fetch_local_registry,
+            artifact_limit_bytes=artifact_limit_bytes,
+        )
+        if set(verified) != set(config.roles) or set(observed) != set(config.roles):
+            raise ValueError("Recipe publication does not cover all soak roles")
+        verify_recipe_source(snapshot, run.source_dir)
+        if profile.read_bytes() != run.recipe.read_bytes():
+            raise ValueError("Recipe profile changed across publication")
+        receipts = []
+        identities = {}
+        for role in config.roles:
+            image, observation = verified[role], observed[role]
+            if observation.digest != image.publication_digest:
+                raise ValueError("Recipe observation image differs from registry")
+            for statement in image.provenance:
+                predicate = _predicate(statement, platform, image.manifest_digest)
+                if _materials(predicate) != observation.base_images:
+                    raise ValueError(
+                        "Recipe observed base materials differ from registry"
+                    )
+            facts = _object(
+                json.loads(
+                    (
+                        run.recipe.parent / "observer" / (role + "-observations.json")
+                    ).read_bytes()
+                ),
+                "recipe observation",
+            )
+            recipe = BuildRecipe(**facts["recipe"])
+            if facts.get("source_fingerprint") != snapshot.fingerprint:
+                raise ValueError("Recipe observation source differs from snapshot")
+            logs = tuple(
+                dict.fromkeys(
+                    (
+                        *observation.logs,
+                        run.recipe,
+                        run.output_dir / "distribution.json",
+                        run.recipe.parent / "source-identity.json",
+                        *sorted((run_dir / "registry" / role).glob("*.json")),
+                    )
+                )
+            )
+            receipt = freeze_build_receipt(
+                recipe,
+                snapshot.fingerprint,
+                image.manifest_digest,
+                toolchains=observation.toolchains,
+                base_images=observation.base_images,
+                logs=logs,
+            )
+            receipts.append(
+                replace(receipt, original_recipe_fingerprint=facts["profile_sha256"])
+            )
+            identities[role] = {**asdict(image), "reference": receipt.image_digest}
+        enforce_limit(run_dir, artifact_limit_bytes)
+        writer.write_json("runtime-images.json", identities)
+        for index, receipt in enumerate(receipts):
+            writer.write_json(
+                f"build-{index}.json", {"schema": "nanolab-soak-v1", **asdict(receipt)}
+            )
+        writer.write_json(
+            "frozen-images.json",
+            {
+                "schema": "nanolab-soak-v1",
+                "source_fingerprint": snapshot.fingerprint,
+                "images": {item.role: item.image_digest for item in receipts},
+            },
+        )
+        enforce_limit(run_dir, artifact_limit_bytes)
+        return tuple(receipts)
+    finally:
+        writer.close()

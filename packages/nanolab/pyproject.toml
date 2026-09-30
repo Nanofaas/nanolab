@@ -144,6 +144,7 @@ known-first-party = ["nanolab"]
 # Both embed the fixture source they drive: a Gradle init script and the Node
 # preload. Same reason as build_observation.py above.
 "tests/soak/test_build_observation.py" = ["E501"]
+"tests/soak/test_recipe_observation.py" = ["E501"]
 "tests/soak/test_diagnostic_helper_node.py" = ["E501"]
 # Test functions are documented by their name; requiring a docstring on every
 # one of them is noise, not documentation. Style rules (D2xx/D4xx) still apply.
