@@ -6,10 +6,12 @@ import hashlib
 import json
 import re
 import shlex
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
+from sonata_engine import TaskInputs
+from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.comparison.manifest import ComparisonManifest
@@ -21,6 +23,7 @@ from nanolab.comparison.prepare import (
 from nanolab.comparison.profiles import (
     COMPARISON_FUNCTIONS,
     COMPARISON_RECIPE_MODULES,
+    COMPARISON_SCHEDULER_STRATEGY,
     declared_options,
 )
 from nanolab.tasks.recipe import (
@@ -53,11 +56,17 @@ def verify_comparison_registry(
     image: RecipeImage, provider: VmCommandProvider, request: VmRequest
 ) -> dict[str, object]:
     """Verify a mutable tag and its single-platform registry configuration."""
+    return _registry_identity(
+        image, lambda argv: comparison_remote_command(provider, request, argv)
+    )
+
+
+def _registry_identity(
+    image: RecipeImage, command: Callable[[tuple[str, ...]], str]
+) -> dict[str, object]:
     digest = _digest(image.digest)
     config = _digest(image.id)
-    reported = comparison_remote_command(
-        provider,
-        request,
+    reported = command(
         (
             "docker",
             "buildx",
@@ -71,9 +80,7 @@ def verify_comparison_registry(
     if reported != digest:
         raise ValueError("Comparison image registry digest differs from report")
     reference = image.reference.rsplit(":", 1)[0] + "@" + digest
-    raw = comparison_remote_command(
-        provider,
-        request,
+    raw = command(
         ("docker", "buildx", "imagetools", "inspect", "--raw", reference),
     )
     descriptor = json.loads(raw)
@@ -307,3 +314,117 @@ def require_recorded_publications(
             }:
                 raise ValueError("Comparison recorded image differs from report")
             verify_comparison_registry(component.image, provider, request)
+
+
+def require_comparison_scheduler(metrics: str) -> None:
+    """Require exactly one active per-function strategy in the running process."""
+    samples = [
+        line.strip()
+        for line in metrics.splitlines()
+        if re.match(r"^\s*scheduler_active(?=[{\s]|$)", line)
+    ]
+    if len(samples) != 1:
+        raise ValueError("Comparison scheduler must expose exactly one strategy sample")
+    sample = re.fullmatch(
+        r"scheduler_active(?:\{(.*)\})?\s+(\S+)(?:\s+[+-]?\d+)?", samples[0]
+    )
+    if sample is None:
+        raise ValueError("Malformed comparison scheduler sample")
+    raw_labels = sample.group(1) or ""
+    labels = {}
+    position = 0
+    label_pattern = re.compile(
+        r'\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*("(?:[^"\\]|\\["\\n])*")\s*(,|$)'
+    )
+    while position < len(raw_labels):
+        label = label_pattern.match(raw_labels, position)
+        if label is None or label.group(1) in labels:
+            raise ValueError("Malformed or duplicate comparison scheduler label")
+        labels[label.group(1)] = json.loads(label.group(2))
+        position = label.end()
+    try:
+        value = float(sample.group(2))
+    except ValueError as error:
+        raise ValueError("Invalid comparison scheduler value") from error
+    if labels.get("strategy") != COMPARISON_SCHEDULER_STRATEGY or value != 1.0:
+        raise ValueError("Comparison scheduler strategy is not active per-function")
+
+
+def verify_comparison_scheduler(
+    *, endpoint: Any, executor: Any, inputs: Any, run_dir: Path
+) -> None:
+    """Retain a direct management scrape before validating the active scheduler."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    from sonata_tasks.http import endpoint_argv
+    from sonata_tasks.tasks.models import CommandTaskSpec
+
+    def command(url: str) -> tuple[str, ...]:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        if not host or parsed.scheme not in {"http", "https"}:
+            raise ValueError("Invalid comparison scheduler endpoint")
+        authority = f"[{host}]" if ":" in host else host
+        management = urlunsplit(
+            (parsed.scheme, f"{authority}:8081", "/actuator/prometheus", "", "")
+        )
+        return ("curl", "-fsS", "--max-time", "15", management)
+
+    argv = endpoint_argv(endpoint, command)
+    result = executor.run(
+        CommandTaskSpec(
+            task_id="",
+            summary="Verify comparison scheduler",
+            argv=argv(inputs) if callable(argv) else argv,
+            role="stack",
+        )
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "scheduler-metrics.txt").write_text(result.stdout)
+    if result.return_code != 0 or result.status != "passed":
+        raise RuntimeError(f"Comparison scheduler scrape failed: {result.stderr}")
+    require_comparison_scheduler(result.stdout)
+
+
+def verify_comparison_cell_registry(
+    *,
+    distributions: tuple[RecipeDistribution, ...],
+    executor: CommandTaskExecutor,
+    inputs: TaskInputs,
+    run_dir: Path,
+) -> None:
+    """Check report tags immediately before load and retain all command responses."""
+    from sonata_tasks.tasks.models import CommandTaskSpec
+
+    responses = []
+
+    def command(argv: tuple[str, ...]) -> str:
+        result = executor.run(
+            CommandTaskSpec(
+                task_id="",
+                summary="Verify comparison registry image",
+                argv=argv,
+                role="stack",
+            )
+        )
+        responses.append(
+            {
+                "argv": argv,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returnCode": result.return_code,
+            }
+        )
+        if result.return_code != 0:
+            raise RuntimeError("Comparison registry verification command failed")
+        return result.stdout
+
+    try:
+        for distribution in distributions:
+            for component in distribution.components:
+                _ = _registry_identity(component.image, command)
+    finally:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "registry-before-load.json").write_text(
+            json.dumps(responses, indent=2) + "\n"
+        )

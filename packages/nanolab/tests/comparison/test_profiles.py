@@ -108,3 +108,23 @@ def test_conflicting_scheduler_profile_is_rejected(tmp_path, change):
     path.write_text(yaml.safe_dump(recipe))
     with pytest.raises(ValueError, match="comparison"):
         declared_options(path)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"nanofaas.scheduler.strategy": "shared-queue"},
+        {"nanofaas": {"scheduler.strategy": "shared-queue"}},
+        {"nanofaas.admin.runtime-config.enabled": True},
+        {"nanofaas": {"admin": {"runtimeConfig": {"enabled": "true"}}}},
+    ],
+)
+def test_flat_or_relaxed_spring_configuration_cannot_override_scheduler(
+    tmp_path, config
+):
+    recipe = yaml.safe_load(comparison_profiles(ROOT, ("jvm",))["jvm"].read_text())
+    recipe["controlPlane"]["config"] = config
+    profile = tmp_path / "changed.yaml"
+    profile.write_text(yaml.safe_dump(recipe))
+    with pytest.raises(ValueError, match="scheduler"):
+        declared_options(profile)

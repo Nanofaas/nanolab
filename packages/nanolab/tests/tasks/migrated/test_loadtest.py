@@ -523,3 +523,43 @@ def test_the_gate_fails_a_collapse_in_a_run_that_never_parked() -> None:
 
     with pytest.raises(RuntimeError, match="released fn-word-stats-java 1 time"):
         EvaluateGateTask().run(_inputs(outcome))
+
+
+def test_failed_before_load_check_releases_platform_without_running_k6():
+    from sonata_engine import Resource
+    from sonata_tasks.execution.bindings import RoleBindings
+
+    from nanolab.tasks.loadtest import build_loadtest_workflow
+
+    executor = RecordingExecutor()
+    k6 = FakeRunK6()
+
+    def before_load(platform):
+        def reject(inputs) -> None:
+            raise ValueError("scheduler strategy mismatch")
+
+        return Resource(
+            title="Verify prepared cell",
+            acquire=reject,
+            release=lambda inputs, value: None,
+            requires=(*platform.resources, *platform.functions),
+        )
+
+    workflow = build_loadtest_workflow(
+        _platform_request(),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        load=loadtest_composite(
+            preflight=CommandTask(
+                title="k6 preflight", argv=("k6", "version"), executor=executor
+            ),
+            prepare=CommandTask(title="prepare", argv=("true",), executor=executor),
+            run_k6=RunK6Task(run_k6=k6),
+            steps_after_run=(),
+        ),
+        before_load=before_load,
+    )
+    with pytest.raises(ValueError, match="scheduler strategy"):
+        workflow.run()
+    assert k6.calls == 0
+    assert any("uninstall" in task.argv for task in executor.seen)
+    assert any("DELETE" in task.argv for task in executor.seen)

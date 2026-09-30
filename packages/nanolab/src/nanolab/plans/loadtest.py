@@ -12,7 +12,7 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from sonata_engine import Steps, Task, Workflow
+from sonata_engine import Resource, Steps, Task, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
@@ -93,7 +93,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from nanolab.tasks.platform import Backend, Build, PlatformRequest
+from nanolab.tasks.platform import Backend, Build, Platform, PlatformRequest
 from nanolab.tasks.recipe import RecipeBinding, recipe_distribution_resource
 from nanolab.tasks.recipe_validation import (
     RecipeImageCheckTask,
@@ -1549,6 +1549,8 @@ def build_loadtest_plan(
     heap_metrics_required: bool = True,
     function_concurrency: int | None = None,
     function_queue_size: int | None = None,
+    before_load: Callable[[Platform], Resource[None]] | None = None,
+    helm_values_overrides: Mapping[str, str] | None = None,
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1628,6 +1630,14 @@ def build_loadtest_plan(
         container_metrics=container_metrics,
         control_plane_resources=_control_plane_resources(config),
     )
+    if helm_values_overrides:
+        request = replace(
+            request,
+            helm_values=(
+                *request.helm_values,
+                *helm_set_args(dict(helm_values_overrides)),
+            ),
+        )
     if backend == "containerd":
         request = replace(
             request, containerd_maven_repository=repository_for_build(environment)
@@ -1776,6 +1786,7 @@ def build_loadtest_plan(
             else None
         ),
         local_endpoint=control_plane_url,
+        before_load=before_load,
         load=loadtest_composite(
             preflight=preflight,
             prepare=CommandTask(

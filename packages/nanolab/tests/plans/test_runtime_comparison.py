@@ -352,3 +352,110 @@ def test_a_two_function_comparison_records_both_functions_refusals() -> None:
 
     assert "function_queue_rejected_total" in names
     assert f"function_queue_rejected_total@{config.functions[1]}" in names
+
+
+@pytest.mark.parametrize("variant", ["jvm", "native-o3"])
+def test_prepared_cells_use_distribution_images_and_fixed_scheduler(
+    monkeypatch, tmp_path, nanofaas_root, variant
+):
+    from pathlib import PurePosixPath
+
+    from nanolab.comparison.profiles import PreparedComparison
+    from nanolab.tasks.recipe import RecipeComponent, RecipeDistribution, RecipeImage
+
+    def component(kind, name, sdk, image, mode):
+        return RecipeComponent(
+            kind,
+            name,
+            sdk,
+            mode,
+            RecipeImage(
+                f"127.0.0.1:5000/nanofaas/{image}:recipe-unique",
+                "sha256:" + "a" * 64,
+                "published",
+                "sha256:" + "b" * 64,
+            ),
+            variant if kind == "control-plane" else None,
+            "c1" if mode == "jvm" else "3",
+        )
+
+    baseline = RecipeDistribution(
+        tmp_path / "jvm.json",
+        "hash",
+        "recipe-unique",
+        None,
+        ("k8s-deployment-provider", "async-queue", "build-metadata"),
+        (
+            component(
+                "control-plane", "control-plane", "java", "control-plane-jvm", "jvm"
+            ),
+            component("function", "word-stats", "java", "java-word-stats", "jvm"),
+            component(
+                "function",
+                "word-stats",
+                "javascript",
+                "javascript-word-stats",
+                "container",
+            ),
+        ),
+    )
+    native = RecipeDistribution(
+        tmp_path / "native.json",
+        "hash",
+        "recipe-unique",
+        None,
+        baseline.modules,
+        (
+            component(
+                "control-plane",
+                "control-plane",
+                "java",
+                "control-plane-native-o3",
+                "native",
+            ),
+        ),
+    )
+    prepared = PreparedComparison(
+        PurePosixPath("/captured/source"), {"jvm": baseline, "native-o3": native}
+    )
+    captured = {}
+
+    def capture(*args, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(comparison_mod, "build_loadtest_plan", capture)
+    build_runtime_comparison_plan(
+        _config(controlPlaneVariant=variant),
+        environment=None,  # type: ignore[arg-type]
+        bindings=None,  # type: ignore[arg-type]
+        control_plane_url="http://cp:8080",
+        prometheus_client=None,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        repo_root=nanofaas_root,
+        prepared=prepared,
+    )
+    assert (
+        captured["prebuilt_control_plane_image"]
+        == f"127.0.0.1:5000/nanofaas/control-plane-{variant}:recipe-unique"
+    )
+    assert captured["prebuilt_function_images"] == {
+        "word-stats-java": "127.0.0.1:5000/nanofaas/java-word-stats:recipe-unique",
+        "word-stats-javascript": (
+            "127.0.0.1:5000/nanofaas/javascript-word-stats:recipe-unique"
+        ),
+    }
+    assert captured["remote_repo_root"] == Path("/captured/source")
+    assert captured["helm_values_overrides"] == {
+        "controlPlane.scheduler.strategy": "per-function"
+    }
+    assert captured["before_load"] is not None
+    assert set(captured["observed_modules"]) == {
+        "k8s-deployment-provider",
+        "async-queue",
+        "build-metadata",
+    }
+    assert captured["script_name"] == SCRIPT_NAME
+    assert captured["stages"] == ()
+    assert captured["snapshot_lead_seconds"] == 0.0
+    assert captured["heap_metrics_required"] is False

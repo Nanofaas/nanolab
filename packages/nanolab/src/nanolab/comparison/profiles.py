@@ -1,5 +1,6 @@
 """Reusable recipe profiles and the prepared comparison handoff."""
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -49,16 +50,30 @@ def declared_options(profile: Path) -> dict[str, object]:
     modules = cp["modules"]
     if set(modules) != COMPARISON_RECIPE_MODULES or len(modules) != 3:
         raise ValueError("comparison recipe requires the exact comparison modules")
-    config = cp.get("config", {}).get("nanofaas", {})
-    strategy = config.get("scheduler", {}).get("strategy", "per-function")
-    admin = config.get("admin", {}).get("runtime-config", {}).get("enabled", False)
-    alternate_admin = (
-        config.get("runtime-config", {}).get("admin", {}).get("enabled", False)
-    )
-    if strategy != COMPARISON_SCHEDULER_STRATEGY or admin or alternate_admin:
-        raise ValueError(
-            "comparison scheduler strategy and admin configuration conflict"
-        )
+
+    def settings(value: object, prefix: str = ""):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                yield from settings(item, f"{prefix}.{key}")
+        else:
+            yield re.sub(r"[^a-z0-9]", "", prefix.lower()), value
+
+    for key, value in settings(cp.get("config", {})):
+        if (
+            key == "nanofaasschedulerstrategy"
+            and value != COMPARISON_SCHEDULER_STRATEGY
+        ):
+            raise ValueError("comparison scheduler strategy configuration conflicts")
+        if (
+            key
+            in {
+                "nanofaasadminruntimeconfigenabled",
+                "nanofaasruntimeconfigadminenabled",
+            }
+            and value is not None
+            and str(value).lower() not in {"false", "0"}
+        ):
+            raise ValueError("comparison scheduler admin configuration conflicts")
     build = cp["build"]
     native = build.get("native", {})
     monitoring = list(native.get("monitoring", []))

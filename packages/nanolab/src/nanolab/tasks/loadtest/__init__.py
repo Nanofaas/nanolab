@@ -38,7 +38,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from nanolab.tasks.platform import PlatformRequest, add_platform
+from nanolab.tasks.platform import Platform, PlatformRequest, add_platform
 from nanolab.tasks.recipe_validation import (
     RecipeImageCheckTask,
     RecipeMetadataCheckTask,
@@ -487,6 +487,7 @@ def build_loadtest_workflow(
     requires: tuple[Resource[Any], ...] = (),
     control_plane_process: Callable[[], Resource[Any]] | None = None,
     local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
+    before_load: Callable[[Platform], Resource[None]] | None = None,
 ) -> Workflow:
     """Deploy the platform, register the functions, then put them under load.
 
@@ -534,5 +535,8 @@ def build_loadtest_workflow(
             ),
             requires=(*requires, *platform.resources, binding.distribution),
         )
-    workflow.add(load, requires=(*requires, *platform.resources, *platform.functions))
+    checks = (before_load(platform),) if before_load is not None else ()
+    workflow.add(
+        load, requires=(*requires, *platform.resources, *platform.functions, *checks)
+    )
     return workflow

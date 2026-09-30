@@ -20,19 +20,33 @@ since `platform.py` skips its own build entirely when an image is supplied.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from sonata_engine import Workflow
-from sonata_tasks.execution.bindings import RoleBindings
+from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
+from nanolab.comparison.evidence import (
+    verify_comparison_cell_registry,
+    verify_comparison_scheduler,
+)
+from nanolab.comparison.profiles import (
+    COMPARISON_FUNCTIONS,
+    COMPARISON_RECIPE_MODULES,
+    COMPARISON_SCHEDULER_STRATEGY,
+    PreparedComparison,
+)
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import resolve_variants
 from nanolab.plans.functions import resolve_function
 from nanolab.plans.loadtest import build_loadtest_plan
-from nanolab.tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from nanolab.tasks.platform import Platform
+from nanolab.tasks.recipe import RecipeDistribution
+from nanolab.tasks.recipe_kubernetes import RecipeKubernetesImageCheckTask
+from nanolab.tasks.recipe_validation import RecipeMetadataCheckTask
 
 SCRIPT_NAME = "runtime-comparison.js"
 
@@ -57,13 +71,9 @@ def script_for(config: ScenarioConfig) -> str:
 # that function returns extras for autoscaling and concurrency runs, and this
 # profile forbids both, so it would return nothing.
 #
-# No sync-queue, and that is the whole point of the profile rather than a
-# detail. With it, a twelve-cell matrix put all four builds at ~430 requests per
-# second and the number was the queue, not the builds: an A/B on one VM with one
-# variable changed measured p95 falling 84% and failures 44 points when it was
-# switched off (nanofaas#197). A comparison cannot see past a ceiling every
-# variant shares. Without it the sync path uses async-queue's per-function
-# queue, which is also what every concurrency experiment has always used.
+# Keep sync-queue outside this experiment: it adds another admission policy
+# and selection strategy. The unified SchedulerEngine uses per-function here;
+# async-queue is the retained module id for that strategy and async admission.
 COMPARISON_MODULES: tuple[str, ...] = (
     "k8s-deployment-provider",
     "async-queue",
@@ -161,12 +171,35 @@ def build_runtime_comparison_plan(
     tool_root: Path | None = None,
     prebuilt_control_plane_image: str | None = None,
     prebuilt_function_images: Mapping[str, str] | None = None,
+    prepared: PreparedComparison | None = None,
 ) -> Workflow:
     """Compile one variant's run of the comparison into a Sonata workflow."""
     if not is_runtime_comparison(config):
         raise ValueError(
             "runtime-comparison plan requires loadProfile: comparison or mixed"
         )
+    if prepared is not None:
+        if (
+            config.backend != "k8s"
+            or config.control_plane_variant is None
+            or config.control_plane_variant not in prepared.distributions
+        ):
+            raise ValueError(
+                "prepared comparison requires a selected Kubernetes variant"
+            )
+        selected = prepared.distributions[config.control_plane_variant]
+        baseline = prepared.distributions["jvm"]
+        prebuilt_control_plane_image = selected.control_plane().image.reference
+        prebuilt_function_images = {
+            key: baseline.function(*COMPARISON_FUNCTIONS[key]).image.reference
+            for key in config.functions
+        }
+        remote_repo_root = Path(prepared.remote_source)
+        before_load = _prepared_checks(
+            config, selected, baseline, bindings, run_dir, repo_root, tool_root
+        )
+    else:
+        before_load = None
     image = prebuilt_control_plane_image or _variant_image(config)
     if image is None:
         raise ValueError(
@@ -217,7 +250,15 @@ def build_runtime_comparison_plan(
         # resources.py). That backend is priced from the Docker Engine API instead,
         # by the resource watcher, which is the same data `docker stats` reads.
         container_metrics=config.backend != "container",
-        observed_modules=COMPARISON_MODULES,
+        observed_modules=tuple(sorted(COMPARISON_RECIPE_MODULES))
+        if prepared is not None
+        else COMPARISON_MODULES,
+        before_load=before_load,
+        helm_values_overrides={
+            "controlPlane.scheduler.strategy": COMPARISON_SCHEDULER_STRATEGY
+        }
+        if prepared is not None
+        else None,
         # No reaching back before the load started: every cell redeploys the
         # control plane, so anything before k6 belongs to the build the previous
         # cell was measuring. That is not hypothetical — two cells reported the
@@ -233,3 +274,94 @@ def build_runtime_comparison_plan(
         function_concurrency=2,
         function_queue_size=20,
     )
+
+
+def _prepared_checks(
+    config: ScenarioConfig,
+    selected: RecipeDistribution,
+    baseline: RecipeDistribution,
+    bindings: RoleBindings,
+    run_dir: Path,
+    repo_root: Path | None,
+    tool_root: Path | None,
+) -> Callable[[Platform], Resource[None]]:
+    def before_load(platform: Platform) -> Resource[None]:
+        executor = RoleBoundCommandTaskExecutor(bindings)
+        selected_resource = Resource(
+            title="Prepared selected comparison distribution",
+            acquire=lambda _inputs: selected,
+            release=lambda _inputs, _value: None,
+        )
+        baseline_resource = Resource(
+            title="Prepared shared comparison distribution",
+            acquire=lambda _inputs: baseline,
+            release=lambda _inputs, _value: None,
+        )
+
+        def acquire(inputs: TaskInputs) -> None:
+            verify_comparison_cell_registry(
+                distributions=(selected, baseline)
+                if selected is not baseline
+                else (selected,),
+                executor=executor,
+                inputs=inputs,
+                run_dir=run_dir,
+            )
+            _ = RecipeMetadataCheckTask(
+                selected_resource,
+                executor=executor,
+                run_dir=run_dir,
+                endpoint=platform.endpoint,
+                role="stack",
+            ).run(inputs)
+            checks = [
+                (
+                    selected_resource,
+                    "control-plane",
+                    ("control-plane", "control-plane", "java"),
+                    run_dir / "images/control-plane",
+                )
+            ]
+            for key in config.functions:
+                function = resolve_function(
+                    config, key, source_root=repo_root, tool_root=tool_root
+                )
+                name, sdk = COMPARISON_FUNCTIONS[key]
+                checks.append(
+                    (
+                        baseline_resource,
+                        f"fn-{function.name}",
+                        ("function", name, sdk),
+                        run_dir / "images" / sdk,
+                    )
+                )
+            for distribution, deployment, component, evidence_dir in checks:
+                _ = RecipeKubernetesImageCheckTask(
+                    distribution,
+                    namespace=DEFAULT_NAMESPACE,
+                    deployment=deployment,
+                    component=component,
+                    executor=executor,
+                    role="stack",
+                    run_dir=evidence_dir,
+                ).run(inputs)
+            verify_comparison_scheduler(
+                endpoint=platform.endpoint,
+                executor=executor,
+                inputs=inputs,
+                run_dir=run_dir,
+            )
+
+        return Resource(
+            title="Verify prepared comparison before load",
+            acquire=acquire,
+            release=lambda _inputs, _value: None,
+            requires=(
+                *platform.resources,
+                *platform.functions,
+                selected_resource,
+                baseline_resource,
+            ),
+        )
+
+    return before_load
