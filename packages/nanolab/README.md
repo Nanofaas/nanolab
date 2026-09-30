@@ -246,3 +246,11 @@ Run `deployment-lifecycle-container-bash.yaml` for the same local Docker
 validation cycle with Bash word-stats. The reusable recipe is
 `recipes/validate-container-bash.yaml`; the catalog calls its runtime `exec`.
 See [profile, command and evidence](recipes/README.md#bash-container-validation).
+
+## Recipe Java service validation
+
+Run `deployment-lifecycle-container-services.yaml` to validate JVM warm-echo
+alongside JVM word-stats with Docker on the host. Java services selected by the
+recipe use the same managed registration and cleanup cycle as functions, with
+their own distribution component and image checks. See
+[profile, command and evidence](recipes/README.md#java-service-container-validation).

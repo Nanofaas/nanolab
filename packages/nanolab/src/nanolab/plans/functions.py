@@ -146,6 +146,57 @@ def _payload(definition: FunctionDefinition, tool_root: Path | None = None) -> s
     return json.dumps({"input": payload}, separators=(",", ":"))
 
 
+def resolve_recipe_services(
+    recipe: Path, *, source_root: Path, tool_root: Path | None = None
+) -> dict[str, SonataFunction]:
+    """Resolve recipe Java services that expose the managed invocation contract."""
+    profile = yaml.safe_load(recipe.read_text(encoding="utf-8"))
+    services: dict[str, SonataFunction] = {}
+    registration_names: set[str] = set()
+    for entry in profile.get("services", []):
+        name = entry.get("name")
+        if (
+            not isinstance(name, str)
+            or not name
+            or Path(name).name != name
+            or name in {".", ".."}
+        ):
+            raise ValueError("Recipe service needs a simple component name")
+        if entry.get("sdk") != "java":
+            raise ValueError(
+                f"Recipe service {name} needs the Java invocation contract"
+            )
+        manifest_path = source_root / "services/java" / name / "function.yaml"
+        if not manifest_path.is_file():
+            raise ValueError(f"Recipe service {name} lacks function.yaml")
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("executionMode") != "DEPLOYMENT":
+            raise ValueError(f"Recipe service {name} must use DEPLOYMENT")
+        definition = FunctionDefinition(
+            key=f"{name}-java",
+            family=name,
+            runtime="java",
+            description="Recipe service",
+            example_dir=manifest_path.parent,
+            default_image=manifest.get("image"),
+            default_payload_file=manifest.get("catalog", {}).get("defaultPayload"),
+        )
+        registration = _function_name(definition)
+        if not registration or registration in registration_names or name in services:
+            raise ValueError(
+                "Recipe services need unique registration and component names"
+            )
+        registration_names.add(registration)
+        image = _function_image(definition)
+        services[name] = SonataFunction(
+            name=registration,
+            image=image,
+            payload=_payload(definition, tool_root),
+            build_argv=("./gradlew", f":services:java:{name}:bootJar", "--quiet"),
+        )
+    return services
+
+
 def resolve_function(
     config: ScenarioConfig,
     key: str,

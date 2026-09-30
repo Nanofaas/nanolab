@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Literal, override
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.command import CommandTask
@@ -41,6 +41,7 @@ class RecipeFunctionRegisterTask(Task[TaskResult]):
         executor: CommandTaskExecutor,
         role: ExecutionRole,
         cwd: Path | None = None,
+        kind: Literal["function", "service"] = "function",
     ) -> None:
         """Bind the selected recipe component to a NanoFaaS registration."""
         self.title = f"Register {function.name} from recipe"
@@ -52,14 +53,17 @@ class RecipeFunctionRegisterTask(Task[TaskResult]):
         self.executor = executor
         self.role: ExecutionRole = role
         self.cwd = cwd
+        self.kind = kind
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[TaskResult]:
-        image = (
-            inputs.resource(self.distribution)
-            .function(self.recipe_name, self.sdk)
-            .image.reference
+        distribution = inputs.resource(self.distribution)
+        component = (
+            distribution.service(self.recipe_name, self.sdk)
+            if self.kind == "service"
+            else distribution.function(self.recipe_name, self.sdk)
         )
+        image = component.image.reference
         manifest = replace(self.function.manifest(), image=image)
         return HttpFunctionRegisterTask(
             manifest,
@@ -74,6 +78,7 @@ class RecipeFunctionRegisterTask(Task[TaskResult]):
         return {
             "recipeName": self.recipe_name,
             "sdk": self.sdk,
+            "kind": self.kind,
             "function": self.function.name,
             "distribution": self.distribution.title,
         }
@@ -221,6 +226,7 @@ class RecipeImageCheckTask(Task[None]):
         project: DockerComposeProject,
         cwd: Path,
         function: tuple[str, str, str] | None = None,
+        kind: Literal["function", "service"] = "function",
     ) -> None:
         """Store the distribution and container to inspect."""
         self.title = (
@@ -234,6 +240,7 @@ class RecipeImageCheckTask(Task[None]):
         self.project = project
         self.cwd = cwd
         self.function = function
+        self.kind = kind
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
@@ -268,7 +275,11 @@ class RecipeImageCheckTask(Task[None]):
             container = result.stdout.strip() if result else ""
         else:
             registration_name, recipe_name, sdk = self.function
-            component = expected.function(recipe_name, sdk)
+            component = (
+                expected.service(recipe_name, sdk)
+                if self.kind == "service"
+                else expected.function(recipe_name, sdk)
+            )
             container = f"nanofaas-{registration_name}-r1"
         if not container:
             raise RuntimeError("Recipe container was not found")
@@ -303,4 +314,8 @@ class RecipeImageCheckTask(Task[None]):
 
     @override
     def _fingerprint_payload(self) -> object:
-        return {"distribution": self.distribution.title, "function": self.function}
+        return {
+            "distribution": self.distribution.title,
+            "function": self.function,
+            "kind": self.kind,
+        }

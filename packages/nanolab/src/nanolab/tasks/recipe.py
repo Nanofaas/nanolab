@@ -62,6 +62,10 @@ class RecipeDistribution:
         """Find a function, accepting catalog exec as the recipe Bash SDK."""
         return self._component("function", name, "bash" if sdk == "exec" else sdk)
 
+    def service(self, name: str, sdk: str) -> RecipeComponent:
+        """Find a service without confusing it with a same-named function."""
+        return self._component("service", name, sdk)
+
     def _component(self, kind: str, name: str, sdk: str) -> RecipeComponent:
         matches = [
             c for c in self.components if (c.kind, c.name, c.sdk) == (kind, name, sdk)
@@ -347,12 +351,14 @@ class RecipeBinding:
     project: DockerComposeProject | None = None
     target: Resource[Any] | None = None
     remote_root: PurePosixPath | None = None
+    services: frozenset[str] = frozenset()
 
 
 def require_validation_distribution(
     distribution: RecipeDistribution,
     *,
     functions: tuple[tuple[str, str], ...],
+    services: tuple[tuple[str, str], ...] = (),
     required_modules: frozenset[str] = frozenset(
         {"build-metadata", "container-deployment-provider"}
     ),
@@ -372,10 +378,15 @@ def require_validation_distribution(
     expected = {(name, "bash" if sdk == "exec" else sdk) for name, sdk in functions}
     if selected != expected or len(selected) != len(functions):
         raise ValueError("Recipe distribution differs from selected functions")
-    if len(control_planes) != 1 or any(
-        component.kind == "service" for component in distribution.components
-    ):
-        raise ValueError("Recipe distribution needs one control plane and no services")
+    selected_services = {
+        (component.name, component.sdk)
+        for component in distribution.components
+        if component.kind == "service"
+    }
+    if selected_services != set(services) or len(selected_services) != len(services):
+        raise ValueError("Recipe distribution differs from selected services")
+    if len(control_planes) != 1:
+        raise ValueError("Recipe distribution needs one control plane")
     if not required_modules.issubset(distribution.modules):
         raise ValueError("Recipe distribution lacks required control-plane modules")
     if exact_modules and set(distribution.modules) != required_modules:
@@ -395,6 +406,7 @@ def recipe_distribution_resource(
     tag: str,
     executor: CommandTaskExecutor,
     functions: tuple[tuple[str, str], ...],
+    services: tuple[tuple[str, str], ...] = (),
     requires: tuple[Resource[Any], ...] = (),
     required_modules: frozenset[str] = frozenset(
         {"build-metadata", "container-deployment-provider"}
@@ -411,6 +423,7 @@ def recipe_distribution_resource(
         require_validation_distribution(
             result,
             functions=functions,
+            services=services,
             required_modules=required_modules,
             exact_modules=exact_modules,
         )

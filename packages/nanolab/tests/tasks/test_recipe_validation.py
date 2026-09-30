@@ -492,3 +492,91 @@ def test_bash_recipe_registers_published_image_for_exec_catalog(
     assert payload["name"] == "word-stats-exec"
     with pytest.raises(ValueError, match="selected functions"):
         require_validation_distribution(value, functions=(("word-stats", "python"),))
+
+
+def test_recipe_service_selection_and_registration_keep_component_kind(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from nanolab.tasks.recipe import require_validation_distribution
+
+    original = distribution(tmp_path)
+    components = tuple(
+        replace(
+            c,
+            image=replace(c.image, reference=f"127.0.0.1:5000/nanofaas/{c.name}:run-1"),
+        )
+        for c in original.components
+    )
+    service = replace(
+        components[1],
+        kind="service",
+        image=replace(
+            components[1].image, reference="127.0.0.1:5000/nanofaas/service:run-1"
+        ),
+    )
+    value = replace(original, components=(*components, service))
+    require_validation_distribution(
+        value, functions=(("word-stats", "java"),), services=(("word-stats", "java"),)
+    )
+    with pytest.raises(ValueError, match="selected services"):
+        require_validation_distribution(value, functions=(("word-stats", "java"),))
+    with pytest.raises(ValueError, match="selected services"):
+        require_validation_distribution(
+            value, functions=(("word-stats", "java"),), services=(("other", "java"),)
+        )
+    resource = Resource(
+        title="distribution",
+        acquire=lambda _inputs: value,
+        release=lambda _inputs, _value: None,
+    )
+    executor = RecordingExecutor()
+    RecipeFunctionRegisterTask(
+        PlatformFunction(
+            name="service-echo", image="wrong", payload="{}", build_argv=("true",)
+        ),
+        recipe_name="word-stats",
+        sdk="java",
+        kind="service",
+        distribution=resource,
+        endpoint="http://localhost:8080",
+        executor=executor,
+        role="host",
+    ).run(TaskInputs._for_resources({resource: value}, {resource}))
+    registration = executor.specs[-1]
+    payload = json.loads(registration.argv[registration.argv.index("--data") + 1])
+    assert payload["image"] == "127.0.0.1:5000/nanofaas/service:run-1"
+    assert payload["executionMode"] == "DEPLOYMENT"
+
+    class ImageExecutor(RecordingExecutor):
+        def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+            return TaskResult(
+                task_id="", status="passed", return_code=0, stdout="sha256:service"
+            )
+
+    service_value = replace(
+        value,
+        components=(
+            *components,
+            replace(service, image=replace(service.image, id="sha256:service")),
+        ),
+    )
+    project = DockerComposeProject(
+        name="test", file=Path("compose.yaml"), ready_url="http://localhost/ready"
+    )
+    check = RecipeImageCheckTask(
+        resource,
+        executor=ImageExecutor(),
+        run_dir=tmp_path,
+        project=project,
+        cwd=tmp_path,
+        function=("service-echo", "word-stats", "java"),
+        kind="service",
+    )
+    check.run(TaskInputs._for_resources({resource: service_value}, {resource}))
+    evidence = json.loads((tmp_path / "image-service-word-stats.json").read_text())
+    assert evidence["container"] == "nanofaas-service-echo-r1"
+    assert evidence["reference"] == "127.0.0.1:5000/nanofaas/service:run-1"
+    with pytest.raises(RuntimeError, match="Running image"):
+        check.run(TaskInputs._for_resources({resource: value}, {resource}))

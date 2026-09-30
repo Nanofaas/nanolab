@@ -25,6 +25,7 @@ from nanolab.functions.catalog import resolve_function_definition
 from nanolab.plans.functions import (
     resolve_function,
     resolve_function_payloads,
+    resolve_recipe_services,
     sonata_function,
 )
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
@@ -306,6 +307,19 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         )
         for key in config.functions
     }
+    services = (
+        resolve_recipe_services(
+            config.recipe_profile, source_root=root, tool_root=tool_root
+        )
+        if config.recipe_profile is not None and config.backend == "container"
+        else {}
+    )
+    if {service.name for service in services.values()} & {
+        function.name for function in functions.values()
+    }:
+        raise ValueError(
+            "Recipe service registration conflicts with a selected function"
+        )
     recipe_binding: RecipeBinding | None = None
     recipe_requires: tuple[Resource, ...] = ()
     recipe_namespace = None
@@ -499,10 +513,23 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
     request = ValidateWorkflowRequest(
         backend=config.backend,
         build=config.build,
-        functions=tuple(functions.values()),
-        envelope_checks=_handler_envelope_checks(functions)
-        if config.handler_envelope
-        else (),
+        functions=(*functions.values(), *services.values()),
+        envelope_checks=(
+            *(_handler_envelope_checks(functions) if config.handler_envelope else ()),
+            *(
+                EnvelopeCheck(
+                    service.name,
+                    service.payload,
+                    HttpFunctionExpectation(
+                        status=200,
+                        api_status="success",
+                        output=json.loads(service.payload)["input"],
+                    ),
+                )
+                for name, service in services.items()
+                if name == "warm-echo"
+            ),
+        ),
         async_checks=_async_checks(functions, config, repo_root)
         if config.async_load
         else (),
@@ -658,6 +685,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                     )
                     for key in config.functions
                 ),
+                services=tuple((name, "java") for name in services),
                 requires=(registry,),
             )
         cleanup = (
@@ -677,12 +705,19 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
                 recipe=RecipeBinding(
                     distribution=distribution,
                     functions={
-                        functions[key].name: (
-                            resolve_function_definition(key, root).family,
-                            resolve_function_definition(key, root).runtime,
-                        )
-                        for key in config.functions
+                        **{
+                            service.name: (name, "java")
+                            for name, service in services.items()
+                        },
+                        **{
+                            functions[key].name: (
+                                resolve_function_definition(key, root).family,
+                                resolve_function_definition(key, root).runtime,
+                            )
+                            for key in config.functions
+                        },
                     },
+                    services=frozenset(service.name for service in services.values()),
                     project=project,
                     run_dir=recipe_run_dir,
                 ),

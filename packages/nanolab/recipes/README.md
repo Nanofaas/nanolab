@@ -8,6 +8,7 @@ this directory.
 | --- | --- | --- | --- |
 | `validate-container-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats | JVM container lifecycle validation |
 | `validate-container-bash.yaml` | JVM, container provider, build metadata | Bash word-stats | Bash container lifecycle validation |
+| `validate-container-services-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats and warm-echo service | Managed Java service lifecycle validation |
 | `validate-container-native.yaml` | Native container builder, container provider, build metadata | Java native word-stats | Native container lifecycle validation |
 | `validate-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Kubernetes lifecycle validation on Minikube or Multipass |
 | `validate-containerd-jvm.yaml` | JVM, containerd provider, build metadata | Java JVM word-stats | Rootless containerd lifecycle validation on Multipass |
@@ -17,7 +18,8 @@ All profiles use the repository `127.0.0.1:5000/nanofaas` and single-platform
 Docker images. The native profile compiles the control plane and word-stats
 inside the container builder. The Kubernetes profile uses `IfNotPresent` so
 Minikube can run images loaded from the host; Multipass publishes images to its
-VM-local registry. Services and multi-platform publication remain uncovered.
+VM-local registry. The services profile covers JVM warm-echo; Dockerfile services,
+native services and multi-platform publication remain to be verified.
 
 ## Use directly
 
@@ -154,3 +156,34 @@ the host and needs no VM. The CI recipe validation step includes this profile.
 The Docker cycle passed on 30 September 2026 against NanoFaaS `e7914be0`;
 evidence is in `/tmp/nanolab-recipe-bash-e2e-20260930/`, with the execution log
 at `/tmp/nanolab-recipe-bash-e2e-20260930.log`.
+
+## Java service container validation
+
+`validate-container-services-jvm.yaml` builds and publishes the JVM control plane,
+word-stats function and warm-echo service in one recipe. The scenario selects
+word-stats through the function catalog; NanoLab also resolves the Java services
+declared by the recipe from `services/java/<name>/function.yaml`. No catalog
+entry or new scenario field is needed for services.
+
+```bash
+export NANOFAAS_ROOT=/path/to/nanofaas
+./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-services.yaml \
+  --run-dir /tmp/nanolab-services-my-run
+```
+
+This support is limited to local Docker `validate` runs and Java services with
+a `DEPLOYMENT` invocation manifest. Unsupported SDKs, missing manifests and
+conflicting registration names are rejected. Services are registered through
+the ordinary function API; component selection and image evidence retain
+their recipe kind `service`.
+
+The workflow checks build metadata, all three running image IDs, invocations,
+container resource inspection, warm-echo's exact echo output and cleanup.
+Without declared resource limits, inspection only establishes that the
+container exists. CI validates the reusable profile with `validateRecipe`.
+
+The Docker cycle passed on 30 September 2026 against NanoFaaS `e7914be0`.
+Evidence is in `/tmp/nanolab-recipe-services-e2e-20260930/`, including
+`image-service-warm-echo.json`; the log is
+`/tmp/nanolab-recipe-services-e2e-20260930.log`. Native services and the
+Dockerfile watchdog require separate verification.

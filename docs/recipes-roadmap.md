@@ -66,7 +66,15 @@ le differenze reali fra backend e tipi di verifica.
      pubblicazione, metadati, immagini, invocazione, risorse e cleanup passati.
      Mapping condiviso `exec` → SDK recipe `bash`; nessun nuovo task.
      Evidenze: `/tmp/nanolab-recipe-bash-e2e-20260930/`, log `.log` a lato.
-   - [ ] Servizi: profili e verifiche delle relative evidenze.
+   - [ ] Servizi: completare la copertura dei tipi e delle build.
+     - [x] Java JVM: `validate-container-services-jvm.yaml` e scenario
+       `deployment-lifecycle-container-services.yaml`, verificati con Docker
+       locale il 30 settembre 2026 su NanoFaaS `e7914be0`. Una pubblicazione,
+       metadati, tre immagini, invocazioni, output echo esatto, ispezione dei
+       container e cleanup passati. Nessun nuovo task o campo di scenario.
+       Evidenze: `/tmp/nanolab-recipe-services-e2e-20260930/`, log `.log` a lato.
+     - [ ] Servizi native e selezione della build indipendente dal control plane.
+     - [ ] Servizi Dockerfile, a partire dal watchdog.
    - [ ] Multiarch: profili, manifest e digest per piattaforma.
 3. **Affrontare soak e release.** Migrare soltanto le parti equivalenti del
    processo di build. Fatto quando restano validi gli snapshot immutabili, la

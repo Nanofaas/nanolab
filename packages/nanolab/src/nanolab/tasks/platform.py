@@ -528,6 +528,9 @@ def _function_resource(
                 function,
                 recipe_name=request.recipe.functions[function.name][0],
                 sdk=request.recipe.functions[function.name][1],
+                kind="service"
+                if function.name in request.recipe.services
+                else "function",
                 distribution=request.recipe.distribution,
                 endpoint=endpoint,
                 executor=executor,

@@ -342,6 +342,9 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                         project=binding.project,
                         cwd=cwd or Path.cwd(),
                         function=(function.name, recipe_name, sdk),
+                        kind="service"
+                        if function.name in binding.services
+                        else "function",
                     ),
                     requires=(*requires, registered, binding.distribution),
                 )
