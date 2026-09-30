@@ -12,12 +12,21 @@
 
 **Resolved contract constraint:** the pinned NanoFaaS recipe contract requires `build-metadata` for an explicit `controlPlane.build.native.optimization`. The user approved adding the module to every variant. The spec now uses that uniform three-module set and declares `build.variant`; no plugin or pin change is needed. Treat results as a new series relative to historical matrices.
 
+**Scheduler after the merge:** the pinned revision already includes the unified
+`SchedulerEngine` and `PendingWorkStore`. The former independent scheduler loops
+have been removed. The module ids remain: `async-queue` supplies the
+`per-function` selection strategy and public async admission; `sync-queue`
+supplies the `shared-queue` strategy and sync admission/backpressure. This
+comparison measures runtime builds of the unified engine with `per-function`
+held fixed. Selecting `async-queue` preserves that experiment; adding
+`sync-queue` would also change the available strategies and admission behavior.
+
 ## Global Constraints
 
 - Implement all nine supported variants; the first end-to-end proof is `jvm` with one repetition on Multipass. Native publication remains unproven until executed.
 - Build on the stack VM. Publish `jvm` once even when unselected, then each selected variant other than `jvm` once. Only the JVM profile includes the two functions.
 - Exact modules: `k8s-deployment-provider`, `async-queue`, `build-metadata`. Set `build.variant` to the variant key in every comparison recipe.
-- `async-queue` is still a supported module id; it supplies `per-function` scheduling to the composed engine. Preserve that strategy and public async admission for the mixed profile.
+- Run one unified scheduler with `per-function` for every variant. `async-queue` is the retained module id for that strategy and public async admission, including the mixed profile. Keep `sync-queue` outside the exact module set and keep runtime strategy switching disabled. Set the existing Helm value `controlPlane.scheduler.strategy=per-function` explicitly for prepared cells; retain the current admin API setting (disabled).
 - Declare C1 explicitly for `jvm`: `-XX:+UseSerialGC -XX:TieredStopAtLevel=1`. Historical samples without an explicit tier flag are not equivalent.
 - Use `127.0.0.1:5000/nanofaas`, distinct `control-plane-<variant>` image names and one unique run tag. Native G1 needs Oracle GraalVM in the VM.
 - Preserve workload, resource limits, k6 scripts, Prometheus queries, interleaved order, retries, reports and cell completion criteria. Recipe selection belongs to `compare`, not the cell's `recipeProfile`.
@@ -30,7 +39,7 @@
 2. A replacement VM has the original name, or k3s was recreated on the original VM: compare stable machine/cluster identities rather than names or IPs (Tasks 3 and 6).
 3. An interruption lands between publication and its manifest commit: reuse committed publications, retry only uncommitted variants, and start no cell until every required entry exists (Task 4).
 4. A report describes the right revision but another tracked patch, or a JVM image launches other flags: reject artifact evidence despite plausible metadata (Tasks 3 and 4).
-5. A registry tag or ready Pod contains another image between preparation and load: fail the cell before k6, retaining inspection evidence (Task 5).
+5. A registry tag, ready Pod or active scheduler strategy differs from the experiment before load: fail the cell before k6, retaining image and scheduler evidence (Task 5).
 
 ## File Map
 
@@ -38,7 +47,7 @@
 - New `comparison/manifest.py`: canonical experiment identity, strict versioned manifest, atomic persistence and publication receipts.
 - New `comparison/target.py`: read-only identity probes for original machines and cluster.
 - Existing `comparison/prepare.py`: one captured/staged source and ordered recipe publication; retain leftover registration cleanup and heartbeat integration.
-- New `comparison/evidence.py`: source, registry, native options and JVM image inspection.
+- New `comparison/evidence.py`: source, registry, native options, JVM image inspection and the active scheduler check before load.
 - Existing `workspace/recipe.py`, `tasks/recipe_remote.py`, `tasks/recipe.py`: reuse snapshot/bundling/command/report support with narrowly scoped additions.
 - Existing `cli/comparison.py`, `cli/product.py`, `plans/runtime_comparison.py`, `plans/loadtest.py`, `tasks/loadtest/__init__.py`: orchestration and an optional prerequisite for verifying prepared images.
 - Nine new `packages/nanolab/recipes/comparison-*.yaml` profiles; `.github/workflows/ci.yml`, both repository/package READMEs, recipe README, comparison scenario comments and roadmap: validation and usage.
@@ -54,10 +63,12 @@
 - `PreparedComparison` frozen dataclass: `remote_source: PurePosixPath`, `distributions: Mapping[str, RecipeDistribution]`.
 - `COMPARISON_FUNCTIONS` maps `word-stats-java` to `('word-stats', 'java')` and `word-stats-javascript` to `('word-stats', 'javascript')`.
 - `COMPARISON_RECIPE_MODULES = frozenset({'k8s-deployment-provider', 'async-queue', 'build-metadata'})`; use it for profile/report validation, while standalone non-recipe comparison plans keep their existing module constant.
+- `COMPARISON_SCHEDULER_STRATEGY = 'per-function'`: shared by manifest capture, prepared-cell Helm values and the runtime strategy check.
 
 - [ ] Write parametrized profile tests asserting:
   - Keys: `jvm`, `jvm-g1`, `jvm-c2`, `jvm-g1-c2`, `jvm-loop1`, `jvm-c2-loop1`, `native-os`, `native-o3`, `native-o3-g1`.
   - Every profile has schema 2, name `comparison-<key>`, the exact three modules, build variant `<key>`, repository `127.0.0.1:5000/nanofaas` and image `control-plane-<key>`.
+  - Reject an added `sync-queue` module or a recipe configuration that overrides `nanofaas.scheduler.strategy` to another value or enables the admin runtime-config API. Do not select modules from a sync/async request label: the unified engine's strategy and the public invocation API are separate choices.
   - JVM args: Serial/C1; G1/C1; Serial/full; G1/full; Serial/C1 plus `-Dreactor.netty.ioWorkerCount=1`; Serial/full plus that property, respectively.
   - Native options: host builder, serial/`s`, serial/`3`, G1/`3` with effective `jfr` monitoring, respectively.
   - Only `jvm` contains `word-stats` Java JVM and `word-stats` JavaScript, with image names `java-word-stats` and `javascript-word-stats`.
@@ -89,6 +100,7 @@
 
 - [ ] Test immutable identity with actual small Git repos and resolved configuration. Assert revision plus SHA-256 of `git diff HEAD --binary --no-ext-diff` for both NanoFaaS and NanoLab; profile byte hashes; tag; ordered selection; repetitions; native overrides; canonical scenario/environment values and hashes; resolved function definitions, payloads and registration settings. Configuration file paths are diagnostic fields, excluded from equality. Include model defaults and resolved role targets/VM requests, not only explicitly supplied YAML fields. Fail closed when Git identity cannot be established.
 - [ ] Parametrize resume rejection for changed patch, profile, load scale, mixed shares, resources, function settings, VM sizing, provider settings, NanoLab revision/patch, selection order and repetitions. Assert rejection leaves manifest bytes unchanged. Assert equivalent configurations parsed from other paths compare equal.
+- [ ] Record the scheduler engine as `unified`, the required strategy as `per-function` and runtime switching as disabled in the experiment identity. Test that a missing or changed scheduler identity refuses resume, including `--fresh`.
 
   Name the first regression `test_changed_load_scale_refuses_resume_without_rewriting`; after setup with an existing manifest and changed captured input, its decisive assertions are:
 
@@ -160,16 +172,22 @@
 
 ### Task 5: Bind cells to distributions and check images before k6
 
-**Files:** modify `packages/nanolab/src/nanolab/plans/runtime_comparison.py`, `plans/loadtest.py`, `tasks/loadtest/__init__.py`; modify `tests/plans/test_runtime_comparison.py`, `tests/plans/test_loadtest.py`, `tests/tasks/migrated/test_loadtest.py`; create `packages/nanolab/tests/comparison/test_cell_images.py`.
+**Files:** modify `packages/nanolab/src/nanolab/plans/runtime_comparison.py`, `plans/loadtest.py`, `tasks/loadtest/__init__.py`, `comparison/evidence.py`; modify `tests/plans/test_runtime_comparison.py`, `tests/plans/test_loadtest.py`, `tests/tasks/migrated/test_loadtest.py`; create `packages/nanolab/tests/comparison/test_cell_images.py`.
 
 **Interfaces:**
 - Extend `build_runtime_comparison_plan(..., prepared: PreparedComparison | None = None) -> Workflow`.
 - Extend `build_loadtest_plan(...)` and `build_loadtest_workflow(...)` with `before_load: Callable[[Platform], Resource[None]] | None = None`. Acquire the returned resource after platform/function readiness and make the existing load composite require it. Existing callers retain their behavior.
 - The prepared comparison uses the selected variant distribution for the control plane and the `jvm` distribution for both functions; its remote Helm/source path is `prepared.remote_source`.
+- Pass `controlPlane.scheduler.strategy=per-function` through the existing chart values for prepared comparisons. Include the scheduler check in the same `before_load` prerequisite as metadata and image verification.
+- `require_comparison_scheduler(metrics: str) -> None` in `comparison/evidence.py`: require exactly one `scheduler_active` sample with `strategy="per-function"` and numeric value `1`. Ignore HELP/TYPE comments and unrelated metric families; accept ordinary label ordering, escaped label values and numeric spellings such as `1.0`. Reject duplicate or malformed matching samples, missing strategy labels and nonfinite values.
+- `verify_comparison_scheduler(*, endpoint: Endpoint, executor: CommandTaskExecutor, inputs: TaskInputs, run_dir: Path) -> None` in that file: resolve the ready platform endpoint with the existing endpoint helper, retain its scheme/host, use management port `8081` and path `/actuator/prometheus`, and execute curl in role `stack`. Persist stdout to `scheduler-metrics.txt` before validation, including on command failure; do not scrape a possibly stale Prometheus server for this check.
 
 - [ ] Test report-derived image references override legacy constructed tags; both function keys map to the shared JVM report across two different variants. Assert no build/push operations in a cell and no `recipeProfile` assignment.
 - [ ] Test exact existing k6 script/environment, `NO_STAGES`, metric catalogue, cAdvisor settings, heap-metric optionality, resource limits and post-load tasks. Prepared cells include `build-metadata` in their declared observed module set without adding new measurement queries. Existing standalone comparison plans and other load tests retain their current behavior when `prepared` is absent; keep their two-module constant separate from the three-module recipe contract.
 - [ ] Test registry retagging, wrong runtime build metadata and a wrong ready Pod image block k6. Construct two constant distribution resources and reuse `RecipeMetadataCheckTask` against the platform endpoint, then `RecipeKubernetesImageCheckTask` for control plane and each `fn-<resolved-function-name>` deployment, role `stack`, namespace `DEFAULT_NAMESPACE`. Use separate per-SDK evidence directories to avoid both `word-stats` components overwriting the same file. Require metadata and all three image checks to finish before load.
+- [ ] Test `test_scheduler_strategy_mismatch_prevents_load`: scrape the running control plane's management metrics endpoint directly after readiness; require the `scheduler_active` gauge to expose exactly the built-in strategy `per-function` with value `1`. Missing, malformed, inactive or additional strategy series fail before k6. Save the raw response under the cell's `scheduler-metrics.txt` on success and failure. Repeat this check on each cell and retry. Use this existing gauge only for preflight evidence; preserve the benchmark's Prometheus query catalogue and load script.
+- [ ] Parametrize `require_comparison_scheduler` for `1` and `1.0`, reordered/common labels, comments/unrelated families, duplicate samples, missing labels, missing series, `0`, `NaN`, `shared-queue` and a second inactive built-in strategy. Assert only the single active `per-function` case passes. In the workflow failure test assert `k6_calls == []` and the saved response equals the fake endpoint's stdout; verify the curl URL uses the prepared control-plane host and port `8081`.
+- [ ] Test prepared Helm values explicitly select `per-function` and keep the admin runtime-config API disabled. Do not invoke the scheduler PATCH endpoint or add `runtime-config` merely to inspect the strategy. Correct outdated comments in `plans/runtime_comparison.py` and comparison scenarios that attribute queue ownership or a separate worker to `async-queue`; describe the unified engine and its fixed selection strategy.
 
   `test_wrong_ready_pod_image_prevents_load` supplies ready Pod/CRI evidence with a manifest different from the selected report:
 
@@ -228,10 +246,11 @@
     --run-dir /tmp/nanolab-comparison-recipe-e2e-<unique-id>
   ```
 
-  Require VM creation when absent, one source stage/publication, verified C1 artifact and three running image identities before k6, existing measurements and `comparison-report.html`. Retain the original VM because `compare` uses `keep=True`; never globally purge Multipass or remove an unrelated existing VM.
+  Require VM creation when absent, one source stage/publication, verified C1 artifact, three running image identities and `scheduler_active{strategy="per-function"} 1` evidence before k6, existing measurements and `comparison-report.html`. Retain the original VM because `compare` uses `keep=True`; never globally purge Multipass or remove an unrelated existing VM.
 - [ ] Rerun the same command against the retained VM and run directory. Require zero publications and zero completed-cell loads; verify identities and regenerate the report. Before runtime execution stops being available, exercise an input mismatch with `--fresh` and verify early refusal leaves the manifest/results unchanged. Do not count fake native tests as native execution evidence.
 - [ ] Run `uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests` (existing coverage gate), `uv run --locked --all-packages --all-groups ruff check packages`, `uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab`, `uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache`, formatting checks for changed Python files, and `git diff --check`. Fix regressions introduced by this branch.
 - [ ] Document profiles, artifacts, the always-prepared JVM/functions distribution, C1 and added-module historical-sample caveats, retained VM, strict original-infrastructure resume, legacy-run refusal and `--fresh`. Update the roadmap with the JVM evidence path/date and explicitly leave native publication/Oracle G1 and other load-test backends open.
+- [ ] Describe the measured scheduler as "unified SchedulerEngine, per-function strategy (module id: async-queue)". Explain that the queue-module names survived the merge and that this matrix varies runtime builds while holding scheduling and admission behavior fixed.
 - [ ] Commit Task 7 files: `Document verified recipe runtime comparison`. Record executed commands/results and evidence paths below; keep failures and native limitations explicit. Implementation completion requires actual evidence, not this plan's expected results.
 
 ## Execution Evidence

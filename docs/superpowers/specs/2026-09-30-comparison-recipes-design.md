@@ -46,6 +46,13 @@ the resulting samples form a new series and are not equivalent to those runs.
 `async-queue` remains the module id in the pinned checkout: it contributes the
 `per-function` strategy to the composed `SchedulerEngine` and enables public
 asynchronous admission. It does not create a separate scheduler worker.
+Hold that strategy fixed for every variant: set the existing Helm value
+`controlPlane.scheduler.strategy=per-function` explicitly in prepared cells,
+exclude `sync-queue` and keep the admin runtime-config API and runtime strategy
+switching disabled. Record the engine as `unified`, the strategy as
+`per-function` and switching as disabled in the experiment identity. Reject
+profiles that override these settings and refuse resume when this identity
+is missing or differs.
 
 The `jvm` profile includes both scenario functions: recipe component `word-stats`
 with Java JVM build and component `word-stats` with JavaScript SDK, with distinct
@@ -125,6 +132,13 @@ registry's manifest digest against the report immediately before each cell and
 verify the running Pod image identity after deployment. A mutable tag by itself
 does not prove a fixed artifact. Check runtime build metadata against the
 selected distribution as well. Complete identity checks before starting k6.
+Also scrape the running control plane's management metrics endpoint before
+each cell and retry. Require exactly one `scheduler_active` sample, with
+`strategy="per-function"` and value `1`; missing, malformed, inactive,
+duplicate or additional strategy samples stop the load. Retain the raw
+response in the cell's `scheduler-metrics.txt` on success and failure. This
+check supplies preflight evidence without changing the benchmark's Prometheus
+query catalogue or invoking an administrative scheduler endpoint.
 Keep the existing load-test and measurement task graph unchanged. The
 scenario's `controlPlaneVariant` remains the human
 matrix key, while recipe selection belongs to `compare`, not `recipeProfile` on
@@ -173,6 +187,9 @@ identities; a new build needs a new run.
 - Test that each cell receives report-derived prebuilt references and that no
   Gradle, Docker build or push task appears in its plan. Preserve the k6 script,
   Prometheus queries, resource settings, interleaving and retry assertions.
+- Test fixed `per-function` Helm settings, rejection of conflicting recipe
+  configuration, scheduler identity on resume and refusal to start k6 when
+  `scheduler_active` differs. Keep scheduler switching and its admin API disabled.
 - Run a Multipass `compare` with `--variants jvm --repetitions 1`; inspect the
   published report, registry/Pod image identities, k6 summary, metrics snapshot
   and generated comparison report. Numerical equality with an earlier run is
