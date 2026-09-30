@@ -36,12 +36,16 @@ only what is built and published. Cells do not run recipe tasks or build images.
 Add nine profiles under `packages/nanolab/recipes/`, named
 `comparison-<variant>.yaml`, for the keys in `VARIANTS_BY_KEY`. Each uses the
 VM registry `127.0.0.1:5000/nanofaas`, a distinct control-plane image name
-`control-plane-<variant>`, and the exact existing comparison modules:
-`k8s-deployment-provider` and `async-queue`. Do not add `build-metadata`: it
-was not in the measured module set. Consequently omit `build.variant`, which
-requires that module. The profile name, hash, recorded options and manifest
-identify the variant; no claim is made that a runtime build-metadata endpoint
-contains the variant.
+`control-plane-<variant>`, and the same exact modules for all variants:
+`k8s-deployment-provider`, `async-queue` and `build-metadata`. NanoFaaS requires
+`build-metadata` for an explicit native optimization; the user approved adding
+it uniformly rather than changing the plugin contract. Set `build.variant` to
+the variant key, so the report and runtime metadata identify the build and its
+derived optimization. This adds a module compared with historical matrices;
+the resulting samples form a new series and are not equivalent to those runs.
+`async-queue` remains the module id in the pinned checkout: it contributes the
+`per-function` strategy to the composed `SchedulerEngine` and enables public
+asynchronous admission. It does not create a separate scheduler worker.
 
 The `jvm` profile includes both scenario functions: recipe component `word-stats`
 with Java JVM build and component `word-stats` with JavaScript SDK, with distinct
@@ -61,9 +65,21 @@ Preserve `--native-build-memory` and `--native-parallelism` by forwarding their
 existing Gradle properties to recipe publication.
 
 Use one unique run tag shared by the nine profiles. Their image names are
-distinct, so references cannot collide. A run directory may be resumed only
-when its captured NanoFaaS source revision and patch, recipe hashes, tag and
-variant selection still match. Changed inputs require a new run directory.
+distinct, so references cannot collide. Persist a versioned matrix manifest
+with the captured NanoFaaS revision and patch SHA-256, recipe hashes, tag,
+ordered variant selection, repetitions and native build property overrides.
+Also capture and hash the resolved scenario and environment configuration,
+including function settings, workload, resource limits and VM configuration,
+and record the NanoLab revision and tracked patch hash so changes to k6,
+Prometheus queries or orchestration cannot silently change the experiment.
+Compare effective configuration values, not just configuration file paths.
+
+On resume, read and validate the existing manifest before writing any manifest,
+provisioning or preparing images. All captured inputs must still match. Changed
+inputs require a new run directory; `--fresh` does not bypass this check.
+Reject nonempty run directories whose manifest is missing, invalid, unsupported
+or lacks the required identity fields, including historical comparison runs.
+Do not overwrite their manifest or infer missing identities from cell results.
 
 ## Preparation and handoff
 
@@ -77,36 +93,66 @@ captured profiles and source identity in the run directory. Cleanup removes
 only run-owned VM staging after successful verification; diagnostics remain on
 the host after failure. Leave the VM alive through all cells.
 
-Validate each distribution before starting any cell: recipe SHA-256, source
-identity, run tag, exact module set, expected control-plane mode and options,
-published status, nonempty digest and exact function set (two for `jvm`, none
-otherwise). Reject duplicate image references or digests that do not match
-the selected artifact. A failed publication or invalid report stops the matrix
-before deployment or k6. The shared function images and each control-plane
-image come from the validated distributions, never from a constructed variant
-tag or a fresh build in a cell.
+Validate the preparation evidence before starting any cell:
+
+- From `distribution.json`, require the recipe SHA-256, run tag, exact module
+  set, expected component modes, variant and derived optimization, published
+  status, valid manifest digests and exact function set (two for `jvm`, none
+  otherwise). Compare reported native
+  options to the captured profile. Reject duplicate image references and
+  verify each reported digest against its published artifact.
+- Require the report's source revision and dirty state to agree with the
+  captured checkout. The current report does not contain a patch hash: verify
+  the staged tracked source and its patch SHA-256 against the host snapshot
+  before each publication, retaining that evidence alongside the report.
+  Revision and `dirty` alone do not establish source identity.
+- Derive declared JVM arguments and native options from the captured recipe,
+  and record forwarded Gradle properties separately. The current report does
+  not contain the complete JVM arguments. Inspect the published JVM image's
+  argument files and launch configuration to verify the collector, tier and
+  event-loop settings, and retain the inspection result. Label declared
+  options and artifact verification separately in the manifest.
+
+A failed publication or invalid evidence stops the matrix before deployment
+or k6. The shared function images and each control-plane image come from the
+validated distributions, never from a constructed variant tag or a fresh build
+in a cell.
 
 Pass the selected control-plane reference and the two shared function references
 to every cell through the existing prebuilt-image inputs. Use digest-qualified
 references when the Kubernetes/Helm path accepts them; otherwise verify the
 registry's manifest digest against the report immediately before each cell and
 verify the running Pod image identity after deployment. A mutable tag by itself
-does not prove a fixed artifact. Keep the existing load-test and measurement
-task graph unchanged. The scenario's `controlPlaneVariant` remains the human
+does not prove a fixed artifact. Check runtime build metadata against the
+selected distribution as well. Complete identity checks before starting k6.
+Keep the existing load-test and measurement task graph unchanged. The
+scenario's `controlPlaneVariant` remains the human
 matrix key, while recipe selection belongs to `compare`, not `recipeProfile` on
 each cell.
 
-Write the matrix manifest before preparation so an interrupted run remains
-legible. After each successful publication, update it atomically with the
-profile path/hash, distribution path, effective build options, image reference
-and digest for that variant; record the shared function references and digests
-once. The report reader continues to consume existing k6 summaries and metrics
+For a new run, write the matrix manifest atomically before preparation so an
+interruption remains legible. Record the provisioned VM and cluster identities
+before publishing. After each successful publication and validation, update it
+atomically with the profile path/hash, distribution path, declared options,
+verification evidence, image reference and digest for that variant; record the
+shared function references and digests once. Preserve these entries on resume.
+The report reader continues to consume existing k6 summaries and metrics
 snapshots. A resumed cell must use the same prepared image identities as its
-completed peers. Since `compare` may provision a fresh VM on resume, it may
-republish the same captured inputs to restore the registry; compare every new
-digest to the previous manifest before running a cell. Stop if a digest differs.
-`--fresh` reruns cells with the same prepared identities; a new build needs a
-new run.
+completed peers.
+
+This slice supports resume only on the original stack VM and cluster, with all
+previously recorded images still available in its registry. Check those
+identities and registry digests before preparing any remaining variants or
+running cells. Reuse validated publications; only variants without a committed
+publication entry may be prepared from the captured inputs. No cells may start
+until every required publication is validated and recorded. If the original
+VM, cluster or any recorded image is missing or differs, stop and require a new
+run directory. Rebuilding identical source is not a recovery mechanism: mutable
+base images and other build inputs can produce different image digests.
+Recovery onto a replacement VM would require preserving the original image
+manifests and blobs and defining a separate cluster policy; it is outside this
+slice. `--fresh` reruns cells under the same checks with the same prepared
+identities; a new build needs a new run.
 
 ## Verification and documentation
 
@@ -114,16 +160,25 @@ new run.
   NanoFaaS checkout. Assert exact modules, functions, build flags, image names
   and unique references in focused tests.
 - Test preparation with a fake VM publisher: `jvm` first, then each selected
-  non-JVM variant once, functions exactly once, one source snapshot, per-variant
-  reports, and no legacy build operations. Cover invalid reports and an
-  interrupted/resumed run with changed source or digest.
+  variant other than `jvm` once, functions exactly once, one source snapshot,
+  per-variant reports, and no legacy build operations. Cover invalid reports, staged patch
+  mismatches and JVM artifact options that differ from the captured profile.
+- Test resume rejection for changed source, recipe, scenario, workload,
+  resources, environment, NanoLab identity, variant order or repetitions,
+  including with `--fresh`. Reject legacy or incomplete identity manifests
+  before overwriting evidence or provisioning. Exercise interruptions before
+  and after a publication entry is committed: reuse recorded artifacts and
+  prepare only the remaining variants. Missing or changed VM, cluster or
+  recorded image identities must stop the run without rebuilding them.
 - Test that each cell receives report-derived prebuilt references and that no
   Gradle, Docker build or push task appears in its plan. Preserve the k6 script,
   Prometheus queries, resource settings, interleaving and retry assertions.
 - Run a Multipass `compare` with `--variants jvm --repetitions 1`; inspect the
   published report, registry/Pod image identities, k6 summary, metrics snapshot
   and generated comparison report. Numerical equality with an earlier run is
-  not expected.
+  not expected. Record that this proves the JVM path only; validation and fake
+  publisher tests do not establish successful native publication, particularly
+  Oracle/G1. Keep that limitation explicit until native execution evidence exists.
 - Run Ruff, type checking, relevant NanoLab tests and `git diff --check`.
   Update `packages/nanolab/recipes/README.md`, comparison usage docs and
   `docs/recipes-roadmap.md` after the end-to-end evidence exists.
