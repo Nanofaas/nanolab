@@ -288,17 +288,17 @@ def recipe_builder_resource(
                     "buildx",
                     "inspect",
                     "--bootstrap",
-                    "--format",
-                    "{{json .}}",
                     name,
                 ),
                 "Bootstrap recipe builder",
             )
-            evidence["bootstrap"] = json.loads(bootstrap)
+            evidence["bootstrap"] = bootstrap
             platforms = {
                 platform.strip().rstrip("*")
-                for node in evidence["bootstrap"].get("Nodes", [])
-                for platform in node.get("Platforms", "").split(",")
+                for line in re.findall(
+                    r"^\s*Platforms:\s*(.*)$", bootstrap, re.MULTILINE
+                )
+                for platform in line.split(",")
             }
             if not {"linux/amd64", "linux/arm64"}.issubset(platforms):
                 raise RuntimeError(

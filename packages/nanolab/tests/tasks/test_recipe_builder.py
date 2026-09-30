@@ -40,7 +40,7 @@ class BuilderExecutor:
                 stdout = self.builder
         elif argv[1:3] == ("buildx", "inspect"):
             failed = self.failure == "bootstrap"
-            stdout = json.dumps({"Nodes": [{"Platforms": "linux/amd64,linux/arm64"}]})
+            stdout = "Name: nanolab-recipe-test\nPlatforms: linux/amd64, linux/arm64\n"
         elif argv[1:3] == ("buildx", "rm"):
             self.builder = ""
         elif "--install" in argv:
