@@ -318,3 +318,53 @@ def test_published_report_rejects_different_selected_function(tmp_path: Path) ->
             distribution,
             functions=(("word-stats", "java"),),
         )
+
+
+def test_recipe_command_forwards_explicit_native_builder_limits():
+    from nanolab.tasks.recipe import recipe_command
+
+    argv = recipe_command(
+        "publishRecipe",
+        recipe="/profiles/native.yaml",
+        output="/out/native",
+        tag="recipe-test",
+        native_build_memory="4g",
+        native_parallelism=2,
+    )
+    assert argv == (
+        "./gradlew",
+        "publishRecipe",
+        "-Precipe=/profiles/native.yaml",
+        "-PrecipeTag=recipe-test",
+        "-PrecipeOutput=/out/native",
+        "-PnativeBuildMemory=4g",
+        "-PnativeParallelism=2",
+        "--no-daemon",
+    )
+
+
+def test_distribution_preserves_native_build_evidence(tmp_path):
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    recipe.write_text(recipe.read_text().replace("mode: jvm", "mode: native"))
+    data = _report(recipe, "recipe-test", "published")
+    component = data["components"][0]
+    component["mode"] = "native"
+    component["optimization"] = "3"
+    component["native"] = {
+        "builder": "host",
+        "optimization": "3",
+        "gc": "serial",
+        "monitoring": [],
+    }
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+    distribution = read_distribution(
+        report, recipe=recipe, tag="recipe-test", published=True
+    )
+    assert distribution.control_plane().native == {
+        "builder": "host",
+        "optimization": "3",
+        "gc": "serial",
+        "monitoring": [],
+    }

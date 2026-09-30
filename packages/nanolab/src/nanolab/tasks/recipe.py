@@ -40,6 +40,7 @@ class RecipeComponent:
     image: RecipeImage
     variant: str | None
     optimization: str | None
+    native: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +215,7 @@ def read_distribution(
                 image=RecipeImage(reference, image_id, status, digest),
                 variant=item.get("variant"),
                 optimization=item.get("optimization"),
+                native=_object(item["native"], "native") if "native" in item else None,
             )
         )
     source = data.get("source")
@@ -303,6 +305,8 @@ def recipe_command(
     output: str,
     tag: str,
     containerd_maven_repository: Path | None = None,
+    native_build_memory: str | None = None,
+    native_parallelism: int | None = None,
 ) -> tuple[str, ...]:
     """Build a recipe with the selected backend dependencies."""
     return (
@@ -317,6 +321,16 @@ def recipe_command(
                 f"-Dmaven.repo.local={containerd_maven_repository}",
             )
             if containerd_maven_repository is not None
+            else ()
+        ),
+        *(
+            (f"-PnativeBuildMemory={native_build_memory}",)
+            if native_build_memory is not None
+            else ()
+        ),
+        *(
+            (f"-PnativeParallelism={native_parallelism}",)
+            if native_parallelism is not None
             else ()
         ),
         "--no-daemon",

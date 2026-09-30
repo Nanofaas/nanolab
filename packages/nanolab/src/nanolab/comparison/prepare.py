@@ -22,13 +22,15 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from sonata_engine import Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.vm.ports import VmCommandProvider
 
+from nanolab.comparison.manifest import ComparisonManifest
+from nanolab.comparison.profiles import PreparedComparison
 from nanolab.images.control_plane_variants import (
     ControlPlaneVariant,
     build_operations,
@@ -338,3 +340,152 @@ def stage_comparison(
     evidence = verify_comparison_source(stage, provider, request)
     (root / "prepare" / "source.json").write_text(json.dumps(evidence, indent=2) + "\n")
     return stage
+
+
+def prepare_comparison(
+    *,
+    stage: ComparisonStage,
+    manifest: ComparisonManifest,
+    root: Path,
+    provider: VmCommandProvider,
+    request: VmRequest,
+) -> PreparedComparison:
+    """Publish missing recipes in order and commit only verified receipts."""
+    import contextlib
+
+    from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
+    from sonata_tasks.vm.logged import run_remote_logged
+
+    from nanolab.comparison.evidence import (
+        require_recorded_publications,
+        verify_comparison_publication,
+    )
+    from nanolab.comparison.manifest import write_comparison_manifest
+    from nanolab.comparison.profiles import declared_options
+    from nanolab.tasks.recipe import (
+        RecipeDistribution,
+        read_distribution,
+        recipe_command,
+    )
+    from nanolab.tasks.vm.runners import VmFileFetcher
+
+    require_recorded_publications(
+        manifest=manifest, provider=provider, request=request, root=root
+    )
+    identity = cast(dict[str, Any], manifest.identity)
+    distributions: dict[str, RecipeDistribution] = {}
+    resources: list[Resource[RecipeDistribution]] = []
+    for variant, run in stage.runs.items():
+
+        def acquire(
+            _inputs: TaskInputs, key: str = variant, local: RecipeRun = run
+        ) -> RecipeDistribution:
+            if key in manifest.publications:
+                receipt = cast(dict[str, Any], manifest.publications[key])
+                result = read_distribution(
+                    root / receipt["distribution"]["path"],
+                    recipe=local.recipe,
+                    tag=local.tag,
+                    published=True,
+                )
+                distributions[key] = result
+                return result
+            evidence_dir = root / "prepare" / key
+            evidence_dir.mkdir(parents=True, exist_ok=True)
+            state = verify_comparison_source(stage, provider, request)
+            source_identity = identity["nanofaas"]
+            if (
+                state["revision"] != source_identity["revision"]
+                or state["patchSha256"] != source_identity["patchSha256"]
+            ):
+                raise ValueError("Comparison staged source differs before publication")
+            (evidence_dir / "source-before-publication.json").write_text(
+                json.dumps(state, indent=2) + "\n"
+            )
+            remote_profile = stage.remote_root / "profiles" / f"{key}.yaml"
+            profile_hash = comparison_remote_command(
+                provider, request, ("sha256sum", str(remote_profile))
+            ).split()
+            if (
+                not profile_hash
+                or profile_hash[0] != identity["profiles"][key]["sha256"]
+            ):
+                raise ValueError("Comparison staged profile differs before publication")
+            remote_output = stage.remote_root / "distributions" / key
+            comparison_remote_command(
+                provider, request, ("mkdir", "-p", str(remote_output))
+            )
+            comparison_remote_command(
+                provider,
+                request,
+                ("rm", "-f", str(remote_output / "distribution.json")),
+            )
+            report = local.output_dir / "distribution.json"
+            report.unlink(missing_ok=True)
+            native = declared_options(local.recipe)["mode"] == "native"
+            properties = identity["nativeProperties"]
+            command = recipe_command(
+                "publishRecipe",
+                recipe=str(remote_profile),
+                output=str(remote_output),
+                tag=local.tag,
+                native_build_memory=properties["buildMemory"] if native else None,
+                native_parallelism=properties["parallelism"] if native else None,
+            )
+            fetcher = VmFileFetcher(provider, request)
+            try:
+                run_remote_logged(
+                    provider,
+                    request,
+                    (command,),
+                    remote_dir=stage.remote_root / "source",
+                    remote_log=remote_output / "gradle.log",
+                    local_log=evidence_dir / "gradle.log",
+                )
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    fetcher.fetch_from(str(remote_output / "distribution.json"), report)
+                raise
+            fetcher.fetch_from(str(remote_output / "distribution.json"), report)
+            result = read_distribution(
+                report, recipe=local.recipe, tag=local.tag, published=True
+            )
+            receipt = verify_comparison_publication(
+                distribution=result,
+                stage=stage,
+                variant=key,
+                inputs=manifest.identity,
+                provider=provider,
+                request=request,
+                evidence_dir=evidence_dir,
+            )
+            candidate = manifest.model_copy(
+                update={"publications": {**manifest.publications, key: receipt}}
+            )
+            write_comparison_manifest(root, candidate)
+            manifest.publications = candidate.publications
+            distributions[key] = result
+            return result
+
+        resource = Resource(
+            title=f"Publish comparison recipe {variant}",
+            acquire=acquire,
+            release=lambda _inputs, _value: None,
+            requires=tuple(resources[-1:]),
+        )
+        resources.append(resource)
+
+    class Ready(Task[None]):
+        title = "Comparison recipe publications verified"
+
+        def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+            for resource in resources:
+                _ = inputs.resource(resource)
+            return TaskOutcome()
+
+    workflow = Workflow(workflow_id="comparison-prepare")
+    _ = workflow.add(Ready(), requires=tuple(resources))
+    _ = workflow.run()
+    if set(distributions) != set(stage.runs):
+        raise RuntimeError("Comparison preparation did not verify every distribution")
+    return PreparedComparison(stage.remote_root / "source", distributions)
