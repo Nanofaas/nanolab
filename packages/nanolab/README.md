@@ -292,12 +292,17 @@ container; only the required foreign architecture is installed. Existing
 functioning registrations are reused. Disabled or incompatible registrations
 fail preflight. A daemon-scoped lock serializes NanoLab runs using this path;
 a concurrent run receives a busy-lock error and can retry after cleanup.
+The lock uses a fixed host path independent of `TMPDIR`. Builder cleanup
+checks a unique node ownership marker, including interrupted creation;
+failure to write evidence does not bypass compensation.
 
 One `publishRecipe` builds and publishes both platforms. NanoLab checks the
 index, each child manifest and each configuration against their SHA-256
 digests, then pulls and deploys the native host manifests by immutable digest.
 Both platform artifacts are verified; HTTP invocation runs on the host
 architecture only. The scenario covers JVM builds with provenance disabled.
+Platform checks accept baseline AMD64 (`v1` or unspecified) and ARM64 (`v8`
+or unspecified), and reject higher or inconsistent CPU variants.
 
 Evidence under the run directory includes `builder.json`,
 `buildkitd.toml`, `recipe/recipe-inputs.json`, the captured profile/source,

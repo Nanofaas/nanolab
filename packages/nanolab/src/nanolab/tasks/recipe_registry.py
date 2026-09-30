@@ -40,6 +40,20 @@ class RegistryResponse:
 RegistryFetch = Callable[[str, str, str], RegistryResponse]
 
 
+def _baseline_platform(data: dict[str, object]) -> str:
+    architecture = data.get("architecture")
+    aliases = {"amd64": (None, "", "v1"), "arm64": (None, "", "v8")}
+    if (
+        not isinstance(architecture, str)
+        or architecture not in aliases
+        or data.get("variant") not in aliases[architecture]
+    ):
+        raise ValueError(
+            "Registry platform variant is incompatible with baseline recipe"
+        )
+    return f"{data.get('os')}/{architecture}"
+
+
 def fetch_local_registry(
     repository: str, kind: str, reference: str
 ) -> RegistryResponse:
@@ -139,7 +153,7 @@ def verify_multiarch_registry(
             if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
                 raise ValueError("Unexpected attestation manifest")
             platform_data = _object(descriptor.get("platform"), "platform")
-            platform = f"{platform_data.get('os')}/{platform_data.get('architecture')}"
+            platform = _baseline_platform(platform_data)
             digest = sha256_digest(descriptor.get("digest"))
             if (
                 platform not in image.manifests
@@ -149,11 +163,10 @@ def verify_multiarch_registry(
                 raise ValueError(
                     "Registry manifest platform identity differs from report"
                 )
-            if (
-                descriptor.get("mediaType") not in MANIFEST_TYPES
-                or "size" not in descriptor
-            ):
+            if descriptor.get("mediaType") not in MANIFEST_TYPES:
                 raise ValueError("Registry manifest descriptor is invalid")
+            if type(descriptor.get("size")) is not int or descriptor["size"] < 0:
+                raise ValueError("Registry manifest descriptor size is invalid")
             slug = platform.replace("/", "-")
             manifest = document(
                 "manifests", digest, digest, f"{slug}-manifest.json", descriptor["size"]
@@ -165,8 +178,11 @@ def verify_multiarch_registry(
                 raise ValueError("Registry executable manifest is invalid")
             config_descriptor = _object(manifest.get("config"), "config descriptor")
             config_digest = sha256_digest(config_descriptor.get("digest"))
-            if "size" not in config_descriptor:
-                raise ValueError("Registry config descriptor size is missing")
+            if (
+                type(config_descriptor.get("size")) is not int
+                or config_descriptor["size"] < 0
+            ):
+                raise ValueError("Registry config descriptor size is invalid")
             config = document(
                 "blobs",
                 config_digest,
@@ -174,9 +190,7 @@ def verify_multiarch_registry(
                 f"{slug}-config.json",
                 config_descriptor["size"],
             )
-            if config.get("os") != platform_data.get("os") or config.get(
-                "architecture"
-            ) != platform_data.get("architecture"):
+            if _baseline_platform(config) != platform:
                 raise ValueError(
                     "Registry configuration platform differs from manifest"
                 )

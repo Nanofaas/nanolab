@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ class BuilderExecutor:
         self.failure = failure
         self.commands: list[tuple[str, ...]] = []
         self.builder = ""
+        self.node = ""
 
     def binding_key(self, role: str) -> str:
         return role
@@ -37,10 +39,28 @@ class BuilderExecutor:
             failed = self.failure == "create"
             if not failed:
                 self.builder = "nanolab-recipe-test"
+                self.node = (
+                    argv[argv.index("--node") + 1]
+                    if "--node" in argv
+                    else "default-node"
+                )
                 stdout = self.builder
+                if self.failure == "cancel-after-create":
+                    raise KeyboardInterrupt("cancelled after creation")
         elif argv[1:3] == ("buildx", "inspect"):
-            failed = self.failure == "bootstrap"
-            stdout = "Name: nanolab-recipe-test\nPlatforms: linux/amd64, linux/arm64\n"
+            failed = self.failure == "bootstrap" and "--bootstrap" in argv
+            if not self.builder:
+                return TaskResult(
+                    task_id="",
+                    status="failed",
+                    return_code=1,
+                    stdout="",
+                    stderr="no builder found",
+                )
+            stdout = (
+                f"Name: nanolab-recipe-test\nNodes:\nName: {self.node}\n"
+                "Platforms: linux/amd64, linux/arm64\n"
+            )
         elif argv[1:3] == ("buildx", "rm"):
             self.builder = ""
         elif "--install" in argv:
@@ -178,3 +198,68 @@ def test_two_runs_serialize_registration_lifetime(tmp_path: Path) -> None:
     finally:
         first.release(TaskInputs._for_resources({}, set()), value)
     assert executor.registration == ""
+
+
+def test_binfmt_lock_is_independent_of_process_tmpdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = BuilderExecutor()
+    first_dir, second_dir = tmp_path / "temp-one", tmp_path / "temp-two"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(first_dir))
+    first = resource(tmp_path / "one", executor)
+    second = resource(tmp_path / "two", executor)
+    inputs = TaskInputs._for_resources({}, set())
+    value = first.acquire(inputs)
+    second_value = None
+    try:
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(second_dir))
+        with pytest.raises(RuntimeError, match=r"busy|lock"):
+            second_value = second.acquire(inputs)
+    finally:
+        first.release(inputs, value)
+        if second_value is not None:
+            second.release(inputs, second_value)
+
+
+def test_cancellation_after_create_reconciles_owned_builder(tmp_path: Path) -> None:
+    executor = BuilderExecutor(failure="cancel-after-create")
+    with pytest.raises(KeyboardInterrupt, match="after creation"):
+        resource(tmp_path, executor).acquire(TaskInputs._for_resources({}, set()))
+    assert executor.builder == ""
+    assert executor.registration == ""
+
+
+@pytest.mark.parametrize("failure", ["evidence", "directory"])
+def test_evidence_failure_cannot_bypass_compensation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    executor = BuilderExecutor()
+    original_write = Path.write_text
+    original_mkdir = Path.mkdir
+
+    def write(path, *args, **kwargs):
+        if path.name == "builder.json":
+            raise OSError("no space for evidence")
+        return original_write(path, *args, **kwargs)
+
+    def mkdir(path, *args, **kwargs):
+        if path == tmp_path / "run":
+            raise OSError("cannot create evidence directory")
+        return original_mkdir(path, *args, **kwargs)
+
+    if failure == "evidence":
+        monkeypatch.setattr(Path, "write_text", write)
+    else:
+        monkeypatch.setattr(Path, "mkdir", mkdir)
+    run = resource(tmp_path / "run", executor)
+    with pytest.raises(OSError, match=r"evidence|space"):
+        run.acquire(TaskInputs._for_resources({}, set()))
+    assert executor.registration == ""
+    assert executor.builder == ""
+    monkeypatch.setattr(Path, "write_text", original_write)
+    monkeypatch.setattr(Path, "mkdir", original_mkdir)
+    retry = resource(tmp_path / "retry", executor)
+    value = retry.acquire(TaskInputs._for_resources({}, set()))
+    retry.release(TaskInputs._for_resources({}, set()), value)

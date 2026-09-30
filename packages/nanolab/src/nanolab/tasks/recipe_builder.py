@@ -8,10 +8,10 @@ import json
 import os
 import re
 import stat
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.command import CommandTask
@@ -71,6 +71,8 @@ def recipe_builder_resource(
     name = f"nanolab-{tag}"
     lock_fd: int | None = None
     owned_builder = False
+    creation_attempted = False
+    owner_node = f"{name}-{uuid4().hex}"
     owned_registration: str | None = None
     registration_name = ""
     helper_image = ""
@@ -117,14 +119,37 @@ def recipe_builder_resource(
         nonlocal lock_fd, owned_builder, owned_registration
         errors: list[str] = []
         try:
-            if owned_builder:
+            if creation_attempted:
                 try:
-                    command(
-                        inputs,
-                        ("docker", "buildx", "rm", name),
-                        "Remove owned recipe builder",
+                    try:
+                        state = command(
+                            inputs,
+                            ("docker", "buildx", "inspect", name),
+                            "Reconcile owned recipe builder",
+                        )
+                    except RuntimeError as error:
+                        if "no builder" not in str(error).lower():
+                            raise
+                        state = ""
+                    matches_owner = bool(
+                        re.search(
+                            r"^\s*Name:\s*" + re.escape(owner_node) + r"\s*$",
+                            state,
+                            re.MULTILINE,
+                        )
                     )
-                    owned_builder = False
+                    if matches_owner:
+                        owned_builder = True
+                        command(
+                            inputs,
+                            ("docker", "buildx", "rm", name),
+                            "Remove owned recipe builder",
+                        )
+                        owned_builder = False
+                    elif owned_builder and state:
+                        raise RuntimeError("Owned builder cleanup identity conflict")
+                    else:
+                        owned_builder = False
                 except Exception as error:
                     errors.append(str(error))
             if owned_registration is not None and not owned_builder:
@@ -160,12 +185,8 @@ def recipe_builder_resource(
             raise RuntimeError("Recipe builder cleanup failed: " + "; ".join(errors))
 
     def acquire(inputs: TaskInputs) -> RecipeBuilder:
-        nonlocal \
-            lock_fd, \
-            owned_builder, \
-            owned_registration, \
-            registration_name, \
-            helper_image
+        nonlocal lock_fd, owned_builder, owned_registration
+        nonlocal registration_name, helper_image, creation_attempted
         info = json.loads(
             command(
                 inputs,
@@ -205,7 +226,8 @@ def recipe_builder_resource(
             + ".lock"
         )
         fd = os.open(
-            Path(tempfile.gettempdir()) / lock_name,
+            # Stable daemon lock; O_NOFOLLOW and file ownership checked below.
+            Path("/tmp") / lock_name,  # nosec B108
             os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
             0o600,
         )
@@ -218,8 +240,8 @@ def recipe_builder_resource(
             os.close(fd)
             raise RuntimeError("NanoLab binfmt lock is busy") from error
         lock_fd = fd
-        run_dir.mkdir(parents=True, exist_ok=True)
         try:
+            run_dir.mkdir(parents=True, exist_ok=True)
             before = registration(inputs, "inspect-registration")
             evidence.update(
                 daemon=info,
@@ -230,6 +252,7 @@ def recipe_builder_resource(
                 probe=PROBE_PLATFORM_IMAGES[foreign],
                 registrationHelper=helper_image,
                 builder=name,
+                ownerNode=owner_node,
             )
             if before and (
                 not before.startswith("enabled\n")
@@ -278,6 +301,7 @@ def recipe_builder_resource(
             )
             config = run_dir / "buildkitd.toml"
             config.write_text('[registry."127.0.0.1:5000"]\n  http = true\n')
+            creation_attempted = True
             command(
                 inputs,
                 (
@@ -286,6 +310,8 @@ def recipe_builder_resource(
                     "create",
                     "--name",
                     name,
+                    "--node",
+                    owner_node,
                     "--driver",
                     "docker-container",
                     "--driver-opt",
@@ -323,7 +349,12 @@ def recipe_builder_resource(
             return RecipeBuilder(name, f"linux/{architecture}")
         except BaseException as error:
             evidence["failure"] = str(error)
-            (run_dir / "builder.json").write_text(json.dumps(evidence, indent=2) + "\n")
+            try:
+                (run_dir / "builder.json").write_text(
+                    json.dumps(evidence, indent=2) + "\n"
+                )
+            except OSError as evidence_error:
+                error.add_note(f"Cannot retain builder evidence: {evidence_error}")
             try:
                 cleanup(inputs)
             except Exception as cleanup_error:

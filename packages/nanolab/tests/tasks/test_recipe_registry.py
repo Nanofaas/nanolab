@@ -14,7 +14,11 @@ from tests.tasks.test_recipe_multiarch import SOURCE, multiarch_fixture
 
 
 def registry_fixture(
-    tmp_path: Path, *, wrong_config: bool = False
+    tmp_path: Path,
+    *,
+    wrong_config: bool = False,
+    config_variant: str | None = None,
+    null_config_size: bool = False,
 ) -> tuple[Any, dict[tuple[str, str], bytes]]:
     recipe, report, data = multiarch_fixture(tmp_path)
     blobs: dict[tuple[str, str], bytes] = {}
@@ -22,7 +26,11 @@ def registry_fixture(
     manifests = {}
     for architecture in ("amd64", "arm64"):
         config = json.dumps(
-            {"architecture": "s390x" if wrong_config else architecture, "os": "linux"}
+            {
+                "architecture": "s390x" if wrong_config else architecture,
+                "os": "linux",
+                **({"variant": config_variant} if config_variant is not None else {}),
+            }
         ).encode()
         config_digest = "sha256:" + hashlib.sha256(config).hexdigest()
         blobs["blobs", config_digest] = config
@@ -33,7 +41,7 @@ def registry_fixture(
                 "config": {
                     "mediaType": "application/vnd.oci.image.config.v1+json",
                     "digest": config_digest,
-                    "size": len(config),
+                    "size": None if null_config_size else len(config),
                 },
                 "layers": [],
             }
@@ -251,3 +259,92 @@ def test_registry_fetch_is_scoped_and_bounded(monkeypatch: pytest.MonkeyPatch) -
         with pytest.raises(ValueError, match="registry"):
             fetch_local_registry(repository, "manifests", "run-1")
     assert len(requests) == 1
+
+
+@pytest.mark.parametrize("target", ["descriptor", "configuration"])
+def test_incompatible_cpu_variants_are_rejected(tmp_path: Path, target: str) -> None:
+    from nanolab.tasks.recipe_registry import verify_multiarch_registry
+
+    distribution, blobs = registry_fixture(
+        tmp_path, config_variant="v9" if target == "configuration" else None
+    )
+    if target == "descriptor":
+        index = json.loads(blobs["manifests", distribution.components[0].image.digest])
+        for descriptor in index["manifests"]:
+            descriptor["platform"]["variant"] = (
+                "v4" if descriptor["platform"]["architecture"] == "amd64" else "v9"
+            )
+        body = json.dumps(index).encode()
+        digest = "sha256:" + hashlib.sha256(body).hexdigest()
+        blobs["manifests", digest] = body
+        blobs["manifests", "run-1"] = body
+        distribution = replace(
+            distribution,
+            components=tuple(
+                replace(component, image=replace(component.image, digest=digest))
+                for component in distribution.components
+            ),
+        )
+    with pytest.raises(ValueError, match="variant"):
+        verify_multiarch_registry(
+            distribution, fetch=fixture_fetch(blobs), evidence_dir=tmp_path / "evidence"
+        )
+
+
+def test_baseline_platform_aliases_are_accepted(tmp_path: Path) -> None:
+    from nanolab.tasks.recipe_registry import verify_multiarch_registry
+
+    distribution, blobs = registry_fixture(tmp_path)
+    index = json.loads(blobs["manifests", distribution.components[0].image.digest])
+    for descriptor in index["manifests"]:
+        descriptor["platform"]["variant"] = (
+            "v1" if descriptor["platform"]["architecture"] == "amd64" else "v8"
+        )
+    body = json.dumps(index).encode()
+    digest = "sha256:" + hashlib.sha256(body).hexdigest()
+    blobs["manifests", digest] = body
+    blobs["manifests", "run-1"] = body
+    distribution = replace(
+        distribution,
+        components=tuple(
+            replace(component, image=replace(component.image, digest=digest))
+            for component in distribution.components
+        ),
+    )
+    assert (
+        len(
+            verify_multiarch_registry(
+                distribution,
+                fetch=fixture_fetch(blobs),
+                evidence_dir=tmp_path / "evidence",
+            )
+        )
+        == 2
+    )
+
+
+@pytest.mark.parametrize("target", ["descriptor", "configuration"])
+def test_null_descriptor_sizes_are_rejected(tmp_path: Path, target: str) -> None:
+    from nanolab.tasks.recipe_registry import verify_multiarch_registry
+
+    distribution, blobs = registry_fixture(
+        tmp_path, null_config_size=target == "configuration"
+    )
+    if target == "descriptor":
+        index = json.loads(blobs["manifests", distribution.components[0].image.digest])
+        index["manifests"][0]["size"] = None
+        body = json.dumps(index).encode()
+        digest = "sha256:" + hashlib.sha256(body).hexdigest()
+        blobs["manifests", digest] = body
+        blobs["manifests", "run-1"] = body
+        distribution = replace(
+            distribution,
+            components=tuple(
+                replace(component, image=replace(component.image, digest=digest))
+                for component in distribution.components
+            ),
+        )
+    with pytest.raises(ValueError, match="size"):
+        verify_multiarch_registry(
+            distribution, fetch=fixture_fetch(blobs), evidence_dir=tmp_path / "evidence"
+        )
