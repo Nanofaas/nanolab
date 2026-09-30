@@ -140,8 +140,8 @@ Expected result: all required capabilities demonstrated, with the concrete mecha
 - [x] Compare resource state before/after. Verify only owned resources were removed, preexisting resources/selected builder remain and no owned command is still running. Exercise a focused real preparation failure if synthetic tests leave a concrete cleanup risk.
 - [x] Run the existing `deployment-lifecycle-container.yaml` recipe regression with host Docker and retain its evidence. Do not launch P24 or unrelated backend/matrix campaigns.
 - [x] Document the new entry point and observations. Preserve P24 limitations and record any readiness failures precisely. Mark only this subset complete on the roadmap if all required phases/evidence succeed; otherwise record the blocker and leave it open.
-- [ ] Self-review implementation against the spec and this plan, then obtain one fresh whole-branch review using the preserved native execution workflow. Fix concrete findings and repeat only the affected verification before committing the final docs/evidence summary.
-- [ ] Commit `Document verified recipe container smoke soak`; present the branch integration choice after fresh verification. Do not merge/push implementation without the user's integration instruction.
+- [x] Self-review implementation against the spec and this plan, then obtain one fresh whole-branch review using the preserved native execution workflow. Fix concrete findings and repeat only the affected verification before committing the final docs/evidence summary.
+- [x] Commit `Document verified recipe container smoke soak`; present the branch integration choice after fresh verification. Do not merge/push implementation without the user's integration instruction.
 
 ## Plan self-review
 
@@ -199,7 +199,7 @@ regression, covered by the existing multiarch suite.
 
 ## Full smoke evidence
 
-The final local ARM64 smoke (`run-6`) completed every phase and retained all
+The final local ARM64 smoke after review fixes (`run-8`) completed every phase and retained all
 required evidence. One root publication, the single original source fingerprint
 `25eea60e44010ed346888db88c022a93864fa610f14a96cc8d059c5147377baf`,
 three executable/configuration identities, actual Java 25.0.4/Gradle 9.7.1/
@@ -211,7 +211,7 @@ Cgroup ceilings pass. No frozen criteria changed; p24_qualified remains false.
 
 Resources after cleanup match the baseline containers, volumes and selected
 builder. Ordinary JVM recipe regression completed 13 tasks/exit 0. Evidence
-root: `/tmp/nanolab-soak-recipes-e2e-20260930/`, including `verification.json`.
+root: `/tmp/nanolab-soak-recipes-e2e-20260930/`, including `verification-after-review.json`.
 Real attempts exposed and verified fixes for CLI recipe environment selection,
 Node compiler observations during the plugin's cached push, quoted JVM launch
 argfiles, recipe-specific offline acceptance, requested/effective fingerprint
@@ -221,3 +221,49 @@ evidence contract.
 The full Bandit gate has four preexisting low-severity B101 assert findings;
 new recipe/soak sources have no findings. Functional migration is complete;
 RSS acceptance and the preexisting security-gate debt stay explicit.
+
+
+## Final review and execution decisions
+
+One fresh whole-branch review found three Important defects, with controlled
+reproductions: added source files were not inventoried, metadata and published
+provenance invocation IDs were not compared, and independent evidence allowances
+could exceed the configured retained-byte budget. All three were reproduced
+RED and corrected. The source guard permits only identified instrumentation and
+build/.gradle output paths of snapshot-identified Gradle projects. Online and
+offline provenance enforce the existing collector's invocation comparison.
+Staging, observer logs, compiler captures, raw registry documents and receipts
+share pre-write retained-byte accounting. Gradle's distribution output is scratch
+until copied through the bounded writer. Quota failures retain no excess bytes.
+
+There were no Critical or Minor findings. The reviewer declined to judge only
+the four unchanged Bandit assertions; they remain explicit preexisting debt,
+covered by the fourth ruling below. No new review is required after this fix pass.
+
+Execution rulings, preserved from the native execution ledger:
+
+1. Ruling: pin BuildKit v0.27.1 by installed repository digest. Floating v0.33.1
+   provenance is rejected by the existing strict collector. Cost if wrong:
+   explicit pin update and revalidation.
+2. Ruling: use MultiarchDistribution for attested single-platform publication with
+   parameterized read_buildx_distribution, preserving existing reader defaults.
+   Plain RecipeDistribution requires local IDs absent from Buildx. Cost if wrong:
+   shared parser regression, covered by existing multiarch tests.
+3. Ruling: adapt only Sonata builder create argv to omit --use; retain its
+   acquisition, compensation, release and explicit private builder name. The
+   generic resource changes selection, which the spec forbids. Cost if wrong:
+   update the small wrapper when Sonata changes its create command.
+4. Ruling: retain four preexisting B101 findings and report the full Bandit gate
+   failure without blanket suppression or unrelated behavior edits. Cost if
+   wrong: existing asserts remain removable under optimized Python and the
+   full security gate remains non-green.
+
+
+Final verification after fixes: full NanoLab suite **3,145 passed in 122.64s**;
+33 observation regressions passed. Ruff, formatting, basedpyright and all three
+import contracts passed. The full Bandit gate still reports exactly the four
+preexisting low-severity B101 findings. Real run 8 repeats the 122-request,
+zero-error/zero-drop, 244-check result; all evidence gates pass, while the original
+RSS/attribution criteria remain INCONCLUSIVE. Containers, volumes (with label
+ordering normalized) and the selected builder match the baseline. No merge or
+push has been performed; branch integration awaits the user's choice.

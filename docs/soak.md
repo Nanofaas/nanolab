@@ -381,9 +381,10 @@ inconclusive and requires ownership/equal-work attribution; the attribution
 and overall run-coverage gates therefore remain inconclusive. Thresholds
 were preserved.
 
-Evidence: `/tmp/nanolab-soak-recipes-e2e-20260930/run-6/`; CLI log and
-`verification.json` are in its parent directory. The report is under
-`evidence/evaluations/evaluation-978b383137234a839965c2c8f3aee67b/`.
+Evidence after final review fixes:
+`/tmp/nanolab-soak-recipes-e2e-20260930/run-8/`; CLI log and
+`verification-after-review.json` are in its parent directory. The report is under
+`evidence/evaluations/evaluation-dd188f51e3ca4057a34a33d7f1f76c23/`.
 Containers, volumes and the selected `nanolab-heap-analysis` builder matched
 the pre-run state after cleanup. The ordinary JVM recipe lifecycle regression
 also completed all 13 tasks successfully under `jvm-regression/`.
@@ -391,3 +392,11 @@ also completed all 13 tasks successfully under `jvm-regression/`.
 The full Bandit gate retains four preexisting low-severity B101 findings in
 comparison/product/loadtest/validate assertions. New recipe/soak source files
 have no Bandit findings. This is recorded separately from functional readiness.
+
+
+The final review's three Important findings were reproduced and corrected:
+unexpected source inputs are rejected, local and published provenance invocation
+IDs are cross-checked online and offline, and serialized evidence producers share
+pre-write quota accounting. The final full NanoLab suite passed **3,145 tests**;
+Ruff, formatting, types and import contracts passed. Execution rulings and their
+costs are recorded in the [implementation plan](superpowers/plans/2026-09-30-soak-recipes.md).
