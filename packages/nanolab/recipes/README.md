@@ -119,3 +119,17 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 The run directory retains `recipe/gradle.log`, `recipe/distribution/distribution.json`,
 the image identity files, `k6-summary.json`, `metrics/prometheus-snapshot.json`,
 `report.html` and `summary.json`.
+
+## Runtime comparison profiles
+
+`comparison-*.yaml` provides nine profiles: JVM Serial/G1 with C1/full tiering,
+two Serial JVM variants with one event loop, and native Serial `s`/`3` and G1 `3`.
+All control planes contain exactly `k8s-deployment-provider`, `async-queue` and
+`build-metadata`. The `comparison-jvm.yaml` distribution also contains JVM Java
+and container JavaScript word-stats; `compare` always prepares this distribution
+first, including when JVM is not selected for measurement.
+
+Native comparison profiles use the host builder on the measured VM. G1 requires
+Oracle GraalVM and records effective JFR monitoring. These profiles have passed
+`validateRecipe`; native publication and the complete native matrix remain to be
+verified. See [runtime comparison usage and evidence](../README.md#recipe-runtime-comparison).

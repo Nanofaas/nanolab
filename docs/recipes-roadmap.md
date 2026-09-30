@@ -1,6 +1,6 @@
 # Roadmap NanoLab: recipes v2
 
-Aggiornata il 29 settembre 2026. Questa pagina raccoglie gli obiettivi di
+Aggiornata il 30 settembre 2026. Questa pagina raccoglie gli obiettivi di
 migrazione e verifica; non sostituisce le specifiche e i piani di implementazione
 in `docs/superpowers/`.
 
@@ -45,8 +45,17 @@ le differenze reali fra backend e tipi di verifica.
    - [x] Primo sottoinsieme container: `autoscaling-cycle-container.yaml`
      usa `loadtest-container-jvm.yaml`. Verificato il 29 settembre 2026:
      una pubblicazione, k6, identità delle immagini, 69 query Prometheus,
-     autoscaling da 0 a 5 e ritorno a 0, report e cleanup. Il confronto dei
-     runtime e gli altri backend restano da migrare.
+     autoscaling da 0 a 5 e ritorno a 0, report e cleanup.
+   - [x] Preparazione recipe di `nanolab compare`: nove profili validati;
+     cella JVM su Multipass verificata il 30 settembre 2026, commit NanoLab
+     `9333d77`, NanoFaaS `e7914be0`. Una pubblicazione, C1 e tre immagini
+     verificate, scheduler unified/per-function, k6, snapshot e report.
+     Evidenze: `/tmp/nanolab-comparison-recipe-e2e-20260930e/`.
+     Ripresa senza build/carico e rifiuto di input diversi con `--fresh`
+     verificati; VM originale conservata. Vedi il
+     [contratto operativo](../packages/nanolab/README.md#recipe-runtime-comparison).
+   - [ ] Pubblicazione delle varianti native, Oracle G1 e matrice completa.
+   - [ ] Migrazione dei load test degli altri backend.
 2. **Coprire le altre capacità v2 con profili mirati.** Aggiungere casi per
    Bash, servizi e poi multiarch. Fatto quando ciascun caso ha un profilo e
    una verifica delle evidenze adatte; per multiarch usare digest e manifest,

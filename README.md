@@ -41,7 +41,7 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 `main`. It checks out this repo and the pinned nanoFaaS source at
 `e7914be065e844776af57fe9e449bce7f12e03c5` into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below. The gate
-validates all five checked-in recipe profiles. To reproduce profile validation
+validates all checked-in recipe profiles. To reproduce profile validation
 and the full container lifecycles locally, use the commands below.
 `miciav/nanofaas` is private, so the cross-repo checkout authenticates with
 the repository secret `NANOFAAS_CHECKOUT_TOKEN` (a fine-grained PAT scoped to
@@ -137,3 +137,11 @@ change one and forget the other.
 Single-version memory soak: see the [operator guide](docs/soak.md) for presets, required policy, and current readiness limits.
 
 Control-plane heap analysis: see the [operator guide](docs/heap-analysis.md) for the public command, timeline, resource bounds, and how to read the result. It is a diagnostic, not a P24 measurement.
+
+## Runtime comparison with recipes
+
+`./nanolab.sh compare` publishes reusable comparison recipes on the measured VM
+and verifies images and scheduling before load. See the [usage and resume
+contract](packages/nanolab/README.md#recipe-runtime-comparison),
+[profiles](packages/nanolab/recipes/README.md) and
+[migration roadmap](docs/recipes-roadmap.md).

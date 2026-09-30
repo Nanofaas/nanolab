@@ -195,3 +195,47 @@ the pinned Azure profile, after `nanolab release prepare` has committed the
 version. The standalone release configuration is in
 [`release.yaml`](release.yaml). GitHub Actions never publishes images, and
 local/Multipass/Proxmox builds cannot promote to GHCR.
+
+## Recipe runtime comparison
+
+`compare` uses the nine reusable `recipes/comparison-*.yaml` profiles and runs
+`publishRecipe` on the measured VM. It captures tracked NanoFaaS changes once,
+always publishes the JVM distribution with Java and JavaScript word-stats first,
+then publishes each selected control-plane variant once. Cells consume image
+references from `distribution.json` and verify registry digests, build metadata,
+running Pod identities and the active scheduler before k6, including on retry.
+
+```bash
+NANOFAAS_ROOT=/path/to/nanofaas ./nanolab.sh compare \
+  packages/nanolab/scenarios-v2/runtime-comparison-jvm.yaml \
+  --environment packages/nanolab/environments/multipass.yaml \
+  --variants jvm --repetitions 1 --run-dir /tmp/comparison-my-run
+```
+
+The measured scheduler is the unified SchedulerEngine, per-function strategy
+(module id: async-queue). Queue-module names survived the scheduler merge;
+this matrix varies runtime builds while holding scheduling and admission fixed.
+All profiles use k8s-deployment-provider, async-queue and build-metadata, with
+runtime scheduler switching disabled. The `jvm` baseline explicitly uses Serial
+GC and C1. Earlier samples that omitted the tiering flag or build-metadata belong
+to a different experiment series.
+
+`comparison-manifest.json` records immutable inputs, original machine/cluster
+identities and committed publications. Captured inputs live under `inputs/` and
+`profiles/`; `prepare/<variant>/` contains distribution reports, Gradle logs and
+source/JVM/registry evidence. Each cell retains image and scheduler evidence,
+k6 summary and Prometheus snapshot; `comparison-report.html` compares cells.
+Untracked NanoFaaS files are excluded from the captured source.
+
+The VM is retained after success or failure. Repeating the command resumes only
+on the original VM and cluster, after checking inputs, evidence and registry
+images; committed images are never rebuilt. Completed cells are skipped.
+`--fresh` reruns all cells using the same verified artifacts and infrastructure;
+it cannot bypass the identity checks. Changed inputs, replaced machines/clusters,
+legacy directories and manifests without a recorded target require a new run
+directory. Success removes only that run's remote source staging.
+
+Native profiles compile with the host builder on the measured VM; Oracle GraalVM
+is required for G1. Profile validation and fake native tests do not establish
+successful native publication. Other load-test backends remain outside this
+comparison migration.
