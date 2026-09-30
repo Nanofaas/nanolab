@@ -49,6 +49,7 @@ def test_profile_declares_runtime_and_only_baseline_functions(key):
     assert recipe["registry"]["repository"] == "127.0.0.1:5000/nanofaas"
     assert recipe["controlPlane"]["container"]["image"] == f"control-plane-{key}"
     assert options["variant"] == key
+    assert isinstance(options["modules"], list)
     assert set(options["modules"]) == {
         "k8s-deployment-provider",
         "async-queue",

@@ -117,3 +117,27 @@ def test_prepare_recipe_run_rejects_altered_staged_inputs(tmp_path: Path) -> Non
     run.recipe.write_text("schemaVersion: 1\n")
     with pytest.raises(ValueError, match="staged inputs"):
         prepare_recipe_run(source, recipe, tmp_path / "run", "run-1")
+
+
+def test_snapshot_preserves_patch_for_tracked_addition_deletion_and_mode(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    _git(source, "config", "user.email", "test@example.com")
+    _git(source, "config", "user.name", "Test")
+    (source / "deleted").write_text("old")
+    (source / "script").write_text("run")
+    _git(source, "add", ".")
+    _git(source, "commit", "-qm", "initial")
+    (source / "deleted").unlink()
+    (source / "script").chmod(0o755)
+    (source / "added").write_text("new")
+    _git(source, "add", "added")
+    (source / "untracked").write_text("excluded")
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("schemaVersion: 2\n")
+    run = prepare_recipe_run(source, profile, tmp_path / "run", "recipe-test")
+    assert _git(run.source_dir, "diff", "HEAD", "--binary") == _git(
+        source, "diff", "HEAD", "--binary"
+    )
+    assert not (run.source_dir / "untracked").exists()

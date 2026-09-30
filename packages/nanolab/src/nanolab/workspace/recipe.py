@@ -98,7 +98,7 @@ def prepare_recipe_run(
     _git(result.source_dir, "checkout", "-q", "--detach", revision)
     if patch:
         subprocess.run(
-            ("git", "apply", "--binary", "-"),
+            ("git", "apply", "--index", "--binary", "-"),
             cwd=result.source_dir,
             input=patch,
             check=True,
