@@ -1,0 +1,32 @@
+schemaVersion: 2
+name: soak-container-smoke-jvm
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: soak-container-smoke-jvm
+  platforms:
+  - linux/arm64
+  provenance: true
+controlPlane:
+  modules:
+  - container-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+    variant: jvm
+  container:
+    image: soak-control-plane
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+functions:
+- name: word-stats
+  sdk: java
+  build:
+    mode: jvm
+  container:
+    image: soak-java-word-stats
+- name: word-stats
+  sdk: javascript
+  container:
+    image: soak-javascript-word-stats

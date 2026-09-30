@@ -215,6 +215,7 @@ jobs:
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-k8s-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/validate-containerd-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/loadtest-container-jvm.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/soak-container-smoke-jvm.yaml"
           for profile in "$GITHUB_WORKSPACE"/packages/nanolab/recipes/comparison-*.yaml; do
             ./gradlew validateRecipe -Precipe="$profile"
           done

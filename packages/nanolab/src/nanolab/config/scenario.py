@@ -262,6 +262,16 @@ class ScenarioConfig(BaseModel):
                         and self.backend in {"container", "containerd", "k8s"}
                     )
                     or (self.workflow == "loadtest" and self.backend == "container")
+                    or (
+                        self.workflow == "soak"
+                        and self.backend == "container"
+                        and self.soak is not None
+                        and self.soak.purpose == "smoke"
+                        and all(
+                            role.runtime in {"jvm", "node"}
+                            for role in self.soak.roles.values()
+                        )
+                    )
                 )
                 or self.build != "docker"
                 or self.control_plane_image is not None
@@ -292,6 +302,7 @@ class ScenarioConfig(BaseModel):
                 "functions",
                 "resources",
                 "soak",
+                "recipe_profile",
             }
             if unexpected:
                 raise ValueError(
