@@ -387,7 +387,9 @@ def test_cell_retry_preserves_prepared_artifacts_and_checks_each_attempt(
             functions=["word-stats-java", "word-stats-javascript"],
         ),
         environment=tmp_path / "environment.yaml",
-        environment_config=EnvironmentConfig(provider="multipass"),
+        environment_config=EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "original"}}}
+        ),
         paths=object(),
         root=tmp_path,
         prepared=prepared,
