@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, override
+from typing import TYPE_CHECKING, Any, Literal, override
 
 import yaml
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
@@ -17,6 +18,9 @@ from sonata_tasks.execution.ports import CommandTaskExecutor
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.deployment import LOCAL_REGISTRY
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
+
+if TYPE_CHECKING:
+    from nanolab.tasks.recipe_multiarch import MultiarchComponent
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +92,10 @@ def _string(value: object, label: str) -> str:
 
 
 def _verify_recipe_identity(
-    recipe: Path, tag: str, modules: list[str], components: list[RecipeComponent]
+    recipe: Path,
+    tag: str,
+    modules: list[str],
+    components: Sequence[RecipeComponent | MultiarchComponent],
 ) -> None:
     """Compare the report's build selection to the actual profile inputs."""
     profile = _object(yaml.safe_load(recipe.read_text(encoding="utf-8")), "profile")
