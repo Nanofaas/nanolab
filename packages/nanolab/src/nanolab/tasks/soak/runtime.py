@@ -1278,6 +1278,22 @@ def create_local_deployment(
 
     def discover():
         targets = []
+        identity_path = prepared.evidence_dir / "builds/runtime-images.json"
+        recipe_images = all(
+            item.mode == "build" and item.bake is None for item in prepared.recipes
+        )
+        if recipe_images and (
+            identity_path.is_symlink() or not identity_path.is_file()
+        ):
+            raise ValueError("Verified recipe configuration identities are missing")
+        if recipe_images and any(
+            describe_artifact(identity_path) not in item.logs
+            for item in prepared.receipts
+        ):
+            raise ValueError("Verified recipe configuration identity was modified")
+        identities = _read_json(identity_path) if identity_path.exists() else None
+        if identities is not None and set(identities) != set(config.roles):
+            raise ValueError("Recipe runtime configuration identities omit roles")
         for service in services:
             name = f"{project.name}-{service}-1"
             container = _docker_get(
@@ -1296,6 +1312,19 @@ def create_local_deployment(
             )
             if prepared.images[role] not in image.get("RepoDigests", []):
                 raise ValueError("deployed image differs from frozen digest")
+            if identities is not None:
+                expected = identities[role]
+                if (
+                    expected.get("reference") != prepared.images[role]
+                    or expected.get("manifest_digest")
+                    != prepared.images[role].rsplit("@", 1)[-1]
+                    or image.get("Id") != expected.get("config_digest")
+                    or container.get("Image") != expected.get("config_digest")
+                ):
+                    raise ValueError(
+                        "Deployed recipe image configuration differs "
+                        "from verified registry"
+                    )
             targets.append(
                 Target(
                     role,
@@ -2164,11 +2193,20 @@ class RunSingleVersionSoak(Task):
         tool_root,
         options=None,
         keep=lambda: False,
+        recipe_builder=None,
     ):
         """Freeze execution inputs without acquiring files, processes or resources."""
         self.config, self.bindings = config, bindings
         self.run_dir, self.repo_root, self.tool_root = run_dir, repo_root, tool_root
         self.options = options or RuntimeOptions()
+        self.recipe_builder = recipe_builder
+        selected = getattr(config, "recipe_profile", None)
+        if selected is not None and (
+            self.options.preparation.recipe_profile != selected
+            or self.options.preparation.recipe_builder != self.options.helper_builder
+            or recipe_builder is None
+        ):
+            raise ValueError("Recipe soak requires its acquired builder and profile")
         self.keep = keep
         self._entered = False
 
@@ -2184,6 +2222,12 @@ class RunSingleVersionSoak(Task):
         holder = {}
         writer_close_attempted = False
         try:
+            if (
+                self.recipe_builder is not None
+                and inputs.resource(self.recipe_builder)
+                != self.options.preparation.recipe_builder
+            ):
+                raise ValueError("Recipe soak builder was not acquired by this run")
             write_policy_input(self.run_dir, self.config)
             prepared = self.options.prepared
             soak = _with_built_helper(

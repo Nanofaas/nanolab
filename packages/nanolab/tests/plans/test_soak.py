@@ -474,3 +474,129 @@ def test_the_switch_soaks_gc_evidence_names_sources_the_worker_emits():
         runtime = soak["roles"][role]["runtime"]
         if runtime in GC_SOURCES:
             assert source == GC_SOURCES[runtime]
+
+
+def recipe_scenario():
+    from nanolab.cli.product import _scenario
+
+    path = (
+        Path(__file__).parents[2]
+        / "scenarios-v2/memory-soak-smoke-recipe-container.yaml"
+    )
+    return _scenario(path)
+
+
+def test_recipe_selection_reaches_deferred_preparation(tmp_path):
+    from nanolab.tasks.soak.runtime import RunSingleVersionSoak
+
+    config = recipe_scenario()
+    workflow = build_soak_plan(
+        config,
+        EnvironmentConfig(provider="local"),
+        RoleBindings({"host": _CompileOnlyExecutor()}),
+        run_dir=tmp_path / "run",
+        repo_root=tmp_path,
+        tool_root=tmp_path,
+    )
+    task = next(
+        item.task
+        for item in workflow.compile().tasks
+        if isinstance(item.task, RunSingleVersionSoak)
+    )
+    assert task.options.preparation.recipe_profile == config.recipe_profile
+    assert task.options.preparation.registry == "127.0.0.1:5000/nanofaas"
+    assert task.options.preparation.recipe_builder == task.options.helper_builder
+    assert task.options.helper_builder.startswith("nanolab-soak-recipe-")
+    assert not (tmp_path / "run").exists()
+
+
+def test_recipe_profile_rejected_before_resources(tmp_path):
+    config = recipe_scenario()
+    assert config.soak is not None
+    for image in config.soak.images.values():
+        image.platform = "linux/amd64"
+    with pytest.raises(ValueError, match=r"recipe|Recipe"):
+        build_soak_plan(
+            config,
+            EnvironmentConfig(provider="local"),
+            RoleBindings({"host": _CompileOnlyExecutor()}),
+            run_dir=tmp_path / "run",
+            repo_root=tmp_path,
+            tool_root=tmp_path,
+        )
+    assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize("bootstrap_failure", [False, True])
+def test_recipe_owned_resources_cleanup_preserves_selection(
+    tmp_path, monkeypatch, bootstrap_failure
+):
+    import sonata_tasks.registry as registry_module
+    from sonata_tasks.execution.models import TaskResult
+
+    import nanolab.tasks.soak.runtime as runtime
+
+    seen = []
+
+    class Executor:
+        def binding_key(self, role):
+            return "host-test"
+
+        def run(self, task, **kwargs):
+            seen.append(task.argv)
+            missing = (
+                task.argv[:3] == ("docker", "buildx", "inspect")
+                and "--bootstrap" not in task.argv
+            )
+            missing |= task.argv[:2] == ("docker", "inspect")
+            failure = bootstrap_failure and "--bootstrap" in task.argv
+            return TaskResult(
+                task.task_id,
+                "failed" if failure else "passed",
+                1 if missing or failure else 0,
+                stdout="test",
+                stderr="bootstrap failed" if failure else "",
+            )
+
+    class FailRuntime(Task):
+        title = "Synthetic runtime failure"
+
+        def __init__(self, *args, **kwargs):
+            self.builder = kwargs["recipe_builder"]
+            self.options = kwargs["options"]
+
+        def run(self, inputs):
+            assert (
+                inputs.resource(self.builder) == self.options.preparation.recipe_builder
+            )
+            raise RuntimeError("runtime failed after acquiring resources")
+
+    original_registry = registry_module.docker_registry_resource
+    monkeypatch.setattr(
+        "nanolab.plans.soak.docker_registry_resource",
+        lambda **kwargs: original_registry(**kwargs, ready=lambda: True),
+    )
+    monkeypatch.setattr(runtime, "RunSingleVersionSoak", FailRuntime)
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.preparation.check_local_process_support",
+        lambda config: None,
+    )
+    workflow = build_soak_plan(
+        recipe_scenario(),
+        EnvironmentConfig(provider="local"),
+        RoleBindings({"host": Executor()}),
+        run_dir=tmp_path / "run",
+        repo_root=tmp_path,
+        tool_root=tmp_path,
+    )
+    with pytest.raises(RuntimeError, match=r"runtime failed|bootstrap failed"):
+        workflow.run()
+    create = next(argv for argv in seen if argv[:3] == ("docker", "buildx", "create"))
+    assert "--use" not in create
+    assert "network=host" in create
+    assert any(arg.startswith("image=moby/buildkit@sha256:") for arg in create)
+    name = create[create.index("--name") + 1]
+    assert any(argv[:3] == ("docker", "buildx", "rm") and name in argv for argv in seen)
+    removed_registry = [argv for argv in seen if argv[:2] == ("docker", "rm")]
+    assert len(removed_registry) == 1 and "-v" in removed_registry[0]
+    assert not any(argv[:3] == ("docker", "buildx", "use") for argv in seen)

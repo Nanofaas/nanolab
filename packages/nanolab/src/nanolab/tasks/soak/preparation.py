@@ -20,6 +20,7 @@ from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
 from nanolab.tasks.soak.build_provenance import BuildProvenanceCollector
 from nanolab.tasks.soak.builds import BuildImagesTask
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe, plan_images
+from nanolab.tasks.soak.recipe import publish_soak_recipe, validate_soak_recipe
 from nanolab.tasks.soak.sources import SourceSnapshot, capture_source_snapshot
 from nanolab.tasks.soak.workload import allocate_vus, constant_arrival_options
 
@@ -29,6 +30,8 @@ class PreparationOptions:
     """Operational inputs, separate from the frozen numerical acceptance policy."""
 
     registry: str = "localhost:5000/nanofaas"
+    recipe_profile: Path | None = None
+    recipe_builder: str | None = None
     build_timeout_s: float = 3600
     source_limit_bytes: int = 1024 * 1024 * 1024
     build_artifact_limit_bytes: int = 256 * 1024 * 1024
@@ -66,6 +69,18 @@ class PreparedSoak:
 
 def check_preparation_support(config: SoakConfig, options: PreparationOptions) -> None:
     """Reject unsupported diagnostic/profile/build policies before expensive work."""
+    if options.recipe_profile is not None:
+        if (
+            not options.recipe_builder
+            or options.registry != "127.0.0.1:5000/nanofaas"
+            or options.build_observer is not None
+        ):
+            raise ValueError("Conflicting recipe preparation options")
+        validate_soak_recipe(
+            options.recipe_profile,
+            config,
+            platform=config.images["control-plane"].platform,
+        )
     if (
         any(config.diagnostics.operations.values())
         and options.diagnostic_adapter is None
@@ -205,6 +220,8 @@ def prepare_soak(
     There is exactly one source acquisition, regardless of role count.
     """
     options = options or PreparationOptions()
+    if options.recipe_profile is not None and build_observer is not None:
+        raise ValueError("Recipe publication owns its build observer")
     config = SoakConfig.model_validate(config.model_dump(mode="json"))
     cancelled = cancelled if cancelled is not None else Event()
     check_preparation_support(config, options)
@@ -224,9 +241,10 @@ def prepare_soak(
     # Resolve catalogue support and payload semantics before source capture/build.
     run_id = "soak-" + uuid4().hex
     runtimes = {role: policy.runtime for role, policy in config.roles.items()}
-    plan_images(
-        repo_root, config.images, runtimes, registry=options.registry, run_id=run_id
-    )
+    if options.recipe_profile is None:
+        plan_images(
+            repo_root, config.images, runtimes, registry=options.registry, run_id=run_id
+        )
     evidence = run_dir / "evidence"
     writer = ArtifactWriter(evidence, config.artifact_limit_bytes)
     resolved = config.model_dump(mode="json")
@@ -247,24 +265,52 @@ def prepare_soak(
 
         def run(self, inputs: TaskInputs) -> TaskOutcome:
             source = inputs.resource(snapshot)
-            recipes = plan_images(
-                source.root,
-                config.images,
-                runtimes,
-                registry=options.registry,
-                run_id=run_id,
-            )
+            if options.recipe_profile is not None:
+                if options.recipe_builder is None:
+                    raise ValueError("Recipe preparation requires its owned builder")
+                receipts = publish_soak_recipe(
+                    source,
+                    options.recipe_profile,
+                    config,
+                    run_dir=evidence / "builds",
+                    tag=run_id,
+                    builder=options.recipe_builder,
+                    executor=executor,
+                    artifact_limit_bytes=options.build_artifact_limit_bytes,
+                )
+                recipes = tuple(
+                    BuildRecipe(
+                        item.role,
+                        "build",
+                        config.images[item.role].variant,
+                        item.platform,
+                        item.image_digest,
+                        None,
+                        None,
+                        item.recipe_fingerprint,
+                        None,
+                    )
+                    for item in receipts
+                )
+            else:
+                recipes = plan_images(
+                    source.root,
+                    config.images,
+                    runtimes,
+                    registry=options.registry,
+                    run_id=run_id,
+                )
+                task = BuildImagesTask(
+                    recipes,
+                    snapshot=snapshot,
+                    executor=executor,
+                    output_dir=evidence / "builds",
+                    collect=observer,
+                    artifact_limit_bytes=options.build_artifact_limit_bytes,
+                )
+                receipts = task.run(inputs).value
             for index, recipe in enumerate(recipes):
                 writer.write_json(f"recipe-{index}.json", asdict(recipe))
-            task = BuildImagesTask(
-                recipes,
-                snapshot=snapshot,
-                executor=executor,
-                output_dir=evidence / "builds",
-                collect=observer,
-                artifact_limit_bytes=options.build_artifact_limit_bytes,
-            )
-            receipts = task.run(inputs).value
             finished = time.monotonic()
             if receipts is None:
                 raise ValueError("build task produced no receipts")

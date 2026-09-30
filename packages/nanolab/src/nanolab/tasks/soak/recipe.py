@@ -14,7 +14,11 @@ import yaml
 from nanolab.config.soak import SoakConfig
 from nanolab.tasks.recipe import _object
 from nanolab.tasks.recipe_registry import fetch_local_registry
-from nanolab.tasks.soak.artifacts import ArtifactWriter, enforce_limit
+from nanolab.tasks.soak.artifacts import (
+    ArtifactWriter,
+    describe_artifact,
+    enforce_limit,
+)
 from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
 from nanolab.tasks.soak.build_provenance import _materials, _predicate
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe, freeze_build_receipt
@@ -235,9 +239,17 @@ def publish_soak_recipe(
             receipts.append(
                 replace(receipt, original_recipe_fingerprint=facts["profile_sha256"])
             )
-            identities[role] = {**asdict(image), "reference": receipt.image_digest}
+            identities[role] = {
+                "publication_digest": image.publication_digest,
+                "manifest_digest": image.manifest_digest,
+                "config_digest": image.config_digest,
+                "reference": receipt.image_digest,
+            }
         enforce_limit(run_dir, artifact_limit_bytes)
-        writer.write_json("runtime-images.json", identities)
+        identity = describe_artifact(
+            writer.write_json("runtime-images.json", identities)
+        )
+        receipts = [replace(item, logs=(*item.logs, identity)) for item in receipts]
         for index, receipt in enumerate(receipts):
             writer.write_json(
                 f"build-{index}.json", {"schema": "nanolab-soak-v1", **asdict(receipt)}

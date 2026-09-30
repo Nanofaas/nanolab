@@ -2497,3 +2497,94 @@ def test_retention_reads_effective_values_from_info():
     }
     with pytest.raises(ValueError, match="execution-store"):
         retention_from_info({})
+
+
+@pytest.mark.parametrize("wrong_config", [False, True, "tampered"])
+def test_frozen_recipe_runtime_checks_manifest_and_config(
+    tmp_path, monkeypatch, wrong_config
+):
+    import nanolab.tasks.soak.runtime as module
+
+    value = prepared(tmp_path)
+    config_digest = "sha256:" + "b" * 64
+    (value.evidence_dir / "builds").mkdir()
+    (value.evidence_dir / "builds/runtime-images.json").write_text(
+        json.dumps(
+            {
+                role: {
+                    "config_digest": config_digest,
+                    "manifest_digest": "sha256:" + "a" * 64,
+                    "publication_digest": "sha256:" + "c" * 64,
+                    "reference": reference,
+                }
+                for role, reference in value.images.items()
+            }
+        )
+    )
+    from nanolab.tasks.soak.artifacts import describe_artifact
+
+    identity_path = value.evidence_dir / "builds/runtime-images.json"
+    identity = describe_artifact(identity_path)
+    value = replace(
+        value,
+        recipes=tuple(replace(item, bake=None) for item in value.recipes),
+        receipts=tuple(replace(item, logs=(identity,)) for item in value.receipts),
+    )
+    if wrong_config == "tampered":
+        identity_path.write_text(identity_path.read_text() + " ")
+    services = {
+        "control-plane": "control-plane",
+        "function-1": "word-stats-java",
+        "function-2": "word-stats-javascript",
+    }
+
+    def docker(path, *args):
+        if path.startswith("/containers/"):
+            role = next(
+                role for service, role in services.items() if service + "-1" in path
+            )
+            return {
+                "Id": role,
+                "Image": config_digest,
+                "Config": {"Labels": {"com.docker.compose.project": value.run_id}},
+                "State": {"Running": True, "Pid": 123, "StartedAt": "now"},
+            }
+        if path.startswith("/images/"):
+            return {
+                "Id": "sha256:" + "f" * 64 if wrong_config is True else config_digest,
+                "RepoDigests": list(value.images.values()),
+            }
+        pytest.fail(path)
+
+    monkeypatch.setattr(module, "_docker_get", docker)
+    deployment = create_local_deployment(value, tmp_path)
+    try:
+        assert deployment.project.build is False
+        assert deployment.request.build_images is False
+        assert deployment.request.push_function_images is False
+        if wrong_config:
+            with pytest.raises(ValueError, match="config"):
+                deployment.discover()
+        else:
+            assert {target.image_digest for target in deployment.discover()} == set(
+                value.images.values()
+            )
+    finally:
+        value.writer.close()
+
+
+def test_recipe_runtime_rejects_missing_verified_configuration(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.runtime._docker_get",
+        lambda *args: pytest.fail("Docker called before identity gate"),
+    )
+    value = prepared(tmp_path)
+    value = replace(
+        value, recipes=tuple(replace(recipe, bake=None) for recipe in value.recipes)
+    )
+    deployment = create_local_deployment(value, tmp_path)
+    try:
+        with pytest.raises(ValueError, match="configuration"):
+            deployment.discover()
+    finally:
+        value.writer.close()

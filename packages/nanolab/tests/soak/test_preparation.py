@@ -184,3 +184,112 @@ def test_explicit_cases_have_exact_expected_output():
         "topWords": [{"word": "hello", "count": 2}, {"word": "world", "count": 1}],
         "averageWordLength": 5.0,
     }
+
+
+def test_recipe_preparation_skips_legacy_builds(tmp_path, monkeypatch):
+    import json
+    from dataclasses import asdict
+
+    import nanolab.tasks.soak.preparation as module
+    from tests.soak.test_recipe_observation import publication_inputs
+
+    source, profile, config, _, _ = publication_inputs(tmp_path, monkeypatch)
+    receipts = tuple(
+        BuildReceipt(
+            role,
+            "127.0.0.1:5000/nanofaas/" + role + "@sha256:" + "a" * 64,
+            source.fingerprint,
+            role + "-recipe",
+            role + "-build",
+            "linux/arm64",
+            (),
+            (),
+            (),
+        )
+        for role in config.roles
+    )
+    seen = []
+
+    def capture(*args, **kwargs):
+        seen.append("snapshot")
+        return source
+
+    def publish(snapshot, selected, actual, **kwargs):
+        assert snapshot is source and selected == profile and actual == config
+        assert kwargs["builder"] == "owned-builder"
+        assert kwargs["run_dir"] == tmp_path / "run/evidence/builds"
+        seen.append("publish")
+        kwargs["run_dir"].mkdir()
+        for index, receipt in enumerate(receipts):
+            (kwargs["run_dir"] / f"build-{index}.json").write_text(
+                json.dumps(asdict(receipt))
+            )
+        return receipts
+
+    monkeypatch.setattr(module, "capture_source_snapshot", capture)
+    monkeypatch.setattr(module, "publish_soak_recipe", publish)
+    monkeypatch.setattr(
+        module, "plan_images", lambda *a, **k: pytest.fail("legacy catalogue invoked")
+    )
+    monkeypatch.setattr(
+        module, "BuildImagesTask", lambda *a, **k: pytest.fail("legacy build invoked")
+    )
+    value = prepare_soak(
+        config,
+        run_dir=tmp_path / "run",
+        repo_root=source.root,
+        tool_root=tmp_path,
+        options=options(
+            recipe_profile=profile,
+            recipe_builder="owned-builder",
+            registry="127.0.0.1:5000/nanofaas",
+            prerequisite_provider_available=True,
+        ),
+    )
+    try:
+        assert seen == ["snapshot", "publish"]
+        assert value.receipts == receipts
+        for index, recipe in enumerate(value.recipes):
+            assert recipe.bake is None and recipe.prerequisite_argv is None
+            assert recipe.role == receipts[index].role
+            assert (
+                json.loads((value.evidence_dir / f"recipe-{index}.json").read_text())[
+                    "role"
+                ]
+                == recipe.role
+            )
+            assert (
+                json.loads(
+                    (value.evidence_dir / f"builds/build-{index}.json").read_text()
+                )["role"]
+                == recipe.role
+            )
+    finally:
+        value.writer.close()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"recipe_builder": None},
+        {"registry": "other:5000/nanofaas"},
+        {"build_observer": object()},
+    ],
+)
+def test_recipe_preparation_rejects_conflicting_options(tmp_path, changes):
+    import json
+
+    from tests.soak.test_recipe import profile_data, smoke_data
+
+    profile = tmp_path / "recipe.yaml"
+    profile.write_text(json.dumps(profile_data()))
+    config = SoakConfig.model_validate(smoke_data()["soak"])
+    values = {
+        "recipe_profile": profile,
+        "recipe_builder": "owned-builder",
+        "registry": "127.0.0.1:5000/nanofaas",
+        "prerequisite_provider_available": True,
+    }
+    values.update(changes)
+    with pytest.raises(ValueError, match=r"recipe|Recipe"):
+        check_preparation_support(config, options(**values))
