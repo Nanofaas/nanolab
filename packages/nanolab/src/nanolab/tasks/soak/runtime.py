@@ -1952,9 +1952,9 @@ def create_soak_lifecycle(
                 time.monotonic() + timeout_s,
                 config.diagnostics.operations,
             )
-            writer.write_json(
-                "diagnostics.json", {**binding, "entries": diagnostic_entries}
-            )
+        writer.write_json(
+            "diagnostics.json", {**binding, "entries": diagnostic_entries}
+        )
 
     def evaluate(state: LifecycleState):
         nonlocal results
@@ -2473,13 +2473,25 @@ def _observed_java_options(
             )
             text = body.decode("ascii")
             content = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
-            if any(char in content for char in "'\"\\") or any(
+            if any(char in content for char in "'\\") or any(
                 ord(char) < 32 and char not in " \t\r\n\f" for char in text
             ):
                 raise ValueError(
                     "unsupported JVM argfile quoting, escape or control character"
                 )
             expanded = content.split()
+            for position, token in enumerate(expanded):
+                # Recipe JVM launch files quote each complete, unescaped token.
+                # Embedded quotes, concatenation and quoted spaces stay unsupported.
+                if (
+                    len(token) > 2
+                    and token.startswith('"')
+                    and token.endswith('"')
+                    and token.count('"') == 2
+                ):
+                    expanded[position] = token[1:-1]
+                elif '"' in token:
+                    raise ValueError("unsupported JVM argfile quoting")
             if any(token.startswith("@") for token in expanded):
                 raise ValueError("nested JVM argfiles are unsupported")
             pending[index : index + 1] = expanded

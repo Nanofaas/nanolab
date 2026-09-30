@@ -287,7 +287,7 @@ def prepare_soak(
                         item.image_digest,
                         None,
                         None,
-                        item.recipe_fingerprint,
+                        item.original_recipe_fingerprint or item.recipe_fingerprint,
                         None,
                     )
                     for item in receipts

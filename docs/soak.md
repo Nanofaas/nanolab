@@ -6,13 +6,10 @@ a source build by default. The shipped P24 preset uses JVM processes.
 There is no revision comparison, baseline/candidate pair, automatic campaign
 closure, or Kubernetes support in these presets.
 
-**Readiness is incomplete.** These presets and model tests do not establish that
-the complete build-to-report workflow is executable. Before a real run, integration
-must demonstrate loader and policy-receipt persistence, build-aware Sonata routing,
-immutable deployment, effective runtime preflight, prerequisite execution, live
-collection/diagnostics, and full-run acceptance. The initial report implementation
-is numerical-only and always records `p24_qualified: false`. An explicitly
-approved real smoke of the integrated workflow remains necessary before P24.
+**P24 readiness remains incomplete.** The ARM64 recipe container smoke now
+exercises the complete local build-to-report path. Its verification below
+distinguishes evidence completeness from unresolved numerical RSS findings.
+Reports retain `p24_qualified: false`; a short smoke does not qualify P24.
 
 The presets establish resource and protocol inputs. Full retained-state publisher
 coverage is still an integration requirement: the shipped required metrics cover
@@ -23,6 +20,7 @@ population. Do not accept a memory-only policy as complete P24 qualification.
 | --- | --- |
 | `memory-soak-sync-container.yaml` | JVM control plane and Java SDK, Node SDK; operator criteria required |
 | `memory-soak-smoke-container.yaml` | Short observation/artifact exercise with inline smoke criteria |
+| `memory-soak-smoke-recipe-container.yaml` | ARM64 JVM/Node sibling using one attested recipe publication |
 | `memory-soak-prerequisites-container.yaml` | Short prerequisite-adapter exercise; still smoke, never a qualifying P24 receipt |
 
 The strict model currently has only `p24` and `smoke` purposes. A short dedicated
@@ -305,3 +303,91 @@ routing with incomplete prebuilt image inputs; the intended fix is dedicated soa
 routing with native builds for both Java roles. These preset changes alone do not
 prove the old plan regression fixed: that requires the integrated loader/builder
 tests, without an actual image build during test execution.
+
+## Recipe preparation for container smoke
+
+The reusable profile is
+[`soak-container-smoke-jvm.yaml`](../packages/nanolab/recipes/soak-container-smoke-jvm.yaml).
+Run its
+[scenario](../packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml)
+from the repository root:
+
+```bash
+NANOFAAS_ROOT=/path/to/pinned/nanofaas ./nanolab.sh run \
+  packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml \
+  --environment packages/nanolab/environments/local.yaml \
+  --run-dir /tmp/nanolab-soak-recipe-run
+```
+
+This supported selection uses Linux ARM64 Docker on the host, JVM control
+plane, Java JVM word-stats and JavaScript word-stats. The control plane
+selects `container-deployment-provider`, `async-queue` and `build-metadata`.
+Profile/platform/module/role contradictions fail before infrastructure
+acquisition. The original smoke scenario remains available.
+
+One captured source inventory supplies every application image. Disposable
+Git staging preserves dirty, deleted, untracked and executable inputs;
+`source-identity.json` distinguishes the original revision/fingerprint from
+the staging commit. One root `publishRecipe` assembles and publishes all roles.
+An explicit owned builder uses BuildKit v0.27.1 by image digest and a local
+HTTP registry; its creation does not change global builder selection.
+
+Evidence under `evidence/builds/` includes:
+
+- `recipe/recipe.yaml`, `recipe/source-identity.json` and
+  `recipe/distribution/distribution.json`;
+- observer requests, instrumentation hashes, successful command logs and
+  preserved Buildx metadata under `recipe/observer/`;
+- raw index, executable manifest, configuration and bound maximum provenance
+  statement under `registry/<role>/`;
+- `build-<index>.json` receipts in configured role order and
+  `runtime-images.json`, hashed into every receipt.
+
+Compiler versions come from the actual successful build context. The plugin's
+Node compilation log is paired with its cached push only when compilation
+inputs match. Quoted JVM launcher files emitted by recipes are read through
+the existing bounded, ownership-checked observer; unsupported quoting and
+indirect option files remain unavailable observations.
+
+The runtime deploys executable manifest digests and verifies image configuration
+IDs, CPU/memory limits and effective launch options. Offline evaluation rechecks
+the captured recipe/report, raw attestations and compiler observations. Report
+recipe descriptors use `bake: null`; the legacy bake verifier keeps its
+existing path. Empty declared diagnostic operations still produce a bound
+empty `diagnostics.json` receipt.
+
+### Local verification
+
+The complete recipe smoke was executed across 30 September–1 October 2026
+against NanoFaaS `e7914be065e844776af57fe9e449bce7f12e03c5`. The clean source
+snapshot fingerprint is
+`25eea60e44010ed346888db88c022a93864fa610f14a96cc8d059c5147377baf`.
+Observed build tools: Java **25.0.4**, Gradle **9.7.1**, Node **20.20.2**,
+BuildKit **v0.27.1**. One application publication produced three verified
+receipts and distinct publication/executable/configuration identities.
+
+All configured phases completed: 12-second warmup, 12-second baseline drain,
+30-second baseline, 60-second steady and 45-second natural drain. Steady
+work completed **122 requests**, with **zero HTTP errors**, **zero dropped
+iterations** and **244/244 checks passed**. This smoke explicitly declares
+no prerequisite profiles or diagnostic operations; both bound receipts exist.
+
+The final report is **INCONCLUSIVE** (CLI exit **2**), with
+`purpose: smoke`, `p24_qualified: false`. Source/artifact provenance, frozen
+policy, continuity, effective preflight, workload correctness/accounting,
+required observations, diagnostic coverage and artifact integrity all pass.
+All three cgroup ceilings pass. Each zero-threshold RSS growth review remains
+inconclusive and requires ownership/equal-work attribution; the attribution
+and overall run-coverage gates therefore remain inconclusive. Thresholds
+were preserved.
+
+Evidence: `/tmp/nanolab-soak-recipes-e2e-20260930/run-6/`; CLI log and
+`verification.json` are in its parent directory. The report is under
+`evidence/evaluations/evaluation-978b383137234a839965c2c8f3aee67b/`.
+Containers, volumes and the selected `nanolab-heap-analysis` builder matched
+the pre-run state after cleanup. The ordinary JVM recipe lifecycle regression
+also completed all 13 tasks successfully under `jvm-regression/`.
+
+The full Bandit gate retains four preexisting low-severity B101 findings in
+comparison/product/loadtest/validate assertions. New recipe/soak source files
+have no Bandit findings. This is recorded separately from functional readiness.

@@ -978,8 +978,10 @@ def install_product_commands(
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
         try:
-            if scenario_config.recipe_profile is not None and is_multiarch_recipe(
-                scenario_config.recipe_profile
+            if (
+                scenario_config.workflow != "soak"
+                and scenario_config.recipe_profile is not None
+                and is_multiarch_recipe(scenario_config.recipe_profile)
             ):
                 require_recipe_environment(scenario_config, environment_config)
                 if resume or keep or teardown:

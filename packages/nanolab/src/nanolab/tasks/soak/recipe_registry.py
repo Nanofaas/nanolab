@@ -38,12 +38,16 @@ def verify_soak_registry(
     distribution: MultiarchDistribution,
     *,
     platform: str,
-    evidence_dir: Path,
+    evidence_dir: Path | None,
     fetch: RegistryFetch,
     artifact_limit_bytes: int = 16 * 1024 * 1024,
 ) -> dict[str, VerifiedSoakImage]:
     """Verify registry bytes, subjects and maximum provenance before deployment."""
-    writer = ArtifactWriter(evidence_dir, artifact_limit_bytes)
+    writer = (
+        ArtifactWriter(evidence_dir, artifact_limit_bytes)
+        if evidence_dir is not None
+        else None
+    )
     verified = {}
     try:
         for component in distribution.components:
@@ -88,7 +92,8 @@ def verify_soak_registry(
                         raise ValueError(
                             f"Registry descriptor size mismatch for {name}"
                         )
-                writer.write_blob(role, name, response.body)
+                if writer is not None:
+                    writer.write_blob(role, name, response.body)
                 try:
                     return _object(
                         json.loads(response.body, object_pairs_hook=unique_json_object),
@@ -210,4 +215,5 @@ def verify_soak_registry(
             )
         return verified
     finally:
-        writer.close()
+        if writer is not None:
+            writer.close()

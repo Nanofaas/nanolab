@@ -319,3 +319,35 @@ Publication or invocation failure retains diagnostics and releases owned
 resources. Use automatic cleanup: `--keep`, `--teardown` and `--resume` are
 unsupported for this scenario. Start a new run directory for a fresh proof;
 runtime mappings are written only after complete artifact verification.
+
+## Recipe container smoke soak
+
+Run the ARM64 JVM/Node smoke using the reusable
+`recipes/soak-container-smoke-jvm.yaml` profile:
+
+```bash
+NANOFAAS_ROOT=/path/to/pinned/nanofaas ./nanolab.sh run \
+  packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml \
+  --environment packages/nanolab/environments/local.yaml \
+  --run-dir /tmp/nanolab-soak-recipe-run
+```
+
+Use a fresh run directory. The host needs Linux ARM64 Docker, Buildx, k6 and
+the pinned NanoFaaS Gradle project's Java toolchain. NanoLab captures one
+immutable source snapshot, including dirty/untracked inputs, then invokes
+`publishRecipe` once for the JVM control plane and Java/JavaScript word-stats.
+The owned builder uses the verified BuildKit v0.27.1 image pin and the local
+HTTP registry; the operator's selected builder stays selected.
+
+Preparation retains maximum provenance, raw registry bytes and actual
+Java/Gradle/Node/BuildKit observations. Node compilation occurs in the plugin's
+initial build; its inputs are checked against the cached push. Runtime images
+use executable manifest digests, with configuration digests checked against
+the deployed images. Build recipes in the report are descriptors with
+`bake: null`; the recipe artifacts are independently verified offline.
+
+The scenario preserves the original smoke's phases, rates, criteria and
+cleanup. Its final report distinguishes numerical results from evidence
+completeness and always records `purpose: smoke`, `p24_qualified: false`.
+See [the soak contract](../../docs/soak.md) for verification results and
+retention/attribution requirements.

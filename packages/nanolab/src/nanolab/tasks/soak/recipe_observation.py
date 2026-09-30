@@ -73,6 +73,21 @@ def _read_record(root: Path, descriptor: dict[str, object], limit: int) -> bytes
     return body
 
 
+def _build_inputs(argv: list[str]) -> list[str]:
+    """Compare compilation inputs independently of publication/export metadata."""
+    output = []
+    index = 0
+    while index < len(argv):
+        if argv[index] == "--metadata-file":
+            index += 2
+        elif argv[index] == "--push":
+            index += 1
+        else:
+            output.append(argv[index])
+            index += 1
+    return output
+
+
 def observe_soak_recipe(
     run: RecipeRun,
     snapshot: SourceSnapshot,
@@ -213,7 +228,7 @@ def observe_soak_recipe(
                 timeout=30,
             ).stdout
         )
-        writer.write_json(
+        publication_request = writer.write_json(
             "publication-request.json",
             {
                 **request,
@@ -367,6 +382,22 @@ def observe_soak_recipe(
             )
             bases = _materials(predicate)
             jvm = component.sdk == "java"
+            publication_record = record
+            if not jvm:
+                assembly = [
+                    candidate
+                    for candidate in records
+                    if "--push" not in candidate["actual"]
+                    and _build_inputs(candidate["actual"]) == _build_inputs(actual)
+                ]
+                if len(assembly) != 1 or records.index(assembly[0]) >= records.index(
+                    record
+                ):
+                    raise ValueError(
+                        "Recipe compiler build is not bound to publication inputs"
+                    )
+                record = assembly[0]
+                actual = record["actual"]
             recipe = BuildRecipe(
                 role,
                 "build",
@@ -380,6 +411,7 @@ def observe_soak_recipe(
                         "profile": request["profile_sha256"],
                         "source": snapshot.fingerprint,
                         "command": actual,
+                        "publication_command": publication_record["actual"],
                         "instrumentation": instrumentation,
                     }
                 ),
@@ -475,6 +507,7 @@ def observe_soak_recipe(
                     "effective_recipe_fingerprint": recipe.recipe_fingerprint,
                     "image_digest": component.image.digest,
                     "commands": capture.commands,
+                    "publication": publication_record,
                     "recipe": asdict(recipe),
                 },
             )
@@ -489,7 +522,15 @@ def observe_soak_recipe(
                             publication_log,
                             observation,
                             request_path,
+                            publication_request,
                             builder_path,
+                            directory / publication_record["metadata"]["path"],
+                            directory / publication_record["log"]["path"],
+                            init,
+                            hook,
+                            node_dockerfile,
+                            observer,
+                            launcher,
                             *capture.evidence_paths,
                         )
                     )

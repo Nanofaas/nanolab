@@ -1,6 +1,6 @@
 # Roadmap NanoLab: recipes v2
 
-Aggiornata il 30 settembre 2026. Questa pagina raccoglie gli obiettivi di
+Aggiornata il 1 ottobre 2026. Questa pagina raccoglie gli obiettivi di
 migrazione e verifica; non sostituisce le specifiche e i piani di implementazione
 in `docs/superpowers/`.
 
@@ -109,6 +109,18 @@ le differenze reali fra backend e tipi di verifica.
 3. **Affrontare soak e release.** Migrare soltanto le parti equivalenti del
    processo di build. Fatto quando restano validi gli snapshot immutabili, la
    provenienza, la firma e i contratti operativi esistenti.
+   - [x] Preparazione recipe del container smoke ARM64: profilo
+     `soak-container-smoke-jvm.yaml` e scenario
+     `memory-soak-smoke-recipe-container.yaml`. Un solo snapshot/pubblicazione,
+     provenienza massima, compiler effettivi, digest/configurazioni e report
+     offline verificati. Il ciclo completo ha eseguito tutte le fasi e
+     122 richieste steady, zero errori/drop; cleanup e regressione JVM ordinaria
+     passati. Evidenze: `/tmp/nanolab-soak-recipes-e2e-20260930/run-6/`.
+   - [ ] Accettazione del container smoke: report `INCONCLUSIVE` per crescita
+     RSS dei tre processi e attribuzione ownership/equal-work mancante. I gate
+     di provenienza, preflight, carico e integrità passano; soglie immutate,
+     `p24_qualified: false`. Vedi [risultati e confini](soak.md#local-verification).
+   - [ ] Migrazione dei preset P24, altri backend soak e release/firma.
 4. **Eliminare i percorsi legacy.** Rimuovere build duplicate e flag di
    scenario ridondanti dopo la migrazione dei rispettivi workflow. Fatto
    quando non restano chiamanti e la suite pertinente passa.

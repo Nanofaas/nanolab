@@ -801,3 +801,16 @@ def test_containerd_recipe_staging_survives_kept_run(
 
     assert workflow.keep is keep
     assert cleanup.call_count == (0 if keep else 1)
+
+
+@pytest.mark.parametrize("extra", [[], ["--keep"]])
+def test_recipe_soak_reaches_own_preflight(monkeypatch, extra):
+    scenario = _PROJECT_ROOT / "scenarios-v2/memory-soak-smoke-recipe-container.yaml"
+    monkeypatch.setattr(
+        product_module.diagnostics,
+        "missing_executables",
+        lambda commands: ["controlled-missing-k6"],
+    )
+    result = CliRunner().invoke(app, ["run", str(scenario), *extra])
+    assert result.exit_code == 2
+    assert "soak requires local executables: controlled-missing-k6" in result.output

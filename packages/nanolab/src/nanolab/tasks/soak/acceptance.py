@@ -1133,6 +1133,12 @@ def evaluate_acceptance(
                     == fingerprint(spec.model_dump(mode="json")),
                     "prebuilt image/recipe provenance differs",
                 )
+            elif recipe.get("bake") is None:
+                from nanolab.tasks.soak.recipe_evidence import (
+                    verify_soak_recipe_receipt,
+                )
+
+                verify_soak_recipe_receipt(root, config, source, build)
             else:
                 rendered = recipe["bake"]["target"]
                 _require(

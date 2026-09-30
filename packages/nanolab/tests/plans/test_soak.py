@@ -600,3 +600,9 @@ def test_recipe_owned_resources_cleanup_preserves_selection(
     removed_registry = [argv for argv in seen if argv[:2] == ("docker", "rm")]
     assert len(removed_registry) == 1 and "-v" in removed_registry[0]
     assert not any(argv[:3] == ("docker", "buildx", "use") for argv in seen)
+
+
+def test_recipe_environment_accepts_container_smoke_soak():
+    from nanolab.plans.validate import require_recipe_environment
+
+    require_recipe_environment(recipe_scenario(), EnvironmentConfig(provider="local"))

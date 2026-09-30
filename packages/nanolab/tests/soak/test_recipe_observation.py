@@ -61,7 +61,9 @@ for index,(kind,item) in enumerate([('control-plane',profile['controlPlane']),*[
     common=['buildx','build','--builder',option('-PrecipeBuilder'),'--platform','linux/arm64','--provenance=mode=max','-t',reference,'-f',str(file),str(source)]
     subprocess.run([docker,*common],check=True)
     metadata=output/('plugin-metadata-'+str(index)+'.json')
-    subprocess.run([docker,*common,'--push','--metadata-file',str(metadata)],check=True)
+    publish=common+['--push','--metadata-file',str(metadata)]
+    if mutation=='different-assembly-input': publish+=['--build-arg','OTHER_INPUT=1']
+    subprocess.run([docker,*publish],check=True)
     if mutation=='partial-publish': sys.exit(1)
     data=json.loads(metadata.read_text()); metadata.unlink()
     image=dict(reference=reference,status='published',platforms=['linux/arm64'],provenance=True,
@@ -96,7 +98,7 @@ if 'javascript' in args[args.index('-t')+1]:
     digest=('b' if mutation=='mismatched-base' else 'a')*64
     print('#1 [build 1/8] FROM docker.io/library/node:20-alpine@sha256:'+digest,flush=True)
     print('#2 [build 4/8] RUN npm run build',flush=True)
-    if mutation!='missing-node':
+    if mutation!='missing-node' and not (mutation=='cached-push' and '--push' in args):
         record=dict(toolchain='node',argv=['/usr/local/bin/node','--version'],output='v20.20.2\n',
                     execution_cwd='/src/sdks/javascript',exit_code=0,stage='build',
                     process_argv=['/usr/local/bin/node','/src/sdks/javascript/node_modules/.bin/tsc','-p','tsconfig.json'],executable_sha256='a'*64)
@@ -259,6 +261,7 @@ def test_one_snapshot_one_publication_all_receipts(tmp_path, monkeypatch):
         "wrong-workspace",
         "changed-instrumentation",
         "wrong-descriptor",
+        "different-assembly-input",
     ],
 )
 def test_recipe_observation_rejects_unbound_output(tmp_path, monkeypatch, mutation):
@@ -381,3 +384,74 @@ def test_cancelled_publication_reaps_running_command(tmp_path, monkeypatch):
         timer.join(timeout=3)
     assert executor.last_result is not None and executor.last_result.reaped
     assert not list((tmp_path / "builds").glob("build-*.json"))
+
+
+def test_cached_push_uses_bound_assembly_compiler_observation(tmp_path, monkeypatch):
+    from nanolab.tasks.soak import recipe as module
+
+    snapshot, profile, config, executor, fetch = publication_inputs(
+        tmp_path, monkeypatch, "cached-push"
+    )
+    monkeypatch.setattr(
+        module,
+        "fetch_local_registry",
+        lambda repo, kind, ref: fetch("nanofaas/control-plane", kind, ref),
+    )
+    receipts = module.publish_soak_recipe(
+        snapshot,
+        profile,
+        config,
+        run_dir=tmp_path / "builds",
+        tag="run-1",
+        builder="test-builder",
+        executor=executor,
+        artifact_limit_bytes=1024 * 1024,
+    )
+    assert dict(receipts[2].toolchains)["node"] == "20.20.2"
+
+
+@pytest.mark.parametrize("tamper", [None, "recipe", "metadata", "source"])
+def test_offline_acceptance_verifies_recipe_receipt(tmp_path, monkeypatch, tamper):
+    from dataclasses import asdict
+
+    from nanolab.tasks.soak import recipe as module
+    from nanolab.tasks.soak.recipe_evidence import verify_soak_recipe_receipt
+
+    snapshot, profile, config, executor, fetch = publication_inputs(
+        tmp_path, monkeypatch, "cached-push"
+    )
+    monkeypatch.setattr(
+        module,
+        "fetch_local_registry",
+        lambda repo, kind, ref: fetch("nanofaas/control-plane", kind, ref),
+    )
+    receipts = module.publish_soak_recipe(
+        snapshot,
+        profile,
+        config,
+        run_dir=tmp_path / "builds",
+        tag="run-1",
+        builder="test-builder",
+        executor=executor,
+        artifact_limit_bytes=1024 * 1024,
+    )
+    if tamper:
+        observer = tmp_path / "builds/recipe/observer"
+        path = (
+            tmp_path / "builds/recipe/recipe.yaml"
+            if tamper == "recipe"
+            else next(observer.glob("metadata-*.json"))
+            if tamper == "metadata"
+            else tmp_path / "builds/recipe/source-identity.json"
+        )
+        paths = (
+            list(observer.glob("metadata-*.json")) if tamper == "metadata" else [path]
+        )
+        for item in paths:
+            item.write_text(item.read_text() + " ")
+    for receipt in receipts:
+        if tamper:
+            with pytest.raises(ValueError, match="checksum"):
+                verify_soak_recipe_receipt(tmp_path, config, snapshot, asdict(receipt))
+        else:
+            verify_soak_recipe_receipt(tmp_path, config, snapshot, asdict(receipt))

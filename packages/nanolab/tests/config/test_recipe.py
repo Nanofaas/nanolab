@@ -121,6 +121,7 @@ def test_autoscaling_container_scenario_selects_loadtest_recipe() -> None:
 
     config = _scenario(scenario)
 
-    assert config.recipe_profile == (
-        scenario.parent.parent / "recipes/loadtest-container-jvm.yaml"
-    ).resolve()
+    assert (
+        config.recipe_profile
+        == (scenario.parent.parent / "recipes/loadtest-container-jvm.yaml").resolve()
+    )

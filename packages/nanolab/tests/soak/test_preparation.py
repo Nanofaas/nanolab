@@ -205,6 +205,7 @@ def test_recipe_preparation_skips_legacy_builds(tmp_path, monkeypatch):
             (),
             (),
             (),
+            original_recipe_fingerprint="requested-profile",
         )
         for role in config.roles
     )
@@ -251,6 +252,7 @@ def test_recipe_preparation_skips_legacy_builds(tmp_path, monkeypatch):
         assert value.receipts == receipts
         for index, recipe in enumerate(value.recipes):
             assert recipe.bake is None and recipe.prerequisite_argv is None
+            assert recipe.recipe_fingerprint == "requested-profile"
             assert recipe.role == receipts[index].role
             assert (
                 json.loads((value.evidence_dir / f"recipe-{index}.json").read_text())[

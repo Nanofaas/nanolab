@@ -41,24 +41,18 @@ def test_stage_snapshot_repository_filters_and_receipts(tmp_path: Path) -> None:
     _repository(source)
     receipt = stage_snapshot_repository(source, target)
     assert not (target / "com").exists()
-    assert not (
-        target / "io/nanofaas/containerd-java/0.23.0/secret.txt"
-    ).exists()
+    assert not (target / "io/nanofaas/containerd-java/0.23.0/secret.txt").exists()
     files = json.loads((target / "nanolab-receipt.json").read_text())["files"]
     assert len(files) == 9
     assert receipt["files"] == files
-    jar = (
-        "io/nanofaas/containerd-java/0.23.0/containerd-java-0.23.0.jar"
-    )
+    jar = "io/nanofaas/containerd-java/0.23.0/containerd-java-0.23.0.jar"
     assert files[jar] == hashlib.sha256(b"containerd-java-jar").hexdigest()
 
 
 def test_stage_snapshot_repository_requires_complete_coordinate(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _repository(source)
-    (
-        source / "io/libcni/libcni-java/0.23.0/libcni-java-0.23.0.pom"
-    ).unlink()
+    (source / "io/libcni/libcni-java/0.23.0/libcni-java-0.23.0.pom").unlink()
     with pytest.raises(ValueError, match="missing Maven artifact"):
         stage_snapshot_repository(source, tmp_path / "staged")
 

@@ -129,6 +129,21 @@ def require_recipe_environment(
     """Reject recipe and environment combinations before provisioning."""
     if config.recipe_profile is None:
         return
+    if config.workflow == "soak":
+        from nanolab.tasks.soak.recipe import validate_soak_recipe
+
+        if (
+            config.backend != "container"
+            or environment.provider != "local"
+            or config.soak is None
+        ):
+            raise ValueError("Recipe soak requires a local container environment")
+        validate_soak_recipe(
+            config.recipe_profile,
+            config.soak,
+            platform=config.soak.images["control-plane"].platform,
+        )
+        return
     if is_multiarch_recipe(config.recipe_profile):
         if (
             config.workflow != "validate"

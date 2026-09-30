@@ -699,6 +699,8 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
         "drain",
     }
     assert manifest["completed"] is True
+    assert manifest["diagnostics"]["path"] == "diagnostics.json"
+    assert json.loads((root / "diagnostics.json").read_text())["entries"] == []
     assert manifest["workload"]["path"] == "steady/workload-receipt.json"
     # The switch step's receipt is referenced the same way, and it carries the
     # count *and* the window, so the criterion cannot be read from the artifact
@@ -2588,3 +2590,23 @@ def test_recipe_runtime_rejects_missing_verified_configuration(tmp_path, monkeyp
             deployment.discover()
     finally:
         value.writer.close()
+
+
+@pytest.mark.parametrize(
+    "body", [b"", b'"-XX:+UseSerialGC"\n"-XX:MaxRAMPercentage=70"\n']
+)
+def test_recipe_quoted_launcher_argfiles_are_observed(tmp_path, monkeypatch, body):
+    module, target, directory = process_arguments_fixture(tmp_path, monkeypatch, body)
+    (directory / "root/app/launch.args").write_bytes(b'"-jar"\n"app.jar"\n')
+    (directory / "cmdline").write_bytes(
+        b"/opt/jre/bin/java\0@/app/jvm.options\0@/app/launch.args\0"
+    )
+    actual = module.observe_local_process(target)
+    assert actual["runtime_options"] == [
+        "-XX:TieredStopAtLevel=4",
+        *(["-XX:+UseSerialGC", "-XX:MaxRAMPercentage=70"] if body else []),
+    ]
+    assert [
+        item["path"] for item in actual["runtime_argument_evidence"]["argfiles"]
+    ] == ["/app/jvm.options", "/app/launch.args"]
+    assert "unavailable" not in actual["runtime_argument_evidence"]

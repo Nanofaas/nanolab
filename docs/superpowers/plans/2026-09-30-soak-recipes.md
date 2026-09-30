@@ -132,14 +132,14 @@ Expected result: all required capabilities demonstrated, with the concrete mecha
 
 **Interfaces:** Existing `nanolab run`, run evidence and cleanup journal; no new command or runtime policy. Record actual counters/verdicts and input revision/fingerprint.
 
-- [ ] Run `uv run --locked --all-packages --all-groups ruff check packages/nanolab`, `uv run --locked --all-packages --all-groups ruff format --check packages/nanolab`, `uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab`, and `uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache`. Run `pre-commit run bandit-nanolab --all-files` for the existing security gate and configured excludes. Expect zero findings/errors/broken contracts.
-- [ ] Run the full NanoLab suite: `uv run --locked --package nanolab pytest packages/nanolab/tests -q`. Record exit code and test count. Fix relevant failures before continuing.
-- [ ] Capture existing Docker containers/builders and selected builder; verify pinned NanoFaaS checkout/revision. Establish a fresh evidence directory, separate from previous multiarch runs.
-- [ ] Execute `uv run --locked --package nanolab nanolab run packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml --run-dir <absolute-evidence-dir> --environment packages/nanolab/environments/local.yaml`. Use a previously unused run directory and retain full CLI logs and exit code.
-- [ ] Inspect evidence: one application publication, one snapshot, exact roles, maximum provenance and actual toolchain/material evidence, verified manifests/configs, digest-fixed deployment, effective runtime preflight, prerequisites, workload, every measurement phase, numerical/completeness verdicts, report, `p24_qualified: false`, cleanup. A zero process exit alone does not pass this step.
-- [ ] Compare resource state before/after. Verify only owned resources were removed, preexisting resources/selected builder remain and no owned command is still running. Exercise a focused real preparation failure if synthetic tests leave a concrete cleanup risk.
-- [ ] Run the existing `deployment-lifecycle-container.yaml` recipe regression with host Docker and retain its evidence. Do not launch P24 or unrelated backend/matrix campaigns.
-- [ ] Document the new entry point and observations. Preserve P24 limitations and record any readiness failures precisely. Mark only this subset complete on the roadmap if all required phases/evidence succeed; otherwise record the blocker and leave it open.
+- [x] Run `uv run --locked --all-packages --all-groups ruff check packages/nanolab`, `uv run --locked --all-packages --all-groups ruff format --check packages/nanolab`, `uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab`, and `uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache`. Run `pre-commit run bandit-nanolab --all-files` for the existing security gate and configured excludes. Expect zero findings/errors/broken contracts.
+- [x] Run the full NanoLab suite: `uv run --locked --package nanolab pytest packages/nanolab/tests -q`. Record exit code and test count. Fix relevant failures before continuing.
+- [x] Capture existing Docker containers/builders and selected builder; verify pinned NanoFaaS checkout/revision. Establish a fresh evidence directory, separate from previous multiarch runs.
+- [x] Execute `uv run --locked --package nanolab nanolab run packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml --run-dir <absolute-evidence-dir> --environment packages/nanolab/environments/local.yaml`. Use a previously unused run directory and retain full CLI logs and exit code.
+- [x] Inspect evidence: one application publication, one snapshot, exact roles, maximum provenance and actual toolchain/material evidence, verified manifests/configs, digest-fixed deployment, effective runtime preflight, prerequisites, workload, every measurement phase, numerical/completeness verdicts, report, `p24_qualified: false`, cleanup. A zero process exit alone does not pass this step.
+- [x] Compare resource state before/after. Verify only owned resources were removed, preexisting resources/selected builder remain and no owned command is still running. Exercise a focused real preparation failure if synthetic tests leave a concrete cleanup risk.
+- [x] Run the existing `deployment-lifecycle-container.yaml` recipe regression with host Docker and retain its evidence. Do not launch P24 or unrelated backend/matrix campaigns.
+- [x] Document the new entry point and observations. Preserve P24 limitations and record any readiness failures precisely. Mark only this subset complete on the roadmap if all required phases/evidence succeed; otherwise record the blocker and leave it open.
 - [ ] Self-review implementation against the spec and this plan, then obtain one fresh whole-branch review using the preserved native execution workflow. Fix concrete findings and repeat only the affected verification before committing the final docs/evidence summary.
 - [ ] Commit `Document verified recipe container smoke soak`; present the branch integration choice after fresh verification. Do not merge/push implementation without the user's integration instruction.
 
@@ -196,3 +196,28 @@ reader while keeping `read_multiarch_distribution`'s existing two-platform,
 provenance-disabled defaults unchanged. The plain `RecipeDistribution` reader
 requires local IDs which Buildx does not provide. Cost if wrong: shared reader
 regression, covered by the existing multiarch suite.
+
+## Full smoke evidence
+
+The final local ARM64 smoke (`run-6`) completed every phase and retained all
+required evidence. One root publication, the single original source fingerprint
+`25eea60e44010ed346888db88c022a93864fa610f14a96cc8d059c5147377baf`,
+three executable/configuration identities, actual Java 25.0.4/Gradle 9.7.1/
+Node 20.20.2/BuildKit v0.27.1, offline provenance and runtime checks passed.
+Steady: 122 requests, zero HTTP errors/dropped iterations, 244/244 checks.
+Report INCONCLUSIVE/exit 2 remains correct: three RSS growth criteria and
+ownership/equal-work attribution are unresolved; all evidence gates pass.
+Cgroup ceilings pass. No frozen criteria changed; p24_qualified remains false.
+
+Resources after cleanup match the baseline containers, volumes and selected
+builder. Ordinary JVM recipe regression completed 13 tasks/exit 0. Evidence
+root: `/tmp/nanolab-soak-recipes-e2e-20260930/`, including `verification.json`.
+Real attempts exposed and verified fixes for CLI recipe environment selection,
+Node compiler observations during the plugin's cached push, quoted JVM launch
+argfiles, recipe-specific offline acceptance, requested/effective fingerprint
+reporting and bound empty diagnostic receipts. These preserve the spec's
+evidence contract.
+
+The full Bandit gate has four preexisting low-severity B101 assert findings;
+new recipe/soak sources have no findings. Functional migration is complete;
+RSS acceptance and the preexisting security-gate debt stay explicit.
