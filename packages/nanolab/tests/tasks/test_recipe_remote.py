@@ -12,7 +12,7 @@ from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.tasks.recipe_remote import (
     RemoteRecipeRun,
-    _bundle_source,
+    bundle_recipe_source,
     remote_recipe_distribution_resource,
 )
 from nanolab.tasks.vm.models import VmRequest
@@ -35,7 +35,7 @@ def test_remote_bundle_retains_source_but_removes_git_remote_and_hooks(
     (source / "hello.txt").write_text("tracked edit")
     archive = tmp_path / "source.tar.gz"
 
-    _bundle_source(source, archive)
+    bundle_recipe_source(source, archive)
 
     with tarfile.open(archive, "r:gz") as bundle:
         names = bundle.getnames()
@@ -71,7 +71,7 @@ def test_remote_bundle_preserves_tracked_diff_and_executable_mode(
     staged = prepare_recipe_run(source, recipe, tmp_path / "run", "recipe-123")
     archive = tmp_path / "source.tar.gz"
 
-    _bundle_source(staged.source_dir, archive)
+    bundle_recipe_source(staged.source_dir, archive)
     extracted = tmp_path / "extracted"
     extracted.mkdir()
     with tarfile.open(archive, "r:gz") as bundle:

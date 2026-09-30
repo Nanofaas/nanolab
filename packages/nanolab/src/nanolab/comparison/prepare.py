@@ -16,18 +16,27 @@ them, and a build made on an arm64 laptop is not the artefact under measurement.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import hashlib
+import json
+import subprocess
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from sonata_engine import Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.images.control_plane_variants import (
     ControlPlaneVariant,
     build_operations,
 )
 from nanolab.tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.recipe_remote import bundle_recipe_source, remote_recipe_root
+from nanolab.tasks.vm.models import VmRequest
+from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
 
 def function_build_operations(
@@ -180,3 +189,152 @@ def prepare_workflow(
             )
         )
     return workflow
+
+
+@dataclass(frozen=True)
+class ComparisonStage:
+    """One captured source, per-variant profiles and the owned remote directory."""
+
+    source: Path
+    remote_root: PurePosixPath
+    runs: Mapping[str, RecipeRun]
+
+
+# The same probe runs on the captured checkout and the VM, comparing tracked
+# content and executable bits independently of Git's revision/dirty flags.
+SOURCE_PROBE = """
+import hashlib, json, os, subprocess
+from pathlib import Path
+def git(*args):
+    return subprocess.check_output(('git', *args))
+paths = set(git('ls-files', '-z').split(b'\\0'))
+paths.update(git('ls-tree', '-r', '--name-only', '-z', 'HEAD').split(b'\\0'))
+files = {}
+for raw in sorted(paths - {b''}):
+    name = os.fsdecode(raw)
+    path = Path(name)
+    if path.is_symlink():
+        files[name] = {'symlink': str(path.readlink())}
+    elif path.is_file():
+        files[name] = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                       'executable': bool(path.stat().st_mode & 0o111)}
+    else:
+        files[name] = {'absent': True}
+print(json.dumps({'revision': git('rev-parse', 'HEAD').decode().strip(),
+    'patchSha256': hashlib.sha256(
+        git('diff', 'HEAD', '--binary', '--no-ext-diff')).hexdigest(),
+    'files': files}, sort_keys=True))
+"""
+
+
+def captured_source_state(source: Path) -> dict[str, object]:
+    """Inspect every tracked input in a captured source checkout."""
+    return json.loads(
+        subprocess.check_output(("python3", "-c", SOURCE_PROBE), cwd=source)
+    )
+
+
+def comparison_remote_command(
+    provider: VmCommandProvider,
+    request: VmRequest,
+    argv: tuple[str, ...],
+    *,
+    remote_dir: str | None = None,
+) -> str:
+    """Execute one VM command and fail closed on unsuccessful execution."""
+    result = provider.exec_argv(
+        request, argv, env=None, remote_dir=remote_dir, dry_run=False
+    )
+    if result.return_code:
+        raise RuntimeError(f"Comparison VM command failed: {argv[0]}: {result.stderr}")
+    return result.stdout
+
+
+def verify_comparison_source(
+    stage: ComparisonStage, provider: VmCommandProvider, request: VmRequest
+) -> dict[str, object]:
+    """Require identical captured and remote tracked source before publication."""
+    expected = captured_source_state(stage.source)
+    actual = json.loads(
+        comparison_remote_command(
+            provider,
+            request,
+            ("python3", "-c", SOURCE_PROBE),
+            remote_dir=str(stage.remote_root / "source"),
+        )
+    )
+    if actual != expected:
+        raise ValueError("Comparison staged source differs from captured inputs")
+    return actual
+
+
+def stage_comparison(
+    *,
+    source: Path,
+    profiles: Mapping[str, Path],
+    root: Path,
+    tag: str,
+    provider: VmCommandProvider,
+    request: VmRequest,
+) -> ComparisonStage:
+    """Capture and upload one source checkout shared by every comparison profile."""
+    if not profiles or next(iter(profiles)) != "jvm":
+        raise ValueError("Comparison staging requires the shared JVM profile first")
+    captured = prepare_recipe_run(source, profiles["jvm"], root / "inputs", tag)
+    remote_root = remote_recipe_root(request, tag)
+    runs = {}
+    profile_root = root / "profiles"
+    profile_root.mkdir(exist_ok=True)
+    for key, profile in profiles.items():
+        local_profile = profile_root / f"{key}.yaml"
+        content = profile.read_bytes()
+        if local_profile.exists() and local_profile.read_bytes() != content:
+            raise ValueError("Comparison staged profile differs from captured inputs")
+        local_profile.write_bytes(content)
+        runs[key] = RecipeRun(
+            captured.source_dir,
+            local_profile,
+            root / "prepare" / key / "distribution",
+            tag,
+        )
+    stage = ComparisonStage(captured.source_dir, remote_root, runs)
+    if captured_source_state(source) != captured_source_state(stage.source):
+        raise ValueError("Comparison source changed during capture")
+    archive = root / "prepare" / "source.tar.gz"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    bundle_recipe_source(stage.source, archive)
+    comparison_remote_command(
+        provider,
+        request,
+        (
+            "mkdir",
+            "-p",
+            str(remote_root / "profiles"),
+            str(remote_root / "distributions"),
+        ),
+    )
+    transfers = [
+        (archive, remote_root / "source.tar.gz"),
+        *(
+            (run.recipe, remote_root / "profiles" / f"{key}.yaml")
+            for key, run in runs.items()
+        ),
+    ]
+    for local, remote in transfers:
+        result = provider.transfer_to(request, source=local, destination=str(remote))
+        if result.return_code:
+            raise RuntimeError("Comparison VM staging transfer failed")
+        expected = hashlib.sha256(local.read_bytes()).hexdigest()
+        actual = comparison_remote_command(
+            provider, request, ("sha256sum", str(remote))
+        ).split()
+        if not actual or actual[0] != expected:
+            raise ValueError("Comparison staged archive/profile hash differs")
+    comparison_remote_command(
+        provider,
+        request,
+        ("tar", "-xzf", str(remote_root / "source.tar.gz"), "-C", str(remote_root)),
+    )
+    evidence = verify_comparison_source(stage, provider, request)
+    (root / "prepare" / "source.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    return stage

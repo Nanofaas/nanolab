@@ -75,7 +75,7 @@ def _remote(
     return result
 
 
-def _bundle_source(source: Path, destination: Path) -> None:
+def bundle_recipe_source(source: Path, destination: Path) -> None:
     """Archive staged inputs with self-contained Git metadata and no hooks or caches."""
     excluded = {
         ".gradle",
@@ -130,7 +130,7 @@ def remote_recipe_run_resource(
         remote = RemoteRecipeRun(local, root)
         run_dir.mkdir(parents=True, exist_ok=True)
         archive = run_dir / "source.tar.gz"
-        _bundle_source(local.source_dir, archive)
+        bundle_recipe_source(local.source_dir, archive)
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         recipe_digest = hashlib.sha256(local.recipe.read_bytes()).hexdigest()
         _remote(provider, request, ("mkdir", "-p", str(root)))
