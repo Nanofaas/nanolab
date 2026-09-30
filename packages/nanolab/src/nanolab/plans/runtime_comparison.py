@@ -317,7 +317,7 @@ def _prepared_checks(
             checks = [
                 (
                     selected_resource,
-                    "control-plane",
+                    "nanofaas-control-plane",
                     ("control-plane", "control-plane", "java"),
                     run_dir / "images/control-plane",
                 )

@@ -190,6 +190,12 @@ def test_prepared_cell_verifies_all_identities_before_k6(
                     else 'scheduler_active{strategy="per-function"} 1\n'
                 )
             elif "deployment" in argv:
+                name = argv[argv.index("deployment") + 1]
+                assert name in {
+                    "nanofaas-control-plane",
+                    "fn-word-stats-java",
+                    "fn-word-stats-javascript",
+                }
                 stdout = json.dumps(
                     {"metadata": {"uid": "deployment"}, "spec": {"replicas": 1}}
                 )
