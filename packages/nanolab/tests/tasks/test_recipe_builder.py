@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from sonata_engine import TaskInputs
+from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
+
+REGISTRATION = "enabled\ninterpreter /usr/bin/qemu-x86_64\nflags: F\n"
+
+
+class BuilderExecutor:
+    def __init__(self, *, registration: str = "", failure: str | None = None):
+        self.registration = registration
+        self.failure = failure
+        self.commands: list[tuple[str, ...]] = []
+        self.builder = ""
+
+    def binding_key(self, role: str) -> str:
+        return role
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        argv = task.argv
+        self.commands.append(argv)
+        stdout = ""
+        failed = False
+        if argv[1] == "info":
+            stdout = json.dumps(
+                {"id": "test-daemon", "os": "linux", "architecture": "aarch64"}
+            )
+        elif argv[1:3] == ("buildx", "ls"):
+            stdout = "nanolab-heap-analysis\n" + (
+                "nanolab-recipe-test\n" if self.failure == "collision" else ""
+            )
+        elif argv[1:3] == ("buildx", "create"):
+            failed = self.failure == "create"
+            if not failed:
+                self.builder = "nanolab-recipe-test"
+                stdout = self.builder
+        elif argv[1:3] == ("buildx", "inspect"):
+            failed = self.failure == "bootstrap"
+            stdout = json.dumps({"Nodes": [{"Platforms": "linux/amd64,linux/arm64"}]})
+        elif argv[1:3] == ("buildx", "rm"):
+            self.builder = ""
+        elif "--install" in argv:
+            assert argv[-2:] == ("--install", "amd64")
+            self.registration = REGISTRATION
+            failed = self.failure == "install"
+        elif "--platform" in argv:
+            failed = self.failure == "probe"
+            if self.failure == "cancel":
+                raise KeyboardInterrupt("cancelled")
+        elif argv[-1] == "inspect-registration":
+            stdout = self.registration
+        elif argv[-2] == "remove-registration":
+            if self.registration != argv[-1].rstrip("\n") and self.registration.rstrip(
+                "\n"
+            ) != argv[-1].rstrip("\n"):
+                failed = True
+            else:
+                self.registration = ""
+        else:
+            raise AssertionError(argv)
+        return TaskResult(
+            task_id="",
+            status="failed" if failed else "passed",
+            return_code=1 if failed else 0,
+            stdout=stdout,
+            stderr="forced failure" if failed else "",
+        )
+
+
+def resource(tmp_path: Path, executor: BuilderExecutor):
+    from nanolab.tasks.recipe_builder import recipe_builder_resource
+
+    return recipe_builder_resource(
+        executor=executor, run_dir=tmp_path, tag="recipe-test"
+    )
+
+
+def test_builder_uses_daemon_architecture_and_explicit_name(tmp_path: Path) -> None:
+    executor = BuilderExecutor()
+    builder = resource(tmp_path, executor)
+    value = builder.acquire(TaskInputs._for_resources({}, set()))
+    assert value.platform == "linux/arm64"
+    assert value.name == "nanolab-recipe-test"
+    create = next(
+        argv for argv in executor.commands if argv[1:3] == ("buildx", "create")
+    )
+    assert "network=host" in create
+    assert "docker-container" in create
+    assert all("--use" not in argv for argv in executor.commands)
+    config = Path(create[create.index("--buildkitd-config") + 1]).read_text()
+    assert '[registry."127.0.0.1:5000"]' in config
+    builder.release(TaskInputs._for_resources({}, set()), value)
+    assert executor.builder == ""
+    assert executor.registration == ""
+
+
+def test_existing_foreign_registration_is_preserved(tmp_path: Path) -> None:
+    executor = BuilderExecutor(registration=REGISTRATION)
+    builder = resource(tmp_path, executor)
+    value = builder.acquire(TaskInputs._for_resources({}, set()))
+    builder.release(TaskInputs._for_resources({}, set()), value)
+    assert executor.registration == REGISTRATION
+    assert not any(
+        "--install" in argv or "remove-registration" in argv
+        for argv in executor.commands
+    )
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_owned_registration_is_removed_only_when_unchanged(
+    tmp_path: Path, changed: bool
+) -> None:
+    executor = BuilderExecutor()
+    builder = resource(tmp_path, executor)
+    value = builder.acquire(TaskInputs._for_resources({}, set()))
+    if changed:
+        executor.registration = "changed by another tool"
+        with pytest.raises(RuntimeError, match=r"cleanup|registration"):
+            builder.release(TaskInputs._for_resources({}, set()), value)
+        assert executor.registration == "changed by another tool"
+        assert "conflict" in (tmp_path / "builder-cleanup.json").read_text()
+    else:
+        builder.release(TaskInputs._for_resources({}, set()), value)
+        assert executor.registration == ""
+
+
+@pytest.mark.parametrize(
+    "failure", ["install", "probe", "create", "bootstrap", "cancel"]
+)
+def test_builder_compensates_partial_acquisition(tmp_path: Path, failure: str) -> None:
+    executor = BuilderExecutor(failure=failure)
+    builder = resource(tmp_path, executor)
+    with pytest.raises((RuntimeError, KeyboardInterrupt), match=r"failure|cancel"):
+        builder.acquire(TaskInputs._for_resources({}, set()))
+    assert executor.builder == ""
+    assert executor.registration == ""
+
+
+def test_builder_name_collision_never_removes_existing_builder(tmp_path: Path) -> None:
+    executor = BuilderExecutor(failure="collision")
+    with pytest.raises(RuntimeError, match=r"exists|collision"):
+        resource(tmp_path, executor).acquire(TaskInputs._for_resources({}, set()))
+    assert not any(argv[1:3] == ("buildx", "rm") for argv in executor.commands)
+    assert not any("--install" in argv for argv in executor.commands)
+
+
+def test_two_runs_serialize_registration_lifetime(tmp_path: Path) -> None:
+    executor = BuilderExecutor()
+    first = resource(tmp_path / "one", executor)
+    second = resource(tmp_path / "two", executor)
+    value = first.acquire(TaskInputs._for_resources({}, set()))
+    try:
+        with pytest.raises(RuntimeError, match=r"busy|lock"):
+            second.acquire(TaskInputs._for_resources({}, set()))
+    finally:
+        first.release(TaskInputs._for_resources({}, set()), value)
+    assert executor.registration == ""
