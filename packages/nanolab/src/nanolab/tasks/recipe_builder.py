@@ -25,6 +25,12 @@ BINFMT_INSTALLER_IMAGE = (
 FOREIGN_PROBE_IMAGE = (
     "busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 )
+PROBE_PLATFORM_IMAGES = {
+    "amd64": "busybox@sha256:"
+    "66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4",
+    "arm64": "busybox@sha256:"
+    "d82c2ab94640ded77cf76514ce6a84870761105058a4a9e51b05a8a79be97a6c",
+}
 
 _REGISTRATION_SCRIPT = """set -eu
 root=/proc/sys/fs/binfmt_misc
@@ -67,6 +73,7 @@ def recipe_builder_resource(
     owned_builder = False
     owned_registration: str | None = None
     registration_name = ""
+    helper_image = ""
     evidence: dict[str, object] = {}
 
     def command(inputs: TaskInputs, argv: tuple[str, ...], title: str) -> str:
@@ -87,7 +94,7 @@ def recipe_builder_resource(
                 "run",
                 "--rm",
                 "--privileged",
-                FOREIGN_PROBE_IMAGE,
+                helper_image,
                 "sh",
                 "-c",
                 _REGISTRATION_SCRIPT,
@@ -153,7 +160,12 @@ def recipe_builder_resource(
             raise RuntimeError("Recipe builder cleanup failed: " + "; ".join(errors))
 
     def acquire(inputs: TaskInputs) -> RecipeBuilder:
-        nonlocal lock_fd, owned_builder, owned_registration, registration_name
+        nonlocal \
+            lock_fd, \
+            owned_builder, \
+            owned_registration, \
+            registration_name, \
+            helper_image
         info = json.loads(
             command(
                 inputs,
@@ -178,6 +190,7 @@ def recipe_builder_resource(
                 "Multiarch recipe needs a Linux AMD64 or ARM64 Docker daemon"
             )
         foreign = "amd64" if architecture == "arm64" else "arm64"
+        helper_image = PROBE_PLATFORM_IMAGES[architecture]
         registration_name = "qemu-x86_64" if foreign == "amd64" else "qemu-aarch64"
         names = command(
             inputs,
@@ -213,7 +226,9 @@ def recipe_builder_resource(
                 existingBuilders=names,
                 registrationBefore=before,
                 installer=BINFMT_INSTALLER_IMAGE,
-                probe=FOREIGN_PROBE_IMAGE,
+                probeIndex=FOREIGN_PROBE_IMAGE,
+                probe=PROBE_PLATFORM_IMAGES[foreign],
+                registrationHelper=helper_image,
                 builder=name,
             )
             if before and (
@@ -256,7 +271,7 @@ def recipe_builder_resource(
                     "--rm",
                     "--platform",
                     f"linux/{foreign}",
-                    FOREIGN_PROBE_IMAGE,
+                    PROBE_PLATFORM_IMAGES[foreign],
                     "/bin/true",
                 ),
                 "Probe foreign recipe platform",

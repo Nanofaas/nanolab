@@ -98,6 +98,25 @@ def test_builder_uses_daemon_architecture_and_explicit_name(tmp_path: Path) -> N
     assert executor.registration == ""
 
 
+def test_probe_and_helper_use_distinct_platform_manifest_digests(
+    tmp_path: Path,
+) -> None:
+    executor = BuilderExecutor()
+    builder = resource(tmp_path, executor)
+    value = builder.acquire(TaskInputs._for_resources({}, set()))
+    try:
+        helper = next(
+            argv for argv in executor.commands if argv[-1] == "inspect-registration"
+        )
+        probe = next(argv for argv in executor.commands if "--platform" in argv)
+        helper_image = helper[helper.index("--privileged") + 1]
+        probe_image = probe[probe.index("--platform") + 2]
+        assert helper_image != probe_image
+        assert "@sha256:" in helper_image and "@sha256:" in probe_image
+    finally:
+        builder.release(TaskInputs._for_resources({}, set()), value)
+
+
 def test_existing_foreign_registration_is_preserved(tmp_path: Path) -> None:
     executor = BuilderExecutor(registration=REGISTRATION)
     builder = resource(tmp_path, executor)
