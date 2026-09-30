@@ -284,3 +284,21 @@ Implemented inline in `/tmp/nanolab-comparison-recipe`, branch `feature/comparis
   90% threshold. No threshold was lowered and no unrelated coverage work added.
 - Native publication, Oracle G1 and the complete runtime matrix remain unverified;
   all-profile validation and fake native tests are not native E2E evidence.
+
+## Final Review
+
+A fresh `gpt-6-astra` reviewer inspected `c9cfac7..156d333`, the spec, all five
+Review Focus cases, ledger rulings and actual JVM E2E evidence. No Critical,
+Important or Minor findings were raised; ready to merge with the existing
+coverage failure and native execution limitation disclosed.
+
+Decisions retained: standalone profiles use a default tag, overridden uniquely
+by compare; optional Helm values fix scheduling for prepared comparisons;
+the 90% coverage threshold remains unchanged. Native/Oracle G1 publication
+and repository-wide coverage remediation remain separate work. Resume requires
+the original VM and cluster; replacement infrastructure starts a new experiment.
+No minor findings were deferred.
+
+The verified JVM run made 195,776 HTTP requests and collected 93 Prometheus
+queries. This verifies one JVM cell and the preparation/resume contracts; it
+does not establish a statistical comparison between runtime variants.
