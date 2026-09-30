@@ -354,6 +354,7 @@ def resume_case(publication, tmp_path):
     def execute(request, argv, **kwargs):
         if argv[:2] == ("sh", "-c"):
             assert "publishRecipe" in argv[2]
+            assert f"{stage.remote_root}/distributions/" not in argv[2].split(" > ")[-1]
             key = "jvm" if "profiles/jvm.yaml" in argv[2] else "native-o3"
             assert "bootJar" not in argv[2]
             if key == "jvm":
@@ -363,9 +364,9 @@ def resume_case(publication, tmp_path):
                 assert "-PnativeBuildMemory=4g" in argv[2]
                 assert "-PnativeParallelism=2" in argv[2]
             publications.append(key)
-            provider.files[
-                str(stage.remote_root / "distributions" / key / "gradle.log")
-            ] = "published\n"
+            provider.files[str(stage.remote_root / "logs" / f"{key}.gradle.log")] = (
+                "published\n"
+            )
             return SimpleNamespace(return_code=0, stdout="", stderr="")
         return original_exec(request, argv, **kwargs)
 
