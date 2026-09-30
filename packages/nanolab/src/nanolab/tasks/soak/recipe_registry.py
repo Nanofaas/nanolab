@@ -41,10 +41,11 @@ def verify_soak_registry(
     evidence_dir: Path | None,
     fetch: RegistryFetch,
     artifact_limit_bytes: int = 16 * 1024 * 1024,
+    budget_root: Path | None = None,
 ) -> dict[str, VerifiedSoakImage]:
     """Verify registry bytes, subjects and maximum provenance before deployment."""
     writer = (
-        ArtifactWriter(evidence_dir, artifact_limit_bytes)
+        ArtifactWriter(evidence_dir, artifact_limit_bytes, budget_root=budget_root)
         if evidence_dir is not None
         else None
     )

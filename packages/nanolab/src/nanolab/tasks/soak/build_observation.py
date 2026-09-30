@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from nanolab.tasks.soak.artifacts import fingerprint
+from nanolab.tasks.soak.artifacts import fingerprint, measure_tree
 from nanolab.tasks.soak.images import BuildRecipe
 
 _GRADLE_OPTIONS = (
@@ -208,6 +208,7 @@ class BuildObservationCapture:
         *,
         source_fingerprint: str,
         artifact_limit_bytes: int,
+        budget_root: Path | None = None,
     ) -> None:
         """Bind an isolated build workspace and finite evidence budget."""
         if type(artifact_limit_bytes) is not int or artifact_limit_bytes <= 0:
@@ -220,6 +221,7 @@ class BuildObservationCapture:
         self.workspace = workspace.resolve(strict=True)
         self.source_fingerprint = source_fingerprint
         self.limit = artifact_limit_bytes
+        self.budget_root = budget_root
         self.spent = 0
         self.token = uuid4().hex
         self.marker = "NANOLAB_BUILD_OBSERVATION_" + self.token + ":"
@@ -234,7 +236,12 @@ class BuildObservationCapture:
         self._toolchains: dict[str, tuple[tuple[str, ...], str, str | None]] = {}
 
     def _write(self, path: Path, body: bytes) -> dict[str, Any]:
-        if len(body) > self.limit - self.spent:
+        used = (
+            measure_tree(self.budget_root)
+            if self.budget_root is not None
+            else self.spent
+        )
+        if len(body) > self.limit - used:
             raise ValueError("observation artifact byte budget exhausted")
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("xb") as stream:

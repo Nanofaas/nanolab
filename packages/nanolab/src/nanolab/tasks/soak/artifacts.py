@@ -134,9 +134,15 @@ def enforce_limit(root: Path, limit_bytes: int) -> int:
 
 
 class ArtifactWriter:
-    """Own a run directory and persist observations without retaining their history."""
+    """Own a directory and persist bounded observations.
 
-    def __init__(self, root: Path, limit_bytes: int) -> None:
+    Serialized producers may share ``budget_root`` to include direct writes and
+    sibling owners in each pre-write quota check. Default accounting is local.
+    """
+
+    def __init__(
+        self, root: Path, limit_bytes: int, *, budget_root: Path | None = None
+    ) -> None:
         """Exclusively acquire an empty directory and reserve terminal-report space."""
         if type(limit_bytes) is not int or limit_bytes < 128:
             raise ValueError("artifact limit must be an integer of at least 128 bytes")
@@ -151,6 +157,7 @@ class ArtifactWriter:
         )
         os.close(descriptor)
         self.root = root
+        self.budget_root = budget_root
         self.limit_bytes = limit_bytes
         self._reserve = min(TERMINAL_RESERVE, limit_bytes // 8)
         self._used_bytes = 0
@@ -166,7 +173,12 @@ class ArtifactWriter:
         if self._closed:
             raise RuntimeError("artifact writer is closed")
         budget = self.limit_bytes if terminal else self.limit_bytes - self._reserve
-        if self._used_bytes + size > budget:
+        used = (
+            measure_tree(self.budget_root)
+            if self.budget_root is not None
+            else self._used_bytes
+        )
+        if used + size > budget:
             raise ArtifactLimitExceededError(
                 "artifact budget exhausted; terminal space is reserved"
             )
@@ -231,7 +243,14 @@ class ArtifactWriter:
         parent = self._target(directory)
         if _NAME.fullmatch(name) is None:
             raise ValueError("artifact name must be a single safe path component")
-        target = parent / name
+        return self._write_raw(parent / name, body)
+
+    def write_file(self, name: str, body: bytes) -> Path:
+        """Publish a raw input directly under the evidence owner."""
+        return self._write_raw(self._target(name), body)
+
+    def _write_raw(self, target: Path, body: bytes) -> Path:
+        parent = target.parent
         with self._lock:
             self._check_budget(len(body))
             if parent.is_symlink():

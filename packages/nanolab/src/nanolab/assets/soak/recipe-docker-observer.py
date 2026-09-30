@@ -25,7 +25,18 @@ name = uuid.uuid4().hex
 path = root / ('docker-' + name + '.log')
 limit = cfg['artifact_limit_bytes']
 def spent():
-    return sum(p.stat().st_size for p in root.rglob('*') if p.is_file())
+    total = 0
+    pending = [cfg['budget_root']]
+    while pending:
+        with os.scandir(pending.pop()) as entries:
+            for entry in entries:
+                if entry.name.startswith(('workspace-', '.')):
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(entry.path)
+                elif entry.is_file(follow_symlinks=False):
+                    total += entry.stat().st_size
+    return total
 def descriptor(path):
     body = path.read_bytes()
     return {'path':path.name,'sha256':hashlib.sha256(body).hexdigest(),'size_bytes':len(body)}

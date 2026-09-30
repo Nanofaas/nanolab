@@ -20,7 +20,10 @@ from nanolab.tasks.soak.build_provenance import (
 )
 from nanolab.tasks.soak.images import BuildRecipe
 from nanolab.tasks.soak.recipe import validate_soak_recipe
-from nanolab.tasks.soak.recipe_observation import _build_inputs
+from nanolab.tasks.soak.recipe_observation import (
+    _build_inputs,
+    verify_recipe_provenance,
+)
 from nanolab.tasks.soak.recipe_registry import verify_soak_registry
 from nanolab.tasks.soak.sources import SourceSnapshot
 
@@ -143,17 +146,14 @@ def verify_soak_recipe_receipt(
         or metadata.get("image.name") != component.image.reference
     ):
         raise ValueError("Recipe build metadata differs from registry")
-    bases = _materials(
-        _predicate(image.provenance[0], build["platform"], image.manifest_digest)
+    published_predicate = _predicate(
+        image.provenance[0], build["platform"], image.manifest_digest
     )
-    if bases != _materials(
-        _predicate(
-            metadata["buildx.build.provenance"],
-            build["platform"],
-            image.manifest_digest,
-        )
-    ):
-        raise ValueError("Recipe material observations differ from registry")
+    local_predicate = _predicate(
+        metadata["buildx.build.provenance"], build["platform"], image.manifest_digest
+    )
+    verify_recipe_provenance(local_predicate, published_predicate)
+    bases = _materials(published_predicate)
     recipe = BuildRecipe(**facts["recipe"])
     command = next(item for item in facts["commands"] if item["kind"] == "build")
     if (

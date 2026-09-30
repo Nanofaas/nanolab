@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
@@ -50,12 +51,48 @@ from nanolab.tasks.soak.sources import SourceSnapshot, _entry, verify_snapshot
 from nanolab.workspace.recipe import RecipeRun
 
 
-def verify_recipe_source(snapshot: SourceSnapshot, workspace: Path) -> None:
+def verify_recipe_source(
+    snapshot: SourceSnapshot,
+    workspace: Path,
+    *,
+    generated_inputs: frozenset[str] = frozenset(),
+) -> None:
     """Check original inputs independently of generated build files."""
     verify_snapshot(snapshot)
     paths = {entry.path for entry in snapshot.entries}
     if any(_entry(workspace, entry.path, paths) != entry for entry in snapshot.entries):
         raise ValueError("Recipe source inputs changed across publication")
+    outputs = {".git", ".gradle", "build"}
+    outputs.update(
+        (Path(entry.path).parent / output).as_posix()
+        for entry in snapshot.entries
+        if Path(entry.path).name in {"build.gradle", "build.gradle.kts"}
+        for output in ("build", ".gradle")
+    )
+    for parent, directories, files in os.walk(workspace, followlinks=False):
+        base = Path(parent)
+        for name in [*directories, *files]:
+            item = base / name
+            relative = item.relative_to(workspace).as_posix()
+            if relative in outputs:
+                if name in directories:
+                    directories.remove(name)
+                continue
+            if (
+                item.is_file() or item.is_symlink()
+            ) and relative not in paths | generated_inputs:
+                raise ValueError("Recipe source inputs added across publication")
+
+
+def verify_recipe_provenance(local: dict, published: dict) -> None:
+    """Apply the collector's material and invocation binding to saved predicates."""
+    if _materials(local) != _materials(published):
+        raise ValueError("Recipe observed base materials differ from registry")
+    local_id = local.get("metadata", {}).get("buildInvocationID")
+    if local_id is not None and local_id != published.get("metadata", {}).get(
+        "buildInvocationID"
+    ):
+        raise ValueError("Recipe metadata and published build invocation differ")
 
 
 def _read_record(root: Path, descriptor: dict[str, object], limit: int) -> bytes:
@@ -95,11 +132,12 @@ def observe_soak_recipe(
     executor: OwnedBuildCommandExecutor,
     builder: str,
     artifact_limit_bytes: int,
+    budget_root: Path,
 ) -> tuple[MultiarchDistribution, dict[str, ObservedBuild]]:
     """Instrument disposable inputs, publish once and validate observations."""
     root = run.recipe.parent
     directory = root / "observer"
-    writer = ArtifactWriter(directory, artifact_limit_bytes)
+    writer = ArtifactWriter(directory, artifact_limit_bytes, budget_root=budget_root)
     token = uuid4().hex
     marker = "NANOLAB_BUILD_OBSERVATION_" + token + ":"
     profile_bytes = run.recipe.read_bytes()
@@ -166,7 +204,9 @@ def observe_soak_recipe(
             "docker": docker,
             "node_source": str(node_source),
             "node_dockerfile": str(node_dockerfile),
-            "artifact_limit_bytes": artifact_limit_bytes,
+            "artifact_limit_bytes": artifact_limit_bytes
+            - min(4096, artifact_limit_bytes // 8),
+            "budget_root": str(budget_root),
         }
         request_path = writer.write_json("request.json", request)
         asset = (
@@ -202,7 +242,7 @@ def observe_soak_recipe(
             *recipe_command(
                 "publishRecipe",
                 recipe=str(run.recipe),
-                output=str(run.output_dir),
+                output=str(root / "workspace-distribution"),
                 tag=run.tag,
                 builder=builder,
             ),
@@ -265,7 +305,13 @@ def observe_soak_recipe(
         publication_log = writer.write_blob(
             "execution", "publication.log", executor.last_log_path.read_bytes()
         )
-        verify_recipe_source(snapshot, run.source_dir)
+        verify_recipe_source(
+            snapshot,
+            run.source_dir,
+            generated_inputs=frozenset(
+                {(generated / hook.name).relative_to(run.source_dir).as_posix()}
+            ),
+        )
         if any(
             describe_artifact(Path(str(item["path"]))) != item
             for item in instrumentation
@@ -275,6 +321,16 @@ def observe_soak_recipe(
             )
         if run.recipe.read_bytes() != profile_bytes:
             raise ValueError("Recipe profile changed across publication")
+        output_writer = ArtifactWriter(
+            run.output_dir, artifact_limit_bytes, budget_root=budget_root
+        )
+        try:
+            output_writer.write_file(
+                "distribution.json",
+                (root / "workspace-distribution/distribution.json").read_bytes(),
+            )
+        finally:
+            output_writer.close()
         distribution = read_buildx_distribution(
             run.output_dir / "distribution.json",
             recipe=run.recipe,
@@ -423,6 +479,7 @@ def observe_soak_recipe(
                 run.source_dir,
                 source_fingerprint=snapshot.fingerprint,
                 artifact_limit_bytes=artifact_limit_bytes,
+                budget_root=budget_root,
             )
             capture.marker = marker
             descriptor = _object(record.get("log"), "command log")

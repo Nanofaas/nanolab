@@ -49,6 +49,12 @@ for task in (':control-plane:compileJava',':functions:java:word-stats:compileJav
     frame(dict(toolchain='java',argv=['/jdk/bin/other' if mutation=='unrelated-executable' else '/jdk/bin/java','--version'],
                output='openjdk version "25.0.2"\n',compiler='/jdk/bin/javac',compiler_sha256='a'*64,task=task))
 rows=[]
+if mutation=='gradle-outputs':
+    cache=Path.cwd()/'platform/gradle-plugin/.gradle/buildOutputCleanup/cache.properties'
+    cache.parent.mkdir(parents=True,exist_ok=True); cache.write_text('gradle.version=9.7.1')
+if mutation=='added-source':
+    extra=Path.cwd()/'platform/control-plane/src/main/java/Uncaptured.java'
+    extra.parent.mkdir(parents=True,exist_ok=True); extra.write_text('class Uncaptured {}')
 if mutation=='wrong-source': (Path.cwd()/'gradlew').write_text('changed')
 if mutation=='changed-instrumentation': Path(args[args.index('--init-script')+1]).write_text('changed')
 for index,(kind,item) in enumerate([('control-plane',profile['controlPlane']),*[("function",x) for x in profile['functions']]]):
@@ -90,6 +96,7 @@ if args[:2]==['buildx','inspect']:
     sys.exit(0)
 assert args[:2]==['buildx','build'],args
 mutation=os.environ.get('NANOLAB_TEST_MUTATION','')
+if mutation=='large-log': print('x'*8000,flush=True)
 file=Path(args[args.index('-f')+1])
 if 'javascript' in args[args.index('-t')+1]:
     source=next(Path(x) for x in args if x.startswith(os.environ['NANOLAB_TEST_SOURCE_ROOT']) and Path(x).is_dir())
@@ -109,6 +116,7 @@ if '--metadata-file' in args:
                      'image.name':('other' if mutation=='wrong-image' else args[args.index('-t')+1]),
                      'buildx.build.ref':('other-builder/node/id' if mutation=='wrong-builder' else 'test-builder/test-builder-node/id'),
                      'buildx.build.provenance':json.loads(os.environ['NANOLAB_TEST_PREDICATE'])})
+    if mutation=='wrong-invocation': metadata['buildx.build.provenance']['metadata']['buildInvocationID']='unrelated'
     if mutation=='wrong-descriptor': metadata['containerimage.descriptor']['digest']='sha256:'+'f'*64
     Path(args[args.index('--metadata-file')+1]).write_text(json.dumps(metadata))
 """
@@ -148,6 +156,9 @@ def publication_inputs(tmp_path, monkeypatch, mutation=None, cancelled=False):
     jvm = source / "deploy/recipes/Dockerfile.jvm"
     jvm.parent.mkdir(parents=True)
     jvm.write_text("FROM scratch\n")
+    build = source / "platform/gradle-plugin/build.gradle"
+    build.parent.mkdir(parents=True)
+    build.write_text("plugins {}\n")
     subprocess.run(["git", "init", "-q"], cwd=source, check=True)
     subprocess.run(["git", "add", "."], cwd=source, check=True)
     subprocess.run(
@@ -258,21 +269,27 @@ def test_one_snapshot_one_publication_all_receipts(tmp_path, monkeypatch):
         "wrong-image",
         "wrong-builder",
         "wrong-source",
+        "added-source",
         "wrong-workspace",
         "changed-instrumentation",
         "wrong-descriptor",
+        "wrong-invocation",
         "different-assembly-input",
     ],
 )
 def test_recipe_observation_rejects_unbound_output(tmp_path, monkeypatch, mutation):
     from nanolab.tasks.soak.recipe import publish_soak_recipe
 
-    snapshot, profile, config, executor, _ = publication_inputs(
+    snapshot, profile, config, executor, fetch = publication_inputs(
         tmp_path, monkeypatch, mutation
+    )
+    monkeypatch.setattr(
+        "nanolab.tasks.soak.recipe.fetch_local_registry",
+        lambda repo, kind, ref: fetch("nanofaas/control-plane", kind, ref),
     )
     with pytest.raises(
         (ValueError, BuildCommandError),
-        match=r"observ|compiler|toolchain|publication|recipe|builder|image|source|material",
+        match=r"observ|compiler|toolchain|publication|recipe|builder|image|source|material|invocation",
     ):
         publish_soak_recipe(
             snapshot,
@@ -386,11 +403,14 @@ def test_cancelled_publication_reaps_running_command(tmp_path, monkeypatch):
     assert not list((tmp_path / "builds").glob("build-*.json"))
 
 
-def test_cached_push_uses_bound_assembly_compiler_observation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mutation", ["cached-push", "gradle-outputs"])
+def test_cached_push_uses_bound_assembly_compiler_observation(
+    tmp_path, monkeypatch, mutation
+):
     from nanolab.tasks.soak import recipe as module
 
     snapshot, profile, config, executor, fetch = publication_inputs(
-        tmp_path, monkeypatch, "cached-push"
+        tmp_path, monkeypatch, mutation
     )
     monkeypatch.setattr(
         module,
@@ -455,3 +475,76 @@ def test_offline_acceptance_verifies_recipe_receipt(tmp_path, monkeypatch, tampe
                 verify_soak_recipe_receipt(tmp_path, config, snapshot, asdict(receipt))
         else:
             verify_soak_recipe_receipt(tmp_path, config, snapshot, asdict(receipt))
+
+
+def test_offline_acceptance_rejects_different_build_invocation(tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from nanolab.tasks.soak import recipe as module
+    from nanolab.tasks.soak.artifacts import describe_artifact
+    from nanolab.tasks.soak.recipe_evidence import verify_soak_recipe_receipt
+
+    snapshot, profile, config, executor, fetch = publication_inputs(
+        tmp_path, monkeypatch
+    )
+    monkeypatch.setattr(
+        module,
+        "fetch_local_registry",
+        lambda repo, kind, ref: fetch("nanofaas/control-plane", kind, ref),
+    )
+    receipts = module.publish_soak_recipe(
+        snapshot,
+        profile,
+        config,
+        run_dir=tmp_path / "builds",
+        tag="run-1",
+        builder="test-builder",
+        executor=executor,
+        artifact_limit_bytes=1024 * 1024,
+    )
+    for path in (tmp_path / "builds/recipe/observer").glob("metadata-*.json"):
+        data = json.loads(path.read_bytes())
+        data["buildx.build.provenance"]["metadata"]["buildInvocationID"] = "unrelated"
+        path.write_text(json.dumps(data))
+    for receipt in receipts:
+        build = asdict(receipt)
+        build["logs"] = tuple(
+            describe_artifact(Path(log["path"])) for log in build["logs"]
+        )
+        with pytest.raises(ValueError, match="invocation"):
+            verify_soak_recipe_receipt(tmp_path, config, snapshot, build)
+
+
+@pytest.mark.parametrize(
+    ("limit", "mutation"), [(50000, "large-log"), (100000, "large-log"), (65000, None)]
+)
+def test_recipe_quota_never_retains_excess_evidence(
+    tmp_path, monkeypatch, limit, mutation
+):
+    from nanolab.tasks.soak import recipe as module
+    from nanolab.tasks.soak.artifacts import measure_tree
+
+    snapshot, profile, config, executor, fetch = publication_inputs(
+        tmp_path, monkeypatch, mutation
+    )
+    monkeypatch.setattr(
+        module,
+        "fetch_local_registry",
+        lambda repo, kind, ref: fetch("nanofaas/control-plane", kind, ref),
+    )
+    root = tmp_path / "builds"
+    with pytest.raises(
+        (OSError, ValueError, BuildCommandError), match=r"budget|quota|publication"
+    ):
+        module.publish_soak_recipe(
+            snapshot,
+            profile,
+            config,
+            run_dir=root,
+            tag="run-1",
+            builder="test-builder",
+            executor=executor,
+            artifact_limit_bytes=limit,
+        )
+    assert measure_tree(root) <= limit
+    assert not (root / "frozen-images.json").exists()

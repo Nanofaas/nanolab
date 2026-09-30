@@ -24,6 +24,7 @@ from nanolab.tasks.soak.build_provenance import _materials, _predicate
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe, freeze_build_receipt
 from nanolab.tasks.soak.recipe_observation import (
     observe_soak_recipe,
+    verify_recipe_provenance,
     verify_recipe_source,
 )
 from nanolab.tasks.soak.recipe_registry import verify_soak_registry
@@ -103,7 +104,13 @@ def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) ->
 
 
 def prepare_soak_recipe_run(
-    snapshot: SourceSnapshot, profile: Path, run_dir: Path, tag: str
+    snapshot: SourceSnapshot,
+    profile: Path,
+    run_dir: Path,
+    tag: str,
+    *,
+    artifact_limit_bytes: int = 16 * 1024 * 1024,
+    budget_root: Path | None = None,
 ) -> RecipeRun:
     """Materialize all captured files; staging Git identity is not source identity."""
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,47}", tag):
@@ -111,9 +118,9 @@ def prepare_soak_recipe_run(
     verify_snapshot(snapshot)
     profile_bytes = profile.read_bytes()
     run_dir.mkdir(parents=True, exist_ok=False)
+    writer = ArtifactWriter(run_dir, artifact_limit_bytes, budget_root=budget_root)
     source = materialize_snapshot(snapshot, run_dir / "workspace-recipe")
-    staged_profile = run_dir / "recipe.yaml"
-    staged_profile.write_bytes(profile_bytes)
+    staged_profile = writer.write_file("recipe.yaml", profile_bytes)
     for argv in (
         ("git", "init", "-q"),
         ("git", "add", "-f", "."),
@@ -141,20 +148,18 @@ def prepare_soak_recipe_run(
     verify_snapshot(snapshot)
     if profile.read_bytes() != profile_bytes:
         raise ValueError("Soak recipe changed during staging")
-    (run_dir / "source-identity.json").write_text(
-        json.dumps(
-            {
-                "revision": snapshot.revision,
-                "dirty": snapshot.dirty,
-                "fingerprint": snapshot.fingerprint,
-                "staging_revision": staging_revision,
-                "recipe_sha256": hashlib.sha256(profile_bytes).hexdigest(),
-                "tag": tag,
-            },
-            indent=2,
-        )
-        + "\n"
+    writer.write_json(
+        "source-identity.json",
+        {
+            "revision": snapshot.revision,
+            "dirty": snapshot.dirty,
+            "fingerprint": snapshot.fingerprint,
+            "staging_revision": staging_revision,
+            "recipe_sha256": hashlib.sha256(profile_bytes).hexdigest(),
+            "tag": tag,
+        },
     )
+    writer.close()
     return RecipeRun(source, staged_profile, run_dir / "distribution", tag)
 
 
@@ -172,15 +177,23 @@ def publish_soak_recipe(
     """Publish once, verify every role, then freeze executable image receipts."""
     platform = config.images["control-plane"].platform
     validate_soak_recipe(profile, config, platform=platform)
-    writer = ArtifactWriter(run_dir, artifact_limit_bytes)
+    writer = ArtifactWriter(run_dir, artifact_limit_bytes, budget_root=run_dir)
     try:
-        run = prepare_soak_recipe_run(snapshot, profile, run_dir / "recipe", tag)
+        run = prepare_soak_recipe_run(
+            snapshot,
+            profile,
+            run_dir / "recipe",
+            tag,
+            artifact_limit_bytes=artifact_limit_bytes,
+            budget_root=run_dir,
+        )
         publication, observed = observe_soak_recipe(
             run,
             snapshot,
             executor=executor,
             builder=builder,
             artifact_limit_bytes=artifact_limit_bytes,
+            budget_root=run_dir,
         )
         verified = verify_soak_registry(
             publication,
@@ -188,10 +201,22 @@ def publish_soak_recipe(
             evidence_dir=run_dir / "registry",
             fetch=fetch_local_registry,
             artifact_limit_bytes=artifact_limit_bytes,
+            budget_root=run_dir,
         )
         if set(verified) != set(config.roles) or set(observed) != set(config.roles):
             raise ValueError("Recipe publication does not cover all soak roles")
-        verify_recipe_source(snapshot, run.source_dir)
+        request = json.loads(
+            (run.recipe.parent / "observer/publication-request.json").read_bytes()
+        )
+        verify_recipe_source(
+            snapshot,
+            run.source_dir,
+            generated_inputs=frozenset(
+                Path(item["path"]).relative_to(run.source_dir).as_posix()
+                for item in request["instrumentation"]
+                if Path(item["path"]).is_relative_to(run.source_dir)
+            ),
+        )
         if profile.read_bytes() != run.recipe.read_bytes():
             raise ValueError("Recipe profile changed across publication")
         receipts = []
@@ -214,6 +239,22 @@ def publish_soak_recipe(
                 ),
                 "recipe observation",
             )
+            metadata = json.loads(
+                (
+                    run.recipe.parent
+                    / "observer"
+                    / facts["publication"]["metadata"]["path"]
+                ).read_bytes()
+            )
+            for statement in image.provenance:
+                verify_recipe_provenance(
+                    _predicate(
+                        metadata["buildx.build.provenance"],
+                        platform,
+                        image.manifest_digest,
+                    ),
+                    _predicate(statement, platform, image.manifest_digest),
+                )
             recipe = BuildRecipe(**facts["recipe"])
             if facts.get("source_fingerprint") != snapshot.fingerprint:
                 raise ValueError("Recipe observation source differs from snapshot")
