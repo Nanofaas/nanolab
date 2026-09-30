@@ -61,12 +61,12 @@ Record exit status and retained command logs; do not infer success from a tail.
 
 **Interfaces:** Consumes the pinned NanoFaaS recipe implementation and current soak evidence contract. Produces a documented mapping from actual recipe execution to maximum provenance, per-role effective compiler/Node/Gradle/BuildKit records, material digests and publication identities. It must identify the concrete observation mechanism before Task 4.
 
-- [ ] Inspect NanoFaaS recipe flow through GitNexus query/context first, following its repository AGENTS instructions; confirm index freshness and read the pinned implementation for exact behavior. Do not edit NanoFaaS or its plugin.
-- [ ] Record how `publishRecipe` selects JVM compilation, JavaScript Dockerfile/build stages, builder, provenance mode and per-component output metadata. Inspect generated-task behavior, not only schema acceptance.
-- [ ] Make a disposable materialized snapshot/profile probe for the exact three roles. Determine whether existing supported Gradle init/build-context instrumentation can observe all required commands without a second application build or modification of immutable inputs.
-- [ ] Verify maximum provenance, actual compiler selection, build-context Node evidence, BuildKit identity and base materials can be retrieved and bound to every publication output. Version commands must belong to successful owned execution; report missing evidence as failure.
-- [ ] Save the probe commands, output paths and one capability verdict in this plan. If any required capability is missing, stop remaining tasks and report the exact plugin gap for a separately reviewed change. Do not add a prebuilt bypass or substitute requested versions.
-- [ ] Commit the capability record as `Record soak recipe observation capability`; include only this plan and compact textual evidence references, not generated build workspaces.
+- [x] Inspect NanoFaaS recipe flow through GitNexus query/context first, following its repository AGENTS instructions; confirm index freshness and read the pinned implementation for exact behavior. Do not edit NanoFaaS or its plugin.
+- [x] Record how `publishRecipe` selects JVM compilation, JavaScript Dockerfile/build stages, builder, provenance mode and per-component output metadata. Inspect generated-task behavior, not only schema acceptance.
+- [x] Make a disposable materialized snapshot/profile probe for the exact three roles. Determine whether existing supported Gradle init/build-context instrumentation can observe all required commands without a second application build or modification of immutable inputs.
+- [x] Verify maximum provenance, actual compiler selection, build-context Node evidence, BuildKit identity and base materials can be retrieved and bound to every publication output. Version commands must belong to successful owned execution; report missing evidence as failure.
+- [x] Save the probe commands, output paths and one capability verdict in this plan. If any required capability is missing, stop remaining tasks and report the exact plugin gap for a separately reviewed change. Do not add a prebuilt bypass or substitute requested versions.
+- [x] Commit the capability record as `Record soak recipe observation capability`; include only this plan and compact textual evidence references, not generated build workspaces.
 
 Expected result: all required capabilities demonstrated, with the concrete mechanism recorded; otherwise a bounded capability-gap report. A profile-only `validateRecipe` success does not pass this gate.
 
@@ -88,7 +88,7 @@ Expected result: all required capabilities demonstrated, with the concrete mecha
 
 **Files:** Create `tasks/soak/recipe_registry.py` and `tests/soak/test_recipe_registry.py`; share existing `tasks/recipe_registry.py` byte-fetching helpers where compatible without changing its multiarch contract.
 
-**Interfaces:** Define frozen `VerifiedSoakImage` with `publication_digest: str`, `manifest_digest: str`, `config_digest: str`, `provenance: tuple[dict[str, object], ...]`. Add `verify_soak_registry(distribution: RecipeDistribution, *, platform: str, evidence_dir: Path, fetch: RegistryFetch) -> dict[str, VerifiedSoakImage]`, keyed by the existing soak role names.
+**Interfaces:** Define frozen `VerifiedSoakImage` with `publication_digest: str`, `manifest_digest: str`, `config_digest: str`, `provenance: tuple[dict[str, object], ...]`. Add `verify_soak_registry(distribution: MultiarchDistribution, *, platform: str, evidence_dir: Path, fetch: RegistryFetch) -> dict[str, VerifiedSoakImage]`, keyed by the existing soak role names.
 
 - [ ] Write `test_attested_publication_selects_only_executable_manifest`: assert selected host platform/config digest and attestation-to-manifest binding; retain index identity separately. Include direct executable manifests only when independently verifiable provenance still meets the required contract.
 - [ ] Write parameterized `test_invalid_publication_fails_before_runtime` covering wrong byte hash, duplicate JSON keys, descriptor size/type, platform/CPU variant, duplicate executable descriptors, missing/foreign attestation, wrong subject, changed tag and absent material evidence. Require rejection of missing/wrong maximum-provenance contents through existing collector checks.
@@ -100,7 +100,7 @@ Expected result: all required capabilities demonstrated, with the concrete mecha
 
 **Files:** Extend `tasks/soak/recipe.py`; create `tasks/soak/recipe_observation.py` and `tests/soak/test_recipe_observation.py`; adapt shared helpers in `build_observation.py`/`build_provenance.py` only as required by the capability gate; extend `tests/soak/test_recipe.py`.
 
-**Interfaces:** Add `publish_soak_recipe(snapshot: SourceSnapshot, profile: Path, config: SoakConfig, *, run_dir: Path, tag: str, builder: str, executor: OwnedBuildCommandExecutor, artifact_limit_bytes: int) -> tuple[BuildReceipt, ...]`. Its observation bridge exports `observe_soak_recipe(run: RecipeRun, snapshot: SourceSnapshot, *, executor: OwnedBuildCommandExecutor, builder: str, artifact_limit_bytes: int) -> tuple[RecipeDistribution, dict[str, ObservedBuild]]`. The bridge owns exactly one publication and returns request-bound observed results by role; the publication adapter validates artifacts and freezes receipts.
+**Interfaces:** Add `publish_soak_recipe(snapshot: SourceSnapshot, profile: Path, config: SoakConfig, *, run_dir: Path, tag: str, builder: str, executor: OwnedBuildCommandExecutor, artifact_limit_bytes: int) -> tuple[BuildReceipt, ...]`. Its observation bridge exports `observe_soak_recipe(run: RecipeRun, snapshot: SourceSnapshot, *, executor: OwnedBuildCommandExecutor, builder: str, artifact_limit_bytes: int) -> tuple[MultiarchDistribution, dict[str, ObservedBuild]]`. The bridge owns exactly one publication and returns request-bound observed results by role; the publication adapter validates artifacts and freezes receipts.
 
 - [ ] Write `test_one_snapshot_one_publication_all_receipts`: instrument the owned executor, assert exactly one `publishRecipe`, no `assembleRecipe`/legacy build, the explicit builder and unique tag, and exactly three receipts sharing the snapshot fingerprint. Verify raw staged profile/report and hashed observation/log references are retained.
 - [ ] Write `test_requested_versions_cannot_satisfy_observation` and parameterized `test_recipe_observation_rejects_unbound_output`: wrong request/workspace/image/source binding, failed compilation, unrelated executable, stale logs, absent role, missing toolchain and mismatched base material must fail. Include successful real build-context evidence fixtures based on Task 1 rather than inventing a transport schema unrelated to the plugin.
@@ -156,3 +156,43 @@ Review this plan before implementation. Preserve the previously selected native
 execution approach: implement task by task in this session, then perform one
 fresh whole-branch review. Start with Task 1 and stop on a demonstrated capability
 gap rather than executing later tasks speculatively.
+
+## Task 1 capability result — 30 September 2026
+
+Gate passed. Two disposable publications used the same captured source snapshot
+with three application roles. The first used the floating BuildKit image and
+produced v0.33.1 provenance rejected by the existing collector. The second used
+`moby/buildkit@sha256:1e110c71d389d6d24f67b9438e2f7b8da749a6ff407b22a1631e025c95599368`
+(v0.27.1), and all three published predicates/material sets passed its checks.
+Both Gradle publications exited zero; both released their builder and registry.
+
+Mechanism demonstrated: `registry.platforms: [linux/arm64]`,
+`registry.provenance: true`, explicit `recipeBuilder`, and supported `recipeDocker`
+command interception to retain each temporary metadata file before the plugin
+deletes it. A Gradle init script observes the selected JavaCompile compiler and
+actual Gradle distribution; a workspace-only Node preload observes the executable
+used by successful npm/tsc build stages. No plugin or operator-checkout edits.
+
+The pinned probe recorded 24 successful toolchain observations, three output
+metadata files bound to the published digests and actual builder/node, three
+attested indexes and executable manifest mappings. Baseline/final containers
+match, the selected `nanolab-heap-analysis` builder remains, and both probe
+builders are gone. Full soak runtime execution is still pending.
+
+Evidence: `/tmp/nanolab-soak-recipe-capability-20260930/pinned-builder/`, including
+`verification.json`, `publication.log`, `docker-commands.jsonl`, metadata files,
+per-component manifest/provenance/image output and resource state.
+Original snapshot fingerprint:
+`25eea60e44010ed346888db88c022a93864fa610f14a96cc8d059c5147377baf`; original
+NanoFaaS revision `e7914be065e844776af57fe9e449bce7f12e03c5`, clean.
+
+Ruling: pin the supported BuildKit image for this recipe path, preserving the
+existing strict provenance checks; no fallback to the floating incompatible
+format. Cost if wrong: an explicit builder-image update and renewed verification.
+
+Ruling: reuse the published Buildx DTO (`MultiarchDistribution`) for the
+single-platform attested path, introducing a parameterized `read_buildx_distribution`
+reader while keeping `read_multiarch_distribution`'s existing two-platform,
+provenance-disabled defaults unchanged. The plain `RecipeDistribution` reader
+requires local IDs which Buildx does not provide. Cost if wrong: shared reader
+regression, covered by the existing multiarch suite.
