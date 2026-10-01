@@ -115,12 +115,17 @@ le differenze reali fra backend e tipi di verifica.
      provenienza massima, compiler effettivi, digest/configurazioni e report
      offline verificati. Il ciclo completo ha eseguito tutte le fasi e
      122 richieste steady, zero errori/drop; cleanup e regressione JVM ordinaria
-     passati. Evidenze: `/tmp/nanolab-soak-recipes-e2e-20260930/run-6/`.
+     passati. Evidenze: `/tmp/nanolab-soak-recipes-e2e-20260930/run-8/`.
    - [ ] Accettazione del container smoke: report `INCONCLUSIVE` per crescita
      RSS dei tre processi e attribuzione ownership/equal-work mancante. I gate
      di provenienza, preflight, carico e integrità passano; soglie immutate,
-     `p24_qualified: false`. Vedi [risultati e confini](soak.md#local-verification).
-   - [ ] Migrazione dei preset P24, altri backend soak e release/firma.
+     `p24_qualified: false`. Revisione dei limiti rinviata separatamente su
+     indicazione dell’utente. Vedi [risultati e confini](soak.md#local-verification).
+   - [ ] Release AMD64: migrazione della build a tre profili recipe mantenendo
+     la fase separata di push e i contratti di benchmark/firma.
+     [Spec in revisione](superpowers/specs/2026-10-01-release-amd64-recipes-design.md).
+   - [ ] Release ARM64: migrazione successiva, con gli stessi contratti.
+   - [ ] Migrazione dei preset P24 e degli altri backend soak.
 4. **Eliminare i percorsi legacy.** Rimuovere build duplicate e flag di
    scenario ridondanti dopo la migrazione dei rispettivi workflow. Fatto
    quando non restano chiamanti e la suite pertinente passa.
