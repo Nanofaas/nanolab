@@ -649,3 +649,48 @@ def test_teardown_refuses_flags_that_describe_running_a_workflow(
     assert result.exit_code != 0
     assert "--teardown" in result.output
     assert "Traceback" not in result.output
+
+
+def test_release_recipe_prefix_until_staging_push_compiles_without_cloud(
+    release_cli_harness, monkeypatch
+) -> None:
+    from sonata_engine import Selection
+
+    from nanolab.plans.release import build_release_workflow
+
+    compiled = []
+
+    def build(request, *, provider=None):
+        workflow = build_release_workflow(request, provider=provider)
+        prefix = workflow.compile(
+            select=Selection(until="push-amd64-images-to-local-registry")
+        )
+        compiled.extend(item.task.title for item in prefix.tasks)
+        return workflow
+
+    monkeypatch.setattr(product_module, "build_release_workflow", build)
+    result = CliRunner().invoke(
+        app,
+        [
+            "plan",
+            str(release_cli_harness.scenario),
+            "--environment",
+            str(release_cli_harness.environment),
+            "--release-config",
+            str(release_cli_harness.release_config),
+            "--run-dir",
+            str(release_cli_harness.release_dir.parent.parent),
+            "--until",
+            "push-amd64-images-to-local-registry",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Run source tests" in compiled
+    assert "Build AMD64 images" in compiled
+    assert "Push AMD64 images to local registry" in compiled
+    assert not any(
+        title.startswith("Run release benchmark")
+        or title.startswith("Publish")
+        or title.startswith("Attest")
+        for title in compiled
+    )

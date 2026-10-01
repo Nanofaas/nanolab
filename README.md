@@ -96,6 +96,37 @@ uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-li
 Nothing in this gate should modify `uv.lock`; if it does, run `uv lock` and
 commit the updated lockfile separately.
 
+## AMD64 release recipes
+
+The AMD64 release build uses three reusable profiles from
+[`packages/nanolab/recipes`](packages/nanolab/recipes):
+
+| Profile | Images at NanoFaaS `e7914be0` | Build policy |
+| --- | ---: | --- |
+| `release-amd64-jvm.yaml` | 9 | JVM G1/C2: control plane, Java functions and warm-echo |
+| `release-amd64-native.yaml` | 12 | Oracle/O3/G1/JFR for Spring; Community/O3/serial for Java-lite |
+| `release-amd64-default.yaml` | 23 | Bash, Go, JavaScript, Python and watchdog Dockerfiles |
+
+The default profile also assembles a JVM control-plane artifact without an
+image. Release tags are overridden from the guarded version; the original
+44-image matrix is preserved. The eight explicit modules match the pinned
+source's resolved `all` selection.
+
+The workflow runs three root `assembleRecipe` commands on its native AMD64
+Azure stack VM using the owned Buildx builder. A separate phase pushes the
+verified local images to the VM registry. It retains profiles, source inventory,
+builder facts, complete logs and raw reports under
+`<run-dir>/releases/<version>/recipe-evidence/amd64/`; resume verifies these files
+and local image IDs. Source tests, benchmark gates, publication and signing keep
+their existing order. ARM64 continues using Bake.
+
+**Verification status:** profile validation, local tests, input guards and the
+staging-push CLI prefix are verified. Native AMD64 assembly, native export,
+runtime probes and real resume remain unverified while Azure provisioning is
+blocked by its MFA requirement. This migration is not release-qualified. See the
+[implementation plan](docs/superpowers/plans/2026-10-01-release-amd64-recipes.md)
+for retained evidence and the remaining gates.
+
 ## Roadmap
 
 See the [recipes v2 roadmap](docs/recipes-roadmap.md) for the next NanoLab

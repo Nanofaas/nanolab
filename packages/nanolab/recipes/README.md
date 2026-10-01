@@ -259,3 +259,20 @@ The full Docker cycle passed on 30 September 2026 against clean NanoFaaS
 and exit code zero, platform invocation and cleanup. CI validates the profile.
 Evidence is in `/tmp/nanolab-recipe-watchdog-e2e-20260930/`, with log
 `/tmp/nanolab-recipe-watchdog-e2e-20260930.log`.
+
+## AMD64 release profiles
+
+`release-amd64-jvm.yaml`, `release-amd64-native.yaml` and
+`release-amd64-default.yaml` describe the complete guarded release matrix.
+They are assembled on the native AMD64 release VM; their checked-in tags are
+manual defaults, replaced by the release version during execution.
+
+The JVM/native/default groups produce 9/12/23 images at NanoFaaS `e7914be0`.
+The default control plane is an artifact only. Spring native builds select
+Oracle/O3/G1 with effective JFR; Java-lite uses Community/O3/serial.
+The release pushes images in its separate staging phase after checking reports
+and local IDs. ARM64 remains on its existing Bake path.
+
+All three profiles pass pinned `validateRecipe`. Native AMD64 build/export and
+runtime verification remain gated on Azure MFA; see the
+[release verification plan](../../../docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).

@@ -157,13 +157,13 @@ In `recipe_execution.py`, define `capture_release_inventory(source_tree: Path, d
 
 **Interfaces:** Consumes the complete executable release DAG and unchanged CLI selection. Produces retained native-AMD64 build/push/runtime/ownership evidence and a clearly bounded migration verdict; no qualified public release.
 
-- [ ] Run `uv run --locked --package nanolab pytest packages/nanolab/tests -q`; expect all pass. Run `uv run --locked --package nanolab nanolab-quality`; expect `Quality checks passed`. Run `uv run --locked --package nanolab ruff format --check --config packages/nanolab/pyproject.toml packages/nanolab`; expect all files formatted. Run `uv run --locked --package nanolab bandit -r packages/nanolab/src/nanolab -c packages/nanolab/pyproject.toml -f json`; expect only the four preexisting B101 lows (nonzero exit is retained and reported), with no new findings. Retain complete logs and exit statuses.
+- [x] Run `uv run --locked --package nanolab pytest packages/nanolab/tests -q`; expect all pass. Run `uv run --locked --package nanolab nanolab-quality`; expect `Quality checks passed`. Run `uv run --locked --package nanolab ruff format --check --config packages/nanolab/pyproject.toml packages/nanolab`; expect all files formatted. Run `uv run --locked --package nanolab bandit -r packages/nanolab/src/nanolab -c packages/nanolab/pyproject.toml -f json`; expect only the four preexisting B101 lows (nonzero exit is retained and reported), with no new findings. Retain complete logs and exit statuses.
 - [ ] Prepare private real Azure environment/credential config under `/tmp/nanolab-release-amd64-verification/`, using the existing examples/contracts; validate actual credentials and network/VM availability without logging secrets. Use a clean prepared source checkout and unchanged release version/policy; do not fake source-test receipts or bypass execution guards. Confirm CLI `--until` selects the slug below in a contract test before incurring cloud work.
 - [ ] Run `uv run --locked --package nanolab nanolab run packages/nanolab/scenarios-v2/release.yaml --environment /tmp/nanolab-release-amd64-verification/environment.yaml --release-config /tmp/nanolab-release-amd64-verification/release-config.yaml --run-dir /tmp/nanolab-release-amd64-verification/run --until push-amd64-images-to-local-registry --keep`. Expect genuine source tests, three assemblies and separate staging push; no benchmark/publication/signing executed. Retain all 44 local IDs/platforms, all 44 registry manifest digests, three raw reports, source inventory/archive binding, profiles, builder/export/log evidence and receipts. Shared source prerequisites may acquire ARM64 infrastructure.
 - [ ] Exercise representative pinned runtime images on the retained stack VM: JVM control plane and Java function, Oracle G1 native control plane/function, Java-lite native function, watchdog and Bash/Go/JavaScript/Python Dockerfile functions. Use existing HTTP/invocation/service smoke contracts with expected outputs and clean up the owned probe workloads. Verify benchmark image selection resolves the unchanged native/G1 variant and staging manifest digests through the normal receipt adapter; fixtures alone do not qualify this boundary.
 - [ ] With retained infrastructure, run the same prefix with `--resume --keep`; expect no assembly/push commands for unchanged verified phases. Save journal verifier observations. Demonstrate report-file and local-tag invalidation in controlled tests, retaining the successful real evidence rather than corrupting it.
 - [ ] Run the matching `nanolab run ... --teardown` invocation with the same scenario/environment/config/run directory. Confirm owned resources are released and unrelated host/VM resources preserved. If an earlier step fails, still compensate/teardown and retain partial logs; leave real verification incomplete.
-- [ ] Document profiles, assembly versus push, exact verified scope/results and remaining ARM64 migration in README/roadmap. Keep smoke-limit review deferred. Record any unavailable native-AMD64 gate explicitly; do not mark migration complete until it passes, and do not claim full release qualification.
+- [x] Document profiles, assembly versus push, exact verified scope/results and remaining ARM64 migration in README/roadmap. Keep smoke-limit review deferred. Record any unavailable native-AMD64 gate explicitly; do not mark migration complete until it passes, and do not claim full release qualification.
 - [ ] Review the complete branch against the spec, run `git diff --check`, and commit as `Document verified AMD64 recipe release builds`. Report any concrete unresolved risks before integration; merge/push follows the user's chosen integration step.
 
 ## Plan self-review and handoff
@@ -171,8 +171,39 @@ In `recipe_execution.py`, define `capture_release_inventory(source_tree: Path, d
 Coverage: profiles/matrix (Task 2), archive and builder/export capability (Tasks
 1/4), strict distribution/local IDs (Task 3/4), DAG/resume/digest semantics
 (Task 5), native VM/runtime/cleanup and documentation (Task 6). Each Review Focus
-entry has named negative tests. No product implementation or capability probe
-has been run for this plan; baseline tests precede these changes.
+entry has named negative tests. Tasks 2–5 are implemented and locally verified;
+Task 1's native VM portion and Task 6's real build/push/runtime gates remain
+incomplete. Baseline tests and retained logs precede the migration changes.
 
 Written spec approved. Review this plan before native execution; Local profile/catalog checks from Task 1 passed; its real VM builder/export
 checks must pass with Task 6 before completion. Preserve the user's existing native execution preference.
+
+## Local implementation verification — 2026-10-01
+
+- Tasks 2–5 committed on `feature/recipe-release-amd64`: reusable profiles,
+  strict report adaptation, source/transfer/image verification and resumable DAG.
+- Final full suite: 3,263 passed in 196.60s, 89% coverage; focused release
+  gate: 444 passed in 66.06s. The suite includes the CLI prefix contract test.
+- `nanolab-quality` passed. Bandit exits 1 with exactly the four baseline
+  B101 LOW findings (comparison:364, product:225, loadtest:819, validate:757).
+  Format gate initially found only the existing soak observer unformatted;
+  formatting-only correction applied. Final format gate passes (419 files),
+  and final `nanolab-quality` passes.
+- Three checked-in profiles pass real pinned Gradle validation. A fresh archive
+  `validateRecipe` probe verifies inventory output rules, including the included
+  Gradle plugin cache and its 32 declared projects. Python/VM archive extraction
+  now shares safe data filtering and directory modes.
+- Real clean-source executable preflight and the exact staging-push prefix pass:
+  `/tmp/nanolab-release-amd64-verification/preflight.json`. Credential files were
+  checked for existence/private permissions; their contents were not logged.
+- Execution is bounded by `--until push-amd64-images-to-local-registry`; no
+  benchmark, public publication or signing is authorized by this verification.
+  The first actual Azure provision failed with MFA and left no release resources.
+  The new executable prefix also failed during stack VM acquisition with
+  `401 RequestDisallowedByAzure` requiring MFA. Teardown returned 0; an independent
+  resource query found no release resources remaining. Evidence:
+  `/tmp/nanolab-release-amd64-verification/{execution.log,teardown.log,resources-after.json}`.
+  Source tests and assemblies were not reached; native gate stays incomplete
+  until actual build/export, push, runtimes and resume pass.
+- Local detailed logs and decisions are retained in this plan's ignored execution
+  ledger. Real builder/load/export results are not replaced by local tests.

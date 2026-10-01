@@ -123,7 +123,16 @@ le differenze reali fra backend e tipi di verifica.
      indicazione dell’utente. Vedi [risultati e confini](soak.md#local-verification).
    - [ ] Release AMD64: migrazione della build a tre profili recipe mantenendo
      la fase separata di push e i contratti di benchmark/firma.
-     [Spec in revisione](superpowers/specs/2026-10-01-release-amd64-recipes-design.md).
+     Implementazione locale completata: tre profili riutilizzabili (9/12/23
+     immagini), inventario dell'archivio, report e ID locali verificati,
+     fingerprint e resume coperti dai test. ARM64 mantiene Bake; benchmark,
+     pubblicazione e firma conservano i gate esistenti.
+     `validateRecipe` e il preflight reale con NanoFaaS `e7914be0` passano.
+     Verifica nativa AMD64 ancora incompleta: Azure ha rifiutato la creazione
+     della VM richiedendo MFA. Restano build/export reali, push di staging,
+     runtime rappresentativi, resume e teardown. Nessuna release qualificata.
+     [Spec approvata](superpowers/specs/2026-10-01-release-amd64-recipes-design.md),
+     [piano e stato delle verifiche](superpowers/plans/2026-10-01-release-amd64-recipes.md).
    - [ ] Release ARM64: migrazione successiva, con gli stessi contratti.
    - [ ] Migrazione dei preset P24 e degli altri backend soak.
 4. **Eliminare i percorsi legacy.** Rimuovere build duplicate e flag di
