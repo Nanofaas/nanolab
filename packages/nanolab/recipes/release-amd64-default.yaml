@@ -1,0 +1,115 @@
+schemaVersion: 2
+name: release-amd64-default
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: v0.22.0-amd64
+controlPlane:
+  modules:
+  - async-queue
+  - autoscaler
+  - build-metadata
+  - concurrency-control
+  - k8s-deployment-provider
+  - offload
+  - runtime-config
+  - sync-queue
+  build:
+    mode: jvm
+    variant: jvm-g1-c2
+  jvm:
+    args:
+    - -XX:+UseG1GC
+functions:
+- name: figlet
+  sdk: bash
+  container:
+    image: bash-figlet
+- name: handler-envelope
+  sdk: bash
+  container:
+    image: bash-handler-envelope
+- name: json-transform
+  sdk: bash
+  container:
+    image: bash-json-transform
+- name: qr-code
+  sdk: bash
+  container:
+    image: bash-qr-code
+- name: roman-numeral
+  sdk: bash
+  container:
+    image: bash-roman-numeral
+- name: word-stats
+  sdk: bash
+  container:
+    image: bash-word-stats
+- name: handler-envelope
+  sdk: go
+  container:
+    image: go-handler-envelope
+- name: json-transform
+  sdk: go
+  container:
+    image: go-json-transform
+- name: qr-code
+  sdk: go
+  container:
+    image: go-qr-code
+- name: roman-numeral
+  sdk: go
+  container:
+    image: go-roman-numeral
+- name: word-stats
+  sdk: go
+  container:
+    image: go-word-stats
+- name: handler-envelope
+  sdk: javascript
+  container:
+    image: javascript-handler-envelope
+- name: json-transform
+  sdk: javascript
+  container:
+    image: javascript-json-transform
+- name: qr-code
+  sdk: javascript
+  container:
+    image: javascript-qr-code
+- name: roman-numeral
+  sdk: javascript
+  container:
+    image: javascript-roman-numeral
+- name: word-stats
+  sdk: javascript
+  container:
+    image: javascript-word-stats
+- name: handler-envelope
+  sdk: python
+  container:
+    image: python-handler-envelope
+- name: json-transform
+  sdk: python
+  container:
+    image: python-json-transform
+- name: mlimage
+  sdk: python
+  container:
+    image: python-mlimage
+- name: qr-code
+  sdk: python
+  container:
+    image: python-qr-code
+- name: roman-numeral
+  sdk: python
+  container:
+    image: python-roman-numeral
+- name: word-stats
+  sdk: python
+  container:
+    image: python-word-stats
+services:
+- name: watchdog
+  sdk: dockerfile
+  container:
+    image: watchdog

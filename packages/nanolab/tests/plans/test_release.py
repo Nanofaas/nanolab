@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import FrozenInstanceError, asdict, replace
 from pathlib import Path
@@ -20,7 +21,7 @@ import nanolab.release.build as release_build
 import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.plan import DEFAULT_REGISTRY, ImageCell, ImagePlan
+from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
 from nanolab.release.evidence import signature_evidence_verifier
 from nanolab.release.metrics import PerformanceAggregate, PerformanceProfile
@@ -100,6 +101,16 @@ def _phase_named(workflow, title: str) -> ReleasePhaseTask:
         if isinstance(compiled.task, ReleasePhaseTask) and compiled.task.title == title:
             return compiled.task
     raise AssertionError(f"no release phase titled {title!r}")
+
+
+def test_preflight_freezes_release_recipe_groups(
+    release_request: ReleaseRequest,
+) -> None:
+    groups = release_request.recipe_groups
+    assert tuple(len(group.cells) for group in groups) == (9, 12, 23)
+    assert groups[0].tag == f"v{CURRENT_VERSION}-amd64-jvm"
+    assert groups[2].tag == f"v{CURRENT_VERSION}-amd64"
+    assert all(group.profile_bytes for group in groups)
 
 
 def test_amd64_build_phase_records_the_commands_it_will_run(
@@ -1424,7 +1435,10 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
     monkeypatch.setattr(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
     )
-    sentinel_tree = Path("/sentinel-extracted-tree")
+    sentinel_tree = tmp_path / "sentinel-extracted-tree"
+    shutil.copytree(
+        NANOFAAS_ROOT / "platform/modules", sentinel_tree / "platform/modules"
+    )
     assert sentinel_tree != NANOFAAS_ROOT
     extracted: list[tuple[Path, str, Path]] = []
 
@@ -1438,11 +1452,8 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
 
     def fake_build_image_plan(root, version, *, registry, architectures):
         planned_roots.append(root)
-        return ImagePlan(
-            version=version,
-            registry=registry,
-            targets=(),
-            cells=cast("tuple[ImageCell, ...]", ("dummy-cell",)),
+        return build_image_plan(
+            NANOFAAS_ROOT, version, registry=registry, architectures=architectures
         )
 
     monkeypatch.setattr(release_plan, "build_image_plan", fake_build_image_plan)

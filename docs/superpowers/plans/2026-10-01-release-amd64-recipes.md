@@ -56,7 +56,7 @@ request socket/network access only for checks that need it. Baseline full suite:
 
 **Files:** Read the approved spec, `tasks/recipe.py`, `release/build.py`, `images/plan.py`, installed Sonata `buildx_builder_resource`, and the pinned NanoFaaS recipe implementation. Update this plan with a verdict and retained evidence paths. Keep disposable probes outside product source.
 
-**Interfaces:** Consumes the pinned source and installed release toolchain. Produces a PASS capability record containing exact profile selections, module list, native task/binary mapping, Maven staging requirements, effective native options and builder/load/export observations. Later tasks depend on PASS.
+**Interfaces:** Consumes the pinned source and installed release toolchain. Produces a PASS capability record containing exact profile selections, module list, native task/binary mapping, Maven staging requirements, effective native options and builder/load/export observations. Local implementation depends on the verified profile/catalog checks; native-AMD64 builder/export evidence remains a final completion gate in Task 6.
 
 - [x] Inspect named NanoFaaS symbols/flows through GitNexus query/context first as its AGENTS instructions require; verify the pinned implementation directly where the graph is unresolved. Make no NanoFaaS/plugin edits.
 - [x] Materialize the three candidate profiles under `/tmp/nanolab-release-amd64-capability/`, using Task 2's exact selections. Validate each with `./gradlew validateRecipe -Precipe=<absolute-profile>` in the pinned source; confirm the default artifact-only CP and all Java-lite selections are accepted.
@@ -66,7 +66,7 @@ request socket/network access only for checks that need it. Baseline full suite:
 - [ ] Retain raw commands, profile hashes, logs, builder facts, exported binary/runtime observations and ownership/cleanup results. Record PASS or the exact unsupported contract in this plan. If VM/toolchain access is unavailable, leave this gate incomplete; if capability fails, stop and revise the spec. Never fall back to Bake or a Docker wrapper.
 - [ ] Commit the textual capability record as `Record AMD64 recipe build capabilities`; exclude generated outputs and secrets.
 
-Expected: demonstrated named-builder selection, local loading and real native export/packaging for both native policies. Schema validation alone is insufficient. Do not start product implementation before PASS.
+Expected: demonstrated named-builder selection, local loading and real native export/packaging for both native policies. Schema validation alone is insufficient. After profile/catalog verification, local implementation may proceed; do not claim migration complete before the deferred native-AMD64 gate passes.
 
 ### Capability progress — 2026-10-01
 
@@ -88,8 +88,8 @@ Expected: demonstrated named-builder selection, local loading and real native ex
   actual provision failed with `401 RequestDisallowedByAzure` requiring MFA.
   `provision.log` retains the failure. Failed-acquire teardown returned 0;
   a subsequent Azure resource query found no release resources remaining.
-- Builder load/export and runtime verification remain **incomplete**. Task 1
-  is not complete and Tasks 2–6 have not started. The user has been asked to
+- Builder load/export and runtime verification remain **incomplete**. The real VM portion of Task 1
+  is deferred to Task 6 after the user asked to continue local implementation. The user has been asked to
   renew authentication with MFA before the native-AMD64 probe continues.
 
 ## Task 2: Freeze reusable profiles against the guarded matrix
@@ -98,14 +98,14 @@ Expected: demonstrated named-builder selection, local loading and real native ex
 
 **Interfaces:** Define frozen `ReleaseRecipeGroup` with `flavor: ImageFlavor`, `name: str`, `profile_bytes: bytes`, `profile_digest: str`, `tag: str`, `cells: tuple[ImageCell, ...]`, `modules: tuple[str, ...]`. Add `prepare_release_recipe_groups(source_tree: Path, image_plan: ImagePlan, *, profiles_root: Path) -> tuple[ReleaseRecipeGroup, ...]`. Extend `ReleaseRequest` with `recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()`; the normal request builder always populates it before workflow construction. Existing direct test requests must supply validated groups rather than silently selecting legacy builds.
 
-- [ ] Write `test_release_profiles_cover_exact_guarded_matrix`: groups have flavors `(jvm, native, default)`, counts `(9,12,23)` at the pin, total 44, original image references/tags, no duplicates; default CP produces no image. Assert the eight resolved modules and the spec's per-family native/JVM settings.
-- [ ] Write parameterized `test_release_profile_drift_fails_before_acquisition`: add/remove a catalog cell or module, alter a SDK/service identity, repository/tag/mode/variant/options, introduce platforms/provenance or duplicate target. Assert preflight fails with zero provider calls. Write `test_profile_freeze_uses_raw_bytes`: later file mutation changes neither frozen bytes nor their SHA-256 identity; a subsequent request gets a different identity.
-- [ ] Run `uv run --locked --package nanolab pytest packages/nanolab/tests/release/test_recipe.py -q --no-cov`; expect failures for absent interfaces or missing coverage checks.
-- [ ] Implement the group interface and strict YAML-to-matrix mapping. Normalize tags using `image_plan.version`; map catalog `exec` to `bash`, Java-lite to native, watchdog/warm-echo to service identities from the pinned schema. Freeze raw bytes, not YAML reserialization. Match resolved `all` selection from the extracted guarded source, with no `all` sentinel.
-- [ ] Add JVM profile CP + seven Java functions + warm-echo; native profile the same nine + three Java-lite functions; default profile six Bash/five Go/five JavaScript/six Python + watchdog and the artifact-only JVM CP. Use source-owned defaults except effective options pinned by the spec. Explicit image names come from `ImagePlan`, never inferred from report order.
-- [ ] Call preparation from `build_release_request` after archive-derived `ImagePlan` creation and before any acquisition. Add all three `validateRecipe` calls to the existing pinned-source CI profile gate.
-- [ ] Validate all profiles with pinned Gradle, then run `tests/release/test_recipe.py`, `tests/plans/test_release.py` and `tests/cli/test_release_command.py`. Expect profile validation and tests to pass.
-- [ ] Commit as `Add frozen AMD64 release recipe profiles`.
+- [x] Write `test_release_profiles_cover_exact_guarded_matrix`: groups have flavors `(jvm, native, default)`, counts `(9,12,23)` at the pin, total 44, original image references/tags, no duplicates; default CP produces no image. Assert the eight resolved modules and the spec's per-family native/JVM settings.
+- [x] Write parameterized `test_release_profile_drift_fails_before_acquisition`: add/remove a catalog cell or module, alter a SDK/service identity, repository/tag/mode/variant/options, introduce platforms/provenance or duplicate target. Assert preflight fails with zero provider calls. Write `test_profile_freeze_uses_raw_bytes`: later file mutation changes neither frozen bytes nor their SHA-256 identity; a subsequent request gets a different identity.
+- [x] Run `uv run --locked --package nanolab pytest packages/nanolab/tests/release/test_recipe.py -q --no-cov`; expect failures for absent interfaces or missing coverage checks.
+- [x] Implement the group interface and strict YAML-to-matrix mapping. Normalize tags using `image_plan.version`; map catalog `exec` to `bash`, Java-lite to native, watchdog/warm-echo to service identities from the pinned schema. Freeze raw bytes, not YAML reserialization. Match resolved `all` selection from the extracted guarded source, with no `all` sentinel.
+- [x] Add JVM profile CP + seven Java functions + warm-echo; native profile the same nine + three Java-lite functions; default profile six Bash/five Go/five JavaScript/six Python + watchdog and the artifact-only JVM CP. Use source-owned defaults except effective options pinned by the spec. Explicit image names come from `ImagePlan`, never inferred from report order.
+- [x] Call preparation from `build_release_request` after archive-derived `ImagePlan` creation and before any acquisition. Add all three `validateRecipe` calls to the existing pinned-source CI profile gate.
+- [x] Validate all profiles with pinned Gradle, then run `tests/release/test_recipe.py`, `tests/plans/test_release.py` and `tests/cli/test_release_command.py`. Expect profile validation and tests to pass.
+- [x] Commit as `Add frozen AMD64 release recipe profiles`.
 
 ## Task 3: Adapt strict distribution reports into release images
 
@@ -174,5 +174,5 @@ Coverage: profiles/matrix (Task 2), archive and builder/export capability (Tasks
 entry has named negative tests. No product implementation or capability probe
 has been run for this plan; baseline tests precede these changes.
 
-Written spec approved. Review this plan before native execution; Task 1 must
-pass before Tasks 2–6. Preserve the user's existing native execution preference.
+Written spec approved. Review this plan before native execution; Local profile/catalog checks from Task 1 passed; its real VM builder/export
+checks must pass with Task 6 before completion. Preserve the user's existing native execution preference.

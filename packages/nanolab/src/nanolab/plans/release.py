@@ -46,6 +46,7 @@ from nanolab.release.model import (
     digest_path,
     git_state,
 )
+from nanolab.release.recipe import ReleaseRecipeGroup, prepare_release_recipe_groups
 from nanolab.release.resources import (
     build_inputs_resource,
     build_release_resources,
@@ -82,6 +83,7 @@ class ReleaseRequest:
     credentials: CredentialFiles | None = None
     nanofaas_root: Path | None = None  # defaults to repo_root
     identity: ReleaseIdentity | None = None
+    recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
 
 
 def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verifier]:
@@ -188,6 +190,9 @@ def build_release_request(
     )
     if not image_plan.cells:
         raise ValueError("release image matrix must not be empty")
+    recipe_groups = prepare_release_recipe_groups(
+        planning_root, image_plan, profiles_root=tool_root / "recipes"
+    )
 
     settings = ReleaseSettings(
         max_parallelism=release.max_parallelism,
@@ -211,6 +216,7 @@ def build_release_request(
         performance_root=Path(performance_root).expanduser().resolve(),
         source_tree=planning_root,
         credentials=credentials,
+        recipe_groups=recipe_groups,
         identity=ReleaseIdentity(
             source_commit=source_commit,
             prepared_version=plain_version,

@@ -158,7 +158,9 @@ an exporter fixture alone does not prove recipe compatibility. Also inspect the
 Java-lite native task/binary mapping. Confirm that the resolved module selection
 does not require containerd Maven staging; do not add an unused backend dependency.
 
-This gate is not yet executed. If the pinned plugin/toolchain cannot represent
+Profile/catalog checks passed; native-AMD64 builder/export checks remain unexecuted.
+At the user’s request, local implementation may proceed while those VM checks
+remain a mandatory final completion gate. If the pinned plugin/toolchain cannot represent
 all required cells or preserve the export contract, stop the implementation
 and revise this spec. Do not silently revert cells to Bake, discard components,
 change native options, or introduce a Docker wrapper to mask an unsupported

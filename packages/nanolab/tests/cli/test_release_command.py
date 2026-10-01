@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -133,6 +134,9 @@ def release_cli_harness(
     """Drive `nanolab run <release scenario>` with no cloud and a one-phase DAG."""
     tool_root = tmp_path / "tool"
     tool_root.mkdir()
+    shutil.copytree(
+        Path(__file__).resolve().parents[2] / "recipes", tool_root / "recipes"
+    )
     scenario_path, environment_path = canonical_release_configs
     secrets = tmp_path / "secrets"
     secrets.mkdir()
