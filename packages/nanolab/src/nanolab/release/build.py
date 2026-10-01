@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tarfile
 import tempfile
 import textwrap
@@ -40,6 +41,18 @@ _RUST_TOOLCHAIN = (
     "rust:1.97.1-alpine3.21@"
     "sha256:e5c73e7a712b368eb90b1190c6e1c4a01a3ebb0fe0abfff68c3bcd2df26ecc41"
 )
+
+# Use the same safe extraction and directory modes on the planning host and VM.
+_EXTRACT_ARCHIVE_SCRIPT = """
+import sys, tarfile
+from pathlib import Path
+archive, output = Path(sys.argv[1]), Path(sys.argv[2])
+with tarfile.open(archive) as bundle:
+    bundle.extractall(output, filter="data")
+for path in output.rglob("*"):
+    if path.is_dir() and not path.is_symlink():
+        path.chmod(0o755)
+"""
 
 _SHA256_PREFIX = "sha256:"
 _ARM64_BUILDER_ID = "release.arm64.builder"
@@ -432,8 +445,11 @@ def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path
             check=True,
             capture_output=True,
         )
-        with tarfile.open(archive) as bundle:
-            bundle.extractall(output, filter="data")
+        subprocess.run(
+            (sys.executable, "-c", _EXTRACT_ARCHIVE_SCRIPT, str(archive), str(output)),
+            check=True,
+            capture_output=True,
+        )
     except (subprocess.CalledProcessError, tarfile.TarError, OSError) as error:
         # The CLI turns ValueError from the preflight into a clean BadParameter;
         # git and tarfile raise neither, so normalize here rather than leaking a
@@ -521,7 +537,7 @@ def stage_source_archive(
     _provider_exec(
         provider,
         request,
-        ("tar", "-xf", remote_archive, "-C", remote_source_dir),
+        ("python3", "-c", _EXTRACT_ARCHIVE_SCRIPT, remote_archive, remote_source_dir),
     )
 
 

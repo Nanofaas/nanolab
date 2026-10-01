@@ -15,12 +15,18 @@ from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 from nanolab.images.bake import render_bake_json
 from nanolab.images.plan import ImagePlan
-from nanolab.release.build import create_source_archive, stage_source_archive
+from nanolab.release.build import (
+    _provider_exec,
+    _provider_transfer_to,
+    create_source_archive,
+    stage_source_archive,
+)
 from nanolab.release.environment import (
     secure_release_endpoints,
     verify_release_vm_facts,
 )
-from nanolab.release.model import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence, digest_path
+from nanolab.release.recipe import ReleaseRecipeGroup
 from nanolab.release.secrets import (
     RemoteCosignCredentials,
     RemoteDockerCredentials,
@@ -481,6 +487,70 @@ def build_inputs_resource(
 
     return Resource(
         title=f"Acquire {architecture.upper()} Bake and BuildKit inputs",
+        acquire=acquire,
+        release=lambda _inputs, _value: cleanup(),
+        requires=requires,
+        always_release=True,
+    )
+
+
+def release_recipe_inputs_resource(
+    *,
+    groups: tuple[ReleaseRecipeGroup, ...],
+    max_parallelism: int,
+    run_dir: Path,
+    remote_root: str,
+    provider: object,
+    request: object,
+    requires: tuple[Resource[Any], ...] = (),
+) -> Resource[Path]:
+    """Stage frozen profiles and configuration; retain local evidence on release."""
+    remote_root = str(_release_remote_root(remote_root))
+    remote_inputs = f"{remote_root}/recipe-inputs/amd64"
+    remote_output = f"{remote_root}/recipe-output/amd64"
+    config = Path(run_dir) / "buildkitd-amd64.toml"
+
+    def cleanup() -> None:
+        _require_remote_success(
+            provider.exec_argv(  # type: ignore[attr-defined]
+                request, ("rm", "-rf", "--", remote_inputs, remote_output)
+            ),
+            "release recipe cleanup",
+        )
+
+    def acquire(_inputs: TaskInputs) -> Path:
+        if max_parallelism < 1 or not groups:
+            raise ValueError("Release recipes require positive parallelism and groups")
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(f"[worker.oci]\n  max-parallelism = {max_parallelism}\n")
+        profiles = []
+        for group in groups:
+            profile = config.parent / f"{group.name}.yaml"
+            profile.write_bytes(group.profile_bytes)
+            profiles.append(profile)
+        try:
+            _provider_exec(provider, request, ("mkdir", "-p", remote_inputs))
+            for path in (*profiles, config):
+                destination = f"{remote_inputs}/{path.name}"
+                _provider_transfer_to(
+                    provider,
+                    request,
+                    source=path,
+                    destination=destination,
+                    action="release recipe input transfer",
+                )
+                result = _provider_exec(provider, request, ("sha256sum", destination))
+                if str(getattr(result, "stdout", "")).split()[0] != digest_path(
+                    path
+                ).removeprefix("sha256:"):
+                    raise ValueError("Staged release recipe input digest differs")
+        except BaseException as error:
+            best_effort(error, cleanup, what="release recipe inputs failed acquire")
+            raise
+        return config
+
+    return Resource(
+        title="Acquire AMD64 recipe and BuildKit inputs",
         acquire=acquire,
         release=lambda _inputs, _value: cleanup(),
         requires=requires,

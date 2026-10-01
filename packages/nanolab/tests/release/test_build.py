@@ -407,13 +407,12 @@ def test_source_transfer_verifies_checksum_before_extracting(tmp_path: Path) -> 
     kinds = [action[0] for action in provider.actions]
     assert kinds == ["exec", "exec", "transfer", "exec", "exec"]
     assert provider.actions[-2][2] == ("sha256sum", "/srv/release/source.tar")
-    assert provider.actions[-1][2] == (
-        "tar",
-        "-xf",
-        "/srv/release/source.tar",
-        "-C",
-        "/srv/release/source",
-    )
+    extract = provider.actions[-1][2]
+    assert isinstance(extract, tuple)
+    assert isinstance(extract[2], str)
+    assert extract[:2] == ("python3", "-c")
+    assert 'filter="data"' in extract[2]
+    assert extract[-2:] == ("/srv/release/source.tar", "/srv/release/source")
 
 
 def test_source_transfer_rejects_checksum_mismatch_before_extracting(
