@@ -28,7 +28,7 @@ from nanolab.release.model import GitState
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmInfo
 from nanolab.workspace.paths import ToolPaths
-from tests.conftest import RejectingProvider
+from tests.conftest import RejectingProvider, captured_release_tree
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
@@ -174,7 +174,7 @@ def release_cli_harness(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: nanofaas_root,
+        captured_release_tree,
     )
     monkeypatch.setattr(
         product_module, "provider_for", lambda *_args, **_kwargs: RejectingProvider()

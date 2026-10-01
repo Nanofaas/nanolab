@@ -104,6 +104,8 @@ class ReleasePhaseTask(ReusableTask):
         evidence must cover exactly that matrix or the phase fails, so a
         partially built image set can never be recorded as reusable.
         """
+        # A new attempt cannot leave an earlier success available to downstream phases.
+        self.receipt.unlink(missing_ok=True)
         prerequisite_evidence = tuple(
             Evidence("file-digest", str(path), digest_path(path))
             for path in self.prerequisites
@@ -143,7 +145,7 @@ def source_test_task(**kwargs: Any) -> ReleasePhaseTask:
 
 
 def amd64_build_task(**kwargs: Any) -> ReleasePhaseTask:
-    """Build the phase that bakes the AMD64 images."""
+    """Build the phase that assembles the AMD64 recipes."""
     return ReleasePhaseTask(phase="amd64-build", title="Build AMD64 images", **kwargs)
 
 

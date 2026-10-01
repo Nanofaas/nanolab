@@ -36,7 +36,7 @@ from nanolab.release.publish import PublishPlan, build_publish_plan
 from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmInfo
-from tests.conftest import RejectingProvider
+from tests.conftest import RejectingProvider, captured_release_tree
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -82,7 +82,7 @@ def release_request(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
     return release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
@@ -124,21 +124,17 @@ def test_amd64_build_phase_records_the_commands_it_will_run(
     workflow = build_release_workflow(release_request, provider=RejectingProvider())
     phase = _phase_named(workflow, "Build AMD64 images")
 
-    argvs = [argv for argv, _role, _remote_dir in phase.phase_inputs["commands"]]
-
-    # No separate native Gradle build survives: every native cell bakes now,
-    # so nothing here shells out with a per-platform Gradle property.
-    assert not any(
-        argv[0] == "./gradlew" and "-PimagePlatform" in " ".join(argv) for argv in argvs
+    commands = phase.phase_inputs["commands"]
+    assert len(commands) == 3
+    assert all(c["argv"][:2] == ("./gradlew", "assembleRecipe") for c in commands)
+    assert all(c["env"]["DOCKER_BUILDKIT"] == "1" for c in commands)
+    assert all(
+        c["env"]["BUILDX_BUILDER"] == f"release-amd64-v{CURRENT_VERSION}"
+        for c in commands
     )
-    assert any(argv[:3] == ("docker", "buildx", "bake") for argv in argvs)
-    # The JVM prerequisite is the source of truth: control-plane's carries its
-    # own extra argument, and dropping it is what shipped in v0.18.1.
-    prepares = [
-        argv for argv in argvs if argv[0] == "./gradlew" and "bootJar" in " ".join(argv)
-    ]
-    assert prepares, "no JVM bootJar prepare command"
-    assert any("-PcontrolPlaneModules=all" in argv for argv in prepares)
+    assert not any(
+        "bake" in arg or "bootJar" in arg for c in commands for arg in c["argv"]
+    )
     assert phase.expected_images == tuple(
         cell.image for cell in release_request.image_plan.cells
     )
@@ -386,7 +382,7 @@ def _arm_failure_workflow(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
     monkeypatch.setattr(
         release_plan,
@@ -849,7 +845,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
@@ -955,7 +951,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Acquire verified source on nanofaas-azure-release",
         "Acquire verified source on nanofaas-azure-release-arm",
         "Acquire registry tunnel to <release-stack>:5000",
-        "Acquire AMD64 Bake and BuildKit inputs",
+        "Acquire AMD64 recipe and BuildKit inputs",
         "Acquire ARM64 Bake and BuildKit inputs",
         f"Acquire release-amd64-v{CURRENT_VERSION} buildx builder",
         f"Acquire release-arm64-v{CURRENT_VERSION} buildx builder",
@@ -967,11 +963,11 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Acquire release stack VM",
         "Acquire immutable release source archive",
         "Acquire verified source on nanofaas-azure-release",
-        "Acquire AMD64 Bake and BuildKit inputs",
+        "Acquire AMD64 recipe and BuildKit inputs",
         f"Acquire release-amd64-v{CURRENT_VERSION} buildx builder",
         "Build AMD64 images",
         f"Release release-amd64-v{CURRENT_VERSION} buildx builder",
-        "Release AMD64 Bake and BuildKit inputs",
+        "Release AMD64 recipe and BuildKit inputs",
         "Release verified source on nanofaas-azure-release",
         "Release immutable release source archive",
         "Release release stack VM",
@@ -1033,7 +1029,7 @@ def test_amd64_buildx_builder_replaces_a_surviving_builder(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
 
     calls: list[dict] = []
@@ -1087,7 +1083,7 @@ def test_missing_execution_credentials_fail_before_any_provider_call(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
@@ -1162,7 +1158,7 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
 
     request = release_plan.build_release_request(
@@ -1299,7 +1295,7 @@ def test_build_release_request_rejects_symlink_credential(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
 
     with pytest.raises(ValueError, match="regular file"):
@@ -1376,7 +1372,9 @@ def test_build_release_request_rejects_credentials_inside_either_repository(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: source_root,
+        lambda _repo_root, _commit, _destination, **kwargs: captured_release_tree(
+            source_root, _commit, _destination, **kwargs
+        ),
     )
 
     with pytest.raises(ValueError, match="outside the repository"):
@@ -1442,8 +1440,12 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
     assert sentinel_tree != NANOFAAS_ROOT
     extracted: list[tuple[Path, str, Path]] = []
 
-    def fake_extract(repo_root: Path, commit: str, destination: Path) -> Path:
+    def fake_extract(
+        repo_root: Path, commit: str, destination: Path, *, archive_destination: Path
+    ) -> Path:
         extracted.append((repo_root, commit, destination))
+        archive_destination.parent.mkdir(parents=True, exist_ok=True)
+        archive_destination.write_bytes(b"fixture archive")
         return sentinel_tree
 
     monkeypatch.setattr(release_plan, "extract_commit_tree", fake_extract)
@@ -1470,7 +1472,7 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
         source_tree=source_tree,
     )
 
-    assert extracted == [(NANOFAAS_ROOT, "a" * 40, source_tree)]
+    assert extracted == [(NANOFAAS_ROOT, "a" * 40, source_tree / "source")]
     assert planned_roots == [sentinel_tree]
     assert request.source_tree == sentinel_tree
     assert request.image_plan.cells
@@ -1496,7 +1498,7 @@ def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
@@ -1559,7 +1561,7 @@ def test_release_source_outlives_the_benchmarks(
     monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
-        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+        captured_release_tree,
     )
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
@@ -1581,3 +1583,93 @@ def test_release_source_outlives_the_benchmarks(
     release_source = titles.index("Release verified source on nanofaas-azure-release")
 
     assert release_source > titles.index("Run release benchmark 3")
+
+
+def test_preflight_freezes_archive_and_inventory_before_acquisition(release_request):
+    assert not (release_request.run_dir / "releases" / CURRENT_VERSION).exists()
+    assert release_request.archive_digest.startswith("sha256:")
+    assert digest_path(release_request.source_archive) == release_request.archive_digest
+    inventory = json.loads(release_request.inventory_file.read_text())
+    assert "settings.gradle" in inventory["entries"]
+    assert not any(name.startswith(".git/") for name in inventory["entries"])
+
+
+def test_amd64_recipe_dag_preserves_release_boundaries(release_request, monkeypatch):
+    calls = []
+    original = release_plan.buildx_builder_resource
+
+    def capture(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(release_plan, "buildx_builder_resource", capture)
+    workflow = build_release_workflow(release_request, provider=RejectingProvider())
+    phases = [
+        item.task
+        for item in workflow.compile().tasks
+        if isinstance(item.task, ReleasePhaseTask)
+    ]
+    assert [p.phase for p in phases][:6] == [
+        "source-tests",
+        "amd64-build",
+        "local-registry-push",
+        "benchmark-1",
+        "benchmark-2",
+        "benchmark-3",
+    ]
+    build = phases[1]
+    push = phases[2]
+    assert build.prerequisites == (phases[0].receipt,)
+    assert push.prerequisites == (phases[0].receipt, build.receipt)
+    assert all(push.receipt in phase.prerequisites for phase in phases[3:6])
+    amd = next(call for call in calls if call["name"].startswith("release-amd64"))
+    assert amd["driver_options"] == ("default-load=true",)
+    assert amd["buildkitd_config"].endswith("/recipe-inputs/amd64/buildkitd-amd64.toml")
+    assert (
+        build.phase_inputs["maxParallelism"] == release_request.settings.max_parallelism
+    )
+    titles = [item.task.title for item in workflow.compile().tasks]
+    assert "Acquire AMD64 recipe and BuildKit inputs" in titles
+    assert "Acquire AMD64 Bake and BuildKit inputs" not in titles
+    assert "Acquire ARM64 Bake and BuildKit inputs" in titles
+    assert titles.index("Build AMD64 images") < titles.index(
+        "Push AMD64 images to local registry"
+    )
+    assert titles.index("Test ARM64 images") < titles.index(
+        "Publish architecture images"
+    )
+    for command in build.phase_inputs["commands"]:
+        assert command["argv"][:2] == ("./gradlew", "assembleRecipe")
+        assert command["env"]["BUILDX_BUILDER"] == amd["name"]
+        assert command["env"]["DOCKER_BUILDKIT"] == "1"
+
+
+def test_recipe_phase_identity_ignores_temporary_planning_directory(
+    release_request, canonical_release_configs, tmp_path
+):
+    scenario, environment = canonical_release_configs
+    second = release_plan.build_release_request(
+        repo_root=release_request.repo_root,
+        nanofaas_root=release_request.nanofaas_root,
+        scenario_path=scenario,
+        environment_path=environment,
+        release_config_path=None,
+        run_dir=release_request.run_dir,
+        performance_root=release_request.performance_root,
+        source_tree=tmp_path / "different-planning-tree",
+    )
+    assert second.source_tree != release_request.source_tree
+    assert second.archive_digest == release_request.archive_digest
+    first = build_release_workflow(release_request, provider=RejectingProvider())
+    other = build_release_workflow(second, provider=RejectingProvider())
+    for title in ("Run source tests", "Build AMD64 images"):
+        assert (
+            _phase_named(first, title).reuse_key == _phase_named(other, title).reuse_key
+        )
+
+
+def test_direct_request_requires_frozen_recipe_inputs(release_request):
+    with pytest.raises(ValueError, match="frozen recipes"):
+        build_release_workflow(
+            replace(release_request, recipe_groups=()), provider=RejectingProvider()
+        )

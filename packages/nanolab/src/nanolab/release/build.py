@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -293,13 +294,23 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 "--locked",
                 "pytest",
                 "-q",
+                "-o",
+                f"cache_dir={remote_source_dir.parent}/source-test-output/pytest-cache",
                 "sdks/python/tests",
                 "functions/python/word-stats/tests",
                 "functions/python/json-transform/tests",
                 "functions/python/roman-numeral/tests",
             ),
             role="stack",
-            options=CommandOptions(remote_dir=source),
+            options=CommandOptions(
+                remote_dir=source,
+                env={
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "UV_PROJECT_ENVIRONMENT": str(
+                        remote_source_dir.parent / "source-test-output/python-venv"
+                    ),
+                },
+            ),
         ),
         CommandTaskSpec(
             task_id="release.source.go",
@@ -372,57 +383,13 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
     )
 
 
-def amd64_build_commands(
-    plan: ImagePlan,
+def extract_commit_tree(
+    repo_root: Path,
+    commit: str,
+    destination: Path,
     *,
-    builder_name: str,
-    remote_bake_file: str,
-    remote_source_dir: str,
-) -> tuple[CommandTaskSpec, ...]:
-    """Prepare, bake and natively build every AMD64 cell.
-
-    Mirrors `arm64_build_commands`: the builder itself is acquired by a
-    resource, so nothing here creates or bootstraps it.
-    """
-    commands: list[CommandTaskSpec] = []
-    seen: set[str] = set()
-    for cell in plan.cells:
-        prerequisite = cell.prerequisite_command
-        if prerequisite is None or cell.target.name in seen:
-            continue
-        seen.add(cell.target.name)
-        commands.append(
-            CommandTaskSpec(
-                task_id=f"release.images.prepare.{cell.target.name}",
-                summary=f"Prepare {cell.target.name} JVM image",
-                argv=prerequisite,
-                role="stack",
-                options=CommandOptions(remote_dir=remote_source_dir),
-            )
-        )
-    commands.append(
-        CommandTaskSpec(
-            task_id="release.images.bake.amd64",
-            summary="Build AMD64 Dockerfile images",
-            argv=(
-                "docker",
-                "buildx",
-                "bake",
-                "--builder",
-                builder_name,
-                "--file",
-                remote_bake_file,
-                "--load",
-                "docker-amd64",
-            ),
-            role="stack",
-            options=CommandOptions(remote_dir=remote_source_dir),
-        )
-    )
-    return tuple(commands)
-
-
-def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path:
+    archive_destination: Path | None = None,
+) -> Path:
     """Materialize one commit as a plain tree, free of worktree state.
 
     Planning reads this instead of the checkout, so ignored build output and
@@ -450,6 +417,9 @@ def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path
             check=True,
             capture_output=True,
         )
+        if archive_destination is not None:
+            archive_destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(archive, archive_destination)
     except (subprocess.CalledProcessError, tarfile.TarError, OSError) as error:
         # The CLI turns ValueError from the preflight into a clean BadParameter;
         # git and tarfile raise neither, so normalize here rather than leaking a

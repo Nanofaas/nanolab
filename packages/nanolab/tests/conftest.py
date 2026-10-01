@@ -202,3 +202,26 @@ def nanofaas_checkout() -> Path:
     """Return the real git repository, for the few tests that need git itself."""
     assert _CHECKOUT is not None
     return _CHECKOUT
+
+
+def captured_release_tree(
+    repo_root: Path, _commit: str, destination: Path, *, archive_destination: Path
+) -> Path:
+    """Export the fixture's real HEAD when its guarded identity is a stub."""
+    from nanolab.release.build import extract_commit_tree
+
+    if (repo_root / ".git").exists():
+        commit = subprocess.run(
+            ("git", "rev-parse", "HEAD"),
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return extract_commit_tree(
+            repo_root, commit, destination, archive_destination=archive_destination
+        )
+    archive_destination.parent.mkdir(parents=True, exist_ok=True)
+    archive_destination.write_bytes(b"fixture archive")
+    shutil.copytree(repo_root, destination, dirs_exist_ok=True, symlinks=True)
+    return destination

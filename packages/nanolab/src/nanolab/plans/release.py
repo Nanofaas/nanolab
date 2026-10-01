@@ -8,6 +8,7 @@ selectable.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
@@ -47,10 +48,13 @@ from nanolab.release.model import (
     git_state,
 )
 from nanolab.release.recipe import ReleaseRecipeGroup, prepare_release_recipe_groups
+from nanolab.release.recipe_execution import capture_release_inventory
 from nanolab.release.resources import (
     build_inputs_resource,
     build_release_resources,
+    preserve_release_builder_selection,
     release_execution_guard,
+    release_recipe_inputs_resource,
 )
 from nanolab.release.tasks import (
     ReleasePhaseTask,
@@ -84,6 +88,9 @@ class ReleaseRequest:
     nanofaas_root: Path | None = None  # defaults to repo_root
     identity: ReleaseIdentity | None = None
     recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
+    source_archive: Path | None = None
+    archive_digest: str = ""
+    inventory_file: Path | None = None
 
 
 def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verifier]:
@@ -156,7 +163,13 @@ def build_release_request(
     source_commit = _release_source_commit(source_root, plain_version)
     # Plan from the commit, never from the checkout: ignored build output and
     # untracked files must not be able to add cells the archive cannot build.
-    planning_root = extract_commit_tree(source_root, source_commit, Path(source_tree))
+    source_archive = Path(source_tree) / "source.tar"
+    planning_root = extract_commit_tree(
+        source_root,
+        source_commit,
+        Path(source_tree) / "source",
+        archive_destination=source_archive,
+    )
     validate_release_environment(environment, source_root, plain_version)
 
     credentials = None
@@ -194,6 +207,14 @@ def build_release_request(
         planning_root, image_plan, profiles_root=tool_root / "recipes"
     )
 
+    after = git_state(source_root)
+    if not after.clean or after.commit != source_commit:
+        raise ValueError("Release source changed during preflight archive capture")
+    archive_digest = digest_path(source_archive)
+    inventory_file = capture_release_inventory(
+        planning_root, Path(source_tree) / "source-inventory.json"
+    )
+
     settings = ReleaseSettings(
         max_parallelism=release.max_parallelism,
         scenario=benchmark_scenario,
@@ -217,6 +238,9 @@ def build_release_request(
         source_tree=planning_root,
         credentials=credentials,
         recipe_groups=recipe_groups,
+        source_archive=source_archive,
+        archive_digest=archive_digest,
+        inventory_file=inventory_file,
         identity=ReleaseIdentity(
             source_commit=source_commit,
             prepared_version=plain_version,
@@ -257,6 +281,29 @@ def build_release_workflow(
         raise ValueError(
             "release image plan version does not match the requested project version"
         )
+
+    if (
+        not request.recipe_groups
+        or request.source_archive is None
+        or request.inventory_file is None
+    ):
+        raise ValueError(
+            "Release requires frozen recipes, source archive and inventory"
+        )
+    if digest_path(request.source_archive) != request.archive_digest:
+        raise ValueError("Frozen release source archive changed")
+    if tuple(g.flavor for g in request.recipe_groups) != ("jvm", "native", "default"):
+        raise ValueError("Release requires all three recipe groups")
+    grouped_cells = tuple(c for g in request.recipe_groups for c in g.cells)
+    if sorted(grouped_cells, key=lambda c: c.image) != sorted(
+        request.image_plan.cells, key=lambda c: c.image
+    ):
+        raise ValueError("Frozen recipe image matrix changed")
+    if any(
+        g.profile_digest != "sha256:" + hashlib.sha256(g.profile_bytes).hexdigest()
+        for g in request.recipe_groups
+    ):
+        raise ValueError("Frozen recipe bytes changed")
 
     if provider is None:
         provider = provider_for(vm_request_for_role(env, "stack"), request.repo_root)
@@ -300,17 +347,19 @@ def build_release_workflow(
         arm_request=arm_req,
         infrastructure=infrastructure,
         executor=executor,
+        source_archive=request.source_archive,
+        archive_digest=request.archive_digest,
+        inventory_file=request.inventory_file,
     )
 
     # --- Phase 2: AMD64 Build ---
-    amd64_inputs = build_inputs_resource(
-        image_plan=request.image_plan,
+    amd64_inputs = release_recipe_inputs_resource(
+        groups=request.recipe_groups,
         max_parallelism=request.settings.max_parallelism,
-        run_dir=release_dir,
+        run_dir=release_dir / "recipe-inputs/amd64",
         remote_root=remote_root,
         provider=provider,
         request=stack_req,
-        architecture="amd64",
         requires=(infrastructure.stack,),
     )
     amd64_builder_name = f"release-amd64-{request.version}"
@@ -319,8 +368,12 @@ def build_release_workflow(
         executor=executor,
         role="stack",
         requires=(infrastructure.stack, amd64_inputs),
-        buildkitd_config=f"{remote_root}/buildkitd-amd64.toml",
+        buildkitd_config=f"{remote_root}/recipe-inputs/amd64/buildkitd-amd64.toml",
+        driver_options=("default-load=true",),
         replace_existing=True,
+    )
+    amd64_builder = preserve_release_builder_selection(
+        amd64_builder, executor=executor, name=amd64_builder_name
     )
     release_images, amd64_build = build_amd64_phase(
         identity=identity,
@@ -332,6 +385,11 @@ def build_release_workflow(
         source_dir=source_dir,
         executor=executor,
         source_tests=source_tests,
+        recipe_groups=request.recipe_groups,
+        provider=provider,
+        request=stack_req,
+        inventory_file=request.inventory_file,
+        archive_digest=request.archive_digest,
     )
 
     # --- Phase 3: Registry Push ---

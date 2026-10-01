@@ -7,7 +7,9 @@ re-read. The phases were already there in the comments; this gives them names.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from pathlib import Path
@@ -32,13 +34,19 @@ from nanolab.release.benchmark import (
     run_sonata_benchmark,
     run_sonata_regression_gate,
 )
-from nanolab.release.build import amd64_build_commands, source_test_commands
+from nanolab.release.build import source_test_commands
 from nanolab.release.metrics import build_release_record
 from nanolab.release.model import (
     Amd64ReleasePlan,
     BuilderConfiguration,
     ReleaseIdentity,
     digest_path,
+)
+from nanolab.release.recipe import ReleaseRecipeGroup
+from nanolab.release.recipe_execution import (
+    release_recipe_commands,
+    run_release_recipe_steps,
+    verify_release_source,
 )
 from nanolab.tasks.release_composites import (
     attest_composite,
@@ -79,6 +87,7 @@ from nanolab.release.tasks import (
     run_steps,
     source_test_task,
     verified_file_receipt,
+    versioned_release_run_dir,
 )
 
 _AGGREGATE_FILENAME = "aggregate.json"
@@ -98,6 +107,9 @@ def build_source_test_phase(
     arm_request: Any,
     infrastructure: ReleaseResources,
     executor: RoleBoundCommandTaskExecutor,
+    source_archive: Path,
+    archive_digest: str,
+    inventory_file: Path,
 ) -> tuple[ReleaseSourceResources, ReleasePhaseTask]:
     """Stage the release source tree and run the source test suite on it."""
     sources = build_release_source_resources(
@@ -111,15 +123,47 @@ def build_source_test_phase(
         arm_request=arm_request,
         stack_requires=(infrastructure.stack,),
         arm_requires=(infrastructure.arm_builder,),
+        source_archive=source_archive,
+        archive_digest=archive_digest,
     )
     source_commands = source_test_commands(Path(source_dir))
     source_steps = command_specs_composite(
         source_commands, executor=executor, title="Run source tests"
     )
+    inventory_digest = digest_path(inventory_file)
+
+    def run_source(inputs):
+        if digest_path(inventory_file) != inventory_digest:
+            raise ValueError("Frozen source inventory changed")
+        verify_release_source(
+            inventory_file=inventory_file,
+            provider=provider,
+            request=stack_request,
+            source_dir=source_dir,
+        )
+        evidence = run_source_steps(
+            source_steps, inputs, source_archive=release_dir / "source.tar"
+        )
+        verify_release_source(
+            inventory_file=inventory_file,
+            provider=provider,
+            request=stack_request,
+            source_dir=source_dir,
+        )
+        retained_inventory = release_dir / "source-test-evidence/source-inventory.json"
+        retained_inventory.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(inventory_file, retained_inventory)
+        return (
+            *evidence,
+            Evidence("file-digest", str(retained_inventory), inventory_digest),
+        )
+
     source_tests = source_test_task(
         identity=identity,
         run_dir=run_dir,
         phase_inputs={
+            "archiveDigest": archive_digest,
+            "inventoryDigest": inventory_digest,
             "commands": tuple(
                 (
                     command.argv,
@@ -129,11 +173,9 @@ def build_source_test_phase(
                     command.options.timeout_seconds,
                 )
                 for command in source_commands
-            )
+            ),
         },
-        work=lambda inputs: run_source_steps(
-            source_steps, inputs, source_archive=release_dir / "source.tar"
-        ),
+        work=run_source,
     )
     return sources, source_tests
 
@@ -149,41 +191,85 @@ def build_amd64_phase(
     source_dir: str,
     executor: RoleBoundCommandTaskExecutor,
     source_tests: ReleasePhaseTask,
+    recipe_groups: tuple[ReleaseRecipeGroup, ...],
+    provider: object,
+    request: object,
+    inventory_file: Path,
+    archive_digest: str,
 ) -> tuple[tuple[str, ...], ReleasePhaseTask]:
-    """Build the AMD64 images on the stack VM from the staged source tree."""
-    amd64_commands = amd64_build_commands(
-        image_plan,
+    """Build only AMD64 through frozen recipes; keep registry push separate."""
+    commands = release_recipe_commands(
+        recipe_groups,
+        source_dir=source_dir,
+        remote_root=remote_root,
         builder_name=builder_name,
-        remote_bake_file=f"{remote_root}/docker-bake-amd64.json",
-        remote_source_dir=source_dir,
     )
-    amd64_steps = command_specs_composite(
-        amd64_commands, executor=executor, title="Build AMD64 images"
-    )
+    release_dir = versioned_release_run_dir(run_dir, identity.prepared_version)
+    inputs_dir = release_dir / "recipe-inputs/amd64"
+    evidence_dir = release_dir / "recipe-evidence/amd64"
+    inventory_digest = digest_path(inventory_file)
+    config_bytes = f"[worker.oci]\n  max-parallelism = {max_parallelism}\n".encode()
     release_images = tuple(cell.image for cell in image_plan.cells)
-    amd64_build = amd64_build_task(
+
+    def assemble(inputs):
+        if digest_path(inventory_file) != inventory_digest:
+            raise ValueError("Frozen source inventory changed")
+        if (inputs_dir / "buildkitd-amd64.toml").read_bytes() != config_bytes:
+            raise ValueError("Frozen BuildKit configuration changed")
+        return run_release_recipe_steps(
+            inputs,
+            groups=recipe_groups,
+            executor=executor,
+            provider=provider,
+            request=request,
+            source_dir=source_dir,
+            remote_root=remote_root,
+            evidence_dir=evidence_dir,
+            inventory_file=inventory_file,
+            source_commit=identity.source_commit,
+            archive_digest=archive_digest,
+            builder_name=builder_name,
+            inputs_dir=inputs_dir,
+        )
+
+    build = amd64_build_task(
         identity=identity,
         run_dir=run_dir,
         phase_inputs={
             "commands": tuple(
-                (command.argv, command.role, str(command.options.remote_dir))
-                for command in amd64_commands
+                {
+                    "argv": c.argv,
+                    "role": c.role,
+                    "env": dict(c.options.env),
+                    "cwd": c.options.remote_dir,
+                }
+                for c in commands
             ),
+            "groups": tuple(
+                {
+                    "name": g.name,
+                    "digest": g.profile_digest,
+                    "tag": g.tag,
+                    "modules": g.modules,
+                    "cells": tuple(asdict(c) for c in g.cells),
+                }
+                for g in recipe_groups
+            ),
+            "archiveDigest": archive_digest,
+            "inventoryDigest": inventory_digest,
+            "builder": builder_name,
+            "driver": "docker-container",
+            "driverOptions": ("default-load=true",),
+            "buildkitConfigDigest": "sha256:"
+            + hashlib.sha256(config_bytes).hexdigest(),
             "maxParallelism": max_parallelism,
             "sourceDir": source_dir,
         },
         prerequisites=(source_tests.receipt,),
         expected_images=release_images,
-        work=lambda inputs: run_image_steps(
-            amd64_steps,
-            inputs,
-            executor,
-            release_images,
-            registry=False,
-            architecture="amd64",
-        ),
+        work=assemble,
     )
-    return release_images, amd64_build
+    return release_images, build
 
 
 def build_registry_push_phase(

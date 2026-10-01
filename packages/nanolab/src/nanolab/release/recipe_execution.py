@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -52,18 +53,44 @@ for directory, dirs, files in os.walk(root, followlinks=False):
             raise ValueError("Unsupported source entry: " + str(path))
         entries[str(path.relative_to(root))] = entry
 caches = [".gradle"]
+projects = {"."}
 for name in ("settings.gradle", "settings.gradle.kts"):
     settings = root / name
     if settings.is_file() and not settings.is_symlink():
+        text = settings.read_text()
+        includes = re.findall(r"\binclude\s*(?:\(([^)]*)\)|([^\n;]+))", text)
+        for parenthesized, plain in includes:
+            for project in re.findall(r"['\"]([^'\"]+)['\"]", parenthesized or plain):
+                projects.add(project.strip(":").replace(":", "/"))
+        mapping = (
+            r"project\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"
+            r"\.projectDir\s*=\s*file\(\s*['\"]([^'\"]+)['\"]\s*\)"
+        )
+        for project, directory in re.findall(mapping, text):
+            projects.discard(project.strip(":").replace(":", "/"))
+            projects.add(directory)
+        if "it.unimib.datai.nanofaas.control-plane-modules" in text:
+            for path in entries:
+                parts = Path(path).parts
+                if len(parts) == 4 and parts[:2] == ("platform", "modules"):
+                    if parts[-1] == "module.properties":
+                        projects.add(str(Path(path).parent))
         expression = r"includeBuild\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"
-        for path in re.findall(expression, settings.read_text()):
+        for path in re.findall(expression, text):
             included = Path(path)
             if included.is_absolute() or ".." in included.parts:
                 raise ValueError("Unsafe included Gradle build")
             names = ("settings.gradle", "settings.gradle.kts")
             if any((root / included / f).is_file() for f in names):
                 caches.append(str(included / ".gradle"))
-payload = {"schema": 1, "entries": entries, "gradleCaches": sorted(set(caches))}
+                projects.add(str(included))
+for project in projects:
+    if Path(project).is_absolute() or ".." in Path(project).parts:
+        raise ValueError("Unsafe Gradle project path")
+payload = {
+    "schema": 1, "entries": entries, "gradleCaches": sorted(set(caches)),
+    "gradleProjects": sorted(projects),
+}
 Path(sys.argv[2]).write_text(
     json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
 """
@@ -170,15 +197,10 @@ def verify_release_source(
     current = json.loads(
         current_file.read_text(), object_pairs_hook=unique_json_object
     )["entries"]
-    # Build scripts in the guarded archive identify writable Gradle project directories.
     writable = set(inventory["gradleCaches"])
-    for name, entry in expected.items():
-        if entry["type"] == "file" and Path(name).name in {
-            "build.gradle",
-            "build.gradle.kts",
-        }:
-            parent = Path(name).parent
-            writable.add(str(parent / "build"))
+    writable.update(
+        str(Path(project) / "build") for project in inventory["gradleProjects"]
+    )
     for name, entry in expected.items():
         if current.get(name) != entry:
             raise ValueError(f"Release source inventory changed: {name}")
@@ -244,6 +266,7 @@ def run_release_recipe_steps(
     source_commit: str,
     archive_digest: str,
     builder_name: str,
+    inputs_dir: Path | None = None,
 ) -> tuple[Evidence, ...]:
     """Require successful fresh reports, complete logs and matching local image IDs."""
     del inputs
@@ -260,8 +283,17 @@ def run_release_recipe_steps(
         source_dir=source_dir,
     )
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    if inputs_dir is not None:
+        for name in ("buildkitd-amd64.toml", *(f"{g.name}.yaml" for g in groups)):
+            shutil.copyfile(inputs_dir / name, evidence_dir / name)
+    retained_inventory = inventory_file
+    if inputs_dir is not None:
+        retained_inventory = evidence_dir / "source-inventory.json"
+        shutil.copyfile(inventory_file, retained_inventory)
     evidence = [
-        Evidence("file-digest", str(inventory_file), digest_path(inventory_file))
+        Evidence(
+            "file-digest", str(retained_inventory), digest_path(retained_inventory)
+        )
     ]
     config = evidence_dir / "buildkitd-amd64.toml"
     evidence.append(Evidence("file-digest", str(config), digest_path(config)))

@@ -4,10 +4,8 @@ functions:
 release:
   version: v0.22.0
   profile: azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1
-  # Six GraalVM nativeCompile runs now share one bake instead of running as
-  # sequential Gradle steps. BuildKit gives RUN steps no memory cgroup and
-  # nanoFaaS sets no -J-Xmx, so each native-image sizes its heap against the
-  # VM's full 32 GiB. Two at a time fits; four is where OOM becomes plausible.
+  # Native recipe assemblies use the owned BuildKit builder with this ceiling.
+  # Keep compiler memory/parallelism separate from BuildKit build-step concurrency.
   max_parallelism: 2
   benchmark_runs: 3
   throughput_max_loss_percent: 10.0

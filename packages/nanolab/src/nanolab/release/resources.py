@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from typing import Any, Protocol, TypeVar
 
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.compensation import best_effort
+from sonata_tasks.execution.ports import CommandTaskExecutor
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
@@ -358,6 +361,8 @@ def build_release_source_resources(
     arm_request: object,
     stack_requires: tuple[Resource[Any], ...] = (),
     arm_requires: tuple[Resource[Any], ...] = (),
+    source_archive: Path | None = None,
+    archive_digest: str | None = None,
 ) -> ReleaseSourceResources:
     """Create one immutable archive and verify that digest on both release VMs."""
     remote_source_dir, remote_archive = _release_remote_source_paths(
@@ -366,13 +371,30 @@ def build_release_source_resources(
     archive = Path(run_dir) / "source.tar"
 
     def acquire_local(_inputs: TaskInputs) -> ArtifactEvidence:
-        archive.unlink(missing_ok=True)
-        return create_source_archive(repo_root, commit, archive)
+        if source_archive is None:
+            archive.unlink(missing_ok=True)
+            return create_source_archive(repo_root, commit, archive)
+        if digest_path(source_archive) != archive_digest:
+            raise ValueError("Frozen source archive changed before acquisition")
+        from nanolab.release.build import git_state
+
+        state = git_state(repo_root)
+        if not state.clean or state.commit != commit:
+            raise ValueError("Release source changed before acquisition")
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        # Keep retained receipt bytes available for verification.
+        if not archive.exists():
+            shutil.copyfile(source_archive, archive)
+        if digest_path(archive) != archive_digest:
+            raise ValueError("Retained source archive changed")
+        return ArtifactEvidence("local", str(archive), digest_path(archive))
 
     local = Resource(
         title="Acquire immutable release source archive",
         acquire=acquire_local,
-        release=lambda _inputs, _value: archive.unlink(missing_ok=True),
+        release=lambda _inputs, _value: (
+            archive.unlink(missing_ok=True) if source_archive is None else None
+        ),
         always_release=True,
     )
 
@@ -555,4 +577,69 @@ def release_recipe_inputs_resource(
         release=lambda _inputs, _value: cleanup(),
         requires=requires,
         always_release=True,
+    )
+
+
+def preserve_release_builder_selection(
+    builder: Resource[str],
+    *,
+    executor: CommandTaskExecutor,
+    name: str,
+) -> Resource[str]:
+    """Restore the prior selection after Sonata creates its named release builder."""
+
+    def acquire(inputs: TaskInputs) -> str:
+        inspected = executor.run(
+            CommandTaskSpec(
+                "release.builder.selected",
+                "Inspect selected builder",
+                ("docker", "buildx", "inspect"),
+                role="stack",
+            )
+        )
+        previous = None
+        if inspected.return_code == 0:
+            for line in inspected.stdout.splitlines():
+                if line.startswith("Name:"):
+                    previous = line.split(":", 1)[1].strip()
+                    break
+            if not previous:
+                raise ValueError("Selected Buildx builder has no name")
+
+        def restore() -> None:
+            if previous and previous != name:
+                result = executor.run(
+                    CommandTaskSpec(
+                        "release.builder.restore",
+                        "Restore selected builder",
+                        ("docker", "buildx", "use", previous),
+                        role="stack",
+                    )
+                )
+                _require_remote_success(result, "restore selected release builder")
+
+        try:
+            value = builder.acquire(inputs)
+        except BaseException as error:
+            best_effort(
+                error, restore, what="restore selected builder after failed acquire"
+            )
+            raise
+        try:
+            restore()
+        except BaseException as error:
+            best_effort(
+                error,
+                lambda: builder.release(inputs, value),
+                what="cleanup unowned builder after failed restore",
+            )
+            raise
+        return value
+
+    return Resource(
+        title=builder.title,
+        acquire=acquire,
+        release=builder.release,
+        requires=builder.requires,
+        always_release=builder.always_release,
     )

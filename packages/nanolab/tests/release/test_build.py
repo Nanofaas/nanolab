@@ -68,64 +68,23 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
         assert command.options.remote_dir == "/srv/nanofaas-source"
 
 
-def test_amd64_build_commands_prepare_jvm_cells_and_bake_everything() -> None:
-    """Assert native cells need no separate build step.
+def test_amd64_commands_delegate_all_image_builds_to_root_recipes() -> None:
+    from nanolab.release.recipe import prepare_release_recipe_groups
+    from nanolab.release.recipe_execution import release_recipe_commands
 
-    The bake already covers them, since every cell is a Bake cell now.
-    """
     plan = build_image_plan(NANOFAAS_ROOT, "v9.9.9", architectures=("amd64",))
-
-    commands = release_build.amd64_build_commands(
-        plan,
-        builder_name="release-amd64-9.9.9",
-        remote_bake_file="/remote/docker-bake.json",
-        remote_source_dir="/remote/source",
+    groups = prepare_release_recipe_groups(
+        NANOFAAS_ROOT, plan, profiles_root=Path(__file__).parents[2] / "recipes"
     )
-
-    task_ids = [command.task_id for command in commands]
-    # The builder is the buildx resource's job, not these commands'.
-    assert not any("buildx" in task_id for task_id in task_ids)
-    # Every JVM bake cell gets its bootJar prepared before the bake.
-    prepares = [c for c in commands if c.task_id.startswith("release.images.prepare.")]
-    assert prepares, "no JVM prerequisite generated"
-    assert all(c.argv[0] == "./gradlew" for c in prepares)
-    bake_index = task_ids.index("release.images.bake.amd64")
-    assert all(task_ids.index(c.task_id) < bake_index for c in prepares)
-    # The bake uses the builder that was passed in.
-    bake = commands[bake_index]
-    assert bake.argv == (
-        "docker",
-        "buildx",
-        "bake",
-        "--builder",
-        "release-amd64-9.9.9",
-        "--file",
-        "/remote/docker-bake.json",
-        "--load",
-        "docker-amd64",
+    commands = release_recipe_commands(
+        groups, source_dir="/remote/source", remote_root="/remote", builder_name="owned"
     )
-    # No separate native build step exists any more; the bake is the last command.
-    assert bake_index == len(commands) - 1
-    assert all(
-        c.role == "stack" and c.options.remote_dir == "/remote/source" for c in commands
-    )
-
-
-def test_amd64_commands_contain_no_gradle_image_builds() -> None:
-    plan = build_image_plan(NANOFAAS_ROOT, "v9.9.9", architectures=("amd64",))
-
-    commands = release_build.amd64_build_commands(
-        plan,
-        builder_name="release-amd64-9.9.9",
-        remote_bake_file="/remote/docker-bake.json",
-        remote_source_dir="/remote/source",
-    )
-
-    assert not any(
-        spec.task_id.startswith("release.images.native.") for spec in commands
-    )
-    assert not any("bootBuildImage" in " ".join(spec.argv) for spec in commands)
-    assert any(spec.task_id == "release.images.bake.amd64" for spec in commands)
+    assert len(commands) == 3
+    assert all(c.argv[:2] == ("./gradlew", "assembleRecipe") for c in commands)
+    assert all(c.options.env["BUILDX_BUILDER"] == "owned" for c in commands)
+    assert {c.image for group in groups for c in group.cells} == {
+        c.image for c in plan.cells
+    }
 
 
 def test_sonata_owned_arm_resources_are_not_recreated_and_every_image_is_pushed(
@@ -513,3 +472,14 @@ def test_extract_commit_tree_normalizes_git_failures_to_value_error(
 
     with pytest.raises(ValueError, match="could not extract release source"):
         extract_commit_tree(repo, "not-a-real-commit", tmp_path / "tree")
+
+
+def test_source_python_tests_keep_generated_files_outside_archived_context():
+    commands = release_build.source_test_commands(Path("/srv/release/source"))
+    python = next(c for c in commands if c.task_id == "release.source.python-sdk")
+    assert python.options.env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert (
+        python.options.env["UV_PROJECT_ENVIRONMENT"]
+        == "/srv/release/source-test-output/python-venv"
+    )
+    assert "cache_dir=/srv/release/source-test-output/pytest-cache" in python.argv
