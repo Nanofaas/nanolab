@@ -82,10 +82,12 @@ Preserve every `container.image` as the current target name, including
 
 All three profiles select the explicit module IDs equivalent to the current
 `controlPlaneModules=all`; recipes do not accept the sentinel `all`. The
-current IDs are async-queue, autoscaler, build-metadata, concurrency-control,
-container-deployment-provider, containerd-deployment-provider,
-k8s-deployment-provider, offload, runtime-config and sync-queue. Validate this
-selection against the guarded source; a changed module catalog requires a
+resolved IDs are async-queue, autoscaler, build-metadata, concurrency-control,
+k8s-deployment-provider, offload, runtime-config and sync-queue. The catalog has
+ten modules, but `all` gives priority to the default-enabled Kubernetes provider
+and excludes the conflicting container and containerd providers. Preserve this
+eight-module selection. Validate the resolved `all` selection against the guarded
+source; a changed selection requires a
 profile update rather than silent expansion.
 
 Preserve the effective JVM G1/C2 settings for all JVM images and the control
@@ -153,8 +155,8 @@ prove named-builder selection, prove a tagged image is loaded into the VM's
 Docker daemon, and prove explicit local output still exports an actually compiled
 native-builder artifact. Validate representative Oracle G1 and Java-lite builds;
 an exporter fixture alone does not prove recipe compatibility. Also inspect the
-Java-lite native task/binary mapping and all-module
-containerd dependency staging required by this source.
+Java-lite native task/binary mapping. Confirm that the resolved module selection
+does not require containerd Maven staging; do not add an unused backend dependency.
 
 This gate is not yet executed. If the pinned plugin/toolchain cannot represent
 all required cells or preserve the export contract, stop the implementation

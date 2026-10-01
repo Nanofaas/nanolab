@@ -16,7 +16,7 @@
 - Native Linux AMD64 stack VM; reject host/daemon architecture mismatch and emulation as qualifying evidence.
 - Three profiles, three root `assembleRecipe` invocations, exact original names/tags: JVM 9, native 12, default 23 at the current pin. Derive expected coverage from the guarded source.
 - Schema 2; registry `127.0.0.1:5000/nanofaas`; omit `registry.platforms` and `registry.provenance`.
-- Explicit modules: async-queue, autoscaler, build-metadata, concurrency-control, container-deployment-provider, containerd-deployment-provider, k8s-deployment-provider, offload, runtime-config, sync-queue.
+- Explicit modules: async-queue, autoscaler, build-metadata, concurrency-control, k8s-deployment-provider, offload, runtime-config, sync-queue.
 - JVM G1/C2, CP variant `jvm-g1-c2`; Spring native container builder/Oracle/O3/G1/effective JFR, CP variant `native-o3-g1`; Java-lite Community/O3/serial.
 - Default profile's sole artifact-only CP is JVM without `container`; allow its `image: null` only in the release adapter.
 - Retain clean/prepared-source guards and verified Git archive; never substitute dirty or synthetic Git staging. `source: null` in a report is not commit proof.
@@ -58,9 +58,9 @@ request socket/network access only for checks that need it. Baseline full suite:
 
 **Interfaces:** Consumes the pinned source and installed release toolchain. Produces a PASS capability record containing exact profile selections, module list, native task/binary mapping, Maven staging requirements, effective native options and builder/load/export observations. Later tasks depend on PASS.
 
-- [ ] Inspect named NanoFaaS symbols/flows through GitNexus query/context first as its AGENTS instructions require; verify the pinned implementation directly where the graph is unresolved. Make no NanoFaaS/plugin edits.
-- [ ] Materialize the three candidate profiles under `/tmp/nanolab-release-amd64-capability/`, using Task 2's exact selections. Validate each with `./gradlew validateRecipe -Precipe=<absolute-profile>` in the pinned source; confirm the default artifact-only CP and all Java-lite selections are accepted.
-- [ ] Confirm the effective Java-lite native task/output binary, Community/O3/serial build, Spring Oracle/O3/G1/JFR settings and all-module containerd Maven prerequisite. Reuse the existing supported dependency staging; document concrete required command/property names.
+- [x] Inspect named NanoFaaS symbols/flows through GitNexus query/context first as its AGENTS instructions require; verify the pinned implementation directly where the graph is unresolved. Make no NanoFaaS/plugin edits.
+- [x] Materialize the three candidate profiles under `/tmp/nanolab-release-amd64-capability/`, using Task 2's exact selections. Validate each with `./gradlew validateRecipe -Precipe=<absolute-profile>` in the pinned source; confirm the default artifact-only CP and all Java-lite selections are accepted.
+- [x] Confirm the effective Java-lite native task/output binary, Community/O3/serial build, Spring Oracle/O3/G1/JFR settings and resolved eight-module selection. Confirm no containerd Maven staging is required: `all` prioritizes the default Kubernetes provider and excludes its two conflicting providers.
 - [ ] On a provisioned native-AMD64 release-compatible stack VM, record Docker/Buildx/BuildKit versions and create an owned builder with the release configuration and `default-load=true`. Run ordinary `docker build` with `BUILDX_BUILDER` and BuildKit enabled, proving execution on that builder and automatic local image loading. Preserve any preexisting selected builder.
 - [ ] From a verified archive, run representative JVM, actual Oracle G1 native and Java-lite builds through recipes. Verify native-builder explicit local export yields the compiled executable and the final tagged images are local Linux/AMD64 images. Inspect effective build commands/options, not only requested YAML. No emulation or fake exporter artifact qualifies.
 - [ ] Retain raw commands, profile hashes, logs, builder facts, exported binary/runtime observations and ownership/cleanup results. Record PASS or the exact unsupported contract in this plan. If VM/toolchain access is unavailable, leave this gate incomplete; if capability fails, stop and revise the spec. Never fall back to Bake or a Docker wrapper.
@@ -68,16 +68,40 @@ request socket/network access only for checks that need it. Baseline full suite:
 
 Expected: demonstrated named-builder selection, local loading and real native export/packaging for both native policies. Schema validation alone is insufficient. Do not start product implementation before PASS.
 
+### Capability progress — 2026-10-01
+
+- Gradle `validateRecipe` passed for all three full candidate profiles after
+  correcting the explicit selection to eight modules; counts remain 9/12/23.
+- A real `-PcontrolPlaneModules=all` Gradle probe resolves exactly the same
+  eight modules. All three Java-lite `nativeCompile.outputFile` paths were
+  read from the configured tasks. Container-built Java-lite uses Community;
+  Spring G1 uses Oracle and effective JFR. No containerd dependency is selected.
+- Ruling: the original spec confused the ten-module catalog with the resolved
+  `all` selection. Preserve the legacy eight-module selection, including the
+  Kubernetes provider, and correct the spec/plan; no backend policy changes.
+  If wrong, the release module set could change; actual Gradle output verifies
+  this correction.
+- Candidate profiles, exact matrix, selection/native-binary output and validation
+  logs: `/tmp/nanolab-release-amd64-capability/`. Source archive identity is
+  recorded in `source-identity.json`; inputs remain disposable capability probes.
+- Azure authentication was renewed, read-only VM/image queries passed, but the
+  actual provision failed with `401 RequestDisallowedByAzure` requiring MFA.
+  `provision.log` retains the failure. Failed-acquire teardown returned 0;
+  a subsequent Azure resource query found no release resources remaining.
+- Builder load/export and runtime verification remain **incomplete**. Task 1
+  is not complete and Tasks 2–6 have not started. The user has been asked to
+  renew authentication with MFA before the native-AMD64 probe continues.
+
 ## Task 2: Freeze reusable profiles against the guarded matrix
 
 **Files:** Create the three profiles, `release/recipe.py` and `tests/release/test_recipe.py`; modify `plans/release.py` and `.github/workflows/ci.yml`.
 
 **Interfaces:** Define frozen `ReleaseRecipeGroup` with `flavor: ImageFlavor`, `name: str`, `profile_bytes: bytes`, `profile_digest: str`, `tag: str`, `cells: tuple[ImageCell, ...]`, `modules: tuple[str, ...]`. Add `prepare_release_recipe_groups(source_tree: Path, image_plan: ImagePlan, *, profiles_root: Path) -> tuple[ReleaseRecipeGroup, ...]`. Extend `ReleaseRequest` with `recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()`; the normal request builder always populates it before workflow construction. Existing direct test requests must supply validated groups rather than silently selecting legacy builds.
 
-- [ ] Write `test_release_profiles_cover_exact_guarded_matrix`: groups have flavors `(jvm, native, default)`, counts `(9,12,23)` at the pin, total 44, original image references/tags, no duplicates; default CP produces no image. Assert all ten modules and the spec's per-family native/JVM settings.
+- [ ] Write `test_release_profiles_cover_exact_guarded_matrix`: groups have flavors `(jvm, native, default)`, counts `(9,12,23)` at the pin, total 44, original image references/tags, no duplicates; default CP produces no image. Assert the eight resolved modules and the spec's per-family native/JVM settings.
 - [ ] Write parameterized `test_release_profile_drift_fails_before_acquisition`: add/remove a catalog cell or module, alter a SDK/service identity, repository/tag/mode/variant/options, introduce platforms/provenance or duplicate target. Assert preflight fails with zero provider calls. Write `test_profile_freeze_uses_raw_bytes`: later file mutation changes neither frozen bytes nor their SHA-256 identity; a subsequent request gets a different identity.
 - [ ] Run `uv run --locked --package nanolab pytest packages/nanolab/tests/release/test_recipe.py -q --no-cov`; expect failures for absent interfaces or missing coverage checks.
-- [ ] Implement the group interface and strict YAML-to-matrix mapping. Normalize tags using `image_plan.version`; map catalog `exec` to `bash`, Java-lite to native, watchdog/warm-echo to service identities from the pinned schema. Freeze raw bytes, not YAML reserialization. Match module catalog from the extracted guarded source, with no `all` sentinel.
+- [ ] Implement the group interface and strict YAML-to-matrix mapping. Normalize tags using `image_plan.version`; map catalog `exec` to `bash`, Java-lite to native, watchdog/warm-echo to service identities from the pinned schema. Freeze raw bytes, not YAML reserialization. Match resolved `all` selection from the extracted guarded source, with no `all` sentinel.
 - [ ] Add JVM profile CP + seven Java functions + warm-echo; native profile the same nine + three Java-lite functions; default profile six Bash/five Go/five JavaScript/six Python + watchdog and the artifact-only JVM CP. Use source-owned defaults except effective options pinned by the spec. Explicit image names come from `ImagePlan`, never inferred from report order.
 - [ ] Call preparation from `build_release_request` after archive-derived `ImagePlan` creation and before any acquisition. Add all three `validateRecipe` calls to the existing pinned-source CI profile gate.
 - [ ] Validate all profiles with pinned Gradle, then run `tests/release/test_recipe.py`, `tests/plans/test_release.py` and `tests/cli/test_release_command.py`. Expect profile validation and tests to pass.
@@ -109,7 +133,7 @@ In `recipe_execution.py`, define `capture_release_inventory(source_tree: Path, d
 - [ ] Write `test_complete_reports_match_independent_daemon_inspection`: every tag is independently Linux/AMD64 and ID-equal to its report; output includes 44 `local-image-digest` entries with `docker-daemon:` references plus file-digest evidence for profiles/reports/inventory/build configuration/logs. Wrong OS/architecture, replaced tag or registry digest masquerading as local ID fails.
 - [ ] Write `test_failed_group_cannot_reuse_stale_output`, `test_transfer_truncation_prevents_receipt`, and parameterized `test_partial_recipe_failure_compensates_owned_inputs`: first group succeeds then failure/cancellation/transfer error; no complete receipt, diagnostics retained, compensation removes only owned remote paths/builder and preserves unrelated containers/volumes/selected builder. Cleanup failure must be reported without losing the original error.
 - [ ] Run new tests and confirm failures. Implement source inventory collection/checking before source tests and immediately before/after assembly. Bind it to the verified source archive and guarded commit; recheck staged frozen profile bytes. Never call Git-based `prepare_recipe_run` or create `.git` in archive staging.
-- [ ] Implement staging of frozen profiles/BuildKit config, root Gradle execution and bounded complete report/log retrieval. Empty each owned group output before that group's command; require successful exit before report validation. Reuse the Maven staging determined in Task 1 for all-module compilation. Retain evidence locally before phase completion; compensation must preserve retained evidence for resume and review.
+- [ ] Implement staging of frozen profiles/BuildKit config, root Gradle execution and bounded complete report/log retrieval. Empty each owned group output before that group's command; require successful exit before report validation. Use the resolved module set from Task 1; it needs no containerd Maven staging. Retain evidence locally before phase completion; compensation must preserve retained evidence for resume and review.
 - [ ] Independently inspect all images and enforce exact union coverage before returning evidence. Record builder driver/environment/configuration and real installed toolchain facts as retained files. Let existing registry push obtain manifest digests later.
 - [ ] Run `tests/release/test_recipe_execution.py`, `tests/release/test_resources.py`, `tests/release/test_build.py` and `tests/tasks/test_recipe_remote.py`; expect all pass. Commit as `Assemble AMD64 recipes with verified release evidence`.
 
