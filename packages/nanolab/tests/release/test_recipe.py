@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 from dataclasses import replace
@@ -168,3 +169,270 @@ def test_module_catalog_change_fails_preflight(tmp_path: Path) -> None:
 def test_missing_release_profile_is_a_preflight_error(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="profile"):
         _groups(tmp_path)
+
+
+def _report(group) -> dict:
+    """Mirror the pinned Gradle report shape without using adapter helpers."""
+    profile = yaml.safe_load(group.profile_bytes)
+    rows = []
+    declared = [
+        (
+            "control-plane",
+            {"name": "control-plane", "sdk": "java", **profile["controlPlane"]},
+        )
+    ]
+    declared.extend(("function", item) for item in profile["functions"])
+    declared.extend(("service", item) for item in profile["services"])
+    for index, (kind, item) in enumerate(declared):
+        name, sdk = item["name"], item["sdk"]
+        build = item.get("build", {})
+        mode = build.get("mode", "container")
+        artifact = (
+            "control-plane/"
+            if kind == "control-plane"
+            else f"{'functions' if kind == 'function' else 'services'}/{sdk}/{name}/"
+            if mode != "container"
+            else None
+        )
+        row = {
+            "kind": kind,
+            "name": name,
+            "sdk": sdk,
+            "mode": mode,
+            "artifact": artifact,
+            "image": None,
+        }
+        if kind == "control-plane":
+            row.update(
+                variant="native-o3-g1" if mode == "native" else "jvm-g1-c2",
+                optimization="3" if mode == "native" else "c2",
+            )
+        if mode == "native":
+            gc = "serial" if sdk == "java-lite" else "G1"
+            row["native"] = {
+                "optimization": "3",
+                "gc": gc,
+                "monitoring": [] if sdk == "java-lite" else ["jfr"],
+                "builder": "container",
+                "distribution": "community" if sdk == "java-lite" else "oracle",
+            }
+        if "container" in item:
+            row["image"] = {
+                "reference": (
+                    f"127.0.0.1:5000/nanofaas/{item['container']['image']}:{group.tag}"
+                ),
+                "status": "built",
+                "id": "sha256:" + f"{index + 1:064x}",
+            }
+        rows.append(row)
+    return {
+        "schemaVersion": 2,
+        "recipe": {
+            "name": group.name,
+            "sha256": group.profile_digest.removeprefix("sha256:"),
+            "schemaVersion": 2,
+        },
+        "tag": group.tag,
+        "source": None,
+        "modules": list(MODULES),
+        "components": rows,
+    }
+
+
+@pytest.mark.parametrize(("index", "count"), [(0, 9), (1, 12), (2, 23)])
+def test_release_distribution_maps_all_component_kinds(
+    tmp_path: Path, index: int, count: int
+) -> None:
+    group = _groups()[index]
+    path = tmp_path / "distribution.json"
+    path.write_text(json.dumps(_report(group)))
+    components = recipe.read_release_distribution(path, group=group)
+    assert len(components) == count
+    assert {c.image.reference for c in components} == {
+        cell.image for cell in group.cells
+    }
+    if index == 1:
+        cp = next(c for c in components if c.kind == "control-plane")
+        assert cp.variant == "native-o3-g1"
+        assert cp.native == {
+            "optimization": "3",
+            "gc": "G1",
+            "monitoring": ["jfr"],
+            "builder": "container",
+            "distribution": "oracle",
+        }
+        lite = next(c for c in components if c.sdk == "java-lite")
+        assert lite.native is not None
+        assert lite.native["gc"] == "serial"
+        assert lite.native["distribution"] == "community"
+    if index == 2:
+        assert not any(c.kind == "control-plane" for c in components)
+        assert any(c.sdk == "bash" and c.mode == "container" for c in components)
+        assert any(c.kind == "service" and c.name == "watchdog" for c in components)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "schema",
+        "recipe-schema",
+        "hash",
+        "name",
+        "tag",
+        "modules",
+        "missing-source",
+        "duplicate",
+        "extra",
+        "missing",
+        "foreign-image",
+        "missing-id",
+        "malformed-id",
+        "failed",
+        "published",
+        "digest",
+        "mode",
+        "variant",
+        "optimization",
+        "distribution",
+        "gc",
+        "jfr",
+        "native-optimization",
+        "builder",
+        "null-image",
+        "missing-image",
+        "artifact",
+        "unknown-metadata",
+        "source",
+    ],
+)
+def test_release_distribution_rejects_identity_or_matrix_mismatch(
+    tmp_path: Path, mutation: str
+) -> None:
+    group = _groups()[1]
+    data = _report(group)
+    cp = data["components"][0]
+    if mutation == "schema":
+        data["schemaVersion"] = 1
+    elif mutation == "recipe-schema":
+        data["recipe"]["schemaVersion"] = 1
+    elif mutation == "hash":
+        data["recipe"]["sha256"] = "0" * 64
+    elif mutation == "name":
+        data["recipe"]["name"] = "foreign"
+    elif mutation == "tag":
+        data["tag"] = "old"
+    elif mutation == "modules":
+        data["modules"].append("async-queue")
+    elif mutation == "missing-source":
+        del data["source"]
+    elif mutation == "duplicate":
+        data["components"].append(cp)
+    elif mutation == "extra":
+        data["components"].append({**cp, "name": "foreign"})
+    elif mutation == "missing":
+        data["components"].pop()
+    elif mutation == "foreign-image":
+        cp["image"]["reference"] = "foreign/image:old"
+    elif mutation == "missing-id":
+        del cp["image"]["id"]
+    elif mutation == "malformed-id":
+        cp["image"]["id"] = "sha256:abcd"
+    elif mutation in {"failed", "published"}:
+        cp["image"]["status"] = mutation
+    elif mutation == "digest":
+        cp["image"]["digest"] = "sha256:" + "a" * 64
+    elif mutation == "mode":
+        cp["mode"] = "jvm"
+    elif mutation == "variant":
+        cp["variant"] = "native-os"
+    elif mutation == "optimization":
+        cp["optimization"] = "s"
+    elif mutation == "distribution":
+        cp["native"]["distribution"] = "community"
+    elif mutation == "gc":
+        cp["native"]["gc"] = "serial"
+    elif mutation == "jfr":
+        cp["native"]["monitoring"] = []
+    elif mutation == "native-optimization":
+        cp["native"]["optimization"] = "s"
+    elif mutation == "builder":
+        cp["native"]["builder"] = "host"
+    elif mutation == "null-image":
+        cp["image"] = None
+    elif mutation == "missing-image":
+        del cp["image"]
+    elif mutation == "artifact":
+        cp["artifact"] = "../../foreign"
+    elif mutation == "unknown-metadata":
+        cp["foreign"] = True
+    else:
+        data["source"] = {"revision": "synthetic", "dirty": False}
+    path = tmp_path / "distribution.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match=r"(?i)recipe|sha256|json"):
+        recipe.read_release_distribution(path, group=group)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing-cp",
+        "missing-image",
+        "cp-image",
+        "cp-native",
+        "cp-mode",
+        "null-function",
+    ],
+)
+def test_artifact_only_control_plane_is_explicitly_validated(
+    tmp_path: Path, mutation: str
+) -> None:
+    group = _groups()[2]
+    data = _report(group)
+    cp = data["components"][0]
+    if mutation == "missing-cp":
+        data["components"].pop(0)
+    elif mutation == "missing-image":
+        del cp["image"]
+    elif mutation == "cp-image":
+        cp["image"] = {
+            "reference": "extra/image",
+            "id": "sha256:" + "a" * 64,
+            "status": "built",
+        }
+    elif mutation == "cp-native":
+        cp["native"] = {"gc": "serial"}
+    elif mutation == "cp-mode":
+        cp["mode"] = "native"
+    else:
+        data["components"][1]["image"] = None
+    path = tmp_path / "distribution.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match=r"(?i)recipe|sha256|json"):
+        recipe.read_release_distribution(path, group=group)
+
+
+@pytest.mark.parametrize(
+    "body", ['{"schemaVersion":2,"schemaVersion":2}', '{"schemaVersion":', "{}"]
+)
+def test_malformed_release_report_fails(tmp_path: Path, body: str) -> None:
+    path = tmp_path / "distribution.json"
+    path.write_text(body)
+    with pytest.raises(ValueError, match=r"(?i)recipe|sha256|json"):
+        recipe.read_release_distribution(path, group=_groups()[0])
+
+
+def test_null_archive_source_is_not_commit_evidence(tmp_path: Path) -> None:
+    group = _groups()[0]
+    path = tmp_path / "distribution.json"
+    data = _report(group)
+    path.write_text(json.dumps(data))
+    assert len(recipe.read_release_distribution(path, group=group)) == 9
+    data["source"] = {"revision": "a" * 40, "dirty": False}
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="source"):
+        recipe.read_release_distribution(path, group=group)
+    assert (
+        len(recipe.read_release_distribution(path, group=group, source_commit="a" * 40))
+        == 9
+    )

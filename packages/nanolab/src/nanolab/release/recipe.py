@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -12,7 +13,8 @@ from typing import Any
 import yaml
 
 from nanolab.images.plan import DEFAULT_REGISTRY, ImageCell, ImageFlavor, ImagePlan
-from nanolab.tasks.recipe import _object
+from nanolab.tasks.recipe import RecipeComponent, RecipeImage, _object, _string
+from nanolab.tasks.recipe_multiarch import sha256_digest, unique_json_object
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,3 +253,170 @@ def prepare_release_recipe_groups(
     if sum(len(group.cells) for group in groups) != len(image_plan.cells):
         raise ValueError("Release recipes do not cover the complete image matrix")
     return tuple(groups)
+
+
+def _report_metadata(kind: str, item: Mapping[str, Any]) -> dict[str, Any]:
+    name, sdk = item["name"], item["sdk"]
+    build = item.get("build", {})
+    mode = build.get("mode", "container")
+    artifact = None
+    if kind == "control-plane":
+        artifact = "control-plane/"
+    elif mode != "container":
+        field = "functions" if kind == "function" else "services"
+        artifact = f"{field}/{sdk}/{name}/"
+    result = {
+        "kind": kind,
+        "name": name,
+        "sdk": sdk,
+        "mode": mode,
+        "artifact": artifact,
+    }
+    if kind == "control-plane":
+        result.update(
+            variant=build["variant"], optimization="3" if mode == "native" else "c2"
+        )
+    if mode == "native":
+        lite = sdk == "java-lite"
+        result["native"] = {
+            "optimization": "3",
+            "gc": "serial" if lite else "G1",
+            "monitoring": [] if lite else ["jfr"],
+            "builder": "container",
+            "distribution": "community" if lite else "oracle",
+        }
+    return result
+
+
+def read_release_distribution(
+    report: Path, *, group: ReleaseRecipeGroup, source_commit: str | None = None
+) -> tuple[RecipeComponent, ...]:
+    """Require complete assembly identity, leaving archive proof to the caller."""
+    try:
+        data = _object(
+            json.loads(
+                report.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object
+            ),
+            "release report",
+        )
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Cannot read release recipe report {report}") from error
+    if (
+        set(data)
+        != {"schemaVersion", "recipe", "tag", "source", "modules", "components"}
+        or type(data.get("schemaVersion")) is not int
+        or data["schemaVersion"] != 2
+    ):
+        raise ValueError("Unsupported release recipe report schema")
+    identity = _object(data.get("recipe"), "release recipe identity")
+    if (
+        identity
+        != {
+            "name": group.name,
+            "sha256": group.profile_digest.removeprefix("sha256:"),
+            "schemaVersion": 2,
+        }
+        or type(identity.get("schemaVersion")) is not int
+        or data.get("tag") != group.tag
+    ):
+        raise ValueError(
+            "Release recipe report identity/tag differs from frozen inputs"
+        )
+    modules = data.get("modules")
+    if (
+        not isinstance(modules, list)
+        or not all(isinstance(m, str) for m in modules)
+        or sorted(modules) != list(group.modules)
+    ):
+        raise ValueError("Release recipe report modules differ from frozen inputs")
+    source = data["source"]
+    if source is not None:
+        source = _object(source, "release source")
+        if (
+            source_commit is None
+            or set(source) != {"revision", "dirty"}
+            or source.get("revision") != source_commit
+            or source.get("dirty") is not False
+        ):
+            raise ValueError("Release recipe report source differs from guarded commit")
+
+    declared: list[tuple[str, dict[str, Any]]] = [
+        (
+            "control-plane",
+            {
+                "name": "control-plane",
+                "sdk": "java",
+                **_control(group.flavor, group.modules),
+            },
+        )
+    ]
+    for cell in group.cells:
+        if cell.target.name != "control-plane":
+            field, item = _component(cell)
+            declared.append(("function" if field == "functions" else "service", item))
+    expected = {
+        (kind, item["name"], item["sdk"]): (item, _report_metadata(kind, item))
+        for kind, item in declared
+    }
+    rows = data.get("components")
+    if not isinstance(rows, list):
+        raise ValueError("Release recipe report components must be a list")
+    seen: set[tuple[str, str, str]] = set()
+    components: list[RecipeComponent] = []
+    for raw in rows:
+        row = _object(raw, "release report component")
+        kind, name, sdk = (
+            _string(row.get(field), field) for field in ("kind", "name", "sdk")
+        )
+        key = (kind, name, sdk)
+        if key in seen or key not in expected:
+            raise ValueError("Duplicate or unexpected release recipe report component")
+        seen.add(key)
+        item, metadata = expected[key]
+        if (
+            "image" not in row
+            or {k: v for k, v in row.items() if k != "image"} != metadata
+        ):
+            raise ValueError(
+                "Release recipe report component metadata differs from policy"
+            )
+        if "container" not in item:
+            if (
+                key != ("control-plane", "control-plane", "java")
+                or group.flavor != "default"
+                or row["image"] is not None
+            ):
+                raise ValueError("Invalid artifact-only release recipe component")
+            continue
+        image = _object(row["image"], "release image")
+        reference = f"{DEFAULT_REGISTRY}/{item['container']['image']}:{group.tag}"
+        if (
+            set(image) - {"reference", "status", "id", "digest"}
+            or image.get("reference") != reference
+            or image.get("status") != "built"
+            or image.get("digest") is not None
+        ):
+            raise ValueError(
+                "Release recipe report image differs from complete local assembly"
+            )
+        image_id = sha256_digest(image.get("id"))
+        components.append(
+            RecipeComponent(
+                kind=key[0],
+                name=key[1],
+                sdk=key[2],
+                mode=row["mode"],
+                image=RecipeImage(reference, image_id, "built", None),
+                variant=row.get("variant"),
+                optimization=row.get("optimization"),
+                native=row.get("native"),
+            )
+        )
+    if (
+        seen != set(expected)
+        or {component.image.reference for component in components}
+        != {cell.image for cell in group.cells}
+        or len(components) != len(group.cells)
+    ):
+        raise ValueError("Release recipe report does not cover the full group matrix")
+    return tuple(components)
