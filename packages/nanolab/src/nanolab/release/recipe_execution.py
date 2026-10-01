@@ -358,7 +358,12 @@ def run_release_recipe_steps(
         _remote(provider, request, ("mkdir", "-p", output))
         log = local_output / "gradle.log"
         log.unlink(missing_ok=True)
-        remote_log = shlex.quote(output + "/gradle.log")
+        # cleanRecipe claims/clears its output; logging must stay outside it.
+        log_dir = f"{remote_root}/recipe-output/amd64/logs"
+        log_path = f"{log_dir}/{group.flavor}.log"
+        _remote(provider, request, ("mkdir", "-p", log_dir))
+        _remote(provider, request, ("rm", "-f", "--", log_path))
+        remote_log = shlex.quote(log_path)
         script = (
             f"{{ {shlex.join(command.argv)}; }} > {remote_log} 2>&1; "
             f'result=$?; tail -c 65536 {remote_log}; exit "$result"'
@@ -369,19 +374,17 @@ def run_release_recipe_steps(
         except BaseException as error:
             best_effort(
                 error,
-                lambda output=output, log=log: _fetch_verified(
+                lambda log_path=log_path, log=log: _fetch_verified(
                     provider,
                     request,
-                    output + "/gradle.log",
+                    log_path,
                     log,
                     limit=100 * 1024 * 1024,
                 ),
                 what="recipe failure diagnostics",
             )
             raise
-        _fetch_verified(
-            provider, request, output + "/gradle.log", log, limit=100 * 1024 * 1024
-        )
+        _fetch_verified(provider, request, log_path, log, limit=100 * 1024 * 1024)
         _fetch_verified(
             provider, request, output + "/distribution.json", report, limit=1024 * 1024
         )

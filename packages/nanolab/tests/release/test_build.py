@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 import subprocess
 import tarfile
 from pathlib import Path
@@ -36,13 +38,18 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
     assert "-u NANOFAAS_RUN_K8S_E2E" in script
     assert "-u NANOFAAS_E2E_NAMESPACE" in script
     python_commands = [
-        command for command in commands if command.argv[:2] == ("uv", "run")
+        command
+        for command in commands
+        if command.task_id == "release.source.python-sdk"
     ]
     assert {command.task_id for command in python_commands} == {
         "release.source.python-sdk",
     }
-    by_id = {command.task_id: command.argv for command in python_commands}
-    assert by_id["release.source.python-sdk"][-4:] == (
+    by_id = {
+        command.task_id: shlex.split(command.argv[2].split("exec ", 1)[1])
+        for command in python_commands
+    }
+    assert tuple(by_id["release.source.python-sdk"][-4:]) == (
         "sdks/python/tests",
         "functions/python/word-stats/tests",
         "functions/python/json-transform/tests",
@@ -482,4 +489,64 @@ def test_source_python_tests_keep_generated_files_outside_archived_context():
         python.options.env["UV_PROJECT_ENVIRONMENT"]
         == "/srv/release/source-test-output/python-venv"
     )
-    assert "cache_dir=/srv/release/source-test-output/pytest-cache" in python.argv
+    assert "cache_dir=/srv/release/source-test-output/pytest-cache" in python.argv[2]
+
+
+def test_python_source_tests_isolate_editable_build_metadata(tmp_path: Path):
+    source = tmp_path / "source"
+    for name in (
+        "sdks/python/tests",
+        "sdks/runtime-contract",
+        "functions/python/word-stats/tests",
+        "functions/test-data",
+    ):
+        directory = source / name
+        directory.mkdir(parents=True)
+        (directory / "input.txt").write_text(name)
+    (source / "pytest.ini").write_text("[pytest]\naddopts = --import-mode=importlib\n")
+    sdk = source / "sdks/python/src"
+    sdk.mkdir()
+    (sdk / "sdk.py").write_text("committed source")
+    before = {
+        str(p.relative_to(source)): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    uv = binary_dir / "uv"
+    uv.write_text(
+        "#!/usr/bin/env python3\n"
+        "from pathlib import Path\n"
+        "import sys\n"
+        "assert sys.argv[1:4] == ['run', '--project', 'sdks/python']\n"
+        "assert Path('sdks/runtime-contract/input.txt').is_file()\n"
+        "assert Path('functions/test-data/input.txt').is_file()\n"
+        "assert '--import-mode=importlib' in Path('pytest.ini').read_text()\n"
+        "metadata = Path('sdks/python/src/nanofaas_sdk.egg-info')\n"
+        "metadata.mkdir()\n"
+        "(metadata / 'PKG-INFO').write_text('editable build metadata')\n"
+    )
+    uv.chmod(0o755)
+    command = next(
+        c
+        for c in release_build.source_test_commands(source)
+        if c.task_id == "release.source.python-sdk"
+    )
+    env = {
+        **os.environ,
+        **command.options.env,
+        "PATH": str(binary_dir) + os.pathsep + os.environ["PATH"],
+    }
+    subprocess.run(command.argv, cwd=command.options.remote_dir, env=env, check=True)
+    after = {
+        str(p.relative_to(source)): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+    assert after == before, "editable install contaminated guarded recipe source"
+    assert (
+        source.parent
+        / "source-test-output/python-source/sdks/python/src"
+        / "nanofaas_sdk.egg-info/PKG-INFO"
+    ).is_file()

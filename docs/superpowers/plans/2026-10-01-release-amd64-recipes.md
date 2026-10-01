@@ -182,7 +182,7 @@ checks must pass with Task 6 before completion. Preserve the user's existing nat
 
 - Tasks 2–5 committed on `feature/recipe-release-amd64`: reusable profiles,
   strict report adaptation, source/transfer/image verification and resumable DAG.
-- Final full suite: 3,263 passed in 196.60s, 89% coverage; focused release
+- Final full suite after review fixes: 3,265 passed in 198.78s, 89% coverage; focused release
   gate: 444 passed in 66.06s. The suite includes the CLI prefix contract test.
 - `nanolab-quality` passed. Bandit exits 1 with exactly the four baseline
   B101 LOW findings (comparison:364, product:225, loadtest:819, validate:757).
@@ -207,3 +207,23 @@ checks must pass with Task 6 before completion. Preserve the user's existing nat
   until actual build/export, push, runtimes and resume pass.
 - Local detailed logs and decisions are retained in this plan's ignored execution
   ledger. Real builder/load/export results are not replaced by local tests.
+
+### Final review corrections
+
+The fresh whole-branch reviewer found two execution blockers. Python's editable
+setuptools build writes SDK metadata into its source directory; Python tests now
+run on an external owned copy of `sdks`, `functions` and the root `pytest.ini`.
+The actual pinned command passes 182 tests in 8.13s with the original source
+inventory unchanged; metadata is confined to the external copy.
+
+Shell redirection previously created the Gradle log inside the recipe output
+before NanoFaaS could claim it. Logs now use the sibling owned `logs` directory.
+A real pinned `cleanRecipe` probe fails with the log inside output and succeeds
+with the sibling log. Regression tests for both findings failed before the fixes
+and pass afterward. Focused build/execution suites pass (23/50 tests).
+
+No Critical or Minor findings were reported; the reviewer declined no behavior.
+Native AMD64 qualification still requires the incomplete Task 1/6 VM gates.
+
+Final fix gate: complete suite 3,265 passed in 198.78s (89% coverage), quality
+checks passed, 419 files formatted and `git diff --check` clean.

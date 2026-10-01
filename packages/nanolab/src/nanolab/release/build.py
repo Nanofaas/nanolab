@@ -273,6 +273,35 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
         """
     )
 
+    python_argv = (
+        "uv",
+        "run",
+        "--project",
+        "sdks/python",
+        "--extra",
+        "test",
+        "--locked",
+        "pytest",
+        "-q",
+        "-o",
+        f"cache_dir={remote_source_dir.parent}/source-test-output/pytest-cache",
+        "sdks/python/tests",
+        "functions/python/word-stats/tests",
+        "functions/python/json-transform/tests",
+        "functions/python/roman-numeral/tests",
+    )
+    python_source = remote_source_dir.parent / "source-test-output/python-source"
+    # Editable backend metadata belongs in the test workspace, never in the
+    # archive used as recipe build context. Keep SDK corpus/function data too.
+    python_script = (
+        f"set -eu; rm -rf -- {shlex.quote(str(python_source))}; "
+        f"mkdir -p {shlex.quote(str(python_source))}; "
+        f"cp -a -- {shlex.quote(source + '/sdks')} "
+        f"{shlex.quote(source + '/functions')} "
+        f"{shlex.quote(source + '/pytest.ini')} {shlex.quote(str(python_source))}/; "
+        f"cd {shlex.quote(str(python_source))}; exec {shlex.join(python_argv)}"
+    )
+
     return (
         CommandTaskSpec(
             task_id="release.source.gradle",
@@ -284,23 +313,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
         CommandTaskSpec(
             task_id="release.source.python-sdk",
             summary="Run Python SDK and function source tests",
-            argv=(
-                "uv",
-                "run",
-                "--project",
-                "sdks/python",
-                "--extra",
-                "test",
-                "--locked",
-                "pytest",
-                "-q",
-                "-o",
-                f"cache_dir={remote_source_dir.parent}/source-test-output/pytest-cache",
-                "sdks/python/tests",
-                "functions/python/word-stats/tests",
-                "functions/python/json-transform/tests",
-                "functions/python/roman-numeral/tests",
-            ),
+            argv=("bash", "-c", python_script),
             role="stack",
             options=CommandOptions(
                 remote_dir=source,

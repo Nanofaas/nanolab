@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -114,7 +116,9 @@ class RecipeExecutor:
         output = self.provider.root / "recipe-output" / "amd64" / group.flavor
         assert not (output / "distribution.json").exists()
         output.mkdir(parents=True, exist_ok=True)
-        (output / "gradle.log").write_text("complete Gradle log\n")
+        (
+            self.provider.root / "recipe-output/amd64/logs" / f"{group.flavor}.log"
+        ).write_text("complete Gradle log\n")
         if group.flavor == self.provider.fail_group:
             raise RuntimeError("assembly failed")
         (output / "distribution.json").write_text(json.dumps(_report(group)))
@@ -877,3 +881,36 @@ def test_inventory_rejects_build_outputs_from_undeclared_gradle_project(staged):
             request=object(),
             source_dir=ROOT + "/source",
         )
+
+
+def test_recipe_log_does_not_preclaim_producer_output(staged, tmp_path, monkeypatch):
+    original = RecipeExecutor.run
+
+    def run_with_output_claim(self, task, *, dry_run=False):
+        group = next(g for g in self.provider.groups if g.name in task.argv[-1])
+        output = self.provider.root / "recipe-output/amd64" / group.flavor
+        # Exercise real shell redirection before the producer claims an empty
+        # output. NanoFaaS cleanRecipe refuses nonempty, unowned directories.
+        claim = shlex.join(
+            (
+                sys.executable,
+                "-c",
+                "from pathlib import Path; import sys; "
+                "assert not list(Path(sys.argv[1]).iterdir()), "
+                "'unowned recipe output is not empty'; print('producer log')",
+                str(output),
+            )
+        )
+        script = task.argv[-1]
+        producer = script[2 : script.index("; } >")]
+        result = subprocess.run(
+            ("sh", "-c", self.provider.path(script.replace(producer, claim, 1))),
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return original(self, task, dry_run=dry_run)
+
+    monkeypatch.setattr(RecipeExecutor, "run", run_with_output_claim)
+    evidence, _, _ = _run(staged, tmp_path)
+    assert len([e for e in evidence if e.reference.endswith("gradle.log")]) == 3
