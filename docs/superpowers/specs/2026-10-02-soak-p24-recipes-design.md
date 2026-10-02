@@ -143,11 +143,15 @@ ownership/equal-work coverage. A qualifying P24 result requires the genuine full
 protocol, all existing coverage and evidence gates, and the unchanged criteria.
 This migration does not repair or relax existing RSS acceptance limits.
 
-Preserve the current completed-run resume and `--fresh` contracts. Recipe bytes,
-resolved policy/config, source and image identities remain binding. Prior legacy
-P24 evidence cannot be relabeled as recipe evidence or resumed across changed
-inputs. A new run must perform genuine preparation and applicable gates; no
-receipt conversion or verification-time rebuilding.
+Preserve the existing refusal of `--resume` and partial selections (`--only`,
+`--from`, `--until`): soak measurement requires its complete uninterrupted
+lifetime. Use a new unused run directory for each experiment and `soak-evaluate`
+for saved evidence. No new `--fresh`/resume mechanism is introduced.
+
+Recipe bytes, resolved policy/config, source and image identities remain
+binding in frozen evidence and offline verification. Prior legacy P24 evidence
+cannot be relabeled as recipe evidence. Missing or altered evidence cannot be
+repaired by rebuilding during verification or by converting receipts.
 
 ## Resource ownership and verification
 
@@ -170,7 +174,8 @@ Required implementation verification:
    exactly one source capture and publication, three complete matching receipts,
    no legacy application builds. Failures/tampering cannot proceed to deployment
    or produce qualifying prerequisite/P24 evidence.
-4. Cover completed-run resume identity checks and cleanup/cancellation boundaries
+4. Cover offline evidence identity checks, refusal of resumed/partial soak runs
+   and cleanup/cancellation boundaries
    through existing workflow/executor tests; no fake successful prerequisite
    receipts and no shortened P24 configuration used as qualification.
 5. Run pinned `validateRecipe`, the relevant tests, the full NanoLab suite and
