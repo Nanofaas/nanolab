@@ -1473,7 +1473,7 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
     )
 
     assert extracted == [(NANOFAAS_ROOT, "a" * 40, source_tree / "source")]
-    assert planned_roots == [sentinel_tree]
+    assert planned_roots == [sentinel_tree, sentinel_tree]
     assert request.source_tree == sentinel_tree
     assert request.image_plan.cells
 
@@ -1673,3 +1673,61 @@ def test_direct_request_requires_frozen_recipe_inputs(release_request):
         build_release_workflow(
             replace(release_request, recipe_groups=()), provider=RejectingProvider()
         )
+
+
+def test_preflight_freezes_arm64_matrix_and_profiles(release_request):
+    groups = release_request.arm_recipe_groups
+    assert tuple(len(g.cells) for g in groups) == (9, 12, 23)
+    assert release_request.arm_image_plan is not None
+    assert len(release_request.arm_image_plan.cells) == 44
+    assert {c.architecture for c in release_request.arm_image_plan.cells} == {"arm64"}
+    assert groups[0].tag == f"v{CURRENT_VERSION}-arm64-jvm"
+    assert groups[2].tag == f"v{CURRENT_VERSION}-arm64"
+    assert all(g.profile_bytes for g in groups)
+
+
+def test_arm_profile_drift_fails_before_acquisition(
+    release_request, tmp_path, canonical_release_configs
+):
+    tool = tmp_path / "tool"
+    tool.mkdir()
+    shutil.copytree(release_request.repo_root / "recipes", tool / "recipes")
+    profile = tool / "recipes/release-arm64-jvm.yaml"
+    profile.write_text("schemaVersion: 2\nname: invalid\n")
+    scenario, environment = canonical_release_configs
+    with pytest.raises(ValueError, match="release recipe"):
+        release_plan.build_release_request(
+            repo_root=tool,
+            nanofaas_root=release_request.nanofaas_root,
+            scenario_path=scenario,
+            environment_path=environment,
+            release_config_path=None,
+            run_dir=tmp_path / "run2",
+            performance_root=tmp_path / "performance2",
+            source_tree=tmp_path / "tree2",
+        )
+
+
+@pytest.mark.parametrize("mutation", ["missing", "cells", "hash"])
+def test_direct_request_requires_frozen_arm_inputs(release_request, mutation):
+    groups = release_request.arm_recipe_groups
+    if mutation == "missing":
+        changed = replace(release_request, arm_recipe_groups=())
+    elif mutation == "cells":
+        changed = replace(
+            release_request,
+            arm_recipe_groups=(
+                replace(groups[0], cells=groups[0].cells[:-1]),
+                *groups[1:],
+            ),
+        )
+    else:
+        changed = replace(
+            release_request,
+            arm_recipe_groups=(
+                replace(groups[0], profile_bytes=groups[0].profile_bytes + b"changed"),
+                *groups[1:],
+            ),
+        )
+    with pytest.raises(ValueError, match=r"(?i)frozen|recipe|matrix"):
+        build_release_workflow(changed, provider=RejectingProvider())

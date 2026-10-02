@@ -41,7 +41,7 @@ native execution preference persists; this plan still requires review before
 execution.
 
 Run test commands from this worktree with
-`NANOFAAS_ROOT=/home/michele/Documenti/nanofaas/.worktrees/nanolab-merge-e7914be0`.
+`NANOFAAS_ROOT=/tmp/nanofaas-release-arm64-pin`.
 Use `uv run --locked --package nanolab`. Baseline: 3,265 tests passed on integrated
 main in 195.74s; rerun the baseline before product changes. Retain long outputs
 in this plan's ignored execution workspace. No NanoFaaS edits; graph-first
@@ -60,11 +60,11 @@ receipts; `arm.py`/`build.py` retain ARM smoke but lose unused release Bake work
 
 **Interfaces:** Extend `prepare_release_recipe_groups(source_tree: Path, image_plan: ImagePlan, *, profiles_root: Path, architecture: ImageArchitecture = "amd64") -> tuple[ReleaseRecipeGroup, ...]`. Keep `ReleaseRecipeGroup` fields unchanged (cells already carry architecture). Add `ReleaseRequest.arm_image_plan: ImagePlan | None = None` and `arm_recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()`; executable request construction always fills both alongside existing AMD64 fields. Both plans come from the same extracted archive, never the live checkout.
 
-- [ ] Write `test_release_profiles_cover_both_architectures` with independently derived `ImagePlan`s: `assert counts == (9, 12, 23)` and `assert total == 44` for each architecture; exact tags/names/modules/native policies, default artifact-only CP and disjoint 88 references. Parameterize existing profile-drift tests for both architectures. Add `test_arm_profile_drift_fails_before_acquisition` and `test_arm_profile_freeze_uses_raw_bytes`: mutation after capture cannot change frozen bytes/hash/tag; a subsequent request sees the change.
-- [ ] Run `uv run --locked --package nanolab pytest packages/nanolab/tests/release/test_recipe.py packages/nanolab/tests/plans/test_release.py packages/nanolab/tests/cli/test_release_command.py -q --no-cov`. Expected: new architecture arguments/request fields or ARM profile/preflight assertions FAIL; existing baseline passes.
-- [ ] Implement the interface, three ARM profiles and preflight request fields. Reject mixed cells, wrong architecture/registry, duplicate or missing cells and altered policy before provider creation/acquisition. Validate the frozen ARM fields in direct workflow requests; update existing fixtures with genuine prepared groups. Add three ARM `validateRecipe` commands to the existing CI gate; preserve the three AMD commands.
-- [ ] Validate each of the six checked-in profiles in a fresh materialized pinned archive with `./gradlew validateRecipe -Precipe=<absolute-profile> --console=plain`. Expected: all six PASS; retain logs and confirm resolved eight modules. No native exporter support is claimed by this check.
-- [ ] Rerun the focused command above. Expected: all PASS; commit `Add frozen ARM64 release recipe profiles`.
+- [x] Write `test_release_profiles_cover_both_architectures` with independently derived `ImagePlan`s: `assert counts == (9, 12, 23)` and `assert total == 44` for each architecture; exact tags/names/modules/native policies, default artifact-only CP and disjoint 88 references. Parameterize existing profile-drift tests for both architectures. Add `test_arm_profile_drift_fails_before_acquisition` and `test_arm_profile_freeze_uses_raw_bytes`: mutation after capture cannot change frozen bytes/hash/tag; a subsequent request sees the change.
+- [x] Run `uv run --locked --package nanolab pytest packages/nanolab/tests/release/test_recipe.py packages/nanolab/tests/plans/test_release.py packages/nanolab/tests/cli/test_release_command.py -q --no-cov`. Expected: new architecture arguments/request fields or ARM profile/preflight assertions FAIL; existing baseline passes.
+- [x] Implement the interface, three ARM profiles and preflight request fields. Reject mixed cells, wrong architecture/registry, duplicate or missing cells and altered policy before provider creation/acquisition. Validate the frozen ARM fields in direct workflow requests; update existing fixtures with genuine prepared groups. Add three ARM `validateRecipe` commands to the existing CI gate; preserve the three AMD commands.
+- [x] Validate each of the six checked-in profiles in a fresh materialized pinned archive with `./gradlew validateRecipe -Precipe=<absolute-profile> --console=plain`. Expected: all six PASS; retain logs and confirm resolved eight modules. No native exporter support is claimed by this check.
+- [x] Rerun the focused command above. Expected: all PASS; commit `Add frozen ARM64 release recipe profiles`.
 
 ## Task 2: Share architecture-aware recipe execution and ownership
 

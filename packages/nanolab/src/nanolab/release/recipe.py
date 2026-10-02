@@ -12,7 +12,13 @@ from typing import Any
 
 import yaml
 
-from nanolab.images.plan import DEFAULT_REGISTRY, ImageCell, ImageFlavor, ImagePlan
+from nanolab.images.plan import (
+    DEFAULT_REGISTRY,
+    ImageArchitecture,
+    ImageCell,
+    ImageFlavor,
+    ImagePlan,
+)
 from nanolab.tasks.recipe import RecipeComponent, RecipeImage, _object, _string
 from nanolab.tasks.recipe_multiarch import sha256_digest, unique_json_object
 
@@ -204,15 +210,20 @@ def _check_profile(
 
 
 def prepare_release_recipe_groups(
-    source_tree: Path, image_plan: ImagePlan, *, profiles_root: Path
+    source_tree: Path,
+    image_plan: ImagePlan,
+    *,
+    profiles_root: Path,
+    architecture: ImageArchitecture = "amd64",
 ) -> tuple[ReleaseRecipeGroup, ...]:
     """Freeze profiles only after exact guarded matrix and policy validation."""
     if (
-        image_plan.registry != DEFAULT_REGISTRY
+        architecture not in {"amd64", "arm64"}
+        or image_plan.registry != DEFAULT_REGISTRY
         or not image_plan.cells
-        or any(cell.architecture != "amd64" for cell in image_plan.cells)
+        or any(cell.architecture != architecture for cell in image_plan.cells)
     ):
-        raise ValueError("Release recipes require the local AMD64 image matrix")
+        raise ValueError("Release recipes require a matching local architecture matrix")
     if len({cell.image for cell in image_plan.cells}) != len(image_plan.cells):
         raise ValueError("Duplicate release image matrix cells")
     modules = release_modules(source_tree)
@@ -221,7 +232,7 @@ def prepare_release_recipe_groups(
         cells = tuple(cell for cell in image_plan.cells if cell.flavor == flavor)
         if not cells:
             raise ValueError(f"Empty release recipe group {flavor}")
-        name = f"release-amd64-{flavor}"
+        name = f"release-{architecture}-{flavor}"
         try:
             raw = (profiles_root / f"{name}.yaml").read_bytes()
         except OSError as error:
@@ -230,7 +241,8 @@ def prepare_release_recipe_groups(
         _check_profile(profile, name=name, flavor=flavor, cells=cells, modules=modules)
         tag = (
             image_plan.version
-            + "-amd64"
+            + "-"
+            + architecture
             + ("" if flavor == "default" else "-" + flavor)
         )
         if any(

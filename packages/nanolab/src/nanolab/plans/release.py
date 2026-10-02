@@ -88,6 +88,8 @@ class ReleaseRequest:
     nanofaas_root: Path | None = None  # defaults to repo_root
     identity: ReleaseIdentity | None = None
     recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
+    arm_image_plan: ImagePlan | None = None
+    arm_recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
     source_archive: Path | None = None
     archive_digest: str = ""
     inventory_file: Path | None = None
@@ -206,6 +208,18 @@ def build_release_request(
     recipe_groups = prepare_release_recipe_groups(
         planning_root, image_plan, profiles_root=tool_root / "recipes"
     )
+    arm_image_plan = build_image_plan(
+        planning_root,
+        version_tag,
+        registry=image_plan.registry,
+        architectures=("arm64",),
+    )
+    arm_recipe_groups = prepare_release_recipe_groups(
+        planning_root,
+        arm_image_plan,
+        profiles_root=tool_root / "recipes",
+        architecture="arm64",
+    )
 
     after = git_state(source_root)
     if not after.clean or after.commit != source_commit:
@@ -238,6 +252,8 @@ def build_release_request(
         source_tree=planning_root,
         credentials=credentials,
         recipe_groups=recipe_groups,
+        arm_image_plan=arm_image_plan,
+        arm_recipe_groups=arm_recipe_groups,
         source_archive=source_archive,
         archive_digest=archive_digest,
         inventory_file=inventory_file,
@@ -284,6 +300,8 @@ def build_release_workflow(
 
     if (
         not request.recipe_groups
+        or request.arm_image_plan is None
+        or not request.arm_recipe_groups
         or request.source_archive is None
         or request.inventory_file is None
     ):
@@ -304,6 +322,27 @@ def build_release_workflow(
         for g in request.recipe_groups
     ):
         raise ValueError("Frozen recipe bytes changed")
+
+    arm_plan = request.arm_image_plan
+    if (
+        arm_plan.version != expected_image_tag
+        or arm_plan.registry != request.image_plan.registry
+        or not arm_plan.cells
+        or any(c.architecture != "arm64" for c in arm_plan.cells)
+    ):
+        raise ValueError("Frozen ARM recipe matrix does not match release")
+    arm_groups = request.arm_recipe_groups
+    if tuple(g.flavor for g in arm_groups) != ("jvm", "native", "default"):
+        raise ValueError("Release requires all three frozen ARM recipe groups")
+    if sorted(
+        (c for g in arm_groups for c in g.cells), key=lambda c: c.image
+    ) != sorted(arm_plan.cells, key=lambda c: c.image):
+        raise ValueError("Frozen ARM recipe image matrix changed")
+    if any(
+        g.profile_digest != "sha256:" + hashlib.sha256(g.profile_bytes).hexdigest()
+        for g in arm_groups
+    ):
+        raise ValueError("Frozen ARM recipe bytes changed")
 
     if provider is None:
         provider = provider_for(vm_request_for_role(env, "stack"), request.repo_root)

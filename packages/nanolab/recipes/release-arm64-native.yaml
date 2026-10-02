@@ -1,0 +1,136 @@
+schemaVersion: 2
+name: release-arm64-native
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: v0.22.0-arm64-native
+controlPlane:
+  modules:
+  - async-queue
+  - autoscaler
+  - build-metadata
+  - concurrency-control
+  - k8s-deployment-provider
+  - offload
+  - runtime-config
+  - sync-queue
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+    variant: native-o3-g1
+  container:
+    image: control-plane
+functions:
+- name: binary-envelope
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-binary-envelope
+- name: figlet
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-figlet
+- name: handler-envelope
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-handler-envelope
+- name: json-transform
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-json-transform
+- name: json-transform
+  sdk: java-lite
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: serial
+  container:
+    image: java-lite-json-transform
+- name: roman-numeral
+  sdk: java-lite
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: serial
+  container:
+    image: java-lite-roman-numeral
+- name: word-stats
+  sdk: java-lite
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: serial
+  container:
+    image: java-lite-word-stats
+- name: qr-code
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-qr-code
+- name: roman-numeral
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-roman-numeral
+- name: word-stats
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-word-stats
+services:
+- name: warm-echo
+  sdk: java
+  build:
+    mode: native
+    builder: container
+    native:
+      optimization: '3'
+      gc: G1
+  container:
+    image: java-warm-echo

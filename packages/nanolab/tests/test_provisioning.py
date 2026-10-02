@@ -354,7 +354,7 @@ def test_arm_builder_role_is_ensured_torn_down_and_base_provisioned(
         for kind, command in orchestrator.events
         if kind == "command"
         and command[0] == "ansible-playbook"
-        and "arm" in " ".join(command)
+        and command[command.index("-i") + 1] == "arm.internal,"
     ]
     assert "provision-base.yml" in arm_playbooks
     assert "provision-k3s.yml" not in arm_playbooks
