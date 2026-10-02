@@ -220,7 +220,6 @@ def test_unsupported_recipe_provider_fails_before_provisioning(tmp_path: Path) -
 def test_container_recipe_services_join_existing_validation_cycle(
     tmp_path: Path,
 ) -> None:
-    import yaml
 
     base = Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
     profile = tmp_path / "services.yaml"
@@ -271,7 +270,6 @@ def test_container_recipe_services_join_existing_validation_cycle(
 def test_invalid_recipe_service_fails_before_provisioning(
     tmp_path: Path, entries: list[dict[str, str]], message: str
 ) -> None:
-    import yaml
 
     from nanolab.plans.functions import resolve_recipe_services
 
@@ -288,7 +286,6 @@ def test_invalid_recipe_service_fails_before_provisioning(
 def test_watchdog_recipe_uses_artifact_probe_instead_of_registration(
     tmp_path: Path,
 ) -> None:
-    import yaml
 
     base = Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
     data = yaml.safe_load(base.read_text())

@@ -531,9 +531,9 @@ def _default_run_dir(
         from nanolab.plans.heap_analysis import unique_heap_analysis_run_dir
 
         return unique_heap_analysis_run_dir(runs_dir)
+    if run_dir is None and recipe and workflow in ("validate", "loadtest"):
+        return runs_dir / f"recipe-{uuid4().hex}"
     if run_dir is None and workflow in ("loadtest", "offload-loadtest"):
-        if workflow == "loadtest" and recipe:
-            return runs_dir / f"recipe-{uuid4().hex}"
         return runs_dir / "latest"
     return run_dir
 
@@ -1105,8 +1105,6 @@ def install_product_commands(
             paths.runs_dir,
             recipe=scenario_config.recipe_profile is not None,
         )
-        if scenario_config.recipe_profile is not None and effective_run_dir is None:
-            effective_run_dir = paths.runs_dir / f"recipe-{uuid4().hex}"
         if (
             scenario_config.workflow in ("soak", "heap-analysis")
             and effective_run_dir is not None

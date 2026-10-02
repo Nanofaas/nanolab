@@ -104,17 +104,19 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
     }
 
 
-def test_recipe_loadtest_gets_unique_default_run_directory(tmp_path: Path) -> None:
-    first = product_module._default_run_dir(None, "loadtest", tmp_path, recipe=True)
-    second = product_module._default_run_dir(None, "loadtest", tmp_path, recipe=True)
+@pytest.mark.parametrize("workflow", ["validate", "loadtest"])
+def test_recipe_workflows_get_unique_default_run_directory(
+    tmp_path: Path, workflow: str
+) -> None:
+    first = product_module._default_run_dir(None, workflow, tmp_path, recipe=True)
+    second = product_module._default_run_dir(None, workflow, tmp_path, recipe=True)
 
     assert first is not None and second is not None
     assert first != second
     assert first.parent == second.parent == tmp_path
     assert first.name.startswith("recipe-")
-    assert (
-        product_module._default_run_dir(None, "loadtest", tmp_path)
-        == tmp_path / "latest"
+    assert product_module._default_run_dir(None, workflow, tmp_path) == (
+        tmp_path / "latest" if workflow == "loadtest" else None
     )
 
 
