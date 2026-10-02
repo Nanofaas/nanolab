@@ -576,15 +576,13 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             else ()
         ),
         source_fingerprint=source_fingerprint(root),
-        build_control_plane=(kubernetes or config.backend == "containerd")
-        and config.recipe_profile is None,
+        build_control_plane=kubernetes or config.backend == "containerd",
         containerd_maven_repository=(
             repository_for_build(environment)
             if config.backend == "containerd"
             else None
         ),
-        push_function_images=not kubernetes and config.recipe_profile is None,
-        build_images=config.recipe_profile is None,
+        push_function_images=not kubernetes,
         recipe=recipe_binding,
         namespace=recipe_namespace or "nanofaas",
         helm_chart=recipe_chart,

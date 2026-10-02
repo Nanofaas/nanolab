@@ -1,6 +1,6 @@
 # Roadmap NanoLab: recipes v2
 
-Aggiornata il 1 ottobre 2026. Questa pagina raccoglie gli obiettivi di
+Aggiornata il 2 ottobre 2026. Questa pagina raccoglie gli obiettivi di
 migrazione e verifica; non sostituisce le specifiche e i piani di implementazione
 in `docs/superpowers/`.
 
@@ -147,6 +147,16 @@ le differenze reali fra backend e tipi di verifica.
 4. **Eliminare i percorsi legacy.** Rimuovere build duplicate e flag di
    scenario ridondanti dopo la migrazione dei rispettivi workflow. Fatto
    quando non restano chiamanti e la suite pertinente passa.
+   - [x] La richiesta condivisa `PlatformRequest` disattiva build e push legacy
+     quando riceve una `RecipeBinding`, anche tramite `dataclasses.replace`.
+     Rimossi i flag duplicati dai planner `validate` e `loadtest`. Verificati
+     i tre backend nella compilazione dei piani e il ciclo container JVM reale:
+     13 task passati, una sola `publishRecipe`, metadati, immagini, invocazione,
+     limiti e cleanup. I percorsi senza recipe e con immagini precompilate
+     conservano le proprie opzioni.
+   - [ ] Migrare i chiamanti rimanenti prima di rimuovere le build legacy:
+     load test degli altri backend, offload e soak containerd. La fase runtime
+     del soak usa già immagini fissate senza build e conserva i suoi guardrail.
 
 Per ogni tappa, aggiornare questa pagina con lo stato e collegare il profilo,
 lo scenario o la verifica introdotti.

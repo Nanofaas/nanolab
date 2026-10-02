@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks.compose import DockerComposeProject
-from nanolab.tasks.platform import PlatformFunction
+from nanolab.tasks.platform import Backend, PlatformFunction, add_platform
 from nanolab.tasks.recipe import (
     RecipeBinding,
     RecipeComponent,
@@ -39,6 +41,57 @@ class RecordingExecutor:
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.specs.append(task)
         return TaskResult(task_id="", status="passed", return_code=0, stdout="ok")
+
+
+@pytest.mark.parametrize("backend", ["container", "containerd", "k8s"])
+@pytest.mark.parametrize("attach_later", [False, True])
+def test_recipe_owns_platform_builds(
+    tmp_path: Path, backend: Backend, attach_later: bool
+) -> None:
+    def unexpected_acquire(_inputs: TaskInputs) -> RecipeDistribution:
+        raise AssertionError("Compilation must not publish a recipe")
+
+    published = Resource(
+        title="Published recipe",
+        acquire=unexpected_acquire,
+        release=lambda _inputs, _value: None,
+    )
+    binding = RecipeBinding(
+        distribution=published,
+        functions={"word-stats-java": ("word-stats", "java")},
+        run_dir=tmp_path / "run",
+    )
+    function = PlatformFunction(
+        name="word-stats-java",
+        image="unused:tag",
+        payload="{}",
+        build_argv=("./gradlew", "bootJar"),
+        image_build_argv=("docker", "build", "."),
+    )
+    request = ValidateWorkflowRequest(
+        backend=backend,
+        functions=(function,),
+        push_function_images=True,
+        recipe=None if attach_later else binding,
+    )
+    if attach_later:
+        request = replace(request, recipe=binding)
+    executor = RecordingExecutor()
+    workflow = Workflow(workflow_id="recipe-build-ownership")
+    platform = add_platform(workflow, request, executor=executor)
+    workflow.add(
+        CommandTask(title="Use platform", argv=("true",), executor=executor),
+        requires=platform.functions,
+    )
+
+    titles = [entry.task.title for entry in workflow.compile().tasks]
+    assert not any(title.startswith(("Build", "Push")) for title in titles)
+    assert titles.index("Published recipe") < titles.index("Acquire word-stats-java")
+    assert "Acquire word-stats-java" in titles
+    assert not (request.build_images or request.build_control_plane)
+    assert not request.push_function_images
+    assert executor.specs == []
+    assert not binding.run_dir.exists()
 
 
 def distribution(tmp_path: Path) -> RecipeDistribution:

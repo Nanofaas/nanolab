@@ -132,9 +132,12 @@ class PlatformRequest:
         return f"{title} on the {self.label}" if self.label else title
 
     def __post_init__(self) -> None:
-        """Reject a request with no functions, or a k8s build with no image."""
+        """Give recipes build ownership and validate the platform inputs."""
         if not self.functions:
             raise ValueError("a platform request needs at least one function")
+        if self.recipe is not None:
+            for flag in ("build_images", "build_control_plane", "push_function_images"):
+                object.__setattr__(self, flag, False)
         if (
             self.backend == "k8s"
             and not self.build_images

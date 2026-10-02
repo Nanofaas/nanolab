@@ -1656,13 +1656,7 @@ def build_loadtest_plan(
             functions=functions,
             additional_modules=additional_modules,
         )
-        request = replace(
-            request,
-            recipe=binding,
-            build_images=False,
-            push_function_images=False,
-            build_control_plane=False,
-        )
+        request = replace(request, recipe=binding)
     else:
         platform_requires = _build_platform_requires(
             backend,
