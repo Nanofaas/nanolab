@@ -122,14 +122,49 @@ Extend `build_registry_push_phase` with explicit `architecture`/`role`, replace 
 
 **Interfaces:** Consumes the Task 1–5 executable DAG and unchanged VM/credential contracts. Produces explicit local/capability/slice/canonical PASS or incomplete records, without public publication/signing. Local implementation may proceed after Task 1 profile/catalog validation; no VM gate is marked complete by fixtures or host probes.
 
-- [ ] Run `uv run --locked --package nanolab pytest packages/nanolab/tests -q` and `uv run --locked --package nanolab nanolab-quality`. Expected: complete suite PASS and `Quality checks passed`. Run `uv run --locked --package nanolab ruff format --check --config packages/nanolab/pyproject.toml packages/nanolab`; expected all formatted. Run `uv run --locked --package nanolab bandit -r packages/nanolab/src/nanolab -c packages/nanolab/pyproject.toml -f json`; expected only the four baseline B101 LOWs, retained nonzero status and no new findings. Run `git diff --check`; expected clean.
-- [ ] Prepare private Azure environment/release credential config under the verification root from existing examples; validate clean pinned source, permissions and executable preflight without logging secrets. Confirm plan-mode `--until` contracts from Task 5 before cloud work. Expected: exact 88-cell request, six frozen profiles and no provider call during plan inspection; unavailable credentials/cloud access leave VM gates incomplete.
+- [x] Run `uv run --locked --package nanolab pytest packages/nanolab/tests -q` and `uv run --locked --package nanolab nanolab-quality`. Expected: complete suite PASS and `Quality checks passed`. Run `uv run --locked --package nanolab ruff format --check --config packages/nanolab/pyproject.toml packages/nanolab`; expected all formatted. Run `uv run --locked --package nanolab bandit -r packages/nanolab/src/nanolab -c packages/nanolab/pyproject.toml -f json`; expected only the four baseline B101 LOWs, retained nonzero status and no new findings. Run `git diff --check`; expected clean.
+- [x] Prepare private Azure environment/release credential config under the verification root from existing examples; validate clean pinned source, permissions and executable preflight without logging secrets. Confirm plan-mode `--until` contracts from Task 5 before cloud work. Expected: exact 88-cell request, six frozen profiles and no provider call during plan inspection; unavailable credentials/cloud access leave VM gates incomplete.
 - [ ] On an owned native ARM64 release-compatible VM, using the same frozen archive/profiles and release BuildKit policy, prove actual named-builder selection/local loading plus real Oracle/O3/G1/JFR and Community/O3/serial compiled binary export. Inspect effective commands/options, executable architecture and actual builder facts; schema-only/mock exports do not qualify. Expected: capability PASS; unsupported policy stops and revises spec, access failure leaves an incomplete gate with compensated resources.
 - [ ] Run an isolated real ARM assembly/staging-push/runtime slice using shared production helpers, not a modified release DAG or fabricated prerequisite receipts. Retain all 44 IDs/platforms, three reports/logs, inputs/archive/inventory/build facts, registry digests and all existing server/watchdog ARM smoke outcomes. Run unchanged verification/resume with retained infrastructure and prove zero assembly/push; compensate owned resources and verify unrelated AMD images/resources survive. Expected: native slice PASS with exact scope; this is not the canonical DAG verdict.
 - [ ] Run `uv run --locked --package nanolab nanolab run packages/nanolab/scenarios-v2/release.yaml --environment /tmp/nanolab-release-arm64-verification/environment.yaml --release-config /tmp/nanolab-release-arm64-verification/release-config.yaml --run-dir /tmp/nanolab-release-arm64-verification/run --until test-arm64-images --keep`. Expected: genuine source tests, AMD64 build/push, three benchmarks, aggregate/regression, ARM64 build/push/smoke; zero public push/signing. Retain evidence. MFA or an existing failed regression gate is recorded without bypass/threshold changes.
 - [ ] With retained canonical infrastructure run the same bounded command with `--resume --keep`; expected no assembly/push for unchanged verified phases. Run matching `--teardown` with the same scenario/environment/config/run-dir after success or failure; expected owned resources released, unrelated resources preserved and diagnostics retained. A failed earlier step still requires cleanup, not a success receipt.
-- [ ] Document supported profiles, assembly/push and CLI boundary changes, exact local/native/canonical results and pending gates in README/profile docs/roadmap. Keep ARM migration unchecked until required real evidence passes; retain AMD64's independent pending gate. Expected: claims match actual logs; no qualified public release claimed.
-- [ ] Review the whole branch against the spec with the native execution workflow's fresh final reviewer, fix Important/Critical findings with regression tests and green suite, record minors/rulings. Commit `Document ARM64 recipe release verification gates` unless all required real gates passed, in which case use `Document verified ARM64 recipe release builds`. Merge/push remains the user's later integration choice.
+- [x] Document supported profiles, assembly/push and CLI boundary changes, exact local/native/canonical results and pending gates in README/profile docs/roadmap. Keep ARM migration unchecked until required real evidence passes; retain AMD64's independent pending gate. Expected: claims match actual logs; no qualified public release claimed.
+- [x] Review the whole branch against the spec with the native execution workflow's fresh final reviewer, fix Important/Critical findings with regression tests and green suite, record minors/rulings. Commit `Document ARM64 recipe release verification gates` unless all required real gates passed, in which case use `Document verified ARM64 recipe release builds`. Merge/push remains the user's later integration choice.
+
+### Task 6 results — 2 October 2026
+
+Local verification is complete; native qualification remains incomplete.
+
+| Check | Actual result |
+| --- | --- |
+| Fresh full NanoLab suite | 3362 passed, 315.93 seconds |
+| `nanolab-quality` | PASS: zero type errors, three import contracts kept |
+| Ruff format / diff check | PASS: 419 files formatted / clean diff |
+| Bandit | Exit 1 retained: only four existing B101 LOW findings; no new findings |
+| Six pinned `validateRecipe` checks | PASS; schema validation only |
+| Executable preflight | PASS: 88 distinct images, six frozen profiles, private credentials validated, no provider constructed |
+| Native ARM capability and 44-image staging/runtime slice | INCOMPLETE: no provisioned ARM VM |
+| Canonical workflow | Two real attempts stopped at first stack acquisition: Azure `401 RequestDisallowedByAzure`, MFA required, including after renewed login |
+| Unchanged real resume | INCOMPLETE: no successfully provisioned infrastructure or build/push receipts |
+| Teardown | Both matching commands exited 0; subsequent read-only Azure inventory for canonical release names returned `[]` |
+| Whole-branch review | No Critical, Important or Minor findings; 65 focused tests independently passed |
+
+No assembly, benchmark, ARM smoke, public publication or signing was reached.
+Policies and thresholds are unchanged. A read-only token inspection found no
+`mfa` authentication-method claim; login renewal alone did not resolve Azure's
+management rejection. Private evidence is retained in
+`/tmp/nanolab-release-arm64-verification/` (`canonical.log`,
+`canonical-retry.log`, both teardown logs/inventories, `preflight-summary.json`
+and `gates.json`). Pinned Gradle validation is retained in
+`/tmp/nanolab-release-arm64-capability/`. The ignored task workspace is retained
+for continuation, since Task 6's mandatory native gates are still open.
+
+Review boundaries remain explicit: native binary capability, actual 44-image
+transport/runtime, canonical success, real resume and AMD preservation, cleanup
+after partial ARM build/push, and independent AMD qualification require live
+proof. Public publication/signing and P24/backend/threshold changes are outside
+these bounded runs; their existing barriers remain in force. The review closes
+local implementation review only.
 
 ## Plan self-review and handoff
 

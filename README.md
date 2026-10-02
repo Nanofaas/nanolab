@@ -96,36 +96,46 @@ uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-li
 Nothing in this gate should modify `uv.lock`; if it does, run `uv lock` and
 commit the updated lockfile separately.
 
-## AMD64 release recipes
+## AMD64 and ARM64 release recipes
 
-The AMD64 release build uses three reusable profiles from
+Each native release VM assembles three reusable profiles from
 [`packages/nanolab/recipes`](packages/nanolab/recipes):
 
-| Profile | Images at NanoFaaS `e7914be0` | Build policy |
+| Profiles (one per architecture) | Images at NanoFaaS `e7914be0` | Build policy |
 | --- | ---: | --- |
-| `release-amd64-jvm.yaml` | 9 | JVM G1/C2: control plane, Java functions and warm-echo |
-| `release-amd64-native.yaml` | 12 | Oracle/O3/G1/JFR for Spring; Community/O3/serial for Java-lite |
-| `release-amd64-default.yaml` | 23 | Bash, Go, JavaScript, Python and watchdog Dockerfiles |
+| `release-{amd64,arm64}-jvm.yaml` | 9 per architecture | JVM G1/C2: control plane, Java functions and warm-echo |
+| `release-{amd64,arm64}-native.yaml` | 12 per architecture | Oracle/O3/G1/JFR for Spring; Community/O3/serial for Java-lite |
+| `release-{amd64,arm64}-default.yaml` | 23 per architecture | Bash, Go, JavaScript, Python and watchdog Dockerfiles |
 
-The default profile also assembles a JVM control-plane artifact without an
-image. Release tags are overridden from the guarded version; the original
-44-image matrix is preserved. The eight explicit modules match the pinned
-source's resolved `all` selection.
+The default control plane is an artifact only. All six profiles select the
+same eight explicit modules and receive the guarded release version as their
+tag. The frozen archive and profiles define 44 images per architecture.
 
-The workflow runs three root `assembleRecipe` commands on its native AMD64
-Azure stack VM using the owned Buildx builder. A separate phase pushes the
-verified local images to the VM registry. It retains profiles, source inventory,
-builder facts, complete logs and raw reports under
-`<run-dir>/releases/<version>/recipe-evidence/amd64/`; resume verifies these files
-and local image IDs. Source tests, benchmark gates, publication and signing keep
-their existing order. ARM64 continues using Bake.
+Both assembly phases use an owned Buildx builder with local loading. Separate
+staging phases verify local IDs before pushing to the stack registry. ARM64
+assembly needs no registry tunnel; ARM64 push and smoke acquire it. Retained
+profiles, source inventory, builder facts, complete logs and raw reports live
+under `<run-dir>/releases/<version>/recipe-evidence/<architecture>/`. Resume
+verifies retained files and each local image on its owning VM.
 
-**Verification status:** profile validation, local tests, input guards and the
-staging-push CLI prefix are verified. Native AMD64 assembly, native export,
-runtime probes and real resume remain unverified while Azure provisioning is
-blocked by its MFA requirement. This migration is not release-qualified. See the
-[implementation plan](docs/superpowers/plans/2026-10-01-release-amd64-recipes.md)
-for retained evidence and the remaining gates.
+CLI boundaries are `--until build-arm64-images` (assembly only),
+`--until push-arm64-images-to-local-registry` (also staging push), and
+`--until test-arm64-images` (also smoke, before public publication/signing).
+Journals from the previous combined ARM build/push DAG fail topology validation;
+use a new `--run-dir` to rerun the genuine source tests and benchmark gates.
+Existing journals are preserved. Source tests, the three benchmarks, regression,
+publication and signing retain their order and policies.
+
+**Verification status (2 October 2026):** all six pinned `validateRecipe` checks,
+local tests and executable preflight pass. The real canonical run reached stack
+VM acquisition, where Azure rejected network resource creation twice (including after renewed login) with
+`401 RequestDisallowedByAzure` because MFA was required. No image assembly,
+benchmark or ARM smoke ran. Native ARM64 capability, the isolated staging/runtime
+slice and real resume remain incomplete; AMD64 qualification is independently
+pending. These migrations are not release-qualified. Evidence is retained under
+`/tmp/nanolab-release-arm64-verification/`; see the
+[ARM64 plan](docs/superpowers/plans/2026-10-02-release-arm64-recipes.md) and
+[AMD64 plan](docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).
 
 ## Roadmap
 

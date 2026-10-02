@@ -260,19 +260,24 @@ and exit code zero, platform invocation and cleanup. CI validates the profile.
 Evidence is in `/tmp/nanolab-recipe-watchdog-e2e-20260930/`, with log
 `/tmp/nanolab-recipe-watchdog-e2e-20260930.log`.
 
-## AMD64 release profiles
+## AMD64 and ARM64 release profiles
 
-`release-amd64-jvm.yaml`, `release-amd64-native.yaml` and
-`release-amd64-default.yaml` describe the complete guarded release matrix.
-They are assembled on the native AMD64 release VM; their checked-in tags are
-manual defaults, replaced by the release version during execution.
+`release-{amd64,arm64}-{jvm,native,default}.yaml` are six frozen release profiles.
+Each native VM assembles its JVM/native/default groups: 9/12/23 images at
+NanoFaaS `e7914be0`, with identical explicit module selections. The default
+control plane is an artifact only. Checked-in tags are manual defaults, replaced
+by the guarded release version.
 
-The JVM/native/default groups produce 9/12/23 images at NanoFaaS `e7914be0`.
-The default control plane is an artifact only. Spring native builds select
-Oracle/O3/G1 with effective JFR; Java-lite uses Community/O3/serial.
-The release pushes images in its separate staging phase after checking reports
-and local IDs. ARM64 remains on its existing Bake path.
+Spring native builds select Oracle/O3/G1 with effective JFR; Java-lite selects
+Community/O3/serial. Both architectures use the selected owned Buildx builder
+with local loading. Each separate staging push verifies all 44 local IDs and
+platforms before its first push. ARM assembly runs without the registry tunnel;
+push and smoke acquire it. Reports and logs are retained by architecture.
 
-All three profiles pass pinned `validateRecipe`. Native AMD64 build/export and
-runtime verification remain gated on Azure MFA; see the
-[release verification plan](../../../docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).
+All six profiles pass pinned `validateRecipe`. Local assembly/push/resume guards
+are tested. On 2 October 2026 the real canonical run stopped at stack VM
+provisioning with Azure's MFA requirement, also after renewed login, before any build. Native ARM binary
+export, the real 44-image staging/runtime slice and unchanged real resume remain
+incomplete; AMD64 native qualification remains independently pending. See the
+[ARM64 verification plan](../../../docs/superpowers/plans/2026-10-02-release-arm64-recipes.md)
+and [AMD64 plan](../../../docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).

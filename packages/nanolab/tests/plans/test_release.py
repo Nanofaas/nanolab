@@ -33,6 +33,7 @@ from nanolab.release.model import (
     digest_path,
 )
 from nanolab.release.publish import PublishPlan, build_publish_plan
+from nanolab.release.recipe import ReleaseRecipeGroup
 from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmInfo
@@ -254,6 +255,8 @@ def test_build_release_workflow_compiles_to_a_workflow():
 
 
 class _ArmWorkflowExecutor:
+    provider: "_ArmWorkflowProvider"
+
     def __init__(self) -> None:
         self.commands = []
         # Set by a test to fail a chosen command; None means everything passes.
@@ -331,7 +334,7 @@ class _ArmWorkflowProvider:
         self.remote_files: dict[str, bytes] = {}
         self.local_ids: dict[str, str] = {}
         self.inventory = b""
-        self.recipe_groups = ()
+        self.recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
         self.remote_root = ""
 
     def connection_host(self, _request) -> str:
@@ -543,6 +546,7 @@ def _arm_failure_workflow(
             cosign_password=secret_paths[2],
         ),
     )
+    assert request.inventory_file is not None
     provider.inventory = request.inventory_file.read_bytes()
     provider.recipe_groups = request.arm_recipe_groups
     provider.remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
@@ -1597,6 +1601,7 @@ def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
 
     workflow = build_release_workflow(request, provider=RejectingProvider())
     arm = _phase_named(workflow, "Build ARM64 images")
+    assert request.arm_image_plan is not None
     assert arm.expected_images == tuple(
         cell.image for cell in request.arm_image_plan.cells
     )

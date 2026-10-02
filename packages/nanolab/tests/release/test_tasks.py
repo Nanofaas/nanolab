@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from sonata_engine import (
@@ -11,6 +11,7 @@ from sonata_engine import (
     TaskOutcome,
     Workflow,
 )
+from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.release import tasks as release_tasks
@@ -1043,7 +1044,7 @@ def _arm_recipe_phases(tmp_path):
         run_dir=arguments["run_dir"],
         image_plan=arguments["image_plan"],
         release_images=phase.expected_images,
-        executor=executor,
+        executor=cast(RoleBoundCommandTaskExecutor, executor),
         prerequisite_phases=(prerequisite,),
         assembly=phase,
         architecture="arm64",

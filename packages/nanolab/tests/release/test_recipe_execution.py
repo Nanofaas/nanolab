@@ -17,7 +17,7 @@ import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
-from nanolab.images.plan import build_image_plan
+from nanolab.images.plan import ImageArchitecture, build_image_plan
 from nanolab.release import recipe_execution as execution
 from nanolab.release.resources import release_recipe_inputs_resource
 
@@ -29,7 +29,7 @@ ROOT = "/home/azureuser/nanofaas-release/v9.9.9"
 class LocalProvider:
     """Run transport commands on real files; substitute only the VM root."""
 
-    def __init__(self, root: Path, architecture="amd64"):
+    def __init__(self, root: Path, architecture: ImageArchitecture = "amd64"):
         self.root = root
         self.architecture = architecture
         self.host = "x86_64" if architecture == "amd64" else "aarch64"
@@ -266,7 +266,7 @@ def _run(
     corrupt_archive=False,
     corrupt_config=False,
     replace_after_default=False,
-    architecture="amd64",
+    architecture: ImageArchitecture = "amd64",
     host=None,
     host_os=None,
     daemon=None,
@@ -315,11 +315,8 @@ def _run(
         source_commit="a" * 40,
         archive_digest="sha256:" + hashlib.sha256(archive_bytes).hexdigest(),
         builder_name="owned-builder",
-        **(
-            {"architecture": architecture, "role": "arm-builder"}
-            if architecture == "arm64"
-            else {}
-        ),
+        architecture=architecture,
+        role="arm-builder" if architecture == "arm64" else "stack",
     )
     return result, provider, executor
 
@@ -554,7 +551,9 @@ def test_archive_staging_matches_planning_permissions_despite_vm_umask(tmp_path)
     )
 
 
-def _recipe_phase(staged, tmp_path, *, architecture="amd64", **overrides):
+def _recipe_phase(
+    staged, tmp_path, *, architecture: ImageArchitecture = "amd64", **overrides
+):
     from nanolab.plans.release_phases import build_recipe_assembly_phase
     from nanolab.release.model import ReleaseIdentity, digest_path
     from nanolab.release.tasks import source_test_task
@@ -1289,7 +1288,7 @@ def _both_recipe_workflow(tmp_path):
             architecture = "arm64" if request == "arm-builder" else "amd64"
             return prepared[architecture]["provider"].exec_argv(request, argv, **kwargs)
 
-    executor = Executor()
+    executor = cast(RoleBoundCommandTaskExecutor, Executor())
     identity = prepared["amd64"]["phase"].identity
     run_dir = tmp_path / "run"
     gate_file = tmp_path / "gate-decision.json"
@@ -1302,7 +1301,7 @@ def _both_recipe_workflow(tmp_path):
     gate = regression_gate_task(
         identity=identity, run_dir=run_dir, phase_inputs={}, work=gate_work
     )
-    for architecture, role in (("amd64", "stack"), ("arm64", "arm-builder")):
+    for architecture in ("amd64", "arm64"):
         item = prepared[architecture]
         args = item["args"] | {"executor": executor}
         if architecture == "arm64":
@@ -1317,7 +1316,7 @@ def _both_recipe_workflow(tmp_path):
             prerequisite_phases=(),
             assembly=build,
             architecture=architecture,
-            role=role,
+            role="stack" if architecture == "amd64" else "arm-builder",
         )
         item.update(build=build, push=push)
 

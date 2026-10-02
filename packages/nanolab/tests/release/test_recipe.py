@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nanolab.images.plan import build_image_plan
+from nanolab.images.plan import ImageArchitecture, build_image_plan
 from nanolab.release import recipe
 
 SOURCE = Path(os.environ["NANOFAAS_ROOT"])
@@ -29,7 +29,7 @@ MODULES = (
 )
 
 
-def _groups(profiles: Path = PROFILES, architecture="amd64"):
+def _groups(profiles: Path = PROFILES, architecture: ImageArchitecture = "amd64"):
     plan = build_image_plan(SOURCE, "v9.9.9", architectures=(architecture,))
     if architecture == "amd64":
         return recipe.prepare_release_recipe_groups(
@@ -105,7 +105,7 @@ def profiles(tmp_path: Path) -> Path:
 )
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_release_profile_drift_fails_before_acquisition(
-    profiles: Path, mutation: str, architecture: str
+    profiles: Path, mutation: str, architecture: ImageArchitecture
 ) -> None:
     path = profiles / f"release-{architecture}-jvm.yaml"
     data = yaml.safe_load(path.read_text())
