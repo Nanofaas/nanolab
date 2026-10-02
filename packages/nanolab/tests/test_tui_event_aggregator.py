@@ -1,6 +1,5 @@
 import pytest
 from sonata_engine.workflow.event_builders import build_log_event, build_task_event
-from sonata_engine.workflow.models import WorkflowState
 
 from nanolab.tui.event_aggregator import WorkflowEventAggregator
 
@@ -93,21 +92,20 @@ def test_event_aggregator_reuses_planned_placeholder_when_log_arrives_before_tas
     assert snapshot.phases[0].status == "running"
 
 
-def test_event_aggregator_routes_label_only_events_to_matching_planned_steps() -> None:
+def test_event_aggregator_routes_task_events_to_matching_planned_steps() -> None:
     bridge = WorkflowEventAggregator(
         planned_steps=["preflight", "bootstrap", "load_k6"]
     )
 
-    preflight = bridge.upsert_phase("preflight")
-    bridge.mark_phase_running(preflight)
-    bridge.mark_phase_success(preflight)
-
-    bootstrap = bridge.upsert_phase("bootstrap")
-    bridge.mark_phase_running(bootstrap)
-    bridge.mark_phase_success(bootstrap)
-
-    load_k6 = bridge.upsert_phase("load_k6")
-    bridge.mark_phase_running(load_k6)
+    for title, kinds in (
+        ("preflight", ("task.started", "task.passed")),
+        ("bootstrap", ("task.started", "task.passed")),
+        ("load_k6", ("task.started",)),
+    ):
+        for kind in kinds:
+            bridge.handle_event(
+                build_task_event(kind=kind, task_id=f"task.{title}", title=title)
+            )
 
     snapshot = bridge.snapshot()
     assert [phase.label for phase in snapshot.phases] == [
@@ -336,40 +334,6 @@ def test_unresolved_parent_task_does_not_fall_back_to_planned_row() -> None:
         "Teardown VM",
         "Verify",
     ]
-
-
-@pytest.mark.parametrize("status", ["success", "failed", "cancelled"])
-def test_complete_running_phases_terminalizes_nested_children(
-    status: WorkflowState,
-) -> None:
-    bridge = WorkflowEventAggregator(planned_steps=["Run verification"])
-    bridge.handle_event(
-        build_task_event(
-            kind="task.started",
-            flow_id="e2e.k3s_junit_curl",
-            task_id="tests.run_verification",
-            title="Run verification",
-        )
-    )
-    bridge.handle_event(
-        build_task_event(
-            kind="task.started",
-            flow_id="e2e.k3s_junit_curl",
-            task_id="verify.health",
-            parent_task_id="tests.run_verification",
-            title="Verify health",
-        )
-    )
-
-    bridge.complete_running_phases(status=status, detail="workflow finished")
-
-    snapshot = bridge.snapshot()
-    assert snapshot.phases[0].status == status
-    assert snapshot.phases[0].detail == "workflow finished"
-    assert snapshot.phases[0].finished_at is not None
-    assert snapshot.phases[0].children[0].status == status
-    assert snapshot.phases[0].children[0].detail == "workflow finished"
-    assert snapshot.phases[0].children[0].finished_at == snapshot.phases[0].finished_at
 
 
 def test_log_buffer_prefixes_stderr_and_trims_oldest_lines() -> None:

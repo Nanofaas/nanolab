@@ -84,48 +84,6 @@ class WorkflowDashboard:
         self._aggregator.toggle_logs()
         self._sync()
 
-    def mark_step_running(self, step_index: int) -> None:
-        """Mark the 1-based step at ``step_index`` as running."""
-        self._aggregator.mark_phase_running(step_index)
-        self._sync()
-
-    def mark_step_success(self, step_index: int) -> None:
-        """Mark the step at ``step_index`` as succeeded."""
-        self._aggregator.mark_phase_success(step_index)
-        self._sync()
-
-    def mark_step_failed(self, step_index: int, detail: str = "") -> None:
-        """Mark the step at ``step_index`` as failed, with an optional detail."""
-        self._aggregator.mark_phase_failed(step_index, detail=detail)
-        self._sync()
-
-    def mark_step_cancelled(self, step_index: int, detail: str = "") -> None:
-        """Mark the step at ``step_index`` as cancelled, with an optional detail."""
-        self._aggregator.mark_phase_cancelled(step_index, detail=detail)
-        self._sync()
-
-    def upsert_step(
-        self, label: str, *, activate: bool = False, detail: str = ""
-    ) -> int:
-        """Create or update the step labelled ``label`` and return its 1-based index.
-
-        ``activate`` marks the step running straight away; ``detail`` sets the
-        secondary text shown beside the label.
-        """
-        index = self._aggregator.upsert_phase(label, detail=detail, activate=activate)
-        self._sync()
-        return index
-
-    def complete_running_steps(
-        self,
-        *,
-        state: WorkflowState = "success",
-        detail: str = "",
-    ) -> None:
-        """Resolve every still-running step to ``state`` and repaint."""
-        self._aggregator.complete_running_phases(status=state, detail=detail)
-        self._sync()
-
     def apply_event(self, event: WorkflowEvent) -> None:
         """Fold one engine event into the dashboard and refresh the rendered state."""
         self._aggregator.handle_event(event)

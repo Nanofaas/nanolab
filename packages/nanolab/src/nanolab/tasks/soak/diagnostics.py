@@ -19,7 +19,7 @@ from typing import Any, Protocol, TypeGuard
 from uuid import uuid4
 
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact
-from nanolab.tasks.soak.models import Availability, CriterionResult, Target
+from nanolab.tasks.soak.models import CriterionResult, Target
 
 _RECEIPT_BYTES = 65536
 # The operation vocabulary: every name this system knows, in any runtime.
@@ -561,43 +561,6 @@ class NodeDiagnosticAdapter(_RuntimeAdapter):
             "gc": "HeapProfiler.collectGarbage",
             "heap_dump": "HeapProfiler.takeHeapSnapshot",
         }[operation]
-
-
-class NativeDiagnosticAdapter(_RuntimeAdapter):
-    """Offer only the operations an operator explicitly configured.
-
-    A native image has no jcmd, so nothing is inferred for it.
-    """
-
-    runtime = "native"
-
-    def __init__(
-        self, *args, commands: Mapping[str, tuple[str, ...]] | None = None, **kwargs
-    ):
-        """Accept the explicitly configured commands, and advertise only those."""
-        super().__init__(*args, **kwargs)
-        self._commands = dict(commands or {})
-        if any(
-            name not in OPERATION_VOCABULARY
-            or not argv
-            or any(not part for part in argv)
-            for name, argv in self._commands.items()
-        ):
-            raise ValueError("invalid explicitly supported native diagnostic command")
-        self.supported = frozenset(self._commands)
-
-    def _command(
-        self, target: Target, operation: str, output: Path
-    ) -> tuple[tuple[str, ...], str | None]:
-        return tuple(
-            part.format(pid=target.process_id, output=str(output))
-            for part in self._commands[operation]
-        ), None
-
-    @staticmethod
-    def metric_availability(metric: str) -> Availability:
-        """Report JVM metrics as not applicable here, never as zero."""
-        return "not_applicable" if metric.startswith("jvm_") else "unavailable"
 
 
 def validate_attribution(

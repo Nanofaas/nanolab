@@ -15,31 +15,6 @@ from nanolab.config.soak import SoakConfig
 from nanolab.tasks.soak.ports import WORKLOAD_RECEIPT, Clock, WorkloadDriver
 
 
-def phase_order() -> tuple[str, ...]:
-    """Return the ordered phases of a complete soak run."""
-    return (
-        "build-preflight",
-        "source-snapshot",
-        "build-images",
-        "publish-images",
-        "freeze-digests",
-        "deploy",
-        "preflight",
-        "prerequisites",
-        "warmup",
-        "baseline-drain",
-        "baseline",
-        "baseline-diagnostics",
-        "steady",
-        "drain",
-        "final-diagnostics",
-        "observer-stop",
-        "evaluate",
-        "report",
-        "cleanup",
-    )
-
-
 class Sampling(Protocol):
     """Define the observer operations needed by the measurement lifetime."""
 

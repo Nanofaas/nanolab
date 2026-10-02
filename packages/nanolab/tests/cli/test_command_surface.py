@@ -1,7 +1,6 @@
 import json
 import subprocess
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -46,15 +45,6 @@ def test_multiarch_rejects_incomplete_cleanup_or_resume_before_provisioning(
 @pytest.fixture(autouse=True)
 def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)
-
-
-@dataclass
-class _Task:
-    task_id: str = "test.task"
-    title: str = "Test task"
-
-    def run(self) -> None:
-        pass
 
 
 def _sonata_workflow(*, fails: str | None = None) -> SonataWorkflow:

@@ -75,15 +75,3 @@ def nanofaas_root_from_env() -> Path:
 def default_tool_paths() -> ToolPaths:
     """Return the tool paths for the checkout named by ``NANOFAAS_ROOT``."""
     return ToolPaths.from_roots(nanofaas_root_from_env(), discover_tool_root())
-
-
-def scenario_path_from_env(cli_path: Path | None = None) -> Path | None:
-    """Return the scenario path to use, preferring an explicit CLI argument.
-
-    Falls back to ``NANOFAAS_SCENARIO_PATH``; None when neither is supplied.
-    """
-    if cli_path is not None:
-        return cli_path
-
-    s = os.getenv("NANOFAAS_SCENARIO_PATH", "").strip()
-    return Path(s) if s else None

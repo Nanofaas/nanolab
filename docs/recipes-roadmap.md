@@ -159,6 +159,12 @@ le differenze reali fra backend e tipi di verifica.
      `build: docker` ridondante, directory automatiche gestite nella stessa
      funzione e release con chiamate dirette; eliminati import e assert
      duplicati nei test.
+   - [x] Pulizia dei residui confermati da Vulture: rimossi il vecchio writer
+     del manifest di confronto e la relativa build senza recipe, i metodi VM
+     e l'adapter Ansible non più chiamati, i mutatori TUI sostituiti dagli
+     eventi Sonata e gli helper soak/scenario utilizzati solo dai vecchi test.
+     Conservati i playbook attivi, gli hook dei framework e i guardrail delle
+     recipe. La dashboard è verificata con le suite TUI e una prova in PTY.
    - [ ] Migrare i chiamanti rimanenti prima di rimuovere le build legacy:
      load test degli altri backend, offload e soak containerd. La fase runtime
      del soak usa già immagini fissate senza build e conserva i suoi guardrail.

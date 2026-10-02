@@ -2,7 +2,7 @@
 
 import math
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import asdict
 from threading import Event, Lock, Thread
 
@@ -18,26 +18,6 @@ _PHASES = frozenset(
 def _positive(value: float) -> None:
     if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
         raise ValueError("expected positive finite duration")
-
-
-def sample_deadlines(
-    start_s: float, end_s: float, interval_s: float
-) -> Iterator[float]:
-    """Yield the absolute deadlines of every sample in a window.
-
-    Absolute rather than cumulative, so a slow scrape delays one sample
-    instead of shifting every one that follows it.
-    """
-    _positive(interval_s)
-    if not math.isfinite(start_s) or not math.isfinite(end_s) or end_s < start_s:
-        raise ValueError("invalid observation window")
-    index = 0
-    while True:
-        deadline = start_s + index * interval_s
-        if deadline > end_s:
-            return
-        yield deadline
-        index += 1
 
 
 class SystemClock:
