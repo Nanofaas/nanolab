@@ -261,3 +261,42 @@ def test_observed_collection_sources_are_derived_from_available_samples():
         "docker-engine",
         "prometheus",
     }
+
+
+def test_p24_recipe_prerequisite_inputs_bind_frozen_receipts(tmp_path):
+    from nanolab.tasks.soak.runtime import _freeze_prerequisite_inputs
+    from tests.soak.test_recipe import p24_config
+
+    config = p24_config()
+    writer = ArtifactWriter(tmp_path, config.artifact_limit_bytes)
+    prepared = SimpleNamespace(config=config, images=dict(_SDK_IMAGES), writer=writer)
+    try:
+        # The canonical grouped coverage expands to eight; only three are derivable.
+        with pytest.raises(
+            ValueError,
+            match=(
+                "no built-in injection exists for async, cancellation, error, "
+                "late-callback, timeout"
+            ),
+        ):
+            _freeze_prerequisite_inputs(prepared)
+        assert not list(tmp_path.glob("prerequisite*"))
+    finally:
+        writer.close()
+
+
+def test_p24_default_diagnostics_require_node_preload_before_build():
+    from nanolab.tasks.soak.runtime import RuntimeOptions, _runtime_preparation_options
+    from tests.soak.test_recipe import p24_config
+
+    config = p24_config()
+    # Automatic helper output shape; this declares wiring only.
+    config.diagnostics.helper_images = dict.fromkeys(
+        config.roles, "registry/helper@" + _DIGEST
+    )
+    with pytest.raises(
+        ValueError, match="Node diagnostic preload must be declared before build"
+    ):
+        _runtime_preparation_options(
+            config, RuntimeOptions(allow_diagnostic_target_stop_on_cancel=True)
+        )

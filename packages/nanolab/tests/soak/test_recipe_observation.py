@@ -15,7 +15,12 @@ from nanolab.tasks.soak.build_executor import (
     OwnedBuildCommandExecutor,
 )
 from nanolab.tasks.soak.sources import capture_source_snapshot
-from tests.soak.test_recipe import profile_data, smoke_data
+from tests.soak.test_recipe import (
+    p24_config,
+    p24_profile_data,
+    profile_data,
+    smoke_data,
+)
 from tests.soak.test_recipe_registry import artifact_fixture
 
 GRADLE_STUB = r"""
@@ -73,9 +78,9 @@ for index,(kind,item) in enumerate([('control-plane',profile['controlPlane']),*[
     if mutation=='partial-publish': sys.exit(1)
     data=json.loads(metadata.read_text()); metadata.unlink()
     image=dict(reference=reference,status='published',platforms=['linux/arm64'],provenance=True,
-               digest=data['containerimage.digest'],manifests={'linux/arm64':os.environ['NANOLAB_TEST_MANIFEST']})
+               digest=data['containerimage.digest'],manifests={'linux/arm64':json.loads(os.environ.get('NANOLAB_TEST_ROLE_IMAGES','{}')).get(item['container']['image'],{}).get('manifest',os.environ['NANOLAB_TEST_MANIFEST'])})
     row=dict(kind=kind,name=name,sdk=sdk,mode='container' if sdk=='javascript' else 'jvm',image=image)
-    if kind=='control-plane': row.update(variant='jvm',optimization='c2')
+    if kind=='control-plane': row.update(variant='jvm',optimization='c1' if '-XX:TieredStopAtLevel=1' in item.get('jvm',{}).get('args',[]) else 'c2')
     rows.append(row)
 revision=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
 dirty=bool(subprocess.check_output(['git','status','--porcelain']))
@@ -85,6 +90,7 @@ report=dict(schemaVersion=2,recipe={'sha256':hashlib.sha256(profile_path.read_by
 if mutation=='wrong-workspace':
     report['source']['revision']='a'*40
 (output/'distribution.json').write_text(json.dumps(report))
+if mutation=='changed-profile': Path(os.environ['NANOLAB_TEST_ORIGINAL_PROFILE']).write_text(profile_path.read_text()+' ')
 """
 
 DOCKER_STUB = r"""
@@ -111,8 +117,10 @@ if 'javascript' in args[args.index('-t')+1]:
                     process_argv=['/usr/local/bin/node','/src/sdks/javascript/node_modules/.bin/tsc','-p','tsconfig.json'],executable_sha256='a'*64)
         print('#2 0.1 '+marker+base64.b64encode(json.dumps(record).encode()).decode(),flush=True)
 if '--metadata-file' in args:
-    metadata=dict(**{'containerimage.digest':os.environ['NANOLAB_TEST_INDEX'],
-                     'containerimage.descriptor':{'digest':os.environ['NANOLAB_TEST_INDEX']},
+    selected=json.loads(os.environ.get('NANOLAB_TEST_ROLE_IMAGES','{}')).get(args[args.index('-t')+1].split('/')[-1].split(':')[0],{})
+    index=selected.get('index',os.environ['NANOLAB_TEST_INDEX'])
+    metadata=dict(**{'containerimage.digest':index,
+                     'containerimage.descriptor':{'digest':index},
                      'image.name':('other' if mutation=='wrong-image' else args[args.index('-t')+1]),
                      'buildx.build.ref':('other-builder/node/id' if mutation=='wrong-builder' else 'test-builder/test-builder-node/id'),
                      'buildx.build.provenance':json.loads(os.environ['NANOLAB_TEST_PREDICATE'])})
@@ -128,7 +136,10 @@ def executable(path, body):
     path.chmod(0o755)
 
 
-def publication_inputs(tmp_path, monkeypatch, mutation=None, cancelled=False):
+def publication_inputs(
+    tmp_path, monkeypatch, mutation=None, cancelled=False, *, purpose="smoke"
+):
+    monkeypatch.delenv("NANOLAB_TEST_ROLE_IMAGES", raising=False)
     distribution, fetch, _ = artifact_fixture(tmp_path)
     image = distribution.components[0].image
     manifest = json.loads(
@@ -175,13 +186,21 @@ def publication_inputs(tmp_path, monkeypatch, mutation=None, cancelled=False):
         cwd=source,
         check=True,
     )
+    if purpose == "p24":
+        (source / "dirty.txt").write_text("dirty input\n")
+        (source / "gradlew").write_text(
+            (source / "gradlew").read_text() + "\n# dirty build input\n"
+        )
     snapshot = capture_source_snapshot(
         source, tmp_path / "snapshot", max_bytes=1024 * 1024
     )
     profile = tmp_path / "recipe.yaml"
-    profile.write_text(json.dumps(profile_data()))
+    profile.write_text(
+        json.dumps(p24_profile_data() if purpose == "p24" else profile_data())
+    )
     executable(tmp_path / "bin/docker", DOCKER_STUB)
     monkeypatch.setenv("PATH", str(tmp_path / "bin") + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("NANOLAB_TEST_ORIGINAL_PROFILE", str(profile))
     monkeypatch.setenv("NANOLAB_TEST_INDEX", image.digest)
     monkeypatch.setenv("NANOLAB_TEST_MANIFEST", image.manifests["linux/arm64"])
     monkeypatch.setenv("NANOLAB_TEST_PREDICATE", json.dumps(statement["predicate"]))
@@ -200,7 +219,9 @@ def publication_inputs(tmp_path, monkeypatch, mutation=None, cancelled=False):
     return (
         snapshot,
         profile,
-        SoakConfig.model_validate(smoke_data()["soak"]),
+        p24_config()
+        if purpose == "p24"
+        else SoakConfig.model_validate(smoke_data()["soak"]),
         executor,
         fetch,
     )
@@ -272,16 +293,20 @@ def test_one_snapshot_one_publication_all_receipts(tmp_path, monkeypatch):
         "added-source",
         "wrong-workspace",
         "changed-instrumentation",
+        "changed-profile",
         "wrong-descriptor",
         "wrong-invocation",
         "different-assembly-input",
     ],
 )
-def test_recipe_observation_rejects_unbound_output(tmp_path, monkeypatch, mutation):
+@pytest.mark.parametrize("purpose", ["smoke", "p24"])
+def test_recipe_observation_rejects_unbound_output(
+    tmp_path, monkeypatch, mutation, purpose
+):
     from nanolab.tasks.soak.recipe import publish_soak_recipe
 
     snapshot, profile, config, executor, fetch = publication_inputs(
-        tmp_path, monkeypatch, mutation
+        tmp_path, monkeypatch, mutation, purpose=purpose
     )
     monkeypatch.setattr(
         "nanolab.tasks.soak.recipe.fetch_local_registry",
@@ -430,15 +455,18 @@ def test_cached_push_uses_bound_assembly_compiler_observation(
     assert dict(receipts[2].toolchains)["node"] == "20.20.2"
 
 
-@pytest.mark.parametrize("tamper", [None, "recipe", "metadata", "source"])
-def test_offline_acceptance_verifies_recipe_receipt(tmp_path, monkeypatch, tamper):
+@pytest.mark.parametrize("tamper", [None, "recipe", "metadata", "source", "report"])
+@pytest.mark.parametrize("purpose", ["smoke", "p24"])
+def test_offline_acceptance_verifies_recipe_receipt(
+    tmp_path, monkeypatch, tamper, purpose
+):
     from dataclasses import asdict
 
     from nanolab.tasks.soak import recipe as module
     from nanolab.tasks.soak.recipe_evidence import verify_soak_recipe_receipt
 
     snapshot, profile, config, executor, fetch = publication_inputs(
-        tmp_path, monkeypatch, "cached-push"
+        tmp_path, monkeypatch, "cached-push", purpose=purpose
     )
     monkeypatch.setattr(
         module,
@@ -460,6 +488,8 @@ def test_offline_acceptance_verifies_recipe_receipt(tmp_path, monkeypatch, tampe
         path = (
             tmp_path / "builds/recipe/recipe.yaml"
             if tamper == "recipe"
+            else tmp_path / "builds/recipe/distribution/distribution.json"
+            if tamper == "report"
             else next(observer.glob("metadata-*.json"))
             if tamper == "metadata"
             else tmp_path / "builds/recipe/source-identity.json"
@@ -548,3 +578,162 @@ def test_recipe_quota_never_retains_excess_evidence(
         )
     assert measure_tree(root) <= limit
     assert not (root / "frozen-images.json").exists()
+
+
+def p24_preparation_inputs(tmp_path, monkeypatch, mutation=None):
+    import nanolab.tasks.soak.recipe as module
+
+    snapshot, profile, config, executor, _ = publication_inputs(
+        tmp_path, monkeypatch, mutation, purpose="p24"
+    )
+    role_images, readers = {}, {}
+    for name in ("control-plane", "java-word-stats", "javascript-word-stats"):
+        distribution, fetch, config_id = artifact_fixture(
+            tmp_path,
+            "config-platform" if mutation == "config-platform" else None,
+            identity=name,
+        )
+        image = distribution.components[0].image
+        role_images[name] = {
+            "index": image.digest,
+            "manifest": image.manifests["linux/arm64"],
+            "config": config_id,
+        }
+        readers["nanofaas/" + name] = fetch
+    monkeypatch.setenv("NANOLAB_TEST_ROLE_IMAGES", json.dumps(role_images))
+    monkeypatch.setattr(
+        module,
+        "fetch_local_registry",
+        lambda repo, kind, ref: readers[repo](
+            "nanofaas/control-plane",
+            kind,
+            ref if ref.startswith("sha256:") else "run-1",
+        ),
+    )
+    return snapshot, profile, config, executor, role_images
+
+
+def prepare_p24(tmp_path, profile, config, source, *, cancelled=None):
+    from nanolab.tasks.soak.preparation import PreparationOptions, prepare_soak
+
+    return prepare_soak(
+        config,
+        run_dir=tmp_path / "run",
+        repo_root=source,
+        tool_root=tmp_path,
+        cancelled=cancelled,
+        options=PreparationOptions(
+            recipe_profile=profile,
+            recipe_builder="test-builder",
+            registry="127.0.0.1:5000/nanofaas",
+            generator_command=(sys.executable,),
+            support_check=lambda config: None,
+            build_timeout_s=10,
+            diagnostic_provider_available=True,
+            prerequisite_provider_available=True,
+        ),
+    )
+
+
+def test_p24_preparation_publishes_one_snapshot_without_legacy_build(
+    tmp_path, monkeypatch
+):
+    from dataclasses import asdict
+
+    import nanolab.tasks.soak.preparation as module
+    from nanolab.tasks.soak.recipe_evidence import verify_soak_recipe_receipt
+
+    _, profile, config, _, images = p24_preparation_inputs(tmp_path, monkeypatch)
+    captures, publications = [], []
+    capture, run = module.capture_source_snapshot, OwnedBuildCommandExecutor.run
+
+    def recorded_capture(*args, **kwargs):
+        captures.append(args[0])
+        return capture(*args, **kwargs)
+
+    def recorded_run(self, task, **kwargs):
+        publications.append(task.argv)
+        return run(self, task, **kwargs)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("recipe preparation invoked a legacy builder")
+
+    monkeypatch.setattr(module, "capture_source_snapshot", recorded_capture)
+    monkeypatch.setattr(module, "BuildImagesTask", forbidden)
+    monkeypatch.setattr(OwnedBuildCommandExecutor, "run", recorded_run)
+    prepared = prepare_p24(tmp_path, profile, config, tmp_path / "original")
+    try:
+        assert len(captures) == len(publications) == 1
+        assert (
+            "publishRecipe" in publications[0]
+            and "assembleRecipe" not in publications[0]
+        )
+        assert {r.role for r in prepared.receipts} == set(config.roles)
+        assert {r.source_fingerprint for r in prepared.receipts} == {
+            prepared.snapshot.fingerprint
+        }
+        assert prepared.snapshot.dirty is True
+        assert (prepared.snapshot.root / "dirty.txt").read_text() == "dirty input\n"
+        assert all(
+            r.bake is None and r.prerequisite_argv is None for r in prepared.recipes
+        )
+        assert len(set(prepared.images.values())) == 3
+        assert len({x["config"] for x in images.values()}) == 3
+        identity = json.loads(
+            (prepared.evidence_dir / "builds/recipe/source-identity.json").read_text()
+        )
+        assert identity["revision"] == prepared.snapshot.revision
+        assert identity["staging_revision"] != identity["revision"]
+        for receipt in prepared.receipts:
+            verify_soak_recipe_receipt(
+                prepared.evidence_dir, config, prepared.snapshot, asdict(receipt)
+            )
+        # Declaring provider wiring produces no success/qualification evidence.
+        assert not list(prepared.evidence_dir.glob("prerequisite*"))
+        assert not list(prepared.evidence_dir.glob("report*"))
+    finally:
+        prepared.writer.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "absent-role",
+        "changed-profile",
+        "wrong-source",
+        "wrong-descriptor",
+        "partial-publish",
+        "config-platform",
+        "running-cancel",
+    ],
+)
+def test_p24_preparation_failure_never_reaches_measurement(
+    tmp_path, monkeypatch, mutation
+):
+    _, profile, config, _, _ = p24_preparation_inputs(tmp_path, monkeypatch, mutation)
+    event = Event()
+
+    def cancel_when_started():
+        import time
+
+        for _ in range(500):
+            if (tmp_path / "started").exists():
+                event.set()
+                return
+            time.sleep(0.01)
+
+    timer = Timer(0, cancel_when_started) if mutation == "running-cancel" else None
+    if timer is not None:
+        timer.daemon = True
+        timer.start()
+    with pytest.raises(
+        (ValueError, BuildCommandError, RuntimeError, KeyboardInterrupt)
+    ):
+        prepare_p24(tmp_path, profile, config, tmp_path / "original", cancelled=event)
+    evidence = tmp_path / "run/evidence"
+    assert (evidence / "config.json").is_file()
+    assert not list(evidence.glob("recipe-*.json"))
+    assert not list(evidence.glob("prerequisite*"))
+    assert not list(evidence.glob("report*"))
+    assert not list((evidence / "builds").glob("build-*.json"))
+    assert list((tmp_path / "run/build-command-logs").glob("*"))

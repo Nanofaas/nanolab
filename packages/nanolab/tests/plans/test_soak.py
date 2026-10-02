@@ -528,13 +528,15 @@ def test_recipe_profile_rejected_before_resources(tmp_path):
 
 
 @pytest.mark.parametrize("bootstrap_failure", [False, True])
+@pytest.mark.parametrize("purpose", ["smoke", "p24"])
 def test_recipe_owned_resources_cleanup_preserves_selection(
-    tmp_path, monkeypatch, bootstrap_failure
+    tmp_path, monkeypatch, bootstrap_failure, purpose
 ):
     import sonata_tasks.registry as registry_module
     from sonata_tasks.execution.models import TaskResult
 
     import nanolab.tasks.soak.runtime as runtime
+    from nanolab.cli.product import _scenario
 
     seen = []
 
@@ -582,7 +584,12 @@ def test_recipe_owned_resources_cleanup_preserves_selection(
         lambda config: None,
     )
     workflow = build_soak_plan(
-        recipe_scenario(),
+        recipe_scenario()
+        if purpose == "smoke"
+        else _scenario(
+            Path(__file__).resolve().parents[2]
+            / "scenarios-v2/memory-soak-sync-container.yaml"
+        ),
         EnvironmentConfig(provider="local"),
         RoleBindings({"host": Executor()}),
         run_dir=tmp_path / "run",

@@ -377,3 +377,69 @@ def test_plan_rejects_heap_analysis_endpoint_override(tmp_path):
     )
     assert result.exit_code != 0
     assert "heap analysis owns its endpoints" in result.output
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["--resume"],
+        ["--only", "steady"],
+        ["--from", "drain"],
+        ["--until", "steady"],
+        [],
+    ],
+)
+def test_p24_recipe_saved_evidence_is_not_resumed_or_republished(
+    tmp_path, monkeypatch, selection
+):
+    from nanolab.cli import product
+    from tests.soak.test_recipe import P24_SCENARIO
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("saved soak evidence reached workflow/build execution")
+
+    monkeypatch.setattr(product, "_workflow", forbidden)
+    # Empty selection still rejects an already used directory.
+    (tmp_path / "original-evidence.json").write_text('{"legacy":true}')
+    app = typer.Typer()
+    product.install_product_commands(app)
+    result = CliRunner().invoke(
+        app, ["run", str(P24_SCENARIO), "--run-dir", str(tmp_path), *selection]
+    )
+    assert result.exit_code != 0
+    assert "saved soak evidence reached" not in result.output
+    assert (
+        "unsupported" in result.output
+        or "only supported" in result.output
+        or "already contains evidence" in result.output
+    )
+    assert (tmp_path / "original-evidence.json").read_text() == '{"legacy":true}'
+
+
+def test_p24_recipe_offline_evaluation_never_builds(tmp_path, monkeypatch):
+    import json
+
+    from nanolab.cli import product
+    from nanolab.tasks.soak import recipe
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("offline evaluation published images")
+
+    monkeypatch.setattr(recipe, "publish_soak_recipe", forbidden)
+    # A P24 label with no lifetime/source/prerequisite manifest is incomplete.
+    (tmp_path / "evaluation-input.json").write_text(
+        json.dumps(
+            {
+                "schema": "nanolab-soak-v1",
+                "purpose": "p24",
+                "targets": [],
+                "criteria": [],
+            }
+        )
+    )
+    app = typer.Typer()
+    product.install_product_commands(app)
+    result = CliRunner().invoke(app, ["soak-evaluate", str(tmp_path)])
+    assert result.exit_code == 2
+    report = json.loads(next(tmp_path.glob("evaluations/*/report.json")).read_text())
+    assert report["status"] == "INCONCLUSIVE" and report["p24_qualified"] is False

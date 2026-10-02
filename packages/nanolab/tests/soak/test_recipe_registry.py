@@ -19,7 +19,7 @@ CONFIG = "application/vnd.oci.image.config.v1+json"
 STATEMENT = "application/vnd.in-toto+json"
 
 
-def artifact_fixture(tmp_path, mutation=None):
+def artifact_fixture(tmp_path, mutation=None, *, identity=None):
     blobs = {}
 
     def blob(kind, data):
@@ -29,6 +29,8 @@ def artifact_fixture(tmp_path, mutation=None):
         return digest, len(raw)
 
     config = {"os": "linux", "architecture": "arm64"}
+    if identity is not None:
+        config["test-role"] = identity
     if mutation == "config-platform":
         config["architecture"] = "amd64"
     if mutation == "config-variant":
