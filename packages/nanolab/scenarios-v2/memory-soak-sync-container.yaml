@@ -1,9 +1,10 @@
 # Historical comparison arm: one NanoFaaS version with advanced metrics.
-# Single source snapshot; build every application role before measurement.
+# One snapshot and recipe publication for all roles before measurement.
 # The checked-in criteria-only policy freezes the approved P24 RSS contract.
 # Profile-aware prerequisite settlement supplies only applicable owner gates.
 workflow: soak
 backend: container
+recipeProfile: ../recipes/soak-container-p24-jvm.yaml
 soakPolicyFile: ./memory-soak-policy.yaml
 functions:
   - word-stats-java

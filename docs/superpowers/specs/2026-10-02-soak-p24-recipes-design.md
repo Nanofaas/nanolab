@@ -44,9 +44,10 @@ Two approaches were considered:
 
 The P24 profile is separate from the historical smoke profile so the declared
 P24 build settings remain independently reviewable. Both use the same runner
-and evidence readers. The smoke profile currently declares a JVM launcher
-option; copying it wholesale must not silently introduce that override into a
-P24 scenario whose build options and runtime options are empty.
+and evidence readers. Preserve the effective legacy launcher settings rather
+than copying the smoke profile: Serial GC and C1 for the control plane,
+JVM defaults for the Java function. The legacy function Dockerfile ignores
+`JVM_TUNING`; empty scenario overrides do not imply equal launcher settings.
 
 ## Profile and scenario
 
@@ -63,8 +64,9 @@ The profile selects exactly:
 - One platform, `linux/arm64`, matching the checked-in preset. Independent
   native Linux host/daemon checks must pass before building. No emulation or
   silent scenario/platform rewriting.
-- Existing default JVM/build settings; no new explicit JVM launcher, GC,
-  compiler or build option overrides. Verify effective runtime and compilation
+- Existing effective JVM/build settings: control-plane `jvm.args` exactly
+  `-XX:+UseSerialGC`, `-XX:TieredStopAtLevel=1`; no function JVM arguments
+  or other launcher, GC, compiler or build overrides. Verify effective runtime and compilation
   settings against the preset and pinned implementation before accepting the
   profile. A discovered mismatch is reported and resolved without silently
   changing the experiment's policy.

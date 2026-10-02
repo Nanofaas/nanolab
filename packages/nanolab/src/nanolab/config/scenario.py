@@ -266,7 +266,7 @@ class ScenarioConfig(BaseModel):
                         self.workflow == "soak"
                         and self.backend == "container"
                         and self.soak is not None
-                        and self.soak.purpose == "smoke"
+                        and self.soak.purpose in {"smoke", "p24"}
                         and all(
                             role.runtime in {"jvm", "node"}
                             for role in self.soak.roles.values()

@@ -55,7 +55,7 @@ def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) ->
     if (
         type(data.get("schemaVersion")) is not int
         or data["schemaVersion"] != 2
-        or config.purpose != "smoke"
+        or config.purpose not in {"smoke", "p24"}
         or platform not in {"linux/amd64", "linux/arm64"}
         or registry.get("platforms") != [platform]
         or registry.get("repository") != "127.0.0.1:5000/nanofaas"
@@ -70,7 +70,7 @@ def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) ->
         or set(config.roles) != set(SOAK_RECIPE_ROLES)
         or set(config.images) != set(SOAK_RECIPE_ROLES)
     ):
-        raise ValueError("Unsupported container smoke recipe selection")
+        raise ValueError("Unsupported container soak recipe selection")
     functions = data.get("functions")
     if not isinstance(functions, list) or len(functions) != 2:
         raise ValueError("Soak recipe requires Java and JavaScript word-stats")
@@ -89,6 +89,32 @@ def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) ->
         or selected[("word-stats", "javascript")].get("build") is not None
     ):
         raise ValueError("Soak recipe function build mode differs from roles")
+    if config.purpose == "p24":
+        blocks = (
+            (data, {"schemaVersion", "name", "registry", "controlPlane", "functions"}),
+            (registry, {"repository", "tag", "platforms", "provenance"}),
+            (control, {"modules", "build", "container", "jvm"}),
+            (build, {"mode", "variant"}),
+        )
+        if control.get("jvm") != {
+            "args": ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1"]
+        } or any(set(block) - allowed for block, allowed in blocks):
+            raise ValueError("P24 recipe must preserve existing build settings")
+        for component in (control, *selected.values()):
+            allowed = (
+                {"modules", "build", "container", "jvm"}
+                if component is control
+                else {"name", "sdk", "build", "container"}
+            )
+            container = _object(component.get("container"), "P24 container")
+            component_build = _object(component.get("build", {}), "P24 build")
+            if (
+                set(component) - allowed
+                or set(container) - {"image"}
+                or set(component_build)
+                - ({"mode", "variant"} if component is control else {"mode"})
+            ):
+                raise ValueError("P24 recipe must preserve existing build settings")
     for role, (runtime, variant) in SOAK_RECIPE_ROLES.items():
         spec = config.images[role]
         expected_modules = SOAK_RECIPE_MODULES if role == "control-plane" else set()

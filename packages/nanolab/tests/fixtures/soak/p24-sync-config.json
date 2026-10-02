@@ -1,0 +1,390 @@
+{
+  "async_load": false,
+  "async_share": null,
+  "autoscaling": false,
+  "autoscaling_strategy": "INTERNAL",
+  "backend": "container",
+  "build": "docker",
+  "concurrency_control": false,
+  "concurrency_mode": "ADAPTIVE_PER_POD",
+  "control_plane_image": null,
+  "control_plane_runtime": "jvm",
+  "control_plane_variant": null,
+  "drain_minutes": null,
+  "function_images": {},
+  "functions": [
+    "word-stats-java",
+    "word-stats-javascript"
+  ],
+  "handler_envelope": false,
+  "heap_analysis": null,
+  "hpa_scale_to_zero": false,
+  "idem_share": null,
+  "load_profile": "cycle",
+  "load_scale": 1.0,
+  "load_vus": null,
+  "payload_profile": null,
+  "persistent_recovery": false,
+  "recipe_profile": null,
+  "release": null,
+  "resources": {
+    "control-plane": {
+      "limits": {
+        "cpu": 2.0,
+        "memory_mib": 1024
+      },
+      "requests": null
+    },
+    "word-stats-java": {
+      "limits": {
+        "cpu": 2.0,
+        "memory_mib": 1024
+      },
+      "requests": null
+    },
+    "word-stats-javascript": {
+      "limits": {
+        "cpu": 1.0,
+        "memory_mib": 512
+      },
+      "requests": null
+    }
+  },
+  "retry_backoff_burst": false,
+  "soak": {
+    "artifact_limit_bytes": 8589934592,
+    "cancellation_timeout_s": 30.0,
+    "criteria": [
+      {
+        "absolute_tolerance": null,
+        "deadline_s": null,
+        "id": "control-plane.p24-cgroup-budget",
+        "label_selector": {},
+        "metric": "cgroup_memory_usage_bytes",
+        "operation": "maximum",
+        "phase": "steady",
+        "quantile": null,
+        "rationale": "The control plane must remain within its declared 1 GiB cgroup limit.",
+        "relative_tolerance": null,
+        "role": "control-plane",
+        "threshold": 1073741824.0,
+        "unit": "bytes",
+        "window_s": 5400.0
+      },
+      {
+        "absolute_tolerance": 0.0,
+        "deadline_s": 2100.0,
+        "id": "control-plane.p24-rss-return",
+        "label_selector": {},
+        "metric": "process_rss_bytes",
+        "operation": "return_to_reference",
+        "phase": "drain",
+        "quantile": null,
+        "rationale": "Post-drain RSS must return to or below this run's baseline without tolerance.",
+        "relative_tolerance": 0.0,
+        "role": "control-plane",
+        "threshold": null,
+        "unit": "bytes",
+        "window_s": 120.0
+      },
+      {
+        "absolute_tolerance": null,
+        "deadline_s": null,
+        "id": "word-stats-java.p24-cgroup-budget",
+        "label_selector": {},
+        "metric": "cgroup_memory_usage_bytes",
+        "operation": "maximum",
+        "phase": "steady",
+        "quantile": null,
+        "rationale": "The Java function must remain within its declared 1 GiB cgroup limit.",
+        "relative_tolerance": null,
+        "role": "word-stats-java",
+        "threshold": 1073741824.0,
+        "unit": "bytes",
+        "window_s": 5400.0
+      },
+      {
+        "absolute_tolerance": 0.0,
+        "deadline_s": 2100.0,
+        "id": "word-stats-java.p24-rss-return",
+        "label_selector": {},
+        "metric": "process_rss_bytes",
+        "operation": "return_to_reference",
+        "phase": "drain",
+        "quantile": null,
+        "rationale": "Post-drain RSS must return to or below this run's baseline without tolerance.",
+        "relative_tolerance": 0.0,
+        "role": "word-stats-java",
+        "threshold": null,
+        "unit": "bytes",
+        "window_s": 120.0
+      },
+      {
+        "absolute_tolerance": null,
+        "deadline_s": null,
+        "id": "word-stats-javascript.p24-cgroup-budget",
+        "label_selector": {},
+        "metric": "cgroup_memory_usage_bytes",
+        "operation": "maximum",
+        "phase": "steady",
+        "quantile": null,
+        "rationale": "The JavaScript function must remain within its declared 512 MiB cgroup limit.",
+        "relative_tolerance": null,
+        "role": "word-stats-javascript",
+        "threshold": 536870912.0,
+        "unit": "bytes",
+        "window_s": 5400.0
+      },
+      {
+        "absolute_tolerance": 0.0,
+        "deadline_s": 2100.0,
+        "id": "word-stats-javascript.p24-rss-return",
+        "label_selector": {},
+        "metric": "process_rss_bytes",
+        "operation": "return_to_reference",
+        "phase": "drain",
+        "quantile": null,
+        "rationale": "Post-drain RSS must return to or below this run's baseline without tolerance.",
+        "relative_tolerance": 0.0,
+        "role": "word-stats-javascript",
+        "threshold": null,
+        "unit": "bytes",
+        "window_s": 120.0
+      }
+    ],
+    "diagnostics": {
+      "baseline_operations": {},
+      "executables": {
+        "control-plane": [
+          "jcmd"
+        ],
+        "word-stats-java": [
+          "jcmd"
+        ]
+      },
+      "gc_completion_evidence": {
+        "control-plane": "jvm-full-gc-event",
+        "word-stats-java": "jvm-full-gc-event",
+        "word-stats-javascript": "node-full-gc-event"
+      },
+      "helper_images": {},
+      "max_dump_bytes": 3221225472,
+      "max_dumps": 3,
+      "operations": {
+        "control-plane": [
+          "gc",
+          "heap_dump"
+        ],
+        "word-stats-java": [
+          "gc",
+          "heap_dump"
+        ],
+        "word-stats-javascript": [
+          "gc",
+          "heap_dump"
+        ]
+      },
+      "timeout_s": 120.0
+    },
+    "images": {
+      "control-plane": {
+        "artifact_kind": "oci-image",
+        "build_options": {},
+        "digest": null,
+        "mode": "build",
+        "modules": [
+          "container-deployment-provider",
+          "async-queue",
+          "build-metadata"
+        ],
+        "platform": "linux/arm64",
+        "provenance_receipt": null,
+        "variant": "jvm"
+      },
+      "word-stats-java": {
+        "artifact_kind": "oci-image",
+        "build_options": {},
+        "digest": null,
+        "mode": "build",
+        "modules": [],
+        "platform": "linux/arm64",
+        "provenance_receipt": null,
+        "variant": "jvm"
+      },
+      "word-stats-javascript": {
+        "artifact_kind": "oci-image",
+        "build_options": {},
+        "digest": null,
+        "mode": "build",
+        "modules": [],
+        "platform": "linux/arm64",
+        "provenance_receipt": null,
+        "variant": "default"
+      }
+    },
+    "max_observation_gap_s": 30.0,
+    "metrics_profile": "advanced",
+    "phases": {
+      "baseline_drain_s": 2100,
+      "baseline_window_s": 120,
+      "cleanup_margin_s": 300,
+      "drain_s": 2100,
+      "steady_s": 5400,
+      "warmup_s": 120
+    },
+    "prerequisites": {
+      "mode": "run",
+      "receipts": {},
+      "relevant_config_keys": {
+        "async": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ],
+        "cancellation": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ],
+        "error": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ],
+        "function-name-churn": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ],
+        "idempotent-replay": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ],
+        "late-callback": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ],
+        "sync": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ],
+        "timeout": [
+          "images",
+          "roles",
+          "retention_s",
+          "workload"
+        ]
+      },
+      "required_coverage": [
+        "sync",
+        "error",
+        "timeout",
+        "cancellation",
+        "async",
+        "late-callback",
+        "idempotent-replay",
+        "function-name-churn"
+      ]
+    },
+    "purpose": "p24",
+    "retention_s": {
+      "live-key-and-execution": 1800,
+      "terminal-key-and-readable-outcome": 300,
+      "unkeyed-sync-outcome": 30
+    },
+    "roles": {
+      "control-plane": {
+        "collection_sources": [
+          "procfs",
+          "docker-engine",
+          "prometheus"
+        ],
+        "expected_cpu": 2.0,
+        "memory_limit_bytes": 1073741824,
+        "required_capabilities": [
+          "procfs",
+          "docker-engine",
+          "gc",
+          "heap_dump"
+        ],
+        "required_metrics": [
+          "process_rss_bytes",
+          "process_pss_bytes",
+          "cgroup_memory_usage_bytes",
+          "jvm_memory_used_bytes"
+        ],
+        "runtime": "jvm",
+        "runtime_options": []
+      },
+      "word-stats-java": {
+        "collection_sources": [
+          "procfs",
+          "docker-engine",
+          "prometheus"
+        ],
+        "expected_cpu": 2.0,
+        "memory_limit_bytes": 1073741824,
+        "required_capabilities": [
+          "procfs",
+          "docker-engine",
+          "gc",
+          "heap_dump"
+        ],
+        "required_metrics": [
+          "process_rss_bytes",
+          "process_pss_bytes",
+          "cgroup_memory_usage_bytes",
+          "jvm_memory_used_bytes"
+        ],
+        "runtime": "jvm",
+        "runtime_options": []
+      },
+      "word-stats-javascript": {
+        "collection_sources": [
+          "procfs",
+          "docker-engine"
+        ],
+        "expected_cpu": 1.0,
+        "memory_limit_bytes": 536870912,
+        "required_capabilities": [
+          "procfs",
+          "docker-engine",
+          "gc",
+          "heap_dump"
+        ],
+        "required_metrics": [
+          "process_rss_bytes",
+          "process_pss_bytes",
+          "cgroup_memory_usage_bytes"
+        ],
+        "runtime": "node",
+        "runtime_options": []
+      }
+    },
+    "sample_interval_s": 10.0,
+    "scheduler_switch": null,
+    "scrape_timeout_s": 3.0,
+    "workload": {
+      "max_dropped_iterations": 0,
+      "max_error_ratio": 0.0,
+      "max_vus": 200,
+      "preallocated_vus": 200,
+      "rates": {
+        "word-stats-java": 20.0,
+        "word-stats-javascript": 20.0
+      }
+    }
+  },
+  "soak_minutes": null,
+  "workflow": "soak"
+}

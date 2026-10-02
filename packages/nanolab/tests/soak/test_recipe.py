@@ -140,15 +140,19 @@ def test_soak_recipe_matches_all_role_expectations(tmp_path):
         "prebuilt",
         "variant",
         "override",
-        "p24",
         "services",
     ],
 )
-def test_soak_recipe_rejects_incompatible_profile(tmp_path, mutation):
+@pytest.mark.parametrize("purpose", ["smoke", "p24"])
+def test_soak_recipe_rejects_incompatible_profile(tmp_path, mutation, purpose):
     from nanolab.tasks.soak.recipe import validate_soak_recipe
 
-    profile = profile_data()
-    config = smoke_data()["soak"]
+    profile = profile_data() if purpose == "smoke" else p24_profile_data()
+    config = (
+        smoke_data()["soak"]
+        if purpose == "smoke"
+        else p24_config().model_dump(mode="json")
+    )
     if mutation == "provenance":
         profile["registry"]["provenance"] = False
     elif mutation == "platform":
@@ -176,10 +180,6 @@ def test_soak_recipe_rejects_incompatible_profile(tmp_path, mutation):
     elif mutation == "services":
         profile["services"] = [{"name": "warm-echo", "sdk": "java"}]
     parsed = SoakConfig.model_validate(config)
-    if mutation == "p24":
-        # Exercise the recipe gate itself; the smoke durations are deliberately
-        # insufficient for the separate P24 policy validator.
-        parsed = parsed.model_copy(update={"purpose": "p24"})
     with pytest.raises(ValueError, match="recipe"):
         validate_soak_recipe(
             write_profile(tmp_path / "recipe.yaml", profile),
@@ -275,3 +275,163 @@ def test_staging_git_identity_includes_captured_tracked_ignored_file(tmp_path):
     )
     assert staged.returncode == 0
     assert staged.stdout == "dirty\n"
+
+
+P24_BASELINE = Path(__file__).parents[1] / "fixtures/soak/p24-sync-config.json"
+P24_SCENARIO = (
+    Path(__file__).parents[2] / "scenarios-v2/memory-soak-sync-container.yaml"
+)
+
+
+def p24_config():
+    return SoakConfig.model_validate(json.loads(P24_BASELINE.read_text())["soak"])
+
+
+def test_p24_recipe_preset_preserves_experiment():
+    baseline = json.loads(P24_BASELINE.read_text())
+    baseline.pop("recipe_profile")
+    config = _scenario(P24_SCENARIO)
+    actual = config.model_dump(mode="json")
+    actual.pop("recipe_profile")
+    assert actual == baseline
+    assert (
+        config.recipe_profile
+        == P24_SCENARIO.parent.parent / "recipes/soak-container-p24-jvm.yaml"
+    )
+    assert config.soak is not None
+    assert config.soak.purpose == "p24" and config.soak.metrics_profile == "advanced"
+    assert config.soak.phases.model_dump() == {
+        "warmup_s": 120,
+        "baseline_drain_s": 2100,
+        "baseline_window_s": 120,
+        "steady_s": 5400,
+        "drain_s": 2100,
+        "cleanup_margin_s": 300,
+    }
+    assert config.soak.workload.rates == {
+        "word-stats-java": 20,
+        "word-stats-javascript": 20,
+    }
+    assert config.soak.workload.preallocated_vus == config.soak.workload.max_vus == 200
+
+
+def test_p24_recipe_accepts_supported_profile(tmp_path):
+    from nanolab.tasks.soak.recipe import validate_soak_recipe
+
+    profile = write_profile(tmp_path / "recipe.yaml", p24_profile_data())
+    validate_soak_recipe(profile, p24_config(), platform="linux/arm64")
+    raw = yaml.safe_load(P24_SCENARIO.read_text())
+    raw.pop("soakPolicyFile")
+    raw["soak"] = p24_config().model_dump(mode="json")
+    raw["recipeProfile"] = str(profile)
+    assert ScenarioConfig.model_validate(raw).recipe_profile == profile
+
+
+@pytest.mark.parametrize("role", ["controlPlane", "java", "javascript"])
+@pytest.mark.parametrize("option", ["jvm", "config", "buildOverride"])
+def test_p24_recipe_rejects_policy_drift_before_acquisition(tmp_path, role, option):
+    from nanolab.tasks.soak.recipe import validate_soak_recipe
+
+    data = p24_profile_data()
+    target = (
+        data["controlPlane"]
+        if role == "controlPlane"
+        else data["functions"][0 if role == "java" else 1]
+    )
+    if option == "jvm":
+        target["jvm"] = {"args": ["-XX:+UseSerialGC"]}
+    elif option == "config":
+        target["config"] = {"nanofaas": {"changed": True}}
+    else:
+        target.setdefault("build", {})["native"] = {"optimization": "3"}
+    with pytest.raises(ValueError, match=r"(?i)recipe"):
+        validate_soak_recipe(
+            write_profile(tmp_path / "recipe.yaml", data),
+            p24_config(),
+            platform="linux/arm64",
+        )
+
+
+def test_smoke_profile_keeps_explicit_jvm_options():
+    from nanolab.tasks.soak.recipe import validate_soak_recipe
+
+    config = _scenario(P24_SCENARIO.parent / "memory-soak-smoke-recipe-container.yaml")
+    assert config.soak is not None and config.recipe_profile is not None
+    validate_soak_recipe(config.recipe_profile, config.soak, platform="linux/arm64")
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "missing-profile", "missing-policy", "bad-policy", "short-p24"]
+)
+def test_p24_recipe_loader_preserves_path_and_policy_guards(
+    tmp_path, monkeypatch, failure
+):
+    root = tmp_path / "project"
+    scenarios = root / "scenarios"
+    scenarios.mkdir(parents=True)
+    profile = write_profile(root / "recipe.yaml", p24_profile_data())
+    raw = yaml.safe_load(P24_SCENARIO.read_text())
+    raw["recipeProfile"] = "../recipe.yaml"
+    raw["soakPolicyFile"] = "./policy.yaml"
+    policy = scenarios / "policy.yaml"
+    policy.write_bytes((P24_SCENARIO.parent / "memory-soak-policy.yaml").read_bytes())
+    if failure == "missing-profile":
+        profile.unlink()
+    elif failure == "missing-policy":
+        policy.unlink()
+    elif failure == "bad-policy":
+        policy.write_text("schema: unsupported\ncriteria: []\n")
+    elif failure == "short-p24":
+        raw["soak"]["phases"]["steady_s"] = 60
+    scenario = scenarios / "p24.yaml"
+    scenario.write_text(yaml.safe_dump(raw))
+    monkeypatch.chdir(tmp_path.parent)
+    if failure is None:
+        assert _scenario(scenario).recipe_profile == profile
+    else:
+        with pytest.raises(ValueError, match=r"(?i)recipe|policy|steady"):
+            _scenario(scenario)
+
+
+def p24_profile_data():
+    data = profile_data()
+    data["controlPlane"]["jvm"] = {
+        "args": ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1"]
+    }
+    return data
+
+
+def test_p24_checked_in_recipe_preserves_effective_launcher_settings():
+    config = _scenario(P24_SCENARIO)
+    assert config.recipe_profile is not None
+    data = yaml.safe_load(config.recipe_profile.read_text())
+    assert data["controlPlane"]["jvm"] == {
+        "args": ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1"]
+    }
+    assert all("jvm" not in function for function in data["functions"])
+
+
+@pytest.mark.parametrize(
+    "jvm",
+    [
+        None,
+        {"args": []},
+        {"args": ["-XX:+UseSerialGC"]},
+        {"args": ["-XX:+UseG1GC", "-XX:TieredStopAtLevel=1"]},
+        {"args": ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1"], "extra": True},
+    ],
+)
+def test_p24_recipe_requires_existing_control_plane_tuning(tmp_path, jvm):
+    from nanolab.tasks.soak.recipe import validate_soak_recipe
+
+    data = p24_profile_data()
+    if jvm is None:
+        data["controlPlane"].pop("jvm")
+    else:
+        data["controlPlane"]["jvm"] = jvm
+    with pytest.raises(ValueError, match=r"(?i)recipe"):
+        validate_soak_recipe(
+            write_profile(tmp_path / "recipe.yaml", data),
+            p24_config(),
+            platform="linux/arm64",
+        )

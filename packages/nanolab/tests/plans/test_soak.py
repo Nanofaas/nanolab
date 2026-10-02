@@ -606,3 +606,31 @@ def test_recipe_environment_accepts_container_smoke_soak():
     from nanolab.plans.validate import require_recipe_environment
 
     require_recipe_environment(recipe_scenario(), EnvironmentConfig(provider="local"))
+
+
+def test_p24_recipe_plan_is_deferred(tmp_path):
+    from nanolab.cli.product import _scenario
+    from nanolab.plans.validate import require_recipe_environment
+    from nanolab.tasks.soak.runtime import RunSingleVersionSoak
+
+    config = _scenario(
+        Path(__file__).parents[2] / "scenarios-v2/memory-soak-sync-container.yaml"
+    )
+    require_recipe_environment(config, EnvironmentConfig(provider="local"))
+    workflow = build_soak_plan(
+        config,
+        EnvironmentConfig(provider="local"),
+        RoleBindings({"host": _CompileOnlyExecutor()}),
+        run_dir=tmp_path / "run",
+        repo_root=tmp_path,
+        tool_root=tmp_path,
+    )
+    tasks = workflow.compile().tasks
+    runtime = next(
+        item.task for item in tasks if isinstance(item.task, RunSingleVersionSoak)
+    )
+    assert runtime.options.preparation.recipe_profile == config.recipe_profile
+    assert runtime.options.preparation.recipe_builder == runtime.options.helper_builder
+    assert runtime.options.preparation.registry == "127.0.0.1:5000/nanofaas"
+    assert config.recipe_profile is not None
+    assert not (tmp_path / "run").exists()

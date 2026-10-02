@@ -25,7 +25,10 @@ ROLES = {"control-plane", "word-stats-java", "word-stats-javascript"}
 
 
 def read_preset(name):
-    return yaml.safe_load((SCENARIOS / name).read_text())
+    data = yaml.safe_load((SCENARIOS / name).read_text())
+    if "recipeProfile" in data:
+        data["recipeProfile"] = str((SCENARIOS / data["recipeProfile"]).resolve())
+    return data
 
 
 def fixture_criteria():
@@ -72,6 +75,8 @@ def resolve(data, path):
 
 def operator_fixture(tmp_path, name):
     data = read_preset(name)
+    if "recipeProfile" in data:
+        data["recipeProfile"] = str((SCENARIOS / data["recipeProfile"]).resolve())
     path = tmp_path / name
     path.write_text(yaml.safe_dump(data))
     policy = {"schema": "nanolab-soak-policy-v1", "criteria": fixture_criteria()}
