@@ -79,7 +79,7 @@
 
 - [x] Run `NANOFAAS_ROOT=/tmp/nanofaas-release-arm64-pin uv run --locked --package nanolab pytest packages/nanolab/tests -q`; expected complete suite PASS. Run `uv run --locked --package nanolab nanolab-quality`; expected `Quality checks passed`. Run `uv run --locked --package nanolab ruff format --check --config packages/nanolab/pyproject.toml packages/nanolab`; expected formatted. Run Bandit with `-r packages/nanolab/src/nanolab -c packages/nanolab/pyproject.toml -f json -o <task-workspace>/bandit.json`; expected only four existing B101 LOWs, retain exit1 and report any regression. Run `git diff --check`; expected clean.
 - [x] Document canonical P24 profile/preparation and real evidence scope. Correct stale prose claiming the policy is unshipped, 100requests/s per function or AMD64 where the actual preset has a shipped policy,20/20rates and ARM64. Document unchanged uninterrupted lifetime/no resume, offline evaluation and native preparation versus multi-hour acceptance. Do not mark the broad P24/backend roadmap item fully complete; add this slice's actual preparation result and leave other presets/backends and qualification pending.
-- [ ] Self-check every spec requirement against tasks/tests and actual evidence. Review the whole branch with a fresh reviewer per `executing-plans`/`requesting-code-review`, including Review Focus and any rulings. Expected: no unfixed Critical/Important findings; retain minors/rulings and native limitations. Fix actual Important/Critical findings in one RED→GREEN pass and rerun the full suite.
+- [x] Self-check every spec requirement against tasks/tests and actual evidence. Review the whole branch with a fresh reviewer per `executing-plans`/`requesting-code-review`, including Review Focus and any rulings. Expected: no unfixed Critical/Important findings; retain minors/rulings and native limitations. Fix actual Important/Critical findings in one RED→GREEN pass and rerun the full suite.
 - [x] Commit `Document P24 recipe preparation verification` if native preparation passed; otherwise `Document P24 recipe preparation verification gates`. Update checked steps to actual results only. Merge/push remains a later user integration choice.
 
 ## Plan self-review and handoff
@@ -129,3 +129,26 @@ Task3 verification actions are complete; the live gates above remain open.
 Final local checks: **3343 tests PASS**, coverage **89%**; quality/types/import
 contracts PASS, 419 files formatted; Bandit retains only four existing LOW B101
 findings, exit1. Final whole-branch review follows this documentation commit.
+
+Final fresh-context review of `4689469..d500ce5`: no Critical, Important or
+introduced Minor findings. The reviewer independently checked the base fixture
+and retained native evidence. The full suite was run by the implementer.
+
+Execution rulings:
+
+- Carry exactly legacy control-plane Serial GC/C1; the pinned Java function
+  Dockerfile ignores legacy JVM_TUNING and retains defaults. Empty scenario
+  overrides do not make recipe C2 defaults equivalent. Native probes verify this.
+- Normalize raw test fixtures to resolved absolute recipe paths; retain loader
+  rejection of unresolved inputs. Fix the existing provisioning test to inspect
+  the actual `-i arm.internal,` inventory rather than its worktree pathname.
+- Exercise real automatic helper construction before native provider checks;
+  label lower publisher verification independently of full preparation.
+- Preserve all eight expanded prerequisite IDs and the five unsupported fault
+  injections. Node diagnostic preload, genuine coverage, campaign/RSS policy,
+  other presets/backends and independent releases remain separate work, with
+  existing refusal and no qualification claim.
+- Reconcile the guide's pre-existing nonexistent `resolve_soak_policy` reference
+  with the actual `load_soak_policy`/`_scenario` boundary; documentation only.
+- Verification actions may complete with an explicitly allowed missing-capability
+  result; the live gates above remain unchecked.

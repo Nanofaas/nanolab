@@ -158,7 +158,7 @@ repaired by rebuilding during verification or by converting receipts.
 ## Resource ownership and verification
 
 Use the existing local registry, owned Buildx builder, selected-builder
-restoration and Docker resources. Compensation after cancellation, malformed
+preservation and Docker resources. Compensation after cancellation, malformed
 reports, failed transport or runtime failure releases only owned resources and
 retains diagnostic evidence. Preserve unrelated containers/images and the
 operator checkout. Do not clean failed inputs into an apparent successful run.

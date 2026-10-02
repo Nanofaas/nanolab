@@ -61,12 +61,11 @@ they do not establish complete retained-state acceptance. The loader replaces
 roles, images, retention, workload, diagnostics, or phase durations. Extra keys
 and unsupported policy schema versions must be rejected.
 
-The public test/loader boundary is
-`nanolab.cli.soak.resolve_soak_policy(data: dict, scenario_path: Path) -> dict`,
-followed by `ScenarioConfig.model_validate(resolved)`. The internal
-`load_soak_policy(data, path)` returns `(resolved_dict, receipt_or_none)`. The
-resolver removes `soakPolicyFile` before strict scenario validation. With inline
-smoke criteria there is no external policy receipt.
+The policy loader is `nanolab.cli.soak.load_soak_policy(data, scenario_path)`.
+It returns `(resolved_dict, receipt_or_none)`, removes `soakPolicyFile`, and
+resolves the criteria before `ScenarioConfig.model_validate(resolved_dict)`.
+The CLI `_scenario(path)` also resolves recipe paths and attaches the policy
+receipt. Inline smoke criteria have no external policy receipt.
 
 The receipt contains `path`, `sha256`, `size_bytes`, and
 `resolved_criteria_fingerprint`. The CLI loader attaches it as the private
