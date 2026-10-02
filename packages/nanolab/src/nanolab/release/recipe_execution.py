@@ -20,6 +20,8 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 from sonata_tasks.vm.logged import VmFileFetcher
 from sonata_tasks.vm.ports import VmCommandProvider
 
+from nanolab.config.environment import ExecutionRole
+from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import _provider_exec, _require_result
 from nanolab.release.model import digest_path
 from nanolab.release.recipe import ReleaseRecipeGroup, read_release_distribution
@@ -230,19 +232,29 @@ def release_recipe_commands(
     source_dir: str,
     remote_root: str,
     builder_name: str,
+    architecture: ImageArchitecture = "amd64",
+    role: ExecutionRole = "stack",
 ) -> tuple[CommandTaskSpec, ...]:
     """Return root Gradle assemblies with separate owned profile and output paths."""
+    if (architecture, role) not in {("amd64", "stack"), ("arm64", "arm-builder")}:
+        raise ValueError("Unsupported release recipe architecture/role pair")
+    if not groups or any(
+        not group.cells
+        or any(cell.architecture != architecture for cell in group.cells)
+        for group in groups
+    ):
+        raise ValueError("Release recipe cells differ from execution architecture")
     return tuple(
         CommandTaskSpec(
-            task_id=f"release.amd64.recipe.{group.flavor}",
-            summary=f"Assemble AMD64 {group.flavor} recipe",
+            task_id=f"release.{architecture}.recipe.{group.flavor}",
+            summary=f"Assemble {architecture.upper()} {group.flavor} recipe",
             argv=recipe_command(
                 "assembleRecipe",
-                recipe=f"{remote_root}/recipe-inputs/amd64/{group.name}.yaml",
-                output=f"{remote_root}/recipe-output/amd64/{group.flavor}",
+                recipe=f"{remote_root}/recipe-inputs/{architecture}/{group.name}.yaml",
+                output=f"{remote_root}/recipe-output/{architecture}/{group.flavor}",
                 tag=group.tag,
             ),
-            role="stack",
+            role=role,
             options=CommandOptions(
                 remote_dir=source_dir,
                 env={"DOCKER_BUILDKIT": "1", "BUILDX_BUILDER": builder_name},
@@ -267,6 +279,8 @@ def run_release_recipe_steps(
     archive_digest: str,
     builder_name: str,
     inputs_dir: Path | None = None,
+    architecture: ImageArchitecture = "amd64",
+    role: ExecutionRole = "stack",
 ) -> tuple[Evidence, ...]:
     """Require successful fresh reports, complete logs and matching local image IDs."""
     del inputs
@@ -275,6 +289,8 @@ def run_release_recipe_steps(
         source_dir=source_dir,
         remote_root=remote_root,
         builder_name=builder_name,
+        architecture=architecture,
+        role=role,
     )
     verify_release_source(
         inventory_file=inventory_file,
@@ -284,7 +300,10 @@ def run_release_recipe_steps(
     )
     evidence_dir.mkdir(parents=True, exist_ok=True)
     if inputs_dir is not None:
-        for name in ("buildkitd-amd64.toml", *(f"{g.name}.yaml" for g in groups)):
+        for name in (
+            f"buildkitd-{architecture}.toml",
+            *(f"{g.name}.yaml" for g in groups),
+        ):
             shutil.copyfile(inputs_dir / name, evidence_dir / name)
     retained_inventory = inventory_file
     if inputs_dir is not None:
@@ -295,7 +314,7 @@ def run_release_recipe_steps(
             "file-digest", str(retained_inventory), digest_path(retained_inventory)
         )
     ]
-    config = evidence_dir / "buildkitd-amd64.toml"
+    config = evidence_dir / f"buildkitd-{architecture}.toml"
     evidence.append(Evidence("file-digest", str(config), digest_path(config)))
     _verify_remote_digest(
         provider, request, f"{remote_root}/source.tar", archive_digest, "archive"
@@ -303,11 +322,13 @@ def run_release_recipe_steps(
     _verify_remote_digest(
         provider,
         request,
-        f"{remote_root}/recipe-inputs/amd64/{config.name}",
+        f"{remote_root}/recipe-inputs/{architecture}/{config.name}",
         digest_path(config),
         "configuration",
     )
     facts = {
+        "architecture": architecture,
+        "role": role,
         "sourceCommit": source_commit,
         "archiveDigest": archive_digest,
         "inventoryDigest": digest_path(inventory_file),
@@ -321,6 +342,7 @@ def run_release_recipe_steps(
     }
     for label, argv in (
         ("host", ("uname", "-m")),
+        ("hostOS", ("uname", "-s")),
         ("daemon", ("docker", "info", "--format={{.OSType}}|{{.Architecture}}")),
         ("docker", ("docker", "version")),
         ("buildx", ("docker", "buildx", "version")),
@@ -329,11 +351,17 @@ def run_release_recipe_steps(
         facts[label] = str(
             getattr(_remote(provider, request, argv), "stdout", "")
         ).strip()
-    if facts["host"] != "x86_64" or facts["daemon"] not in {
-        "linux|x86_64",
-        "linux|amd64",
-    }:
-        raise ValueError("Recipe builder requires native Linux AMD64 host/daemon")
+    aliases = {"amd64": {"x86_64", "amd64"}, "arm64": {"aarch64", "arm64"}}[
+        architecture
+    ]
+    if (
+        facts["hostOS"] != "Linux"
+        or facts["host"] not in aliases
+        or facts["daemon"] not in {"linux|" + alias for alias in aliases}
+    ):
+        raise ValueError(
+            f"Recipe builder requires native Linux {architecture.upper()} host/daemon"
+        )
     facts_file = evidence_dir / "build-facts.json"
     facts_file.write_text(json.dumps(facts, sort_keys=True, indent=2) + "\n")
     evidence.append(Evidence("file-digest", str(facts_file), digest_path(facts_file)))
@@ -341,7 +369,7 @@ def run_release_recipe_steps(
         profile = evidence_dir / f"{group.name}.yaml"
         if profile.read_bytes() != group.profile_bytes:
             raise ValueError("Frozen recipe profile changed")
-        remote_profile = f"{remote_root}/recipe-inputs/amd64/{profile.name}"
+        remote_profile = f"{remote_root}/recipe-inputs/{architecture}/{profile.name}"
         staged_hash = str(
             getattr(
                 _remote(provider, request, ("sha256sum", remote_profile)), "stdout", ""
@@ -350,7 +378,7 @@ def run_release_recipe_steps(
         if "sha256:" + staged_hash != group.profile_digest:
             raise ValueError("Staged recipe profile differs")
         evidence.append(Evidence("file-digest", str(profile), group.profile_digest))
-        output = f"{remote_root}/recipe-output/amd64/{group.flavor}"
+        output = f"{remote_root}/recipe-output/{architecture}/{group.flavor}"
         local_output = evidence_dir / group.flavor
         report = local_output / "distribution.json"
         report.unlink(missing_ok=True)
@@ -359,7 +387,7 @@ def run_release_recipe_steps(
         log = local_output / "gradle.log"
         log.unlink(missing_ok=True)
         # cleanRecipe claims/clears its output; logging must stay outside it.
-        log_dir = f"{remote_root}/recipe-output/amd64/logs"
+        log_dir = f"{remote_root}/recipe-output/{architecture}/logs"
         log_path = f"{log_dir}/{group.flavor}.log"
         _remote(provider, request, ("mkdir", "-p", log_dir))
         _remote(provider, request, ("rm", "-f", "--", log_path))
@@ -412,7 +440,7 @@ def run_release_recipe_steps(
         if len(rows) != len(components):
             raise ValueError("Daemon image inspection coverage differs")
         for row, component in zip(rows, components, strict=True):
-            if row != f"linux|amd64|{component.image.id}":
+            if row != f"linux|{architecture}|{component.image.id}":
                 raise ValueError(
                     f"Daemon image/platform differs: {component.image.reference}"
                 )
@@ -447,6 +475,6 @@ def run_release_recipe_steps(
         ),
     )
     rows = str(getattr(inspected, "stdout", "")).strip().splitlines()
-    if rows != [f"linux|amd64|{item.digest}" for item in images]:
+    if rows != [f"linux|{architecture}|{item.digest}" for item in images]:
         raise ValueError("Final release image IDs/platforms differ from reports")
     return tuple(evidence)

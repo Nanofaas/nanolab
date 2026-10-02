@@ -17,7 +17,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 from nanolab.images.bake import render_bake_json
-from nanolab.images.plan import ImagePlan
+from nanolab.images.plan import ImageArchitecture, ImagePlan
 from nanolab.release.build import (
     _provider_exec,
     _provider_transfer_to,
@@ -525,12 +525,23 @@ def release_recipe_inputs_resource(
     provider: object,
     request: object,
     requires: tuple[Resource[Any], ...] = (),
+    architecture: ImageArchitecture = "amd64",
 ) -> Resource[Path]:
     """Stage frozen profiles and configuration; retain local evidence on release."""
+    if (
+        architecture not in {"amd64", "arm64"}
+        or not groups
+        or any(
+            not group.cells
+            or any(cell.architecture != architecture for cell in group.cells)
+            for group in groups
+        )
+    ):
+        raise ValueError("Release recipe cells differ from input architecture")
     remote_root = str(_release_remote_root(remote_root))
-    remote_inputs = f"{remote_root}/recipe-inputs/amd64"
-    remote_output = f"{remote_root}/recipe-output/amd64"
-    config = Path(run_dir) / "buildkitd-amd64.toml"
+    remote_inputs = f"{remote_root}/recipe-inputs/{architecture}"
+    remote_output = f"{remote_root}/recipe-output/{architecture}"
+    config = Path(run_dir) / f"buildkitd-{architecture}.toml"
 
     def cleanup() -> None:
         _require_remote_success(
@@ -572,7 +583,7 @@ def release_recipe_inputs_resource(
         return config
 
     return Resource(
-        title="Acquire AMD64 recipe and BuildKit inputs",
+        title=f"Acquire {architecture.upper()} recipe and BuildKit inputs",
         acquire=acquire,
         release=lambda _inputs, _value: cleanup(),
         requires=requires,
@@ -585,6 +596,7 @@ def preserve_release_builder_selection(
     *,
     executor: CommandTaskExecutor,
     name: str,
+    role: ExecutionRole = "stack",
 ) -> Resource[str]:
     """Restore the prior selection after Sonata creates its named release builder."""
 
@@ -594,7 +606,7 @@ def preserve_release_builder_selection(
                 "release.builder.selected",
                 "Inspect selected builder",
                 ("docker", "buildx", "inspect"),
-                role="stack",
+                role=role,
             )
         )
         previous = None
@@ -613,7 +625,7 @@ def preserve_release_builder_selection(
                         "release.builder.restore",
                         "Restore selected builder",
                         ("docker", "buildx", "use", previous),
-                        role="stack",
+                        role=role,
                     )
                 )
                 _require_remote_success(result, "restore selected release builder")
