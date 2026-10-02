@@ -552,26 +552,26 @@ def test_archive_staging_matches_planning_permissions_despite_vm_umask(tmp_path)
     )
 
 
-def _recipe_phase(staged, tmp_path, **overrides):
-    from nanolab.plans.release_phases import build_amd64_phase
+def _recipe_phase(staged, tmp_path, *, architecture="amd64", **overrides):
+    from nanolab.plans.release_phases import build_recipe_assembly_phase
     from nanolab.release.model import ReleaseIdentity, digest_path
     from nanolab.release.tasks import source_test_task
 
     source, inventory = staged
-    provider = LocalProvider(source.parent)
+    provider = LocalProvider(source.parent, architecture)
     archive = source.parent / "source.tar"
     archive.write_bytes(b"guarded source")
     run_dir = tmp_path / "release-run"
     release_dir = run_dir / "releases/9.9.9"
-    inputs = release_dir / "recipe-inputs/amd64"
+    inputs = release_dir / f"recipe-inputs/{architecture}"
     inputs.mkdir(parents=True)
-    remote = source.parent / "recipe-inputs/amd64"
+    remote = source.parent / f"recipe-inputs/{architecture}"
     remote.mkdir(parents=True)
     for g in provider.groups:
         for directory in (inputs, remote):
             (directory / f"{g.name}.yaml").write_bytes(g.profile_bytes)
     for directory in (inputs, remote):
-        (directory / "buildkitd-amd64.toml").write_text(
+        (directory / f"buildkitd-{architecture}.toml").write_text(
             "[worker.oci]\n  max-parallelism = 2\n"
         )
     identity = ReleaseIdentity(
@@ -584,17 +584,19 @@ def _recipe_phase(staged, tmp_path, **overrides):
     source_tests.receipt.write_text("{}")
     executor = RecipeExecutor(provider)
     arguments: dict[str, Any] = {
+        "architecture": architecture,
+        "role": "stack" if architecture == "amd64" else "arm-builder",
         "identity": identity,
         "run_dir": run_dir,
         "image_plan": build_image_plan(
-            Path(os.environ["NANOFAAS_ROOT"]), "v9.9.9", architectures=("amd64",)
+            Path(os.environ["NANOFAAS_ROOT"]), "v9.9.9", architectures=(architecture,)
         ),
         "max_parallelism": 2,
         "builder_name": "owned-builder",
         "remote_root": ROOT,
         "source_dir": ROOT + "/source",
         "executor": cast(RoleBoundCommandTaskExecutor, executor),
-        "source_tests": source_tests,
+        "prerequisite_phases": (source_tests,),
         "recipe_groups": provider.groups,
         "provider": provider,
         "request": object(),
@@ -602,7 +604,7 @@ def _recipe_phase(staged, tmp_path, **overrides):
         "archive_digest": digest_path(archive),
     }
     arguments.update(overrides)
-    _, phase = build_amd64_phase(**arguments)
+    _, phase = build_recipe_assembly_phase(**arguments)
     return phase, provider, executor, source_tests, arguments
 
 
@@ -773,7 +775,7 @@ def test_recipe_phase_fingerprint_binds_all_inputs(
                 return tuple(result)
 
             monkeypatch.setattr(release_phases, "release_recipe_commands", commands)
-        _, other = release_phases.build_amd64_phase(**args)
+        _, other = release_phases.build_recipe_assembly_phase(**args)
     assert other.reuse_key != original_key
 
 

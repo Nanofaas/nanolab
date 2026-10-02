@@ -889,9 +889,9 @@ def test_run_image_steps_rejects_a_foreign_architecture() -> None:
                 "docker",
                 "image",
                 "inspect",
-                "--format={{.Architecture}}|{{.Id}}",
+                "--format={{.Os}}|{{.Architecture}}|{{.Id}}",
                 "img:v1",
-            ): f"arm64|{digest}",
+            ): f"linux|arm64|{digest}",
         }
     )
 
@@ -914,10 +914,10 @@ def test_run_image_steps_accepts_the_expected_architecture() -> None:
                 "docker",
                 "image",
                 "inspect",
-                "--format={{.Architecture}}|{{.Id}}",
+                "--format={{.Os}}|{{.Architecture}}|{{.Id}}",
                 "img-a:v1",
                 "img-b:v1",
-            ): f"amd64|{digest}\namd64|{digest}",
+            ): f"linux|amd64|{digest}\nlinux|amd64|{digest}",
         }
     )
 
@@ -965,3 +965,198 @@ def test_run_image_steps_retries_the_read_only_matrix_inspection(monkeypatch) ->
 
     assert executor.calls == 2
     assert [item.digest for item in evidence] == [digest]
+
+
+def _arm_recipe_phases(tmp_path):
+    from nanolab.plans import release_phases
+    from nanolab.release.recipe_execution import capture_release_inventory
+    from tests.release.test_recipe import _report
+    from tests.release.test_recipe_execution import _recipe_phase
+
+    source = tmp_path / "vm/source"
+    source.mkdir(parents=True)
+    (source / "settings.gradle").write_text('rootProject.name="probe"\n')
+    (source / "build.gradle").write_text("plugins {}\n")
+    inventory = capture_release_inventory(source, tmp_path / "inventory.json")
+    phase, provider, _producer, prerequisite, arguments = _recipe_phase(
+        (source, inventory), tmp_path, architecture="arm64"
+    )
+    ids = {
+        row["image"]["reference"]: row["image"]["id"]
+        for group in provider.groups
+        for row in _report(group)["components"]
+        if row["image"]
+    }
+
+    class PushExecutor:
+        def __init__(self):
+            self.commands = []
+            self.replaced = False
+            self.platform = "linux|arm64"
+
+        def binding_key(self, role):
+            return "daemon:" + role
+
+        def run(self, task, **kwargs):
+            self.commands.append(task)
+            if task.argv[:3] == ("docker", "image", "inspect"):
+                assert task.role == "arm-builder"
+                stdout = "\n".join(
+                    self.platform
+                    + "|"
+                    + ("sha256:" + "f" * 64 if self.replaced else ids[image])
+                    for image in task.argv[4:]
+                )
+            elif task.argv[:2] == ("docker", "push"):
+                assert task.role == "arm-builder"
+                stdout = ""
+            elif task.argv[:2] == ("skopeo", "inspect"):
+                assert task.role == "arm-builder"
+                stdout = "sha256:" + "e" * 64
+            else:
+                assert task.role == "stack" and task.argv[:2] == ("sh", "-c")
+                stdout = "\n".join("sha256:" + "e" * 64 for _image in task.argv[4:])
+            return TaskResult("", "passed", 0, stdout=stdout)
+
+    executor = PushExecutor()
+    push = release_phases.build_registry_push_phase(
+        identity=phase.identity,
+        run_dir=arguments["run_dir"],
+        image_plan=arguments["image_plan"],
+        release_images=phase.expected_images,
+        executor=executor,
+        prerequisite_phases=(prerequisite,),
+        assembly=phase,
+        architecture="arm64",
+        role="arm-builder",
+    )
+    return phase, push, executor
+
+
+def test_arm_assembly_and_push_have_distinct_receipts(tmp_path):
+    build, push, executor = _arm_recipe_phases(tmp_path)
+    build.run(TaskInputs.empty())
+    assert build.phase_inputs["recipeContract"] == 2
+    assert build.phase_inputs["architecture"] == "arm64"
+    assert build.phase_inputs["role"] == "arm-builder"
+    images = tuple("docker-daemon:" + image for image in build.expected_images)
+    assert (
+        len(
+            exact_receipt_artifacts(
+                build.receipt, "arm64-build", "local-image-digest", images
+            )
+        )
+        == 44
+    )
+    assert not receipt_artifacts(build.receipt, "arm64-build", "local-registry-digest")
+    workflow = Workflow("arm-push")
+    workflow.add(push)
+    workflow.run()
+    assert push.phase == "arm64-local-registry-push"
+    assert push.title == "Push ARM64 images to local registry"
+    refs = tuple("docker://" + image for image in build.expected_images)
+    assert (
+        len(
+            exact_receipt_artifacts(
+                push.receipt, push.phase, "local-registry-digest", refs
+            )
+        )
+        == 44
+    )
+    assert not receipt_artifacts(push.receipt, push.phase, "local-image-digest")
+    assert (
+        len([task for task in executor.commands if task.argv[:2] == ("docker", "push")])
+        == 44
+    )
+    assert executor.commands[0].role == "arm-builder"
+    assert executor.commands[-1].role == "stack"
+
+
+@pytest.mark.parametrize("mutation", ["id", "windows", "amd64"])
+def test_changed_local_image_blocks_push_before_first_command(tmp_path, mutation):
+    build, push, executor = _arm_recipe_phases(tmp_path)
+    build.run(TaskInputs.empty())
+    if mutation == "id":
+        executor.replaced = True
+    else:
+        executor.platform = "windows|arm64" if mutation == "windows" else "linux|amd64"
+    with pytest.raises(RuntimeError, match=r"image|platform|architecture"):
+        push.run(TaskInputs.empty())
+    assert not any(task.argv[:2] == ("docker", "push") for task in executor.commands)
+    assert not push.receipt.exists()
+
+
+def test_old_combined_arm_receipt_is_not_local_assembly_proof(tmp_path):
+    build, push, executor = _arm_recipe_phases(tmp_path)
+    build.receipt.parent.mkdir(parents=True, exist_ok=True)
+    build.receipt.write_text(
+        json.dumps(
+            {
+                "phase": "arm64-build",
+                "evidence": [
+                    {
+                        "kind": "local-registry-digest",
+                        "reference": "docker://" + image,
+                        "digest": "sha256:" + "e" * 64,
+                    }
+                    for image in build.expected_images
+                ],
+            }
+        )
+    )
+    with pytest.raises(RuntimeError, match="exact artifact coverage"):
+        push.run(TaskInputs.empty())
+    assert not executor.commands and not push.receipt.exists()
+
+
+@pytest.mark.parametrize("mutation", ["partial", "foreign", "duplicate"])
+def test_arm_push_rejects_partial_or_foreign_digest_set(tmp_path, mutation):
+    from nanolab.release.tasks import arm64_registry_push_task
+
+    images = ("image-a:arm64", "image-b:arm64")
+    refs = ["docker://" + image for image in images]
+    if mutation == "partial":
+        refs.pop()
+    elif mutation == "foreign":
+        refs[0] = "docker://foreign:arm64"
+    else:
+        refs[0] = refs[1]
+    task = arm64_registry_push_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={},
+        expected_images=images,
+        work=lambda _inputs: tuple(
+            Evidence("local-registry-digest", ref, "sha256:" + "e" * 64) for ref in refs
+        ),
+    )
+    with pytest.raises(RuntimeError, match="image matrix"):
+        task.run(TaskInputs.empty())
+    assert not task.receipt.exists()
+
+
+def test_run_image_steps_can_verify_without_running_build_or_push():
+    digest = "sha256:" + "a" * 64
+    executor = _ScriptedExecutor(
+        {
+            (
+                "docker",
+                "image",
+                "inspect",
+                "--format={{.Os}}|{{.Architecture}}|{{.Id}}",
+                "image:arm64",
+            ): f"linux|arm64|{digest}",
+        }
+    )
+    evidence = run_image_steps(
+        None,
+        TaskInputs.empty(),
+        executor,
+        ("image:arm64",),
+        registry=False,
+        architecture="arm64",
+        role="arm-builder",
+    )
+    assert evidence == (
+        Evidence("local-image-digest", "docker-daemon:image:arm64", digest),
+    )

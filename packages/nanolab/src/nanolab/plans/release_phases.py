@@ -21,7 +21,8 @@ from sonata_tasks.cosign import CosignTask
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_tasks.transfer import FileTransferTask
 
-from nanolab.images.plan import ImagePlan
+from nanolab.config.environment import ExecutionRole
+from nanolab.images.plan import ImageArchitecture, ImagePlan
 from nanolab.plans import loadtest as loadtest_plan
 from nanolab.release import attest as release_attest
 from nanolab.release import build as release_build
@@ -68,6 +69,7 @@ from nanolab.release.tasks import (
     aggregate_benchmarks_task,
     amd64_build_task,
     arm64_build_task,
+    arm64_registry_push_task,
     arm64_smoke_task,
     attest_task,
     benchmark_task,
@@ -180,8 +182,10 @@ def build_source_test_phase(
     return sources, source_tests
 
 
-def build_amd64_phase(
+def build_recipe_assembly_phase(
     *,
+    architecture: ImageArchitecture,
+    role: ExecutionRole,
     identity: ReleaseIdentity,
     run_dir: Path,
     image_plan: ImagePlan,
@@ -190,23 +194,25 @@ def build_amd64_phase(
     remote_root: str,
     source_dir: str,
     executor: RoleBoundCommandTaskExecutor,
-    source_tests: ReleasePhaseTask,
+    prerequisite_phases: tuple[ReleasePhaseTask, ...],
     recipe_groups: tuple[ReleaseRecipeGroup, ...],
     provider: object,
     request: object,
     inventory_file: Path,
     archive_digest: str,
 ) -> tuple[tuple[str, ...], ReleasePhaseTask]:
-    """Build only AMD64 through frozen recipes; keep registry push separate."""
+    """Assemble frozen recipes on their owning VM; keep registry push separate."""
     commands = release_recipe_commands(
         recipe_groups,
         source_dir=source_dir,
         remote_root=remote_root,
         builder_name=builder_name,
+        architecture=architecture,
+        role=role,
     )
     release_dir = versioned_release_run_dir(run_dir, identity.prepared_version)
-    inputs_dir = release_dir / "recipe-inputs/amd64"
-    evidence_dir = release_dir / "recipe-evidence/amd64"
+    inputs_dir = release_dir / f"recipe-inputs/{architecture}"
+    evidence_dir = release_dir / f"recipe-evidence/{architecture}"
     inventory_digest = digest_path(inventory_file)
     config_bytes = f"[worker.oci]\n  max-parallelism = {max_parallelism}\n".encode()
     release_images = tuple(cell.image for cell in image_plan.cells)
@@ -214,7 +220,7 @@ def build_amd64_phase(
     def assemble(inputs):
         if digest_path(inventory_file) != inventory_digest:
             raise ValueError("Frozen source inventory changed")
-        if (inputs_dir / "buildkitd-amd64.toml").read_bytes() != config_bytes:
+        if (inputs_dir / f"buildkitd-{architecture}.toml").read_bytes() != config_bytes:
             raise ValueError("Frozen BuildKit configuration changed")
         return run_release_recipe_steps(
             inputs,
@@ -230,12 +236,18 @@ def build_amd64_phase(
             archive_digest=archive_digest,
             builder_name=builder_name,
             inputs_dir=inputs_dir,
+            architecture=architecture,
+            role=role,
         )
 
-    build = amd64_build_task(
+    factory = amd64_build_task if architecture == "amd64" else arm64_build_task
+    build = factory(
         identity=identity,
         run_dir=run_dir,
         phase_inputs={
+            "recipeContract": 2,
+            "architecture": architecture,
+            "role": role,
             "commands": tuple(
                 {
                     "argv": c.argv,
@@ -265,7 +277,7 @@ def build_amd64_phase(
             "maxParallelism": max_parallelism,
             "sourceDir": source_dir,
         },
-        prerequisites=(source_tests.receipt,),
+        prerequisites=tuple(phase.receipt for phase in prerequisite_phases),
         expected_images=release_images,
         work=assemble,
     )
@@ -274,34 +286,76 @@ def build_amd64_phase(
 
 def build_registry_push_phase(
     *,
+    architecture: ImageArchitecture,
+    role: ExecutionRole,
     identity: ReleaseIdentity,
     run_dir: Path,
     image_plan: ImagePlan,
     release_images: tuple[str, ...],
     executor: RoleBoundCommandTaskExecutor,
-    source_tests: ReleasePhaseTask,
-    amd64_build: ReleasePhaseTask,
+    prerequisite_phases: tuple[ReleasePhaseTask, ...],
+    assembly: ReleasePhaseTask,
 ) -> ReleasePhaseTask:
-    """Push the built AMD64 images into the registry on the stack VM."""
+    """Verify local assembly IDs, push on their VM, then inspect the stack registry."""
+    if (architecture, role) not in {("amd64", "stack"), ("arm64", "arm-builder")}:
+        raise ValueError("Unsupported release push architecture/role pair")
     registry_steps = registry_push_composite(
         image_plan,
         executor=executor,
-        role="stack",
+        role=role,
         tls_verify=False,
     )
-    return registry_push_task(
-        identity=identity,
-        run_dir=run_dir,
-        phase_inputs={"images": release_images, "tlsVerify": False},
-        prerequisites=(source_tests.receipt, amd64_build.receipt),
-        expected_images=release_images,
-        work=lambda inputs: run_image_steps(
+
+    def push(inputs):
+        proof = exact_receipt_artifacts(
+            assembly.receipt,
+            assembly.phase,
+            "local-image-digest",
+            tuple("docker-daemon:" + image for image in release_images),
+        )
+        current = run_image_steps(
+            None,
+            inputs,
+            executor,
+            release_images,
+            registry=False,
+            architecture=architecture,
+            role=role,
+        )
+        if {(item.reference, item.digest) for item in proof} != {
+            (item.reference, item.digest) for item in current
+        }:
+            raise RuntimeError("Local image IDs changed since recipe assembly")
+        return run_image_steps(
             registry_steps,
             inputs,
             executor,
             release_images,
             registry=True,
+            role="stack",
+        )
+
+    factory = (
+        registry_push_task if architecture == "amd64" else arm64_registry_push_task
+    )
+    return factory(
+        identity=identity,
+        run_dir=run_dir,
+        phase_inputs={
+            "recipeContract": 2,
+            "architecture": architecture,
+            "role": role,
+            "images": release_images,
+            "tlsVerify": False,
+            # Sonata's fingerprint hook binds the actual composite argv/options/roles.
+            "commands": registry_steps._fingerprint_payload(),  # noqa: SLF001
+        },
+        prerequisites=(
+            *(phase.receipt for phase in prerequisite_phases),
+            assembly.receipt,
         ),
+        expected_images=release_images,
+        work=push,
     )
 
 

@@ -25,11 +25,11 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.plans.release_phases import (
-    build_amd64_phase,
     build_arm64_phase,
     build_attestation_phase,
     build_benchmark_phase,
     build_publication_phase,
+    build_recipe_assembly_phase,
     build_registry_push_phase,
     build_regression_phase,
     build_source_test_phase,
@@ -427,7 +427,9 @@ def build_release_workflow(
     amd64_builder = preserve_release_builder_selection(
         amd64_builder, executor=executor, name=amd64_builder_name
     )
-    release_images, amd64_build = build_amd64_phase(
+    release_images, amd64_build = build_recipe_assembly_phase(
+        architecture="amd64",
+        role="stack",
         identity=identity,
         run_dir=request.run_dir,
         image_plan=request.image_plan,
@@ -436,7 +438,7 @@ def build_release_workflow(
         remote_root=remote_root,
         source_dir=source_dir,
         executor=executor,
-        source_tests=source_tests,
+        prerequisite_phases=(source_tests,),
         recipe_groups=request.recipe_groups,
         provider=provider,
         request=stack_req,
@@ -446,13 +448,15 @@ def build_release_workflow(
 
     # --- Phase 3: Registry Push ---
     registry_push = build_registry_push_phase(
+        architecture="amd64",
+        role="stack",
         identity=identity,
         run_dir=request.run_dir,
         image_plan=request.image_plan,
         release_images=release_images,
         executor=executor,
-        source_tests=source_tests,
-        amd64_build=amd64_build,
+        prerequisite_phases=(source_tests,),
+        assembly=amd64_build,
     )
 
     # --- Phases 4-6: Benchmarks ---

@@ -16,6 +16,7 @@ from sonata_engine import Evidence, ReusableTask, Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
 
+from nanolab.config.environment import ExecutionRole
 from nanolab.release.evidence import is_sha256_digest, receipt_artifacts
 from nanolab.release.model import ArtifactEvidence, ReleaseIdentity, digest_path
 from nanolab.release.remote_retry import retry_on_connection_death
@@ -158,6 +159,15 @@ def registry_push_task(**kwargs: Any) -> ReleasePhaseTask:
     )
 
 
+def arm64_registry_push_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that pushes assembled ARM64 images to the local registry."""
+    return ReleasePhaseTask(
+        phase="arm64-local-registry-push",
+        title="Push ARM64 images to local registry",
+        **kwargs,
+    )
+
+
 def benchmark_task(index: int, **kwargs: Any) -> ReleasePhaseTask:
     """Build the phase that runs benchmark number `index`."""
     return ReleasePhaseTask(
@@ -178,7 +188,7 @@ def regression_gate_task(**kwargs: Any) -> ReleasePhaseTask:
 
 
 def arm64_build_task(**kwargs: Any) -> ReleasePhaseTask:
-    """Build the phase that bakes and pushes the ARM64 images."""
+    """Build the phase that assembles the ARM64 recipes."""
     return ReleasePhaseTask(phase="arm64-build", title="Build ARM64 images", **kwargs)
 
 
@@ -367,7 +377,9 @@ def _image_inspection_argv(
             *images,
         )
     output_format = (
-        "--format={{.Architecture}}|{{.Id}}" if architecture else "--format={{.Id}}"
+        "--format={{.Os}}|{{.Architecture}}|{{.Id}}"
+        if architecture
+        else "--format={{.Id}}"
     )
     return ("docker", "image", "inspect", output_format, *images)
 
@@ -375,8 +387,14 @@ def _image_inspection_argv(
 def _digest_from_inspection(line: str, image: str, architecture: str | None) -> str:
     if architecture is None:
         return line.strip()
-    actual, separator, digest = line.partition("|")
-    if not separator or actual != architecture:
+    os_type, os_separator, platform = line.partition("|")
+    actual, separator, digest = platform.partition("|")
+    if (
+        os_type != "linux"
+        or not os_separator
+        or not separator
+        or actual != architecture
+    ):
         raise RuntimeError(
             f"image architecture mismatch for {image}: "
             f"expected {architecture}, got {actual or 'empty'}"
@@ -391,22 +409,26 @@ def _image_evidence(image: str, digest: str, *, registry: bool) -> Evidence:
 
 
 def run_image_steps(
-    steps: Task[Any],
+    steps: Task[Any] | None,
     inputs: TaskInputs,
     executor: CommandTaskExecutor,
     images: tuple[str, ...],
     *,
     registry: bool,
     architecture: str | None = None,
+    role: ExecutionRole = "stack",
 ) -> tuple[Evidence, ...]:
     """Run build/push steps and capture the complete current image matrix.
+
+    Pass `steps=None` to inspect only. `architecture` also requires Linux.
 
     `architecture`, when given, asserts every image really carries it: a
     cross-built or mistagged image otherwise inspects cleanly and reaches the
     manifest list, where the mismatch surfaces as a runtime failure on a
     user's machine instead of here.
     """
-    run_steps(steps, inputs)
+    if steps is not None:
+        run_steps(steps, inputs)
     if not images:
         return ()
 
@@ -417,7 +439,7 @@ def run_image_steps(
                 task_id="",
                 summary="Verify image matrix",
                 argv=argv,
-                role="stack",
+                role=role,
             )
         ),
         describe="image matrix verification",
