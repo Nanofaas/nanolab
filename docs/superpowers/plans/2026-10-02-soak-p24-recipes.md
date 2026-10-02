@@ -64,12 +64,12 @@
 
 **Interfaces:** Consume Task1's canonical resolved config/profile and Task2's shared `prepare_soak` contract. Use existing registry/Buildx resources and `RuntimeOptions`/`_runtime_preparation_options` wiring for real preparation capabilities; the latter declares provider wiring and never proves target/prerequisite success. This is an isolated preparation harness, not a partial public soak run.
 
-- [ ] Record baseline Docker containers/image IDs, selected builder, daemon OS/architecture and any pre-existing registry. Expected: native Linux ARM64; otherwise the real gate stays incomplete without emulation or platform edits. Verify the clean pinned NanoFaaS checkout and policy/profile/preset input identities relevant to this slice; retain their hashes, not secrets.
-- [ ] Create a bounded private harness using the existing owned resource lifecycle: validate the full canonical P24 config, acquire its registry and existing builder executor that removes `--use` to preserve the selected builder, and wire actual default prerequisite/diagnostic providers using production preparation options. Call `prepare_soak` with the new profile, owned builder and required local registry, then close its writer and release owned resources in `finally`. Never bypass support checks with a no-op, fabricate adapters/receipts, or call the multi-hour measurement task. Expected: real preparation produces three complete immutable receipts or reports a concrete missing-capability gate before proceeding.
-- [ ] Retain the one real `publishRecipe` command/full logs, raw profile/distribution, dirty-inclusive source identity, observation/provenance and registry artifacts. Independently inspect executable ARM64 manifests/config IDs and actual effective JVM/Node settings against existing preset/default build expectations using read-only catalogue planning and actual observations; no second application build. Expected: three verified roles, one source/publication, no policy drift. A compiler/launcher mismatch stops qualification and requires an explicit documented resolution.
-- [ ] Check owned cleanup against the baseline, including selected builder and unrelated image/container IDs. Expected: owned resources released, unrelated resources intact, evidence retained. Missing/failed checks are incomplete, not inferred from mocks.
-- [ ] Run `NANOFAAS_ROOT=/tmp/nanofaas-release-arm64-pin uv run --locked --package nanolab nanolab run packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml --run-dir /tmp/nanolab-soak-p24-recipes-verification/smoke-run` with logs retained as `smoke.log`. Expected: unchanged recipe smoke completes preparation/deployment/measurement/report/cleanup; record the real numerical verdict, including INCONCLUSIVE if unchanged limits still fail. This run remains smoke and `p24_qualified: false`. Run its matching `--teardown` after success or failure and verify ownership; do not change thresholds to obtain exit0.
-- [ ] Record preparation and smoke integration separately from numerical acceptance and genuine P24 coverage. Expected: PASS or explicit incomplete per gate; no P24 qualification claimed. If native work is blocked, keep this task's live gates unchecked and continue truthful local documentation/review.
+- [x] Record baseline Docker containers/image IDs, selected builder, daemon OS/architecture and any pre-existing registry. Expected: native Linux ARM64; otherwise the real gate stays incomplete without emulation or platform edits. Verify the clean pinned NanoFaaS checkout and policy/profile/preset input identities relevant to this slice; retain their hashes, not secrets.
+- [x] Create a bounded private harness using the existing owned resource lifecycle: validate the full canonical P24 config, acquire its registry and existing builder executor that removes `--use` to preserve the selected builder, and wire actual default prerequisite/diagnostic providers using production preparation options. Call `prepare_soak` with the new profile, owned builder and required local registry, then close its writer and release owned resources in `finally`. Never bypass support checks with a no-op, fabricate adapters/receipts, or call the multi-hour measurement task. Expected: real preparation produces three complete immutable receipts or reports a concrete missing-capability gate before proceeding.
+- [x] Retain the one real `publishRecipe` command/full logs, raw profile/distribution, dirty-inclusive source identity, observation/provenance and registry artifacts. Independently inspect executable ARM64 manifests/config IDs and actual effective JVM/Node settings against existing preset/default build expectations using read-only catalogue planning and actual observations; no second application build. Expected: three verified roles, one source/publication, no policy drift. A compiler/launcher mismatch stops qualification and requires an explicit documented resolution.
+- [x] Check owned cleanup against the baseline, including selected builder and unrelated image/container IDs. Expected: owned resources released, unrelated resources intact, evidence retained. Missing/failed checks are incomplete, not inferred from mocks.
+- [x] Run `NANOFAAS_ROOT=/tmp/nanofaas-release-arm64-pin uv run --locked --package nanolab nanolab run packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml --run-dir /tmp/nanolab-soak-p24-recipes-verification/smoke-run` with logs retained as `smoke.log`. Expected: unchanged recipe smoke completes preparation/deployment/measurement/report/cleanup; record the real numerical verdict, including INCONCLUSIVE if unchanged limits still fail. This run remains smoke and `p24_qualified: false`. Run its matching `--teardown` after success or failure and verify ownership; do not change thresholds to obtain exit0.
+- [x] Record preparation and smoke integration separately from numerical acceptance and genuine P24 coverage. Expected: PASS or explicit incomplete per gate; no P24 qualification claimed. If native work is blocked, keep this task's live gates unchecked and continue truthful local documentation/review.
 
 ## Task 4: Final checks, documentation and whole-branch review
 
@@ -98,3 +98,30 @@ unused run-dir and offline evaluation. No implementation or policy was changed.
 
 Execution preference: native inline in this session, as previously requested.
 Review this written plan before implementation begins.
+
+
+## Actual native gates (2 October 2026)
+
+- [x] Pinned Gradle validation: three intended components.
+- [x] Native ARM64 application publication: one snapshot, one publishRecipe,
+  three independently verified executable/config/provenance identities and
+  offline receipts. Real probes preserve control-plane Serial GC/C1 and Java
+  function default tier4; Node executable version observed.
+- [x] Actual automatic diagnostic helper build.
+- [ ] Full canonical preparation: provider wiring rejects the undeclared Node
+  diagnostic preload before application preparation. Lower publication PASS
+  does not complete this gate.
+- [ ] Genuine prerequisite coverage: expanded async/cancellation/error/
+  late-callback/timeout lack built-in fault-capable injection; coverage preserved.
+- [x] Existing recipe smoke completes all phases: 122 steady requests, zero
+  errors/drops, 244/244 checks, valid source/preflight/accounting/integrity.
+  Report INCONCLUSIVE for all three zero-threshold RSS-growth reviews and
+  missing ownership/equal-work attribution; p24_qualified false, CLI exit2.
+- [x] Matching teardown exit0, owned builders/registry/new image references
+  released, baseline containers/images and selected builder preserved.
+- [ ] Multi-hour P24 campaign and acceptance (not launched).
+
+Private evidence: `/tmp/nanolab-soak-p24-recipes-verification/` with
+`native-preparation.log`, `p24-preparation/gates.json`, `smoke.log`,
+`smoke-teardown.log`, `cleanup-verification.json` and offline recheck scripts.
+Task3 verification actions are complete; the live gates above remain open.
