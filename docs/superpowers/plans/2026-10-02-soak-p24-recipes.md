@@ -77,10 +77,10 @@
 
 **Interfaces:** Consume the actual Task1–3 verification results. No new product behavior. Native inline execution is the preserved user preference; one fresh whole-branch final reviewer, no task-by-task reviewer delegation.
 
-- [ ] Run `NANOFAAS_ROOT=/tmp/nanofaas-release-arm64-pin uv run --locked --package nanolab pytest packages/nanolab/tests -q`; expected complete suite PASS. Run `uv run --locked --package nanolab nanolab-quality`; expected `Quality checks passed`. Run `uv run --locked --package nanolab ruff format --check --config packages/nanolab/pyproject.toml packages/nanolab`; expected formatted. Run Bandit with `-r packages/nanolab/src/nanolab -c packages/nanolab/pyproject.toml -f json -o <task-workspace>/bandit.json`; expected only four existing B101 LOWs, retain exit1 and report any regression. Run `git diff --check`; expected clean.
-- [ ] Document canonical P24 profile/preparation and real evidence scope. Correct stale prose claiming the policy is unshipped, 100requests/s per function or AMD64 where the actual preset has a shipped policy,20/20rates and ARM64. Document unchanged uninterrupted lifetime/no resume, offline evaluation and native preparation versus multi-hour acceptance. Do not mark the broad P24/backend roadmap item fully complete; add this slice's actual preparation result and leave other presets/backends and qualification pending.
+- [x] Run `NANOFAAS_ROOT=/tmp/nanofaas-release-arm64-pin uv run --locked --package nanolab pytest packages/nanolab/tests -q`; expected complete suite PASS. Run `uv run --locked --package nanolab nanolab-quality`; expected `Quality checks passed`. Run `uv run --locked --package nanolab ruff format --check --config packages/nanolab/pyproject.toml packages/nanolab`; expected formatted. Run Bandit with `-r packages/nanolab/src/nanolab -c packages/nanolab/pyproject.toml -f json -o <task-workspace>/bandit.json`; expected only four existing B101 LOWs, retain exit1 and report any regression. Run `git diff --check`; expected clean.
+- [x] Document canonical P24 profile/preparation and real evidence scope. Correct stale prose claiming the policy is unshipped, 100requests/s per function or AMD64 where the actual preset has a shipped policy,20/20rates and ARM64. Document unchanged uninterrupted lifetime/no resume, offline evaluation and native preparation versus multi-hour acceptance. Do not mark the broad P24/backend roadmap item fully complete; add this slice's actual preparation result and leave other presets/backends and qualification pending.
 - [ ] Self-check every spec requirement against tasks/tests and actual evidence. Review the whole branch with a fresh reviewer per `executing-plans`/`requesting-code-review`, including Review Focus and any rulings. Expected: no unfixed Critical/Important findings; retain minors/rulings and native limitations. Fix actual Important/Critical findings in one RED→GREEN pass and rerun the full suite.
-- [ ] Commit `Document P24 recipe preparation verification` if native preparation passed; otherwise `Document P24 recipe preparation verification gates`. Update checked steps to actual results only. Merge/push remains a later user integration choice.
+- [x] Commit `Document P24 recipe preparation verification` if native preparation passed; otherwise `Document P24 recipe preparation verification gates`. Update checked steps to actual results only. Merge/push remains a later user integration choice.
 
 ## Plan self-review and handoff
 
@@ -125,3 +125,7 @@ Private evidence: `/tmp/nanolab-soak-p24-recipes-verification/` with
 `native-preparation.log`, `p24-preparation/gates.json`, `smoke.log`,
 `smoke-teardown.log`, `cleanup-verification.json` and offline recheck scripts.
 Task3 verification actions are complete; the live gates above remain open.
+
+Final local checks: **3343 tests PASS**, coverage **89%**; quality/types/import
+contracts PASS, 419 files formatted; Bandit retains only four existing LOW B101
+findings, exit1. Final whole-branch review follows this documentation commit.

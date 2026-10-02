@@ -16,6 +16,7 @@ this directory.
 | `validate-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Kubernetes lifecycle validation on Minikube or Multipass |
 | `validate-containerd-jvm.yaml` | JVM, containerd provider, build metadata | Java JVM word-stats | Rootless containerd lifecycle validation on Multipass |
 | `loadtest-container-jvm.yaml` | JVM, container provider, autoscaler, async queue, build metadata | Java JVM word-stats | Container autoscaling load test |
+| `soak-container-p24-jvm.yaml` | JVM Serial GC/C1, container provider, async queue, build metadata | Java JVM and JavaScript word-stats | Canonical ARM64 P24 image preparation; qualification pending |
 
 All profiles use the repository `127.0.0.1:5000/nanofaas` and single-platform
 Docker images. The native profile compiles the control plane and word-stats
@@ -276,3 +277,18 @@ and local IDs. ARM64 remains on its existing Bake path.
 All three profiles pass pinned `validateRecipe`. Native AMD64 build/export and
 runtime verification remain gated on Azure MFA; see the
 [release verification plan](../../../docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).
+
+
+## P24 container preparation
+
+`memory-soak-sync-container.yaml` selects `soak-container-p24-jvm.yaml`.
+Use the scenario loader to resolve both its profile and shipped policy.
+One `publishRecipe` builds and publishes the three application images from one
+immutable source snapshot. The profile preserves legacy control-plane Serial
+GC/C1 and Java function JVM defaults; the strict P24 validator rejects drift.
+
+Pinned `validateRecipe` and native ARM64 publication/receipt/runtime probes pass.
+Full preparation remains blocked by the undeclared Node diagnostic preload and
+missing automatic fault-capable prerequisite coverage. A short smoke or successful
+publication cannot qualify P24. See the [P24 verification gates](../../../docs/soak.md#p24-preparation-verification)
+before attempting a multi-hour run.

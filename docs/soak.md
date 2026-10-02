@@ -18,7 +18,7 @@ population. Do not accept a memory-only policy as complete P24 qualification.
 
 | Preset in `packages/nanolab/scenarios-v2/` | Purpose and boundary |
 | --- | --- |
-| `memory-soak-sync-container.yaml` | JVM control plane and Java SDK, Node SDK; operator criteria required |
+| `memory-soak-sync-container.yaml` | ARM64 JVM/Node recipe preparation; shipped policy, full P24 readiness pending |
 | `memory-soak-smoke-container.yaml` | Short observation/artifact exercise with inline smoke criteria |
 | `memory-soak-smoke-recipe-container.yaml` | ARM64 JVM/Node sibling using one attested recipe publication |
 | `memory-soak-prerequisites-container.yaml` | Short prerequisite-adapter exercise; still smoke, never a qualifying P24 receipt |
@@ -34,7 +34,7 @@ there is no exemption for absent coverage or a successful ordinary smoke.
 
 ## Operator criteria file
 
-The P24 preset deliberately references an unshipped file:
+The canonical P24 preset references the shipped six-criterion policy:
 
 ```yaml
 soakPolicyFile: ./memory-soak-policy.yaml
@@ -53,9 +53,11 @@ schema: nanolab-soak-policy-v1
 criteria: []
 ```
 
-This shows the file structure only. An empty list is invalid, and no numerical
-P24 acceptance policy is shipped. Populate the list with reviewed criteria before
-using it. The loader replaces **only** `soak.criteria`; it cannot alter resources,
+This shows the file structure only; an empty list is invalid. The shipped
+`memory-soak-policy.yaml` contains cgroup ceilings and zero-threshold RSS
+residual criteria for all three roles. These existing limits remain unchanged;
+they do not establish complete retained-state acceptance. The loader replaces
+**only** `soak.criteria`; it cannot alter resources,
 roles, images, retention, workload, diagnostics, or phase durations. Extra keys
 and unsupported policy schema versions must be rejected.
 
@@ -140,7 +142,8 @@ went into, so nothing from a run survives it. If you keep a registry of your own
 running, stop it before a run — a different container already bound to that port
 makes the run's own creation fail rather than adopt yours.
 
-P24 declares 100 requests/second per function (200 total) and 200 VUs. These are explicit
+The canonical P24 preset declares 20 requests/second per function (40 total)
+and 200 preallocated/maximum VUs. These are explicit
 initial workload inputs, not a measured saturation claim. Validate achieved
 offered work, correctness, errors, dropped iterations, and generator capacity.
 The smoke offers 1 request/second per function with 4 preallocated/8 maximum VUs.
@@ -161,10 +164,11 @@ or become zero-valued observations.
 One stable, fingerprinted source snapshot supplies the control-plane, Java SDK,
 and JavaScript SDK builds, including identified local modifications. The shipped
 P24 preset selects `jvm` for both Java roles and `default` for JavaScript on
-`linux/amd64`; the generic image builder continues to support native recipes.
+`linux/arm64`; the generic image builder continues to support native recipes.
 The control plane explicitly selects
-`container-deployment-provider` and `async-queue`. Changing modules, platform,
-runtime options, payload, or source invalidates relevant evidence identities.
+`container-deployment-provider`, `async-queue` and `build-metadata`. Changing
+modules, platform, runtime options, payload, or source invalidates relevant
+evidence identities.
 
 The required order is source/build preflight, snapshot, all role builds,
 publication under run-owned tags, digest freeze, deployment, effective runtime
@@ -231,17 +235,16 @@ gates, not exceptions that can be removed to get PASS.
 
 ## Commands after integration
 
-Run from the NanoLab worktree, with a suitable operator policy in the location
-referenced by the chosen P24 scenario. These are the intended public commands;
-this documentation change did not render a plan, build images, or run containers.
+Run from the NanoLab worktree. The canonical P24 preset resolves its shipped
+policy and recipe relative to the scenario file:
 Do not execute the run commands until the integration and real-run prerequisites
 above are satisfied and the resource/diagnostic costs have been approved.
 
 ```bash
 export NANOFAAS_ROOT=/home/michele/Documenti/nanofaas
-./nanolab.sh inspect packages/nanolab/scenarios-v2/memory-soak-sync-candidate-diagnostic-container.yaml
-./nanolab.sh plan packages/nanolab/scenarios-v2/memory-soak-sync-candidate-diagnostic-container.yaml
-./nanolab.sh run packages/nanolab/scenarios-v2/memory-soak-sync-candidate-diagnostic-container.yaml
+./nanolab.sh inspect packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
+./nanolab.sh plan packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
+./nanolab.sh run packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
 ```
 
 For the separately authorized integrated smoke:
@@ -277,8 +280,11 @@ effective preflight, prerequisite receipts, target identities, phase/events and
 raw samples, workload results, logs, diagnostic receipts, artifact checksums,
 and versioned JSON/Markdown reports. Offline evaluation must read these artifacts
 without contacting the old containers. A new evaluation preserves the preceding
-verdict and identifies any added attribution. The offline CLI owner supplies its
-final command syntax; this guide does not invent an unintegrated subcommand.
+verdict and identifies any added attribution. Use
+`./nanolab.sh soak-evaluate /path/to/saved/run/evidence` to reassess
+saved evidence without publication or deployment. All resume and partial
+measurement selections remain unsupported, and a new run requires an unused
+run directory.
 
 `PASS` requires complete valid evidence and every mandatory criterion satisfied.
 `FAIL` records demonstrated violations. `INCONCLUSIVE` records missing or invalid
@@ -400,3 +406,51 @@ IDs are cross-checked online and offline, and serialized evidence producers shar
 pre-write quota accounting. The final full NanoLab suite passed **3,145 tests**;
 Ruff, formatting, types and import contracts passed. Execution rulings and their
 costs are recorded in the [implementation plan](superpowers/plans/2026-09-30-soak-recipes.md).
+
+## Recipe preparation for the canonical P24 preset
+
+[`soak-container-p24-jvm.yaml`](../packages/nanolab/recipes/soak-container-p24-jvm.yaml)
+is selected by `memory-soak-sync-container.yaml`. It uses the same snapshot,
+publication, registry verification and frozen-receipt path as recipe smoke.
+The full resolved preset matches its pre-migration configuration except for
+`recipeProfile`: phases, policy, workload, resources, diagnostics and prerequisite
+coverage are preserved.
+
+The profile explicitly carries the legacy control-plane Serial GC/C1 settings
+(`-XX:+UseSerialGC`, `-XX:TieredStopAtLevel=1`). The Java function retains JVM
+defaults: its legacy Dockerfile ignored the supplied `JVM_TUNING` build argument.
+Changing or omitting the control-plane tuning, adding function JVM arguments or
+introducing other profile build overrides fails P24 validation. Smoke retains
+its separate launcher policy.
+
+### P24 preparation verification
+
+On 2 October 2026, native Linux ARM64 Docker against clean NanoFaaS `e7914be0`
+completed one application `publishRecipe` for all three roles. Independent
+registry manifests/configurations, maximum provenance, compiler observations,
+frozen receipts and offline receipt verification passed. Real Java probes
+confirmed control-plane Serial GC/C1 and Java-function default tier4; Node
+version was observed from the published executable image. No second legacy
+application build or multi-hour measurement campaign was run.
+
+Full canonical preparation remains **INCOMPLETE**. The normal diagnostic helper
+build succeeded, then provider wiring refused the undeclared Node diagnostic
+preload. The unchanged prerequisite groups expand to eight coverage IDs; the
+freezer separately refuses `async`, `cancellation`, `error`, `late-callback`
+and `timeout`, which require fault-capable recipes. Availability declarations
+and image receipts cannot supply these missing success proofs.
+
+Private evidence is retained under
+`/tmp/nanolab-soak-p24-recipes-verification/`: `native-preparation.log`,
+`p24-preparation/gates.json`, publication artifacts and effective-runtime probes.
+This is preparation evidence with `p24_qualified: false`. The lower publication
+verification does not qualify full preparation, prerequisites or P24 acceptance.
+
+The unchanged recipe smoke regression also completed all phases: 122 steady
+requests, zero HTTP errors/drops and 244/244 correctness checks. Its report is
+**INCONCLUSIVE** for the three zero-threshold RSS-growth reviews and missing
+ownership/equal-work attribution; provenance, preflight, continuity, workload
+and artifact-integrity gates pass. Matching teardown returned zero; owned
+builders, registry and new image references were removed, while pre-existing
+containers/images and the selected builder were preserved. Evidence is under
+`smoke-run/` in the same verification directory.

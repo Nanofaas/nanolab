@@ -135,6 +135,15 @@ le differenze reali fra backend e tipi di verifica.
      [piano e stato delle verifiche](superpowers/plans/2026-10-01-release-amd64-recipes.md).
    - [ ] Release ARM64: migrazione successiva, con gli stessi contratti.
    - [ ] Migrazione dei preset P24 e degli altri backend soak.
+     Il preset canonico `memory-soak-sync-container.yaml` ora usa
+     `soak-container-p24-jvm.yaml`, conservando policy, fasi e carico (20/20).
+     Validazione Gradle e pubblicazione nativa ARM64 delle tre immagini,
+     provenienza, ricevute offline e tuning JVM verificati con NanoFaaS `e7914be0`.
+     Preparazione completa ancora incompleta: preload diagnostico Node assente
+     e cinque coperture dei prerequisiti senza ricetta di iniezione automatica.
+     Nessuna campagna P24 eseguita; `p24_qualified: false`. Altri preset/backend
+     restano da migrare. [Gate e prove](soak.md#p24-preparation-verification),
+     [piano](superpowers/plans/2026-10-02-soak-p24-recipes.md).
 4. **Eliminare i percorsi legacy.** Rimuovere build duplicate e flag di
    scenario ridondanti dopo la migrazione dei rispettivi workflow. Fatto
    quando non restano chiamanti e la suite pertinente passa.

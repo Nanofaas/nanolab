@@ -165,7 +165,11 @@ Bumping the pin used by CI means updating both the `ref:` in
 README; `test_readme_quotes_the_nanofaas_commit_ci_actually_pins` fails if you
 change one and forget the other.
 
-Single-version memory soak: see the [operator guide](docs/soak.md) for presets, required policy, and current readiness limits.
+Single-version memory soak: see the [operator guide](docs/soak.md) for presets,
+shipped P24 policy, and current readiness limits. The canonical ARM64 P24 container
+preset now selects `soak-container-p24-jvm.yaml`; native image publication and
+runtime probes are verified, while diagnostic/prerequisite readiness and P24
+qualification remain incomplete.
 
 Control-plane heap analysis: see the [operator guide](docs/heap-analysis.md) for the public command, timeline, resource bounds, and how to read the result. It is a diagnostic, not a P24 measurement.
 
