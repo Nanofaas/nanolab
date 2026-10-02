@@ -16,8 +16,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
-from nanolab.images.bake import render_bake_json
-from nanolab.images.plan import ImageArchitecture, ImagePlan
+from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import (
     _provider_exec,
     _provider_transfer_to,
@@ -88,16 +87,6 @@ class ReleaseSourceResources:
     local: Resource[ArtifactEvidence]
     stack: Resource[str]
     arm: Resource[str]
-
-
-@dataclass(frozen=True, slots=True)
-class BuildInputs:
-    """The generated Bake and BuildKit files, locally and on the VM."""
-
-    bake_file: Path
-    buildkit_config: Path
-    remote_bake_file: str
-    remote_buildkit_config: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,85 +423,6 @@ def build_release_source_resources(
         local=local,
         stack=remote(stack_request, stack_requires),
         arm=remote(arm_request, arm_requires),
-    )
-
-
-def build_inputs_resource(
-    *,
-    image_plan: ImagePlan,
-    max_parallelism: int,
-    run_dir: Path,
-    remote_root: str,
-    provider: object,
-    request: object,
-    architecture: str,
-    requires: tuple[Resource[Any], ...] = (),
-) -> Resource[BuildInputs]:
-    """Stage the two generated inputs consumed by a Buildx builder.
-
-    The filenames carry the architecture because both builders stage into the
-    same local run directory: a shared name would let one architecture's
-    cleanup delete the other's file.
-    """
-    remote_root = str(_release_remote_root(remote_root))
-    bake = Path(run_dir) / f"docker-bake-{architecture}.json"
-    buildkit = Path(run_dir) / f"buildkitd-{architecture}.toml"
-    remote_bake = f"{remote_root}/{bake.name}"
-    remote_buildkit = f"{remote_root}/{buildkit.name}"
-
-    def cleanup() -> None:
-        error: BaseException | None = None
-        try:
-            result = provider.exec_argv(  # type: ignore[attr-defined]
-                request,
-                ("rm", "-f", "--", remote_bake, remote_buildkit),
-            )
-            _require_remote_success(result, f"{architecture} release input cleanup")
-        except RuntimeError as cleanup_error:
-            error = cleanup_error
-        finally:
-            bake.unlink(missing_ok=True)
-            buildkit.unlink(missing_ok=True)
-        if error is not None:
-            raise error
-
-    def acquire(_inputs: TaskInputs) -> BuildInputs:
-        Path(run_dir).mkdir(parents=True, exist_ok=True)
-        bake.write_text(render_bake_json(image_plan), encoding="utf-8")
-        buildkit.write_text(
-            f"[worker.oci]\n  max-parallelism = {max_parallelism}\n",
-            encoding="utf-8",
-        )
-        try:
-            result = provider.exec_argv(  # type: ignore[attr-defined]
-                request, ("mkdir", "-p", remote_root)
-            )
-            if int(getattr(result, "return_code", 0)) != 0:
-                raise RuntimeError(
-                    f"create {architecture} release input directory failed"
-                )
-            for source, destination in (
-                (bake, remote_bake),
-                (buildkit, remote_buildkit),
-            ):
-                result = provider.transfer_to(  # type: ignore[attr-defined]
-                    request, source=source, destination=destination
-                )
-                if int(getattr(result, "return_code", 0)) != 0:
-                    raise RuntimeError(f"transfer {source.name} failed")
-        except BaseException as error:
-            best_effort(
-                error, cleanup, what=f"{architecture} release inputs failed acquire"
-            )
-            raise
-        return BuildInputs(bake, buildkit, remote_bake, remote_buildkit)
-
-    return Resource(
-        title=f"Acquire {architecture.upper()} Bake and BuildKit inputs",
-        acquire=acquire,
-        release=lambda _inputs, _value: cleanup(),
-        requires=requires,
-        always_release=True,
     )
 
 

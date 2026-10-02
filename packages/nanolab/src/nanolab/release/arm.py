@@ -6,9 +6,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from sonata_tasks.execution.models import CommandOptions
-from sonata_tasks.tasks.models import CommandTaskSpec
-
 from nanolab.images.plan import ImageCell, ImagePlan, build_image_plan
 from nanolab.release.model import ArtifactEvidence
 
@@ -55,94 +52,6 @@ def build_arm64_image_plan(
         registry=registry,
         architectures=("arm64",),
     )
-
-
-def arm64_build_commands(
-    plan: ImagePlan,
-    *,
-    builder_name: str,
-    remote_bake_file: str,
-    remote_buildkit_config: str,
-    remote_source_dir: str,
-    registry_upstream: str,
-) -> tuple[CommandTaskSpec, ...]:
-    """Return the ARM-builder commands that bake the ARM64 images in order.
-
-    The registry tunnel and the bounded Buildx builder come first, then one
-    prepare step per distinct target, and finally the bake itself.
-    """
-    commands = [
-        CommandTaskSpec(
-            task_id="release.arm64.registry-tunnel",
-            summary="Tunnel localhost:5000 to the stack registry",
-            argv=registry_tunnel_command(registry_upstream),
-            role="arm-builder",
-            options=CommandOptions(remote_dir=remote_source_dir),
-        ),
-        # Buildx builders are per-daemon state, so the name the stack VM created
-        # means nothing here: this VM needs its own, with the same parallelism
-        # bound.
-        CommandTaskSpec(
-            task_id="release.arm64.builder-create",
-            summary="Create bounded release Buildx builder",
-            argv=(
-                "docker",
-                "buildx",
-                "create",
-                "--name",
-                builder_name,
-                "--driver",
-                "docker-container",
-                "--buildkitd-config",
-                remote_buildkit_config,
-                "--use",
-            ),
-            role="arm-builder",
-            options=CommandOptions(remote_dir=remote_source_dir),
-        ),
-        CommandTaskSpec(
-            task_id="release.arm64.builder",
-            summary="Require ARM64 support from the release builder",
-            argv=("docker", "buildx", "inspect", builder_name, "--bootstrap"),
-            role="arm-builder",
-            options=CommandOptions(remote_dir=remote_source_dir),
-        ),
-    ]
-    seen: set[str] = set()
-    for cell in plan.cells:
-        prerequisite = cell.prerequisite_command
-        if prerequisite is None or cell.target.name in seen:
-            continue
-        seen.add(cell.target.name)
-        commands.append(
-            CommandTaskSpec(
-                task_id=f"release.arm64.prepare.{cell.target.name}",
-                summary=f"Prepare {cell.target.name} ARM64 JVM image",
-                argv=prerequisite,
-                role="arm-builder",
-                options=CommandOptions(remote_dir=remote_source_dir),
-            )
-        )
-    commands.append(
-        CommandTaskSpec(
-            task_id="release.images.bake.arm64",
-            summary="Build ARM64 Dockerfile images",
-            argv=(
-                "docker",
-                "buildx",
-                "bake",
-                "--builder",
-                builder_name,
-                "--file",
-                remote_bake_file,
-                "--load",
-                "docker-arm64",
-            ),
-            role="arm-builder",
-            options=CommandOptions(remote_dir=remote_source_dir),
-        )
-    )
-    return tuple(commands)
 
 
 def require_arm64_builder(output: str) -> None:

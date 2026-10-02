@@ -36,7 +36,6 @@ from nanolab.plans.release_phases import (
 )
 from nanolab.release import arm as release_arm
 from nanolab.release import publish as release_publish
-from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release.build import extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
@@ -50,7 +49,6 @@ from nanolab.release.model import (
 from nanolab.release.recipe import ReleaseRecipeGroup, prepare_release_recipe_groups
 from nanolab.release.recipe_execution import capture_release_inventory
 from nanolab.release.resources import (
-    build_inputs_resource,
     build_release_resources,
     preserve_release_builder_selection,
     release_execution_guard,
@@ -499,15 +497,11 @@ def build_release_workflow(
     aggregate, reg_gate = regression_tasks
 
     # --- Phase 9: ARM64 Build ---
-    arm_plan = build_arm64_image_plan(
-        request.source_tree,
-        request.version,
-        registry=request.image_plan.registry,
-    )
-    arm_inputs = build_inputs_resource(
-        image_plan=arm_plan,
+    arm_plan = request.arm_image_plan
+    arm_inputs = release_recipe_inputs_resource(
+        groups=request.arm_recipe_groups,
         max_parallelism=request.settings.max_parallelism,
-        run_dir=release_dir,
+        run_dir=release_dir / "recipe-inputs/arm64",
         remote_root=remote_root,
         provider=provider,
         request=arm_req,
@@ -529,23 +523,33 @@ def build_release_workflow(
         executor=executor,
         role="arm-builder",
         requires=(infrastructure.arm_builder, arm_inputs),
-        buildkitd_config=f"{remote_root}/buildkitd-arm64.toml",
+        buildkitd_config=f"{remote_root}/recipe-inputs/arm64/buildkitd-arm64.toml",
+        driver_options=("default-load=true",),
         validate=release_arm.require_arm64_builder,
         validation_key="nanolab.release.arm64-builder:v1",
         replace_existing=True,
     )
-    arm_runtime_plan, arm_images, arm64_build, arm64_smoke = build_arm64_phase(
-        request=request,
-        identity=identity,
-        release_dir=release_dir,
-        nanofaas=nanofaas,
-        arm_plan=arm_plan,
-        remote_root=remote_root,
-        source_dir=source_dir,
-        provider=provider,
-        arm_request=arm_req,
-        reg_gate=reg_gate,
-        source_tests=source_tests,
+    arm64_builder = preserve_release_builder_selection(
+        arm64_builder,
+        executor=executor,
+        name=f"release-arm64-{request.version}",
+        role="arm-builder",
+    )
+    arm_runtime_plan, arm_images, arm64_build, arm64_push, arm64_smoke = (
+        build_arm64_phase(
+            request=request,
+            executor=executor,
+            identity=identity,
+            release_dir=release_dir,
+            nanofaas=nanofaas,
+            arm_plan=arm_plan,
+            remote_root=remote_root,
+            source_dir=source_dir,
+            provider=provider,
+            arm_request=arm_req,
+            reg_gate=reg_gate,
+            source_tests=source_tests,
+        )
     )
 
     # --- Publish, attest, and finalize ---
@@ -564,7 +568,7 @@ def build_release_workflow(
         release_images=release_images,
         registry_push=registry_push,
         reg_gate=reg_gate,
-        arm64_build=arm64_build,
+        arm64_push=arm64_push,
         arm64_smoke=arm64_smoke,
         arm_images=arm_images,
         arm_runtime_plan=arm_runtime_plan,
@@ -637,11 +641,14 @@ def build_release_workflow(
         requires=(
             infrastructure.stack,
             infrastructure.arm_builder,
-            tunnel,
             arm64_builder,
             sources.arm,
             arm_inputs,
         ),
+    )
+    wf.add(  # pyright: ignore[reportArgumentType]
+        arm64_push,
+        requires=(infrastructure.stack, infrastructure.arm_builder, tunnel),
     )
     # ARM64 gets a smoke phase and AMD64 does not, on purpose: the three
     # benchmark runs exercise every AMD64 image from the local registry and

@@ -239,23 +239,18 @@ def registry_evidence(artifacts: Iterable[ArtifactEvidence]) -> tuple[Evidence, 
 
 
 def registry_artifacts_from_receipt(
-    receipt: Path, images: tuple[str, ...]
+    receipt: Path,
+    images: tuple[str, ...],
+    *,
+    phase: str = "arm64-local-registry-push",
 ) -> tuple[ArtifactEvidence, ...]:
-    """Return the ARM64 build receipt's artifacts, checking image coverage.
-
-    Raises unless the receipt names exactly the `docker://` references in
-    `images`, each with a sha256 digest, so a partial build cannot be read as
-    a complete one.
-    """
-    evidence = receipt_artifacts(receipt, "arm64-build", "local-registry-digest")
-    expected = {f"docker://{image}" for image in images}
-    if (
-        len(evidence) != len(expected)
-        or {item.reference for item in evidence} != expected
-        or any(not is_sha256_digest(item.digest) for item in evidence)
-    ):
-        raise RuntimeError("ARM64 build receipt does not cover the image matrix")
-    return evidence
+    """Require the push receipt to cover exactly the complete registry matrix."""
+    return exact_receipt_artifacts(
+        receipt,
+        phase,
+        "local-registry-digest",
+        tuple("docker://" + image for image in images),
+    )
 
 
 def exact_receipt_artifacts(
@@ -311,21 +306,21 @@ def require_release_barriers(
     gate_file: Path,
     smoke_receipt: Path,
     smoke_file: Path,
-    arm_build_receipt: Path,
+    arm_push_receipt: Path,
     arm_images: tuple[str, ...],
 ) -> tuple[ArtifactEvidence, ...]:
-    """Return the ARM64 build evidence once the pre-publication gates agree.
+    """Return the ARM64 push evidence once the pre-publication gates agree.
 
     Requires a passing regression-gate decision and an ARM smoke record whose
-    architecture and image digests match the ARM build receipt, so publication
+    architecture and image digests match the ARM push receipt, so publication
     cannot start on a release that regressed or smoked the wrong images.
     """
     decision = verified_json_receipt(gate_receipt, "regression-gate", gate_file)
     if decision.get("passed") is not True:
         raise RuntimeError("publication requires a passing regression gate")
     arm_evidence = exact_receipt_artifacts(
-        arm_build_receipt,
-        "arm64-build",
+        arm_push_receipt,
+        "arm64-local-registry-push",
         "local-registry-digest",
         tuple(f"docker://{image}" for image in arm_images),
     )
@@ -337,7 +332,7 @@ def require_release_barriers(
         smoke.get("architecture") != "linux/arm64"
         or smoke.get("images") != expected_images
     ):
-        raise RuntimeError("ARM smoke evidence does not match the ARM build")
+        raise RuntimeError("ARM smoke evidence does not match the ARM push")
     return arm_evidence
 
 

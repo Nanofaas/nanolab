@@ -408,19 +408,37 @@ def test_arm_tasks_form_gate_build_smoke_digest_chain(tmp_path: Path) -> None:
         prerequisites=(gate,),
         expected_images=("image:v1-arm64",),
         work=lambda _inputs: (
-            Evidence("local-registry-digest", "docker://image:v1-arm64", digest),
+            Evidence("local-image-digest", "docker-daemon:image:v1-arm64", digest),
         ),
     )
     gate.write_text("passed", encoding="utf-8")
     build.run(TaskInputs.empty())
-    smoke = arm64_smoke_task(
+    from nanolab.release.tasks import arm64_registry_push_task
+
+    push = arm64_registry_push_task(
         identity=_identity(),
         run_dir=tmp_path,
-        phase_inputs={"images": ["image:v1-arm64"]},
+        phase_inputs={},
         prerequisites=(build.receipt,),
         expected_images=("image:v1-arm64",),
         work=lambda _inputs: (
             Evidence("local-registry-digest", "docker://image:v1-arm64", digest),
+        ),
+    )
+    push.run(TaskInputs.empty())
+    smoke_file = tmp_path / "arm-smoke.json"
+    smoke_file.write_text(
+        json.dumps(
+            {"architecture": "linux/arm64", "images": {"image:v1-arm64": digest}}
+        )
+    )
+    smoke = arm64_smoke_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"images": ["image:v1-arm64"]},
+        prerequisites=(push.receipt,),
+        work=lambda _inputs: (
+            Evidence("file-digest", str(smoke_file), digest_path(smoke_file)),
         ),
     )
 
@@ -429,7 +447,8 @@ def test_arm_tasks_form_gate_build_smoke_digest_chain(tmp_path: Path) -> None:
     assert build.phase == "arm64-build"
     assert smoke.phase == "arm64-smoke"
     assert build.prerequisites == (gate,)
-    assert smoke.prerequisites == (build.receipt,)
+    assert push.prerequisites == (build.receipt,)
+    assert smoke.prerequisites == (push.receipt,)
 
 
 def test_arm_work_never_starts_without_its_prerequisite(tmp_path: Path) -> None:
@@ -629,7 +648,7 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(
     arm_receipt.write_text(
         json.dumps(
             {
-                "phase": "arm64-build",
+                "phase": "arm64-local-registry-push",
                 "evidence": [
                     {
                         "kind": "local-registry-digest",
@@ -659,7 +678,7 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(
             gate_file=gate_file,
             smoke_receipt=smoke_receipt,
             smoke_file=smoke_file,
-            arm_build_receipt=arm_receipt,
+            arm_push_receipt=arm_receipt,
             arm_images=(image,),
         )
 
@@ -676,7 +695,7 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(
             gate_file=gate_file,
             smoke_receipt=smoke_receipt,
             smoke_file=smoke_file,
-            arm_build_receipt=arm_receipt,
+            arm_push_receipt=arm_receipt,
             arm_images=(image,),
         )
 
@@ -770,7 +789,7 @@ def test_arm_receipt_parser_rejects_malformed_schema(payload, tmp_path: Path) ->
     receipt = tmp_path / "arm64-build.json"
     receipt.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="invalid arm64-build receipt"):
+    with pytest.raises(ValueError, match="invalid arm64-local-registry-push receipt"):
         registry_artifacts_from_receipt(receipt, ("image:v1",))
 
 
@@ -1160,3 +1179,72 @@ def test_run_image_steps_can_verify_without_running_build_or_push():
     assert evidence == (
         Evidence("local-image-digest", "docker-daemon:image:arm64", digest),
     )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["none", "legacy", "partial", "foreign", "duplicate", "stale-smoke"]
+)
+def test_smoke_and_publication_require_exact_arm_push_receipt(tmp_path, mutation):
+    images = ("registry/image-a:v1-arm64", "registry/image-b:v1-arm64")
+    digest = "sha256:" + "a" * 64
+    entries = [
+        {
+            "kind": "local-registry-digest",
+            "reference": "docker://" + image,
+            "digest": digest,
+        }
+        for image in images
+    ]
+    phase = "arm64-local-registry-push"
+    if mutation == "legacy":
+        phase = "arm64-build"
+    elif mutation == "partial":
+        entries.pop()
+    elif mutation == "foreign":
+        entries[0]["reference"] = "docker://foreign:arm64"
+    elif mutation == "duplicate":
+        entries[0] = entries[1]
+    receipt = tmp_path / "arm-push.json"
+    receipt.write_text(json.dumps({"phase": phase, "evidence": entries}))
+    gate_file = tmp_path / "gate-decision.json"
+    gate_file.write_text('{"passed": true}')
+    gate_receipt = tmp_path / "gate.json"
+    _file_receipt(gate_receipt, "regression-gate", gate_file)
+    smoke_file = tmp_path / "smoke-outcome.json"
+    smoke_file.write_text(
+        json.dumps(
+            {
+                "architecture": "linux/arm64",
+                "images": dict.fromkeys(
+                    images,
+                    "sha256:" + "b" * 64 if mutation == "stale-smoke" else digest,
+                ),
+            }
+        )
+    )
+    smoke_receipt = tmp_path / "smoke.json"
+    _file_receipt(smoke_receipt, "arm64-smoke", smoke_file)
+
+    def barriers():
+        return require_release_barriers(
+            gate_receipt=gate_receipt,
+            gate_file=gate_file,
+            smoke_receipt=smoke_receipt,
+            smoke_file=smoke_file,
+            arm_push_receipt=receipt,
+            arm_images=images,
+        )
+
+    if mutation == "none":
+        assert len(registry_artifacts_from_receipt(receipt, images)) == 2
+        assert len(barriers()) == 2
+    else:
+        if mutation != "stale-smoke":
+            with pytest.raises(
+                (ValueError, RuntimeError), match=r"receipt|coverage|matrix"
+            ):
+                registry_artifacts_from_receipt(receipt, images)
+        with pytest.raises(
+            (ValueError, RuntimeError), match=r"receipt|coverage|matrix|does not match"
+        ):
+            barriers()

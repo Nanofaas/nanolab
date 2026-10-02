@@ -269,6 +269,45 @@ class _ArmWorkflowExecutor:
             return TaskResult(
                 task_id="", status="failed", return_code=1, stderr="injected failure"
             )
+        if task.task_id.startswith("release.arm64.recipe."):
+            from tests.release.test_recipe import _report
+
+            group = next(
+                g
+                for g in self.provider.recipe_groups
+                if g.flavor == task.task_id.rsplit(".", 1)[-1]
+            )
+            output = f"{self.provider.remote_root}/recipe-output/arm64/{group.flavor}"
+            log = (
+                f"{self.provider.remote_root}/recipe-output/arm64/logs/"
+                f"{group.flavor}.log"
+            )
+            self.provider.remote_files[log] = b"complete Gradle log\n"
+            if self.provider.failure == "build" and group.flavor == "native":
+                return TaskResult("", "failed", 1, stderr="individual build failed")
+            report = _report(group)
+            self.provider.remote_files[output + "/distribution.json"] = json.dumps(
+                report
+            ).encode()
+            for item in report["components"]:
+                if item["image"]:
+                    self.provider.local_ids[item["image"]["reference"]] = item["image"][
+                        "id"
+                    ]
+            return TaskResult("", "passed", 0)
+        if task.argv[:3] == ("docker", "image", "inspect") or task.argv[:2] in {
+            ("docker", "push"),
+            ("skopeo", "inspect"),
+            ("sh", "-c"),
+        }:
+            result = self.provider.exec_argv(object(), task.argv)
+            return TaskResult(
+                "",
+                "passed" if result.return_code == 0 else "failed",
+                result.return_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
         if task.argv[:3] == ("docker", "buildx", "inspect"):
             if "--bootstrap" in task.argv:
                 return TaskResult(
@@ -289,6 +328,11 @@ class _ArmWorkflowProvider:
         self.staged = 0
         self.remote_digests: dict[str, str] = {}
         self.registry_digests: dict[str, str] = {}
+        self.remote_files: dict[str, bytes] = {}
+        self.local_ids: dict[str, str] = {}
+        self.inventory = b""
+        self.recipe_groups = ()
+        self.remote_root = ""
 
     def connection_host(self, _request) -> str:
         return "10.0.0.10"
@@ -300,7 +344,12 @@ class _ArmWorkflowProvider:
                 return_code=1, stdout="", stderr="source transfer failed"
             )
         self.remote_digests[destination] = digest_path(source)
+        self.remote_files[destination] = source.read_bytes()
         return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    def transfer_from(self, _request, *, source, destination):
+        Path(destination).write_bytes(self.remote_files[source])
+        return SimpleNamespace(return_code=0)
 
     def exec_argv(self, _request, argv, *, env=None, remote_dir=None, dry_run=False):
         del env, remote_dir, dry_run
@@ -316,30 +365,63 @@ class _ArmWorkflowProvider:
                 stdout=f"/tmp/nanofaas-release-credentials.aB3xY{self.staged}\n",
                 stderr="",
             )
+        if argv[:2] == ("python3", "-c"):
+            if "os.walk" in argv[2]:
+                self.remote_files[argv[-1]] = self.inventory
+                return SimpleNamespace(return_code=0, stdout="", stderr="")
+            if "Not a regular evidence file" not in argv[2]:
+                # Source extraction is substituted at the external VM boundary.
+                return SimpleNamespace(return_code=0, stdout="", stderr="")
+            data = self.remote_files[argv[-1]]
+            return SimpleNamespace(
+                return_code=0,
+                stdout=json.dumps(
+                    {
+                        "size": len(data),
+                        "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
+                    }
+                ),
+                stderr="",
+            )
         if argv[0] == "sha256sum":
-            digest = self.remote_digests[argv[1]].removeprefix("sha256:")
+            data = self.remote_files.get(argv[1])
+            digest = (
+                hashlib.sha256(data).hexdigest()
+                if data is not None
+                else self.remote_digests[argv[1]].removeprefix("sha256:")
+            )
             return SimpleNamespace(
                 return_code=0, stdout=f"{digest}  {argv[1]}\n", stderr=""
             )
-        if (
-            self.failure == "build"
-            and "docker buildx bake" in rendered
-            and "docker-arm64" in rendered
-        ):
-            # Native images no longer get their own Gradle build step: every
-            # cell (JVM, native, default) bakes together in this one command,
-            # so this is where an "individual build" failure now surfaces.
+        if argv[0] == "uname":
             return SimpleNamespace(
-                return_code=1, stdout="", stderr="individual build failed"
+                return_code=0,
+                stdout="Linux\n" if argv[-1] == "-s" else "aarch64\n",
+                stderr="",
             )
+        if argv[:2] == ("docker", "info"):
+            return SimpleNamespace(return_code=0, stdout="linux|arm64\n", stderr="")
+        if argv[:3] == ("docker", "buildx", "inspect"):
+            return SimpleNamespace(
+                return_code=0,
+                stdout="Driver: docker-container\nBuildKit version: v0.20\n",
+                stderr="",
+            )
+        if argv[:2] == ("sh", "-c") and "for image do skopeo inspect" in argv[2]:
+            rows = [
+                "malformed"
+                if self.failure == "digest"
+                else self.registry_digests[image]
+                for image in argv[4:]
+            ]
+            return SimpleNamespace(return_code=0, stdout="\n".join(rows), stderr="")
         if self.failure == "push" and "docker push" in rendered:
             return SimpleNamespace(return_code=1, stdout="", stderr="push failed")
         if argv[:3] == ("docker", "image", "inspect"):
-            if argv[3] == "--format={{.Architecture}}":
-                return SimpleNamespace(return_code=0, stdout="arm64\n", stderr="")
-            return SimpleNamespace(
-                return_code=0, stdout="sha256:" + "a" * 64, stderr=""
-            )
+            rows = [self.local_ids[image] for image in argv[4:]]
+            if argv[3] != "--format={{.Id}}":
+                rows = ["linux|arm64|" + digest for digest in rows]
+            return SimpleNamespace(return_code=0, stdout="\n".join(rows), stderr="")
         if "docker push" in rendered:
             image = rendered.split("docker push ", 1)[1].split()[0]
             self.registry_digests[image] = "sha256:" + "b" * 64
@@ -461,6 +543,10 @@ def _arm_failure_workflow(
             cosign_password=secret_paths[2],
         ),
     )
+    provider.inventory = request.inventory_file.read_bytes()
+    provider.recipe_groups = request.arm_recipe_groups
+    provider.remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
+    executor.provider = provider
     workflow = build_release_workflow(request, provider=provider)
     phases = {
         compiled.task.title: compiled.task
@@ -479,7 +565,7 @@ def _arm_failure_workflow(
     [
         ("build", "individual build failed"),
         ("push", "push failed"),
-        ("digest", "invalid registry digest"),
+        ("digest", "invalid image digest"),
         ("smoke", "smoke failed"),
     ],
 )
@@ -505,17 +591,15 @@ def test_new_arm_workflow_failures_cleanup_and_never_publish(
         command[:4] == ("docker", "buildx", "rm", "--force")
         for command in (task.argv for task in executor.commands)
     )
-    assert (
-        sum(
-            "systemctl stop nanofaas-registry-tunnel" in command
-            for command in provider_rendered
-        )
-        >= 2
+    tunnel_stops = sum(
+        "systemctl stop nanofaas-registry-tunnel" in command
+        for command in provider_rendered
     )
+    assert tunnel_stops == 0 if failure == "build" else tunnel_stops >= 2
     assert any(
         "rm -rf --" in command and "/source" in command for command in provider_rendered
     )
-    assert phases["Build ARM64 images"].receipt.exists() is (failure == "smoke")
+    assert phases["Build ARM64 images"].receipt.exists() is (failure != "build")
     assert not phases["Test ARM64 images"].receipt.exists()
 
 
@@ -539,7 +623,7 @@ def test_new_arm_source_transfer_failure_compensates_all_acquired_resources(
         sum(
             "systemctl stop nanofaas-registry-tunnel" in command for command in rendered
         )
-        >= 2
+        == 0
     )
     assert any(
         task.argv[:4] == ("docker", "buildx", "rm", "--force")
@@ -876,6 +960,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Aggregate benchmarks",
         "Evaluate regression gate",
         "Build ARM64 images",
+        "Push ARM64 images to local registry",
         "Test ARM64 images",
         "Publish architecture images",
         "Publish image manifests",
@@ -895,6 +980,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     aggregate = release_phases["Aggregate benchmarks"]
     gate = release_phases["Evaluate regression gate"]
     arm_build = release_phases["Build ARM64 images"]
+    arm_push = release_phases["Push ARM64 images to local registry"]
     arm_smoke = release_phases["Test ARM64 images"]
     publish_architectures = release_phases["Publish architecture images"]
     publish_manifests = release_phases["Publish image manifests"]
@@ -908,12 +994,12 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         gate.receipt,
         release_phases["Run source tests"].receipt,
     )
-    assert arm_smoke.prerequisites == (arm_build.receipt,)
+    assert arm_smoke.prerequisites == (arm_push.receipt,)
     assert publish_architectures.prerequisites == (
         gate.receipt,
         arm_smoke.receipt,
         push.receipt,
-        arm_build.receipt,
+        arm_push.receipt,
     )
     assert publish_manifests.prerequisites == (publish_architectures.receipt,)
     assert publish_aliases.prerequisites == (publish_manifests.receipt,)
@@ -952,7 +1038,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Acquire verified source on nanofaas-azure-release-arm",
         "Acquire registry tunnel to <release-stack>:5000",
         "Acquire AMD64 recipe and BuildKit inputs",
-        "Acquire ARM64 Bake and BuildKit inputs",
+        "Acquire ARM64 recipe and BuildKit inputs",
         f"Acquire release-amd64-v{CURRENT_VERSION} buildx builder",
         f"Acquire release-arm64-v{CURRENT_VERSION} buildx builder",
     }
@@ -976,26 +1062,11 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
 
     arm_slice = workflow.compile(select=Selection(only="build-arm64-images"))
     arm_titles = [task.task.title for task in arm_slice.tasks]
-    assert arm_titles[:8] == [
-        "Acquire validated release execution credentials",
-        "Acquire release stack VM",
-        "Acquire release ARM builder VM",
-        "Acquire registry tunnel to <release-stack>:5000",
-        "Acquire ARM64 Bake and BuildKit inputs",
-        f"Acquire release-arm64-v{CURRENT_VERSION} buildx builder",
-        "Acquire immutable release source archive",
-        "Acquire verified source on nanofaas-azure-release-arm",
-    ]
-    assert arm_titles[-8:] == [
-        "Release verified source on nanofaas-azure-release-arm",
-        "Release immutable release source archive",
-        f"Release release-arm64-v{CURRENT_VERSION} buildx builder",
-        "Release ARM64 Bake and BuildKit inputs",
-        "Release registry tunnel to <release-stack>:5000",
-        "Release release ARM builder VM",
-        "Release release stack VM",
-        "Release validated release execution credentials",
-    ]
+    assert "Acquire release ARM builder VM" in arm_titles
+    assert "Acquire ARM64 recipe and BuildKit inputs" in arm_titles
+    assert "Acquire verified source on nanofaas-azure-release-arm" in arm_titles
+    assert not any("registry tunnel" in title for title in arm_titles)
+    assert "Release ARM64 recipe and BuildKit inputs" in arm_titles
 
     arm_suffix = workflow.compile(select=Selection(start="build-arm64-images"))
     suffix_titles = [task.task.title for task in arm_suffix.tasks]
@@ -1483,14 +1554,7 @@ def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
     tmp_path: Path,
     canonical_release_configs: tuple[Path, Path],
 ) -> None:
-    """The ARM64 and publish plans must read the extracted tree, not the checkout.
-
-    ``request.source_tree`` is overridden to a sentinel distinct from
-    ``request.nanofaas_root`` (both equal NANOFAAS_ROOT otherwise, which
-    would make this assertion pass even if the workflow builder reverted to
-    planning from the checkout). Spies on the two planners confirm they
-    receive the sentinel.
-    """
+    """Use the frozen ARM matrix and the archive tree for publication planning."""
     scenario_path, environment_path = canonical_release_configs
     monkeypatch.setattr(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
@@ -1514,15 +1578,10 @@ def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
     assert sentinel_tree != NANOFAAS_ROOT
     request = replace(request, source_tree=sentinel_tree)
 
-    arm_roots: list[Path] = []
+    def forbid_image_replanning(*_args, **_kwargs):
+        pytest.fail("workflow must consume frozen matrices")
 
-    def fake_build_arm64_image_plan(root, version, *, registry):
-        arm_roots.append(root)
-        return ImagePlan(version=version, registry=registry, targets=(), cells=())
-
-    monkeypatch.setattr(
-        release_plan, "build_arm64_image_plan", fake_build_arm64_image_plan
-    )
+    monkeypatch.setattr(release_plan, "build_image_plan", forbid_image_replanning)
 
     publish_roots: list[Path] = []
 
@@ -1536,9 +1595,11 @@ def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
         release_plan.release_publish, "build_publish_plan", fake_build_publish_plan
     )
 
-    build_release_workflow(request, provider=RejectingProvider())
-
-    assert arm_roots == [sentinel_tree]
+    workflow = build_release_workflow(request, provider=RejectingProvider())
+    arm = _phase_named(workflow, "Build ARM64 images")
+    assert arm.expected_images == tuple(
+        cell.image for cell in request.arm_image_plan.cells
+    )
     assert publish_roots == [sentinel_tree]
 
 
@@ -1631,7 +1692,7 @@ def test_amd64_recipe_dag_preserves_release_boundaries(release_request, monkeypa
     titles = [item.task.title for item in workflow.compile().tasks]
     assert "Acquire AMD64 recipe and BuildKit inputs" in titles
     assert "Acquire AMD64 Bake and BuildKit inputs" not in titles
-    assert "Acquire ARM64 Bake and BuildKit inputs" in titles
+    assert "Acquire ARM64 recipe and BuildKit inputs" in titles
     assert titles.index("Build AMD64 images") < titles.index(
         "Push AMD64 images to local registry"
     )
@@ -1799,3 +1860,84 @@ def test_release_verifiers_reject_missing_or_conflicting_matrices(
     ):
         release_plan.release_verifiers(request, provider)
     assert not provider.calls
+
+
+def test_release_dag_has_symmetric_recipe_build_and_push(release_request, monkeypatch):
+    seen = []
+    original = release_plan.buildx_builder_resource
+
+    def builder(**kwargs):
+        seen.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(release_plan, "buildx_builder_resource", builder)
+    workflow = build_release_workflow(release_request, provider=RejectingProvider())
+    phases = [
+        entry.task
+        for entry in workflow.compile().tasks
+        if isinstance(entry.task, ReleasePhaseTask)
+    ]
+    assert [phase.phase for phase in phases] == [
+        "source-tests",
+        "amd64-build",
+        "local-registry-push",
+        "benchmark-1",
+        "benchmark-2",
+        "benchmark-3",
+        "aggregate",
+        "regression-gate",
+        "arm64-build",
+        "arm64-local-registry-push",
+        "arm64-smoke",
+        "publish-architectures",
+        "publish-manifests",
+        "publish-aliases",
+        "attest",
+        "finalize",
+    ]
+    by_phase = {phase.phase: phase for phase in phases}
+    for architecture, role, push_phase in (
+        ("amd64", "stack", "local-registry-push"),
+        ("arm64", "arm-builder", "arm64-local-registry-push"),
+    ):
+        phase = by_phase[architecture + "-build"]
+        assert phase.phase_inputs["recipeContract"] == 2
+        assert phase.phase_inputs["architecture"] == architecture
+        assert phase.phase_inputs["role"] == role
+        assert len(phase.expected_images) == 44
+        assert len(phase.phase_inputs["commands"]) == 3
+        assert all(
+            command["argv"][:2] == ("./gradlew", "assembleRecipe")
+            for command in phase.phase_inputs["commands"]
+        )
+        assert phase.receipt in by_phase[push_phase].prerequisites
+        owned = next(item for item in seen if item["role"] == role)
+        assert owned["driver_options"] == ("default-load=true",)
+        assert owned["buildkitd_config"].endswith(
+            f"recipe-inputs/{architecture}/buildkitd-{architecture}.toml"
+        )
+    arm_build, arm_push, smoke = (
+        by_phase[name]
+        for name in ("arm64-build", "arm64-local-registry-push", "arm64-smoke")
+    )
+    assert set(arm_build.prerequisites) == {
+        by_phase["source-tests"].receipt,
+        by_phase["regression-gate"].receipt,
+    }
+    assert smoke.prerequisites == (arm_push.receipt,)
+    assert arm_push.receipt in by_phase["publish-architectures"].prerequisites
+    assert arm_build.receipt not in by_phase["publish-architectures"].prerequisites
+    titles = [entry.task.title for entry in workflow.compile().tasks]
+    assert "Acquire ARM64 recipe and BuildKit inputs" in titles
+    assert not any("Bake" in title for title in titles)
+    for selector, tunnel_expected in (
+        ("build-arm64-images", False),
+        ("push-arm64-images-to-local-registry", True),
+        ("test-arm64-images", True),
+    ):
+        selected = workflow.compile(select=Selection(only=selector))
+        assert (
+            any("registry tunnel" in entry.task.title for entry in selected.tasks)
+            is tunnel_expected
+        )
+    assert not list((release_request.run_dir / "releases").glob("**/*bake*"))

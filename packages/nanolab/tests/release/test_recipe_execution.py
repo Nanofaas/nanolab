@@ -67,6 +67,8 @@ class LocalProvider:
                     or (
                         f"linux|{self.architecture}|sha256:" + "f" * 64
                         if self.replace_earlier_tag and ref.endswith("-jvm")
+                        else ids[ref]
+                        if argv[3] == "--format={{.Id}}"
                         else f"linux|{self.architecture}|{ids[ref]}"
                     )
                     for ref in refs
@@ -1188,3 +1190,400 @@ def test_arm_cancellation_after_first_group_retains_diagnostics(
     assert not (source.parent / "recipe-inputs/arm64").exists()
     assert not (source.parent / "recipe-output/arm64").exists()
     assert amd.read_text() == "unrelated AMD output"
+
+
+def _both_recipe_workflow(tmp_path):
+    """Real Sonata/files/reports; substitute the two external daemons and registry."""
+    from sonata_engine import Evidence, JournalConfig, Workflow
+    from sonata_tasks.tasks.models import TaskResult
+
+    from nanolab.plans.release_phases import (
+        build_recipe_assembly_phase,
+        build_registry_push_phase,
+    )
+    from nanolab.release.evidence import release_evidence_verifiers
+    from nanolab.release.model import digest_path
+    from nanolab.release.tasks import (
+        arm64_smoke_task,
+        benchmark_task,
+        publish_architectures_task,
+        registry_artifacts_from_receipt,
+        regression_gate_task,
+        require_release_barriers,
+    )
+
+    prepared = {}
+    registry = {}
+    counts = {
+        "amd64-build": 0,
+        "arm64-build": 0,
+        "amd64-push": 0,
+        "arm64-push": 0,
+        "benchmark": 0,
+        "smoke": 0,
+        "publish": 0,
+    }
+    for architecture in ("amd64", "arm64"):
+        root = tmp_path / architecture
+        source = root / "vm/source"
+        source.mkdir(parents=True)
+        (source / "settings.gradle").write_text('rootProject.name="probe"\n')
+        (source / "build.gradle").write_text("plugins {}\n")
+        inventory = execution.capture_release_inventory(source, root / "inventory.json")
+        phase, provider, producer, prerequisite, args = _recipe_phase(
+            (source, inventory), root, architecture=architecture
+        )
+        prepared[architecture] = {
+            "phase": phase,
+            "provider": provider,
+            "producer": producer,
+            "source": prerequisite,
+            "args": args,
+        }
+
+    class Executor:
+        def binding_key(self, role):
+            return "two-daemons:" + role
+
+        def run(self, task, **kwargs):
+            architecture = "arm64" if task.role == "arm-builder" else "amd64"
+            item = prepared[architecture]
+            provider = item["provider"]
+            if task.task_id.startswith("release.") and ".recipe." in task.task_id:
+                provider.replace_earlier_tag = False
+                counts[architecture + "-build"] += 1
+                return item["producer"].run(task, **kwargs)
+            if task.argv[:3] == ("docker", "image", "inspect"):
+                result = provider.exec_argv(object(), task.argv)
+                return TaskResult("", "passed", 0, stdout=result.stdout)
+            if task.argv[:2] == ("docker", "push"):
+                counts[architecture + "-push"] += 1
+                registry[task.argv[-1]] = (
+                    "sha256:" + hashlib.sha256(task.argv[-1].encode()).hexdigest()
+                )
+                return TaskResult("", "passed", 0)
+            if task.argv[:2] == ("skopeo", "inspect"):
+                return TaskResult(
+                    "",
+                    "passed",
+                    0,
+                    stdout=registry[task.argv[-1].removeprefix("docker://")],
+                )
+            assert task.role == "stack" and task.argv[:2] == ("sh", "-c")
+            return TaskResult(
+                "",
+                "passed",
+                0,
+                stdout="\n".join(registry[image] for image in task.argv[4:]),
+            )
+
+    class Provider:
+        def exec_argv(self, request, argv, **kwargs):
+            if argv[:2] == ("skopeo", "inspect"):
+                assert request == "stack"
+                return SimpleNamespace(
+                    return_code=0,
+                    stdout=registry[argv[-1].removeprefix("docker://")],
+                    stderr="",
+                )
+            architecture = "arm64" if request == "arm-builder" else "amd64"
+            return prepared[architecture]["provider"].exec_argv(request, argv, **kwargs)
+
+    executor = Executor()
+    identity = prepared["amd64"]["phase"].identity
+    run_dir = tmp_path / "run"
+    gate_file = tmp_path / "gate-decision.json"
+    smoke_file = tmp_path / "arm-smoke.json"
+
+    def gate_work(_inputs):
+        gate_file.write_text('{"passed": true}')
+        return (Evidence("file-digest", str(gate_file), digest_path(gate_file)),)
+
+    gate = regression_gate_task(
+        identity=identity, run_dir=run_dir, phase_inputs={}, work=gate_work
+    )
+    for architecture, role in (("amd64", "stack"), ("arm64", "arm-builder")):
+        item = prepared[architecture]
+        args = item["args"] | {"executor": executor}
+        if architecture == "arm64":
+            args["prerequisite_phases"] = (item["source"], gate)
+        images, build = build_recipe_assembly_phase(**args)
+        push = build_registry_push_phase(
+            identity=identity,
+            run_dir=run_dir,
+            image_plan=args["image_plan"],
+            release_images=images,
+            executor=executor,
+            prerequisite_phases=(),
+            assembly=build,
+            architecture=architecture,
+            role=role,
+        )
+        item.update(build=build, push=push)
+
+    benchmarks = []
+    for index in range(1, 4):
+        report = tmp_path / f"benchmark-{index}.json"
+
+        def benchmark_work(_inputs, report=report):
+            counts["benchmark"] += 1
+            report.write_text('{"measured": true}')
+            return (Evidence("file-digest", str(report), digest_path(report)),)
+
+        benchmarks.append(
+            benchmark_task(
+                index,
+                identity=identity,
+                run_dir=run_dir,
+                phase_inputs={},
+                prerequisites=(prepared["amd64"]["push"].receipt,),
+                work=benchmark_work,
+            )
+        )
+    from dataclasses import replace
+
+    gate = replace(gate, prerequisites=tuple(phase.receipt for phase in benchmarks))
+
+    arm = prepared["arm64"]
+
+    def smoke_work(_inputs):
+        artifacts = registry_artifacts_from_receipt(
+            arm["push"].receipt, arm["build"].expected_images
+        )
+        counts["smoke"] += 1
+        smoke_file.write_text(
+            json.dumps(
+                {
+                    "architecture": "linux/arm64",
+                    "images": {
+                        a.reference.removeprefix("docker://"): a.digest
+                        for a in artifacts
+                    },
+                }
+            )
+        )
+        return (Evidence("file-digest", str(smoke_file), digest_path(smoke_file)),)
+
+    smoke = arm64_smoke_task(
+        identity=identity,
+        run_dir=run_dir,
+        phase_inputs={},
+        prerequisites=(arm["push"].receipt,),
+        work=smoke_work,
+    )
+
+    def publish_work(_inputs):
+        require_release_barriers(
+            gate_receipt=gate.receipt,
+            gate_file=gate_file,
+            smoke_receipt=smoke.receipt,
+            smoke_file=smoke_file,
+            arm_push_receipt=arm["push"].receipt,
+            arm_images=arm["build"].expected_images,
+        )
+        counts["publish"] += 1
+        report = tmp_path / "publication.json"
+        report.write_text('{"fixture": true}')
+        return (Evidence("file-digest", str(report), digest_path(report)),)
+
+    publication = publish_architectures_task(
+        identity=identity,
+        run_dir=run_dir,
+        phase_inputs={},
+        prerequisites=(gate.receipt, smoke.receipt, arm["push"].receipt),
+        work=publish_work,
+    )
+    workflow = Workflow("both-recipes-resume")
+    for phase in (
+        prepared["amd64"]["build"],
+        prepared["amd64"]["push"],
+        *benchmarks,
+        gate,
+        arm["build"],
+        arm["push"],
+        smoke,
+        publication,
+    ):
+        requires = ()
+        for architecture in ("amd64", "arm64"):
+            item = prepared[architecture]
+            if phase is item["build"]:
+                resource = release_recipe_inputs_resource(
+                    groups=item["provider"].groups,
+                    max_parallelism=2,
+                    run_dir=item["args"]["run_dir"]
+                    / f"releases/9.9.9/recipe-inputs/{architecture}",
+                    remote_root=ROOT,
+                    provider=item["provider"],
+                    request=object(),
+                    architecture=architecture,
+                )
+                requires = (resource,)
+        workflow.add(phase, requires=requires)
+    mapping = {
+        "docker-daemon:" + image: role
+        for architecture, role in (("amd64", "stack"), ("arm64", "arm-builder"))
+        for image in prepared[architecture]["build"].expected_images
+    }
+    verifiers = release_evidence_verifiers(
+        Provider(), "stack", local_image_requests=mapping
+    )
+    return {
+        "workflow": workflow,
+        "journal": JournalConfig(tmp_path / "journal.jsonl"),
+        "verifiers": verifiers,
+        "prepared": prepared,
+        "counts": counts,
+        "smoke": smoke,
+        "smoke_file": smoke_file,
+        "publication": publication,
+    }
+
+
+def _run_both_recipes(case, *, resume=False):
+    case["workflow"].run(
+        journal=case["journal"], verifiers=case["verifiers"], resume=resume
+    )
+
+
+def test_both_architecture_resume_performs_no_build_or_push(tmp_path):
+    case = _both_recipe_workflow(tmp_path)
+    _run_both_recipes(case)
+    initial = dict(case["counts"])
+    assert initial == {
+        "amd64-build": 3,
+        "arm64-build": 3,
+        "amd64-push": 44,
+        "arm64-push": 44,
+        "benchmark": 3,
+        "smoke": 1,
+        "publish": 1,
+    }
+    _run_both_recipes(case, resume=True)
+    assert case["counts"] == initial
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "report-delete",
+        "report-tamper",
+        "profile-delete",
+        "profile-tamper",
+        "config-delete",
+        "config-tamper",
+        "inventory-delete",
+        "inventory-tamper",
+        "receipt",
+        "image-id",
+    ],
+)
+def test_arm_evidence_invalidation_preserves_verified_amd64_phase(tmp_path, mutation):
+    case = _both_recipe_workflow(tmp_path)
+    _run_both_recipes(case)
+    arm = case["prepared"]["arm64"]
+    evidence = arm["args"]["run_dir"] / "releases/9.9.9/recipe-evidence/arm64"
+    filenames = {
+        "report": "jvm/distribution.json",
+        "profile": "release-arm64-jvm.yaml",
+        "config": "buildkitd-arm64.toml",
+        "inventory": "source-inventory.json",
+    }
+    if mutation == "receipt":
+        arm["build"].receipt.write_text("{}")
+    elif mutation == "image-id":
+        arm["provider"].replace_earlier_tag = True
+    else:
+        key, action = mutation.split("-")
+        path = evidence / filenames[key]
+        if action == "delete":
+            path.unlink()
+        else:
+            path.write_text("tampered")
+    _run_both_recipes(case, resume=True)
+    assert case["counts"] == {
+        "amd64-build": 3,
+        "arm64-build": 6,
+        "amd64-push": 44,
+        "arm64-push": 88,
+        "benchmark": 3,
+        "smoke": 2,
+        "publish": 2,
+    }
+
+
+def test_arm_failed_resume_invalidates_prior_receipts_and_preserves_amd64(tmp_path):
+    case = _both_recipe_workflow(tmp_path)
+    _run_both_recipes(case)
+    arm = case["prepared"]["arm64"]
+    retained = (
+        arm["args"]["run_dir"]
+        / "releases/9.9.9/recipe-evidence/arm64/jvm/distribution.json"
+    )
+    retained.unlink()
+    arm["provider"].fail_group = "native"
+    with pytest.raises(RuntimeError, match="assembly failed"):
+        _run_both_recipes(case, resume=True)
+    assert not arm["build"].receipt.exists()
+    assert case["counts"]["amd64-build"] == 3 and case["counts"]["amd64-push"] == 44
+    assert (
+        case["counts"]["arm64-push"] == 44
+        and case["counts"]["smoke"] == 1
+        and case["counts"]["publish"] == 1
+    )
+    assert (retained.parent.parent / "native/gradle.log").is_file()
+
+
+def test_legacy_arm_journal_requires_recipe_assembly_and_new_push(tmp_path):
+    from dataclasses import replace
+
+    from sonata_engine import Evidence, JournalConfig, Workflow
+    from sonata_engine.errors import WorkflowTopologyMismatchError
+
+    case = _both_recipe_workflow(tmp_path)
+    arm = case["prepared"]["arm64"]
+    # Genuine journal record for the old combined contract, under the same phase ID.
+    legacy = replace(
+        arm["build"],
+        phase_inputs={"images": arm["build"].expected_images, "source": "a" * 40},
+        prerequisites=(arm["source"].receipt,),
+        work=lambda _inputs: tuple(
+            Evidence("local-registry-digest", "docker://" + image, "sha256:" + "e" * 64)
+            for image in arm["build"].expected_images
+        ),
+    )
+    old = Workflow("both-recipes-resume")
+    old.add(legacy)
+    old.run(journal=case["journal"], verifiers=case["verifiers"])
+    original_journal = case["journal"].path.read_bytes()
+    with pytest.raises(WorkflowTopologyMismatchError):
+        _run_both_recipes(case, resume=True)
+    assert case["journal"].path.read_bytes() == original_journal
+    assert case["counts"]["arm64-build"] == 0 and case["counts"]["arm64-push"] == 0
+    case["journal"] = JournalConfig(tmp_path / "recipe-contract-2.jsonl")
+    _run_both_recipes(case)
+    assert case["counts"]["arm64-build"] == 3 and case["counts"]["arm64-push"] == 44
+    assert case["counts"]["smoke"] == 1 and case["counts"]["publish"] == 1
+
+
+def test_stale_arm_smoke_cannot_publish(tmp_path):
+    from sonata_engine import Selection
+
+    from nanolab.release.model import digest_path
+
+    case = _both_recipe_workflow(tmp_path)
+    _run_both_recipes(case)
+    smoke_file, smoke = case["smoke_file"], case["smoke"]
+    data = json.loads(smoke_file.read_text())
+    first = next(iter(data["images"]))
+    data["images"][first] = "sha256:" + "f" * 64
+    smoke_file.write_text(json.dumps(data))
+    payload = json.loads(smoke.receipt.read_text())
+    next(entry for entry in payload["evidence"] if entry["kind"] == "file-digest")[
+        "digest"
+    ] = digest_path(smoke_file)
+    smoke.receipt.write_text(json.dumps(payload))
+    with pytest.raises(RuntimeError, match="does not match"):
+        case["workflow"].run(select=Selection(only="publish-architecture-images"))
+    assert case["counts"]["publish"] == 1
+    assert not case["publication"].receipt.exists()

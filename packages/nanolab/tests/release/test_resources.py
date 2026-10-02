@@ -3,14 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
 
 import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.images.plan import ImagePlan
 from nanolab.release.model import ArtifactEvidence
 from nanolab.release.resources import (
     ReleaseResources,
@@ -360,87 +358,6 @@ def test_source_archive_is_created_once_and_checksum_verified_on_stack_and_arm(
     ]
 
 
-def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(release_resources, "render_bake_json", lambda _plan: "{}\n")
-
-    class Provider:
-        def __init__(self) -> None:
-            self.transfers: list[tuple[str, str]] = []
-            self.commands: list[tuple[str, ...]] = []
-
-        def transfer_to(self, _request, *, source: Path, destination: str):
-            self.transfers.append((source.name, destination))
-            return SimpleNamespace(
-                return_code=1 if len(self.transfers) == 2 else 0, stderr="boom"
-            )
-
-        def exec_argv(self, _request, argv):
-            self.commands.append(argv)
-            return SimpleNamespace(return_code=0)
-
-    provider = Provider()
-    resource = release_resources.build_inputs_resource(
-        image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
-        max_parallelism=3,
-        run_dir=tmp_path,
-        remote_root="/home/user/nanofaas-release/v1",
-        provider=provider,
-        request=object(),
-        architecture="arm64",
-    )
-    assert resource.always_release is True
-
-    with pytest.raises(RuntimeError, match="buildkitd-arm64"):
-        resource.acquire(TaskInputs.empty())
-
-    assert provider.transfers == [
-        (
-            "docker-bake-arm64.json",
-            "/home/user/nanofaas-release/v1/docker-bake-arm64.json",
-        ),
-        ("buildkitd-arm64.toml", "/home/user/nanofaas-release/v1/buildkitd-arm64.toml"),
-    ]
-    assert provider.commands[-1] == (
-        "rm",
-        "-f",
-        "--",
-        "/home/user/nanofaas-release/v1/docker-bake-arm64.json",
-        "/home/user/nanofaas-release/v1/buildkitd-arm64.toml",
-    )
-    assert not (tmp_path / "docker-bake-arm64.json").exists()
-    assert not (tmp_path / "buildkitd-arm64.toml").exists()
-
-
-def test_arm_build_inputs_cleanup_propagates_programming_errors(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(release_resources, "render_bake_json", lambda _plan: "{}\n")
-
-    class BrokenProvider:
-        def transfer_to(self, _request, *, source: Path, destination: str):
-            return SimpleNamespace(return_code=1, stderr="transfer failed")
-
-        def exec_argv(self, _request, argv):
-            if argv[0] == "rm":
-                raise ValueError("bad cleanup contract")
-            return SimpleNamespace(return_code=0)
-
-    resource = release_resources.build_inputs_resource(
-        image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
-        max_parallelism=1,
-        run_dir=tmp_path,
-        remote_root="/home/user/nanofaas-release/v1",
-        provider=BrokenProvider(),
-        request=object(),
-        architecture="arm64",
-    )
-
-    with pytest.raises(ValueError, match="bad cleanup contract"):
-        resource.acquire(TaskInputs.empty())
-
-
 @pytest.mark.parametrize(
     ("source", "archive"),
     [
@@ -474,23 +391,6 @@ def test_release_source_resources_reject_unsafe_remote_paths(
             provider=object(),
             stack_request=object(),
             arm_request=object(),
-        )
-
-
-@pytest.mark.parametrize(
-    "remote_root",
-    ["relative", "/", "/tmp/release", "/home/user/nanofaas-release/v1/.."],
-)
-def test_arm_inputs_reject_unsafe_remote_root(remote_root: str, tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="release remote"):
-        release_resources.build_inputs_resource(
-            image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
-            max_parallelism=1,
-            run_dir=tmp_path,
-            remote_root=remote_root,
-            provider=object(),
-            request=object(),
-            architecture="arm64",
         )
 
 
@@ -532,40 +432,3 @@ def test_source_resource_normal_release_propagates_remote_cleanup_failure(
 
     with pytest.raises(RuntimeError, match="cleanup failed"):
         resources.stack.release(inputs, state)
-
-
-def test_arm_inputs_normal_release_propagates_cleanup_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(release_resources, "render_bake_json", lambda _plan: "{}\n")
-
-    class Provider:
-        failing = False
-
-        def transfer_to(self, _request, *, source, destination):
-            return SimpleNamespace(return_code=0)
-
-        def exec_argv(self, _request, _argv):
-            return SimpleNamespace(
-                return_code=1 if self.failing else 0,
-                stderr="cleanup failed" if self.failing else "",
-            )
-
-    provider = Provider()
-    resource = release_resources.build_inputs_resource(
-        image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
-        max_parallelism=1,
-        run_dir=tmp_path,
-        remote_root="/home/user/nanofaas-release/v1",
-        provider=provider,
-        request=object(),
-        architecture="arm64",
-    )
-    state = resource.acquire(TaskInputs.empty())
-    provider.failing = True
-
-    with pytest.raises(RuntimeError, match="cleanup failed"):
-        resource.release(TaskInputs.empty(), state)
-
-    assert not (tmp_path / "docker-bake-arm64.json").exists()
-    assert not (tmp_path / "buildkitd-arm64.toml").exists()
