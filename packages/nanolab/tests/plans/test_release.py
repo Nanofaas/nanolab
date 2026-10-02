@@ -1731,3 +1731,71 @@ def test_direct_request_requires_frozen_arm_inputs(release_request, mutation):
         )
     with pytest.raises(ValueError, match=r"(?i)frozen|recipe|matrix"):
         build_release_workflow(changed, provider=RejectingProvider())
+
+
+def test_release_verifiers_route_complete_frozen_matrices(release_request):
+    from sonata_engine import Evidence
+
+    from tests.release.test_evidence import DaemonProvider
+
+    digest = "sha256:" + "a" * 64
+    stack = release_request.environment.target("stack").name
+    arm = release_request.environment.target("arm-builder").name
+    provider = DaemonProvider(
+        {
+            stack: {cell.image: digest for cell in release_request.image_plan.cells},
+            arm: {cell.image: digest for cell in release_request.arm_image_plan.cells},
+        }
+    )
+    verify = release_plan.release_verifiers(release_request, provider)[
+        "local-image-digest"
+    ]
+    for plan, owner in (
+        (release_request.image_plan, stack),
+        (release_request.arm_image_plan, arm),
+    ):
+        for cell in plan.cells:
+            provider.calls.clear()
+            assert verify(
+                Evidence("local-image-digest", "docker-daemon:" + cell.image, digest)
+            )
+            assert [name for name, _argv in provider.calls] == [owner]
+    provider.calls.clear()
+    assert not verify(
+        Evidence("local-image-digest", "docker-daemon:unknown/image:arm64", digest)
+    )
+    assert not provider.calls
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing-arm", "missing-amd", "empty-arm", "wrong-arch", "ambiguous", "duplicate"],
+)
+def test_release_verifiers_reject_missing_or_conflicting_matrices(
+    release_request, mutation
+):
+    request = release_request
+    arm = request.arm_image_plan
+    if mutation == "missing-arm":
+        request = replace(request, arm_image_plan=None)
+    elif mutation == "missing-amd":
+        request = replace(request, image_plan=None)
+    elif mutation == "empty-arm":
+        request = replace(request, arm_image_plan=replace(arm, cells=()))
+    elif mutation == "wrong-arch":
+        request = replace(request, arm_image_plan=request.image_plan)
+    elif mutation == "ambiguous":
+        cell = replace(arm.cells[0], image=request.image_plan.cells[0].image)
+        request = replace(
+            request, arm_image_plan=replace(arm, cells=(cell, *arm.cells[1:]))
+        )
+    else:
+        request = replace(
+            request, arm_image_plan=replace(arm, cells=(*arm.cells, arm.cells[0]))
+        )
+    provider = RejectingProvider()
+    with pytest.raises(
+        ValueError, match=r"matrix|matrices|architecture|ambiguous|duplicate"
+    ):
+        release_plan.release_verifiers(request, provider)
+    assert not provider.calls

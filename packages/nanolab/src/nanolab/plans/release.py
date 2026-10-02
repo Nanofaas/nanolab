@@ -96,14 +96,27 @@ class ReleaseRequest:
 
 
 def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verifier]:
-    """Bind evidence verifiers to the VM that serves registry inspection.
-
-    Which host that is belongs to the release plan, not to the caller: a
-    verifier pointed at the wrong VM fails closed and is indistinguishable
-    from invalidated evidence.
-    """
+    """Route local image proof by frozen matrices and registry proof via stack."""
+    stack = vm_request_for_role(request.environment, "stack", loadtest=True)
+    arm = vm_request_for_role(request.environment, "arm-builder")
+    image_requests: dict[str, object] = {}
+    for plan, architecture, owner in (
+        (request.image_plan, "amd64", stack),
+        (request.arm_image_plan, "arm64", arm),
+    ):
+        if plan is None or not plan.cells:
+            raise ValueError("Release verifiers require both frozen image matrices")
+        for cell in plan.cells:
+            if cell.architecture != architecture:
+                raise ValueError("Release verifier matrix architecture differs")
+            reference = "docker-daemon:" + cell.image
+            if reference in image_requests:
+                raise ValueError(
+                    "Ambiguous or duplicate release verifier matrix reference"
+                )
+            image_requests[reference] = owner
     return release_evidence_verifiers(
-        provider, vm_request_for_role(request.environment, "stack", loadtest=True)
+        provider, stack, local_image_requests=image_requests
     )
 
 

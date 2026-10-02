@@ -128,8 +128,24 @@ def release_evidence_verifiers(
     request: object,
     *,
     ghcr_authfile: str | None = None,
+    local_image_requests: Mapping[str, object] | None = None,
 ) -> dict[str, Verifier]:
     """Return release verifiers; GHCR fails closed until auth is staged."""
+    # Capture the authoritative frozen routing rather than a caller's mutable map.
+    image_requests = (
+        dict(local_image_requests) if local_image_requests is not None else None
+    )
+
+    def local(reference: str) -> str | None:
+        if not reference.startswith("docker-daemon:"):
+            return None
+        if image_requests is not None:
+            if reference not in image_requests:
+                return None
+            owner = image_requests[reference]
+        else:
+            owner = request
+        return _remote_image_digest(provider, owner, "remote", reference)
 
     def remote(reference: str, *, authfile: str | None = None) -> str | None:
         return _remote_image_digest(
@@ -143,11 +159,7 @@ def release_evidence_verifiers(
     return {
         "file-digest": file_digest_verifier,
         "cosign-attestation": signature_evidence_verifier,
-        "local-image-digest": image_digest_verifier(
-            lambda reference: (
-                remote(reference) if reference.startswith("docker-daemon:") else None
-            )
-        ),
+        "local-image-digest": image_digest_verifier(local),
         "local-registry-digest": image_digest_verifier(
             lambda reference: (
                 remote(reference)
