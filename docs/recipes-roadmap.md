@@ -165,6 +165,10 @@ le differenze reali fra backend e tipi di verifica.
      eventi Sonata e gli helper soak/scenario utilizzati solo dai vecchi test.
      Conservati i playbook attivi, gli hook dei framework e i guardrail delle
      recipe. La dashboard è verificata con le suite TUI e una prova in PTY.
+   - [x] Aggiornato il pin Sonata a `0.6.5` dopo la pubblicazione della
+     [PR #15](https://github.com/Nanofaas/sonata/pull/15): i comandi inoltrano
+     stdout e stderr alla dashboard anche senza un listener esplicito.
+     Verificati suite TUI e log del processo reale in PTY con i pacchetti PyPI.
    - [ ] Migrare i chiamanti rimanenti prima di rimuovere le build legacy:
      load test degli altri backend, offload e soak containerd. La fase runtime
      del soak usa già immagini fissate senza build e conserva i suoi guardrail.
