@@ -816,7 +816,8 @@ def _recipe_container_platform(
     additional_modules: tuple[str, ...],
 ) -> tuple[RecipeBinding, tuple[Any, ...]]:
     """Publish one staged distribution before starting the load-test stack."""
-    assert config.recipe_profile is not None
+    if config.recipe_profile is None:
+        raise ValueError("Container load-test requires a recipe profile")
     registry = docker_registry_resource(
         executor=executor, role="host", container=REGISTRY_CONTAINER_NAME
     )

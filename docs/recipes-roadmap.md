@@ -169,6 +169,9 @@ le differenze reali fra backend e tipi di verifica.
      [PR #15](https://github.com/Nanofaas/sonata/pull/15): i comandi inoltrano
      stdout e stderr alla dashboard anche senza un listener esplicito.
      Verificati suite TUI e log del processo reale in PTY con i pacchetti PyPI.
+   - [x] Sostituiti i quattro assert dei percorsi recipe/confronto con controlli
+     espliciti, attivi anche con Python ottimizzato. Eliminato il piano di
+     confronto completato; evidenze JVM e limiti restano nella tappa 1.
    - [ ] Migrare i chiamanti rimanenti prima di rimuovere le build legacy:
      load test degli altri backend, offload e soak containerd. La fase runtime
      del soak usa già immagini fissate senza build e conserva i suoi guardrail.

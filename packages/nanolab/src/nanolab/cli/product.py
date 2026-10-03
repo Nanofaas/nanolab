@@ -222,7 +222,8 @@ def _workflow(
     ):
         require_recipe_environment(scenario, environment)
         if environment.provider == "multipass":
-            assert run_dir is not None
+            if run_dir is None:
+                raise ValueError("Multipass recipe workflow requires a run directory")
             remote_project_root = str(
                 remote_recipe_root(
                     vm_request_for_role(environment, "stack"), recipe_run_tag(run_dir)

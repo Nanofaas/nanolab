@@ -752,7 +752,8 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             else None
         )
         if distribution is not None:
-            assert recipe_run_dir is not None
+            if recipe_run_dir is None:
+                raise ValueError("Recipe validation requires a run directory")
             request = replace(
                 request,
                 recipe=RecipeBinding(
