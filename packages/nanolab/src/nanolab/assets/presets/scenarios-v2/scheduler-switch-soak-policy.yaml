@@ -1,0 +1,134 @@
+schema: nanolab-soak-policy-v1
+criteria:
+  # The approved P24 memory contract, unchanged from memory-soak-policy.yaml.
+  # Duplicated rather than referenced because the loader replaces a scenario's
+  # criteria with the policy file's whole list: a scenario cannot attach one more
+  # criterion to a shared contract. `test_the_switch_policy_keeps_the_memory_contract`
+  # asserts every criterion below still matches the shared file, so the two
+  # cannot drift into disagreeing about a budget.
+  - id: control-plane.p24-cgroup-budget
+    role: control-plane
+    metric: cgroup_memory_usage_bytes
+    label_selector: {}
+    unit: bytes
+    operation: maximum
+    phase: steady
+    window_s: 5400
+    threshold: 1073741824
+    rationale: The control plane must remain within its declared 1 GiB cgroup limit.
+  - id: control-plane.p24-rss-return
+    role: control-plane
+    metric: process_rss_bytes
+    label_selector: {}
+    unit: bytes
+    operation: return_to_reference
+    phase: drain
+    window_s: 120
+    deadline_s: 2100
+    absolute_tolerance: 0
+    relative_tolerance: 0
+    rationale: Post-drain RSS must return to or below this run's baseline without tolerance.
+  - id: word-stats-java.p24-cgroup-budget
+    role: word-stats-java
+    metric: cgroup_memory_usage_bytes
+    label_selector: {}
+    unit: bytes
+    operation: maximum
+    phase: steady
+    window_s: 5400
+    threshold: 1073741824
+    rationale: The Java function must remain within its declared 1 GiB cgroup limit.
+  - id: word-stats-java.p24-rss-return
+    role: word-stats-java
+    metric: process_rss_bytes
+    label_selector: {}
+    unit: bytes
+    operation: return_to_reference
+    phase: drain
+    window_s: 120
+    deadline_s: 2100
+    absolute_tolerance: 0
+    relative_tolerance: 0
+    rationale: Post-drain RSS must return to or below this run's baseline without tolerance.
+  - id: word-stats-javascript.p24-cgroup-budget
+    role: word-stats-javascript
+    metric: cgroup_memory_usage_bytes
+    label_selector: {}
+    unit: bytes
+    operation: maximum
+    phase: steady
+    window_s: 5400
+    threshold: 536870912
+    rationale: The JavaScript function must remain within its declared 512 MiB cgroup limit.
+  - id: word-stats-javascript.p24-rss-return
+    role: word-stats-javascript
+    metric: process_rss_bytes
+    label_selector: {}
+    unit: bytes
+    operation: return_to_reference
+    phase: drain
+    window_s: 120
+    deadline_s: 2100
+    absolute_tolerance: 0
+    relative_tolerance: 0
+    rationale: Post-drain RSS must return to or below this run's baseline without tolerance.
+  # The switch's own budget, and the only one of the three the campaign froze
+  # that a Criterion can carry.
+  #
+  # budgets.json says maxSwitchPauseMs: 250. The meter publishes the engine's own
+  # pause in seconds — Micrometer serves the timer this way and there is no
+  # millisecond series — so 0.25 is the same frozen bound in the meter's unit,
+  # not a restated one. The threshold is deliberately not a scenario field: the
+  # step in nanolab.tasks.soak.scheduler_switch holds the same 250, and neither
+  # may be raised without the other.
+  #
+  # The other two frozen budgets are enforced by that step instead, because no
+  # MetricOperation expresses them: `switchesInSoak: 1000` is a lower bound on a
+  # counter that is always zero at the start, and `maxLiveStrategyIndexes: 2` is
+  # the number of series a name has rather than any value one of them takes.
+  # maxSwitchPauseP99Ms: 100 is the third, carried by the percentile criterion
+  # further down.
+  - id: control-plane.scheduler-switch-pause
+    role: control-plane
+    metric: scheduler_switch_duration_seconds_max
+    label_selector: {}
+    unit: seconds
+    operation: maximum
+    phase: steady
+    window_s: 5400
+    threshold: 0.25
+    rationale: >-
+      A hot switch must not pause the engine for more than budgets.json's
+      maxSwitchPauseMs of 250, which this meter serves as 0.25 seconds.
+  # budgets.json's maxSwitchPauseP99Ms: 100, read from the same timer's bucket
+  # family rather than from its maximum.
+  #
+  # The p99 was never unobservable — this is the correction of a claim this file
+  # used to make. The platform publishes the timer's bucket family under every
+  # non-basic metrics profile, nanoFaaS asserts the buckets (`+Inf` included) are
+  # in the wired exposition from the first scrape, before any switch is made, and
+  # this scenario runs `soak`. What was missing was a way to *express* it: none of
+  # the other operations derives a percentile from a `le`-labelled family, so the
+  # budget had a series behind it and no criterion that could read one. Saying
+  # "unobservable" would send a reader off to write a metric that already exists.
+  #
+  # The quantile is named by the criterion, so it says which p99 it means, and
+  # the family is read the way Prometheus reads one: a percentile cannot be
+  # derived from any single series of it. A family that is absent, that carries
+  # no `le`, or whose buckets are all zero is answered with a reason rather than
+  # with a number, which is the whole point of the operation: a percentile of
+  # nothing and a percentile of zero are the same reading downstream, and only
+  # one of them is a reading.
+  - id: control-plane.scheduler-switch-pause-p99
+    role: control-plane
+    metric: scheduler_switch_duration_seconds_bucket
+    label_selector: {}
+    unit: seconds
+    operation: percentile
+    quantile: 0.99
+    phase: steady
+    window_s: 5400
+    threshold: 0.1
+    rationale: >-
+      A hot switch must not pause the engine for more than budgets.json's
+      maxSwitchPauseP99Ms of 100, which this meter serves as 0.1 seconds.

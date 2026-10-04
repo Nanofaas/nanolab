@@ -636,3 +636,36 @@ def _loadtest_config():
     from nanolab.config import ScenarioConfig
 
     return ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])
+
+
+def test_summary_counts_resets_per_series_and_preserves_gauge_delta(
+    tmp_path: Path,
+) -> None:
+    from nanolab.tasks.loadtest.report import _counter_table
+
+    (tmp_path / "metrics").mkdir()
+    (tmp_path / "k6-summary.json").write_text('{"metrics": {}}')
+    points = [
+        {"timestamp": f"t{i}", "value": value, "labels": {"pod": pod}}
+        for pod, values in (("a", [100, 110, 5, 15]), ("b", [100, 200, 300, 400]))
+        for i, value in enumerate(values)
+    ]
+    queries = {
+        "function_dispatch_total": {"points": points},
+        "function_pool_release_total": {
+            "points": [{"value": v} for v in [100, 110, 5, 15]]
+        },
+        "function_queue_depth": {"points": [{"value": v} for v in [100, 110, 5, 15]]},
+    }
+    (tmp_path / "metrics" / "prometheus-snapshot.json").write_text(
+        json.dumps({"queries": queries})
+    )
+    summary = json.loads(
+        WriteLoadtestSummary("", "", tmp_path, tmp_path).run().read_text()
+    )
+    assert summary["prometheus"]["function_dispatch_total"]["delta"] == 325
+    assert summary["prometheus"]["function_pool_release_total"]["delta"] == 25
+    assert summary["prometheus"]["function_queue_depth"]["delta"] == -85
+    table = _counter_table(queries).set_index("counter")
+    assert table.loc["function_dispatch_total", "increase over run"] == "325"
+    assert table.loc["function_pool_release_total", "increase over run"] == "25"

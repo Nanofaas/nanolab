@@ -239,3 +239,32 @@ def test_a_single_run_per_build_yields_no_verdict(tmp_path: Path) -> None:
 
     assert "single run" in verdict
     assert "own spread" not in verdict
+
+
+@pytest.mark.parametrize(
+    "failed", [{"rate": 0.25}, {"values": {"rate": 0.25}}, {"value": 0.25}]
+)
+def test_failed_rate_formats_render_twenty_five_percent(
+    tmp_path: Path, failed: dict
+) -> None:
+    _matrix(tmp_path, {"jvm": [(400.0, 100.0, [500.0])]})
+    path = tmp_path / "jvm" / "run-1" / "k6-summary.json"
+    summary = _k6(400, 100)
+    summary["metrics"]["http_req_failed"] = failed
+    path.write_text(json.dumps(summary))
+    cell = read_cell(tmp_path, "jvm", 1)
+    assert cell is not None
+    assert cell.failed_rate == 0.25
+    assert (
+        "25.00" in WriteComparisonReport("", "Comparison", tmp_path).run().read_text()
+    )
+
+
+def test_missing_required_k6_data_is_not_zero(tmp_path: Path) -> None:
+    _matrix(tmp_path, {"jvm": [(400.0, 100.0, [500.0])]})
+    path = tmp_path / "jvm" / "run-1" / "k6-summary.json"
+    summary = _k6(400, 100)
+    del summary["metrics"]["http_req_failed"]
+    path.write_text(json.dumps(summary))
+    with pytest.raises(ValueError, match="http_req_failed"):
+        read_cell(tmp_path, "jvm", 1)

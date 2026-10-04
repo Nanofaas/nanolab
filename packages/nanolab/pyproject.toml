@@ -45,11 +45,16 @@ nanolab = [
     "tasks/infra/ansible_assets/requirements.txt",
     "tasks/infra/ansible_assets/playbooks/*.yml",
     # Bundled runtime assets, inside the package on purpose: they are shipped,
-    # unlike the caller's scenarios and run outputs, so they must resolve from
+    # alongside public presets, independently of caller inputs and outputs.
+    # They must resolve from
     # the installed distribution and not from a checkout beside it.
     "assets/k6/*",
     "assets/soak/*",
     "assets/containerd-rootless/*",
+    "assets/presets/scenarios-v2/*",
+    "assets/presets/recipes/*",
+    "assets/presets/environments/*",
+    "assets/presets/scenarios/payloads/*",
 ]
 
 [dependency-groups]

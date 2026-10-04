@@ -1,0 +1,30 @@
+schemaVersion: 2
+name: comparison-jvm
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: comparison
+controlPlane:
+  modules:
+  - k8s-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+    variant: jvm
+  container:
+    image: control-plane-jvm
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -XX:TieredStopAtLevel=1
+functions:
+- name: word-stats
+  sdk: java
+  build:
+    mode: jvm
+  container:
+    image: java-word-stats
+- name: word-stats
+  sdk: javascript
+  container:
+    image: javascript-word-stats

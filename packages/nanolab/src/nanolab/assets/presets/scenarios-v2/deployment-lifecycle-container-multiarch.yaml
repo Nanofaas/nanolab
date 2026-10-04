@@ -1,0 +1,6 @@
+workflow: validate
+backend: container
+build: docker
+recipeProfile: ../recipes/validate-container-multiarch-jvm.yaml
+functions:
+  - word-stats-java

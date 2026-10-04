@@ -1,0 +1,34 @@
+schemaVersion: 2
+name: soak-container-p24-jvm
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: soak-container-p24-jvm
+  platforms:
+  - linux/arm64
+  provenance: true
+controlPlane:
+  modules:
+  - container-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+    variant: jvm
+  # Preserve the legacy soak control-plane tuning; Java functions use JVM defaults.
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -XX:TieredStopAtLevel=1
+  container:
+    image: soak-p24-control-plane
+functions:
+- name: word-stats
+  sdk: java
+  build:
+    mode: jvm
+  container:
+    image: soak-p24-java-word-stats
+- name: word-stats
+  sdk: javascript
+  container:
+    image: soak-p24-javascript-word-stats

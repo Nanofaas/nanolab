@@ -6,7 +6,10 @@ texts (e.g. via ``CapturePrometheusSnapshot``) and pass them in.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+import math
+import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,41 +28,64 @@ def _k6_counter_value(
 ) -> float:
     """Read a k6 --summary-export counter's count.
 
-    k6's JSON summary stores counter fields flat on the metric object (e.g.
-    ``{"count": 4, "rate": 0.06}``), not nested under a "values" key. It also
+    Accept flat summary-export fields and handleSummary's nested "values".
+    k6 also
     only emits a per-tag submetric (key ``"name{tag:value}"``) for tag
     combinations referenced by a threshold; untagged custom counters are the
     reliable source for anything else.
     """
-    metrics = k6_summary.get("metrics")
+    metrics = k6_summary.get("metrics", {})
     if not isinstance(metrics, Mapping):
-        return 0.0
+        raise ValueError(f"missing required k6 counter {name}")
+    entry = None
     if tags:
         tag_str = ",".join(f"{key}:{value}" for key, value in tags.items())
-        submetric = metrics.get(f"{name}{{{tag_str}}}")
-        if isinstance(submetric, Mapping) and "count" in submetric:
-            try:
-                return float(submetric["count"])
-            except (TypeError, ValueError):
-                pass
-    aggregate = metrics.get(name)
-    if isinstance(aggregate, Mapping) and "count" in aggregate:
-        try:
-            return float(aggregate["count"])
-        except (TypeError, ValueError):
-            pass
-    return 0.0
+        entry = metrics.get(f"{name}{{{tag_str}}}")
+    if entry is None:
+        entry = metrics.get(name)
+    if not isinstance(entry, Mapping):
+        raise ValueError(f"missing required k6 counter {name}")
+    values = entry.get("values", entry)
+    if not isinstance(values, Mapping) or "count" not in values:
+        raise ValueError(f"missing required k6 counter {name}")
+    return _finite_counter(values["count"], name)
 
 
-def _sum_metric(text: str, prefix: str) -> float:
+def _finite_counter(value: Any, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid counter {name}: {value!r}") from exc
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"invalid counter {name}: {value!r}")
+    return number
+
+
+_SAMPLE = re.compile(
+    r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(?P<labels>.*)\})?\s+(?P<value>\S+)(?:\s+\S+)?$"
+)
+_LABEL = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*("(?:[^"\\]|\\.)*")')
+
+
+def _sum_metric(
+    text: str, name: str, labels: Mapping[str, str], *, required: bool = False
+) -> float:
     total = 0.0
+    found = False
     for line in text.splitlines():
-        if line.startswith(prefix):
-            try:
-                total += float(line.rsplit(" ", 1)[-1])
-            except ValueError:
-                continue
-    return total
+        sample = _SAMPLE.fullmatch(line.strip())
+        if sample is None or sample["name"] != name:
+            continue
+        actual = {
+            key: json.loads(value)
+            for key, value in _LABEL.findall(sample["labels"] or "")
+        }
+        if all(actual.get(key) == value for key, value in labels.items()):
+            total += _finite_counter(sample["value"], name)
+            found = True
+    if required and not found:
+        raise ValueError(f"missing required counter {name} for {dict(labels)}")
+    return _finite_counter(total, name)
 
 
 def evaluate_conservation(
@@ -81,7 +107,12 @@ def evaluate_conservation(
     failures: list[str] = []
     numbers: dict[str, float] = {}
 
-    def record(label: str, value: float) -> float:
+    def record(label: str, read: Callable[[], float]) -> float:
+        try:
+            value = read()
+        except ValueError as exc:
+            failures.append(str(exc))
+            value = float("nan")
         numbers[label] = value
         return value
 
@@ -95,12 +126,15 @@ def evaluate_conservation(
     # 1. k6 requests for the offloadable function vs edge function_success_total.
     k6_offloadable_reqs = record(
         "k6_offloadable_requests",
-        _k6_counter_value(k6_summary, "offloadable_requests"),
+        lambda: _k6_counter_value(k6_summary, "offloadable_requests"),
     )
     edge_success_offloadable = record(
         "edge_function_success_offloadable",
-        _sum_metric(
-            edge_metrics, f'function_success_total{{function="{offloadable}"}}'
+        lambda: _sum_metric(
+            edge_metrics,
+            "function_success_total",
+            {"function": offloadable},
+            required=True,
         ),
     )
     check_close(
@@ -113,18 +147,28 @@ def evaluate_conservation(
     # 2. k6 offloaded_requests vs the edge's nanofaas_offload_total vs cloud success.
     k6_offloaded = record(
         "k6_offloaded_requests",
-        _k6_counter_value(k6_summary, "offloaded_requests", {"function": offloadable}),
+        lambda: _k6_counter_value(
+            k6_summary, "offloaded_requests", {"function": offloadable}
+        ),
     )
     if k6_offloaded == 0:
         failures.append("no requests were offloaded to the cloud")
     edge_offload_total = record(
         "edge_offload_total",
-        _sum_metric(edge_metrics, f'nanofaas_offload_total{{function="{offloadable}",'),
+        lambda: _sum_metric(
+            edge_metrics,
+            "nanofaas_offload_total",
+            {"function": offloadable},
+            required=True,
+        ),
     )
     cloud_success_offloadable = record(
         "cloud_function_success_offloadable",
-        _sum_metric(
-            cloud_metrics, f'function_success_total{{function="{offloadable}"}}'
+        lambda: _sum_metric(
+            cloud_metrics,
+            "function_success_total",
+            {"function": offloadable},
+            required=True,
         ),
     )
     check_close(
@@ -148,7 +192,9 @@ def evaluate_conservation(
     # 3. the control function must never be offloaded, on either control plane.
     edge_offload_control = record(
         "edge_offload_control",
-        _sum_metric(edge_metrics, f'nanofaas_offload_total{{function="{control}",'),
+        lambda: _sum_metric(
+            edge_metrics, "nanofaas_offload_total", {"function": control}
+        ),
     )
     if edge_offload_control > tolerance:
         failures.append(
@@ -167,8 +213,11 @@ def evaluate_conservation(
             "edge exposes nanofaas_offload_failure_total; offload calls must never fail"
         )
     for function in (offloadable, control):
-        retries = _sum_metric(
-            edge_metrics, f'function_retry_total{{function="{function}"}}'
+        retries = record(
+            f"edge_retries_{function}",
+            lambda function=function: _sum_metric(
+                edge_metrics, "function_retry_total", {"function": function}
+            ),
         )
         if retries > tolerance:
             failures.append(

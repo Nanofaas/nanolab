@@ -27,6 +27,21 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab doctor
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab list
 ```
 
+The installed wheel includes the public scenario, recipe, policy, payload and
+environment presets. `nanolab list` prints their paths for `inspect`, `plan` and
+`run`, and the TUI selects them directly. `NANOFAAS_ROOT` points to the separate
+nanoFaaS source checkout needed to build or plan workloads.
+
+Results default to `runs/` under the current working directory. Set
+`NANOLAB_WORKSPACE=/path/to/workspace` to use another workspace for `runs/`,
+`profiles/` and operator environment files, or use `--run-dir` for one run. The
+TUI reads `environments/*.yaml` from that workspace and gives them precedence
+over bundled presets of the same name. Copy cloud provider templates there and
+edit those copies; presets inside the installation are read-only resources.
+Public preset source files remain in this package's top-level directories;
+update their bundled copies under `src/nanolab/assets/presets/` together (the
+packaging regression verifies they match).
+
 ## Local Telegram notifications
 
 Set both variables before `nanolab run` to receive one message after the workflow

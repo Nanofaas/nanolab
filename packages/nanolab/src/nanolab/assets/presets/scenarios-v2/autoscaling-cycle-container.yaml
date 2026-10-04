@@ -1,0 +1,6 @@
+workflow: loadtest
+backend: container
+recipeProfile: ../recipes/loadtest-container-jvm.yaml
+autoscaling: true
+functions:
+  - word-stats-java

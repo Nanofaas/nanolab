@@ -1,0 +1,7 @@
+# Use --keep to retrieve /tmp/nanolab-retry-{burst,hint}-* from the stack VM.
+workflow: validate
+backend: k8s
+build: docker
+functions:
+  - word-stats-java
+retryBackoffBurst: true

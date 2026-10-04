@@ -1,0 +1,5 @@
+provider: multipass
+roles:
+  stack:
+    name: nanofaas-containerd-recipe
+containerdMavenRepository: /absolute/path/to/nanofaas/.gradle/containerd-m2

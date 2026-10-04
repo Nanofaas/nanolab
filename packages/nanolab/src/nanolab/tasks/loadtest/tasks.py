@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from nanolab.tasks.loadtest.models import PrometheusQuery, TimeWindow
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from nanolab.tasks.loadtest.prometheus import counter_delta, is_counter
 
 if TYPE_CHECKING:
     from nanolab.tasks.loadtest.autoscaling import AutoscalingResult
@@ -278,15 +279,22 @@ class WriteK6Report:
         return dest
 
 
-def _point_stats(points: list[dict]) -> dict[str, float | int]:
-    values = [float(point["value"]) for point in points if "value" in point]
+def _point_stats(
+    points: list[dict], *, counter: bool = False
+) -> dict[str, float | int]:
+    merged: dict[str, float] = {}
+    for index, point in enumerate(points):
+        if "value" in point:
+            timestamp = point.get("timestamp", str(index))
+            merged[timestamp] = merged.get(timestamp, 0.0) + float(point["value"])
+    values = list(merged.values())
     if not values:
         return {"points": 0}
     return {
         "points": len(values),
         "first": values[0],
         "last": values[-1],
-        "delta": values[-1] - values[0],
+        "delta": counter_delta(points) if counter else values[-1] - values[0],
         "min": min(values),
         "max": max(values),
     }
@@ -316,7 +324,10 @@ class WriteLoadtestSummary:
             "schema_version": 1,
             "k6": {name: k6.get("metrics", {}).get(name, {}) for name in selected},
             "prometheus": {
-                name: _point_stats(entry.get("points", []))
+                name: _point_stats(
+                    entry.get("points", []),
+                    counter=is_counter(name, entry.get("metric_type")),
+                )
                 for name, entry in prometheus.get("queries", {}).items()
             },
             "autoscaling": asdict(self.autoscaling.result)
