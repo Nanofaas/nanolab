@@ -222,7 +222,8 @@ def _workflow(
     ):
         require_recipe_environment(scenario, environment)
         if environment.provider == "multipass":
-            assert run_dir is not None
+            if run_dir is None:
+                raise ValueError("recipe validation requires a run directory")
             remote_project_root = str(
                 remote_recipe_root(
                     vm_request_for_role(environment, "stack"), recipe_run_tag(run_dir)
@@ -1032,6 +1033,8 @@ def install_product_commands(
                         tool_root=paths.tool_root,
                     )
                     return
+                if run_dir is not None:
+                    require_unused_run_dir(run_dir)
                 missing = diagnostics.missing_executables(
                     ("docker", "k6")
                     if scenario_config.backend == "container"
