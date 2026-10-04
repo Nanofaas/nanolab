@@ -222,7 +222,8 @@ def _workflow(
     ):
         require_recipe_environment(scenario, environment)
         if environment.provider == "multipass":
-            assert run_dir is not None
+            if run_dir is None:
+                raise ValueError("recipe validation requires a run directory")
             remote_project_root = str(
                 remote_recipe_root(
                     vm_request_for_role(environment, "stack"), recipe_run_tag(run_dir)
@@ -275,7 +276,7 @@ def _workflow(
             repo_root=paths.nanofaas_root,
             tool_root=paths.tool_root,
             environment=environment,
-            run_dir=run_dir,
+            run_dir=run_dir or paths.runs_dir / "recipe-preview",
         )
     if scenario.workflow == "offload":
         return build_offload_plan(scenario, bindings, repo_root=paths.nanofaas_root)
@@ -1032,6 +1033,8 @@ def install_product_commands(
                         tool_root=paths.tool_root,
                     )
                     return
+                if run_dir is not None:
+                    require_unused_run_dir(run_dir)
                 missing = diagnostics.missing_executables(
                     ("docker", "k6")
                     if scenario_config.backend == "container"

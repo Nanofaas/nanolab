@@ -77,9 +77,9 @@ held fixed. Selecting `async-queue` preserves that experiment; adding
   ```python
   def test_nonbaseline_selection_prepares_shared_functions_first():
       tool_root = Path(__file__).resolve().parents[2]
-      selected = comparison_profiles(tool_root, ('native-o3', 'jvm-g1'))
-      assert list(selected) == ['jvm', 'native-o3', 'jvm-g1']
-      assert selected['jvm'].name == 'comparison-jvm.yaml'
+      selected = comparison_profiles(tool_root, ("native-o3", "jvm-g1"))
+      assert list(selected) == ["jvm", "native-o3", "jvm-g1"]
+      assert selected["jvm"].name == "comparison-jvm.yaml"
   ```
 
 - [x] Run `uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/comparison/test_profiles.py --no-cov`; require new tests to fail first.
@@ -105,10 +105,10 @@ held fixed. Selecting `async-queue` preserves that experiment; adding
   Name the first regression `test_changed_load_scale_refuses_resume_without_rewriting`; after setup with an existing manifest and changed captured input, its decisive assertions are:
 
   ```python
-  before = (root / 'comparison-manifest.json').read_bytes()
-  with pytest.raises(ValueError, match='inputs'):
+  before = (root / "comparison-manifest.json").read_bytes()
+  with pytest.raises(ValueError, match="inputs"):
       require_matching_inputs(manifest, changed_inputs)
-  assert (root / 'comparison-manifest.json').read_bytes() == before
+  assert (root / "comparison-manifest.json").read_bytes() == before
   ```
 
 - [x] Test missing manifest in a nonempty root, malformed JSON, unsupported schema, missing identity fields and stale profile copies. Preserve compatibility of the comparison HTML reader with added fields. Add an atomic-write failure test: the prior complete manifest survives a failed replacement.
@@ -132,7 +132,7 @@ held fixed. Selecting `async-queue` preserves that experiment; adding
   `test_same_name_replacement_vm_is_not_the_original` passes two probe records with the same configured name and different machine/product UUIDs:
 
   ```python
-  with pytest.raises(ValueError, match='identity'):
+  with pytest.raises(ValueError, match="identity"):
       require_comparison_target(original, replacement)
   assert provider.ensure_calls == []
   ```
@@ -162,9 +162,9 @@ held fixed. Selecting `async-queue` preserves that experiment; adding
   `test_resume_reuses_committed_jvm_and_publishes_only_remaining_variant` uses a recording fake provider with a valid JVM receipt and uncommitted `native-o3`:
 
   ```python
-  assert published_variants == ['native-o3']
-  assert set(prepared.distributions) == {'jvm', 'native-o3'}
-  assert original_jvm_receipt == resumed_manifest.publications['jvm']
+  assert published_variants == ["native-o3"]
+  assert set(prepared.distributions) == {"jvm", "native-o3"}
+  assert original_jvm_receipt == resumed_manifest.publications["jvm"]
   ```
 
 - [x] Run `uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/comparison packages/nanolab/tests/tasks/test_recipe.py packages/nanolab/tests/tasks/test_recipe_remote.py --no-cov`, observe new failures, then implement using `read_distribution`, exact-set validation, `run_remote_logged`, `VmFileFetcher` and registry manifest/config inspection. Each receipt includes relative evidence paths and SHA-256 hashes, profile/source identity, image references/digests, declared options and forwarded properties. Key its image records by `control-plane`, `word-stats/java` and `word-stats/javascript` as applicable. Commit it only after verification passes.
@@ -192,7 +192,7 @@ held fixed. Selecting `async-queue` preserves that experiment; adding
   `test_wrong_ready_pod_image_prevents_load` supplies ready Pod/CRI evidence with a manifest different from the selected report:
 
   ```python
-  with pytest.raises(ValueError, match='manifest differs'):
+  with pytest.raises(ValueError, match="manifest differs"):
       workflow.run()
   assert k6_calls == []
   assert image_evidence_path.is_file()

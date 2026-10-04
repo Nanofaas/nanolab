@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
+
+from nanolab.tasks.loadtest.prometheus import counter_delta, is_counter
 
 _PROMETHEUS_SNAPSHOT = "prometheus-snapshot.json"
 # Colours held constant per function across every chart, so a reader tracks one
@@ -38,21 +39,6 @@ class ReportPhase:
     name: str
     start_seconds: float
     end_seconds: float
-
-
-def counter_delta(points: list[dict[str, Any]]) -> float:
-    """Total increase across a window, counting a restart as its own increment.
-
-    A plain last-minus-first was wrong here and wrong in a way that looked like
-    data rather than an error: Prometheus keeps its volume across a redeploy, so
-    a window could open on the previous run's value and close on the new
-    process's, reporting a NEGATIVE number of requests served.
-    """
-    values = [float(point["value"]) for point in points if "value" in point]
-    total = 0.0
-    for previous, current in pairwise(values):
-        total += current - previous if current >= previous else current
-    return total
 
 
 def _scalar(value: object) -> float:
@@ -398,7 +384,7 @@ def _counter_table(queries: dict[str, Any]) -> pd.DataFrame:
     for key, entry in sorted(queries.items()):
         if not isinstance(entry, dict) or not key.startswith("function_"):
             continue
-        if not any(marker in key for marker in ("_total", "dispatch")):
+        if not is_counter(key, entry.get("metric_type")):
             continue
         points = entry.get("points") or []
         if not points:

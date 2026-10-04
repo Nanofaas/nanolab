@@ -29,13 +29,15 @@ def k8s_function_resources_absent(
     Polls `kubectl get` every two seconds until both objects are gone or
     `timeout_seconds` elapses, in which case the task fails with a message naming
     the function and the budget it exhausted. Used after a deregistration to
-    confirm the control plane really released the pods.
+    confirm the control plane really released the pods. Only NotFound is treated
+    as absence; other kubectl failures preserve their diagnostics and exit code.
     """
     attempts = max(1, timeout_seconds // 2)
     resources = (f"deployment/fn-{function}", f"service/fn-{function}")
     checks = " ".join(
-        f"kubectl -n {shlex.quote(namespace)} get {shlex.quote(resource)} "
-        ">/dev/null 2>&1 && present=1;"
+        f"if object=$(kubectl -n {shlex.quote(namespace)} get "
+        f"{shlex.quote(resource)} --ignore-not-found -o name); then "
+        '[ -n "$object" ] && present=1; else exit $?; fi;'
         for resource in resources
     )
     missing = (

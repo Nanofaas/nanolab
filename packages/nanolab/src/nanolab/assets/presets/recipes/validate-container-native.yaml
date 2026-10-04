@@ -1,0 +1,30 @@
+schemaVersion: 2
+name: validate-container-native
+
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: recipe-v2-native
+
+controlPlane:
+  modules: [container-deployment-provider, build-metadata]
+  build:
+    mode: native
+    builder: container
+    variant: recipe-v2-native
+  container:
+    image: control-plane
+  config:
+    nanofaas:
+      deployment:
+        default-backend: container-local
+      metrics:
+        profile: advanced
+
+functions:
+  - name: word-stats
+    sdk: java
+    build:
+      mode: native
+      builder: container
+    container:
+      image: word-stats-java

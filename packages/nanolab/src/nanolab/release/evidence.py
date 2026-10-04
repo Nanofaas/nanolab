@@ -8,9 +8,12 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from sonata_engine import Evidence, Verifier
+from sonata_tasks.cosign import COSIGN_IMAGE
 
-from nanolab.release.build import _remote_image_digest
-from nanolab.release.model import ArtifactEvidence, digest_path
+from nanolab.release.build import _provider_exec, _remote_image_digest
+from nanolab.release.model import ArtifactEvidence, CredentialFiles, digest_path
+from nanolab.release.publish import ghcr_username
+from nanolab.release.secrets import stage_cosign_credentials, stage_ghcr_credentials
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 DigestReader = Callable[[str], str | None]
@@ -104,22 +107,114 @@ def image_digest_verifier(read_digest: DigestReader) -> Verifier:
     return verify
 
 
-def signature_evidence_verifier(evidence: Evidence) -> bool:
-    """Verify a recorded signature names exactly the digest it claims to sign.
+def signature_evidence_verifier(
+    evidence: Evidence, *, verify_signature: Callable[[str], bool] | None = None
+) -> bool:
+    """Require a pinned digest and cryptographic verification under release policy.
 
-    Sonata fails a resume closed on any evidence kind it cannot verify, so the
-    attest phase needs a verifier or every resume re-signs the whole matrix.
-
-    ponytail: checks the reference is digest-pinned and self-consistent, not
-    that the signature is still in the registry. Upgrade to a real
-    `cosign verify` once the GHCR authfile is reachable from a verifier --
-    today it is staged inside the workflow run, after verifiers are built.
+    A self-consistent reference is only a claim. Without an authenticated
+    verifier, Sonata must rerun the signing phase rather than reuse that claim.
     """
     reference, _, pinned = evidence.reference.partition("@")
-    return (
-        bool(reference)
+    if not (
+        evidence.kind == "cosign-attestation"
+        and reference.startswith("ghcr.io/")
         and pinned == evidence.digest
         and is_sha256_digest(evidence.digest)
+        and verify_signature is not None
+    ):
+        return False
+    try:
+        return verify_signature(evidence.reference) is True
+    except Exception:
+        return False
+
+
+def authenticated_signature_verifier(
+    provider: object, request: object, credentials: CredentialFiles | None
+) -> Verifier:
+    """Verify both Cosign artifacts against the requested release signing key.
+
+    Credentials are staged only while inspecting evidence. Derive the public
+    key afresh, so a leftover VM key cannot select the trust policy on resume.
+    Verification uses the same pinned tool and custom predicate type as signing.
+    Missing credentials, inaccessible artifacts or failed verification fail closed.
+    """
+
+    def verify(reference: str) -> bool:
+        if credentials is None or credentials.cosign_password is None:
+            return False
+        with (
+            stage_ghcr_credentials(
+                provider,
+                request,
+                username=ghcr_username(),
+                token_file=credentials.ghcr_token,
+            ) as docker,
+            stage_cosign_credentials(
+                provider,
+                request,
+                key_file=credentials.cosign_key,
+                password_file=credentials.cosign_password,
+            ) as signing,
+        ):
+            public_key = f"{signing.key_file}.pub"
+            _provider_exec(
+                provider,
+                request,
+                (
+                    "sh",
+                    "-c",
+                    'pw=$(cat "$1") || exit; out="$2"; shift 2; '
+                    'COSIGN_PASSWORD="$pw" "$@" > "$out" && test -s "$out"',
+                    "--",
+                    str(signing.password_file),
+                    public_key,
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--user",
+                    "0",
+                    "-e",
+                    "COSIGN_PASSWORD",
+                    "-v",
+                    f"{signing.key_file}:/key.cosign:ro",
+                    COSIGN_IMAGE,
+                    "public-key",
+                    "--key",
+                    "/key.cosign",
+                ),
+            )
+            base = (
+                "docker",
+                "run",
+                "--rm",
+                "--user",
+                "0",
+                "-e",
+                "DOCKER_CONFIG=/auth",
+                "-v",
+                f"{docker.docker_config}:/auth:ro",
+                "-v",
+                f"{public_key}:/pub.key:ro",
+                COSIGN_IMAGE,
+            )
+            for operation in (
+                ("verify", "--key", "/pub.key", reference),
+                (
+                    "verify-attestation",
+                    "--key",
+                    "/pub.key",
+                    "--type",
+                    "custom",
+                    reference,
+                ),
+            ):
+                _provider_exec(provider, request, (*base, *operation), bounded=True)
+        return True
+
+    return lambda evidence: signature_evidence_verifier(
+        evidence, verify_signature=verify
     )
 
 
@@ -128,6 +223,7 @@ def release_evidence_verifiers(
     request: object,
     *,
     ghcr_authfile: str | None = None,
+    credentials: CredentialFiles | None = None,
 ) -> dict[str, Verifier]:
     """Return release verifiers; GHCR fails closed until auth is staged."""
 
@@ -142,7 +238,9 @@ def release_evidence_verifiers(
 
     return {
         "file-digest": file_digest_verifier,
-        "cosign-attestation": signature_evidence_verifier,
+        "cosign-attestation": authenticated_signature_verifier(
+            provider, request, credentials
+        ),
         "local-image-digest": image_digest_verifier(
             lambda reference: (
                 remote(reference) if reference.startswith("docker-daemon:") else None

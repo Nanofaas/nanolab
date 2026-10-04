@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 _NANOFAAS_MARKERS = ("build.gradle", "settings.gradle")
@@ -36,21 +36,16 @@ class ToolPaths:
 
 
 def discover_tool_root() -> Path:
-    """Return the root of the ``nanolab`` package this module ships in."""
-    return Path(__file__).resolve().parents[3]
+    """Return preset resources from a source checkout or the installed package."""
+    checkout = Path(__file__).resolve().parents[3]
+    source_module = checkout / "src/nanolab/workspace/paths.py"
+    if source_module == Path(__file__).resolve():
+        return checkout
+    return bundled_assets_root() / "presets"
 
 
 def bundled_assets_root() -> Path:
-    """Return the ``assets`` directory inside this package.
-
-    Deliberately separate from :func:`discover_tool_root`. That one is the
-    checkout, which holds the caller's scenarios, profiles and run outputs and is
-    legitimately absent from an installed wheel. These assets ship *inside* the
-    distribution, so they are derived from the package and never from a directory
-    beside it -- deriving them from the checkout worked until nanolab was
-    installed, where the parent of the package is site-packages and holds no
-    assets at all.
-    """
+    """Return read-only runtime resources inside the installed package."""
     return Path(__file__).resolve().parents[1] / "assets"
 
 
@@ -72,9 +67,19 @@ def nanofaas_root_from_env() -> Path:
     return root
 
 
+def operator_workspace_root() -> Path:
+    """Return writable operator inputs and outputs, independent of installation."""
+    value = os.getenv("NANOLAB_WORKSPACE", "").strip()
+    return Path(value).expanduser().resolve() if value else Path.cwd().resolve()
+
+
 def default_tool_paths() -> ToolPaths:
     """Return the tool paths for the checkout named by ``NANOFAAS_ROOT``."""
-    return ToolPaths.from_roots(nanofaas_root_from_env(), discover_tool_root())
+    paths = ToolPaths.from_roots(nanofaas_root_from_env(), discover_tool_root())
+    workspace = operator_workspace_root()
+    return replace(
+        paths, profiles_dir=workspace / "profiles", runs_dir=workspace / "runs"
+    )
 
 
 def scenario_path_from_env(cli_path: Path | None = None) -> Path | None:

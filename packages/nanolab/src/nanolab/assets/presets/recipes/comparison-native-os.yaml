@@ -1,0 +1,19 @@
+schemaVersion: 2
+name: comparison-native-os
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: comparison
+controlPlane:
+  modules:
+  - k8s-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: native
+    variant: native-os
+    builder: host
+    native:
+      optimization: s
+      gc: serial
+  container:
+    image: control-plane-native-os

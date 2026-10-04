@@ -399,6 +399,9 @@ def test_p24_recipe_saved_evidence_is_not_resumed_or_republished(
         raise AssertionError("saved soak evidence reached workflow/build execution")
 
     monkeypatch.setattr(product, "_workflow", forbidden)
+    monkeypatch.setattr(
+        "nanolab.cli.diagnostics.missing_executables", lambda tools=(): ("k6",)
+    )
     # Empty selection still rejects an already used directory.
     (tmp_path / "original-evidence.json").write_text('{"legacy":true}')
     app = typer.Typer()

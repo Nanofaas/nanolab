@@ -52,3 +52,20 @@ def test_default_tool_paths_rejects_invalid_nanofaas_checkout(
 
     with pytest.raises(RuntimeError, match=r"build.gradle, settings.gradle"):
         default_tool_paths()
+
+
+def test_default_outputs_follow_operator_workspace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkout = tmp_path / "source"
+    checkout.mkdir()
+    (checkout / "build.gradle").touch()
+    (checkout / "settings.gradle").touch()
+    monkeypatch.setenv("NANOFAAS_ROOT", str(checkout))
+    workspace = tmp_path / "operator"
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(workspace))
+    paths = default_tool_paths()
+    assert paths.runs_dir == workspace / "runs"
+    assert paths.profiles_dir == workspace / "profiles"
+    assert paths.tool_root != workspace

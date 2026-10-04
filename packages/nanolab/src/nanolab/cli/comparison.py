@@ -361,7 +361,8 @@ def register(app: typer.Typer) -> None:
                 )
                 write_comparison_manifest(root, manifest)
             else:
-                assert manifest.target is not None
+                if manifest.target is None:
+                    raise ValueError("comparison resume requires a recorded target")
                 require_comparison_target(manifest.target, target)
                 require_recorded_publications(
                     manifest=manifest, provider=provider, request=request, root=root

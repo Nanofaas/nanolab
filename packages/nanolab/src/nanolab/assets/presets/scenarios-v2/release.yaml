@@ -1,0 +1,13 @@
+workflow: release
+functions:
+  - word-stats-java
+release:
+  version: v0.22.0
+  profile: azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1
+  # Native recipe assemblies use the owned BuildKit builder with this ceiling.
+  # Keep compiler memory/parallelism separate from BuildKit build-step concurrency.
+  max_parallelism: 2
+  benchmark_runs: 3
+  throughput_max_loss_percent: 10.0
+  p95_max_increase_percent: 15.0
+  error_rate_max: 0.30

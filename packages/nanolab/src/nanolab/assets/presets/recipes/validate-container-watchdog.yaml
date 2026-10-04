@@ -1,0 +1,36 @@
+schemaVersion: 2
+name: validate-container-watchdog
+
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: recipe-v2-watchdog
+
+controlPlane:
+  modules: [container-deployment-provider, build-metadata]
+  build:
+    mode: jvm
+    variant: recipe-v2-watchdog
+  jvm:
+    args: ["-XX:+UseSerialGC", "-Xmx256m"]
+  container:
+    image: control-plane
+  config:
+    nanofaas:
+      deployment:
+        default-backend: container-local
+      metrics:
+        profile: advanced
+
+functions:
+  - name: word-stats
+    sdk: java
+    build:
+      mode: jvm
+    container:
+      image: word-stats-java
+
+services:
+  - name: watchdog
+    sdk: dockerfile
+    container:
+      image: watchdog

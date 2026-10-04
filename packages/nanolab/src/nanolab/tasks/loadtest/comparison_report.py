@@ -76,6 +76,19 @@ def _k6_values(summary: dict[str, Any], name: str) -> dict[str, Any]:
     return entry.get("values", entry) if isinstance(entry, dict) else {}
 
 
+def _required_k6_value(values: dict[str, Any], name: str, *keys: str) -> float:
+    for key in keys:
+        if key in values:
+            try:
+                value = float(values[key])
+            except (ValueError, TypeError):
+                break
+            if math.isfinite(value):
+                return value
+            break
+    raise ValueError(f"missing or invalid required k6 metric {name}: {'/'.join(keys)}")
+
+
 def _series(snapshot: dict[str, Any], name: str) -> pd.DataFrame:
     entry = snapshot.get("queries", {}).get(name)
     if not entry or not entry.get("points"):
@@ -116,12 +129,12 @@ def read_cell(root: Path, variant: str, repetition: int) -> CellData | None:
     return CellData(
         variant=variant,
         repetition=repetition,
-        requests=float(reqs.get("count", 0.0)),
-        rps=float(reqs.get("rate", 0.0)),
-        p50_ms=float(duration.get("p(50)", duration.get("med", 0.0))),
-        p95_ms=float(duration.get("p(95)", 0.0)),
-        p99_ms=float(duration.get("p(99)", 0.0)),
-        failed_rate=float(failed.get("value", 0.0)),
+        requests=_required_k6_value(reqs, "http_reqs", "count"),
+        rps=_required_k6_value(reqs, "http_reqs", "rate"),
+        p50_ms=_required_k6_value(duration, "http_req_duration", "p(50)", "med"),
+        p95_ms=_required_k6_value(duration, "http_req_duration", "p(95)"),
+        p99_ms=_required_k6_value(duration, "http_req_duration", "p(99)"),
+        failed_rate=_required_k6_value(failed, "http_req_failed", "rate", "value"),
         series=series,
     )
 

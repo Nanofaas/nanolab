@@ -24,7 +24,11 @@ from nanolab.cli.product import (
 from nanolab.cli.provisioning import provision_environment
 from nanolab.cli.soak import terminal_status, unique_soak_run_dir
 from nanolab.tui.workflow_controller import TuiWorkflowController
-from nanolab.workspace.paths import default_tool_paths, discover_tool_root
+from nanolab.workspace.paths import (
+    default_tool_paths,
+    discover_tool_root,
+    operator_workspace_root,
+)
 
 _INSPECT_SCENARIO_TITLE = "Inspect scenario"
 
@@ -294,12 +298,15 @@ class NanofaasTUI:
 
     def _select_environment(self) -> Path | None:
         environment_dir = discover_tool_root() / "environments"
+        operator_environments = operator_workspace_root() / "environments"
         while True:
-            environment_paths = [
-                path
-                for path in sorted(environment_dir.glob("*.yaml"))
+            by_name = {
+                path.name: path
+                for directory in (environment_dir, operator_environments)
+                for path in directory.glob("*.yaml")
                 if path.is_file() and ".example" not in path.name
-            ]
+            }
+            environment_paths = sorted(by_name.values(), key=lambda path: path.name)
             choices = [
                 Choice(path.stem, str(path), f"Use {path.name}.")
                 for path in environment_paths
@@ -309,9 +316,11 @@ class NanofaasTUI:
                 template_name,
                 target_name,
             ) in _PROVIDER_SETUP.items():
-                if (environment_dir / template_name).is_file() and not (
-                    environment_dir / target_name
-                ).is_file():
+                if (
+                    (environment_dir / template_name).is_file()
+                    and not (operator_environments / target_name).is_file()
+                    and not (environment_dir / target_name).is_file()
+                ):
                     choices.append(
                         Choice(
                             f"{label} (setup required)",
@@ -339,7 +348,11 @@ class NanofaasTUI:
                 self._show_static(
                     title=f"{_PROVIDER_SETUP[provider][0]} setup required",
                     breadcrumb="Main / Environment",
-                    body=_PROVIDER_GUIDANCE[provider],
+                    body=(
+                        f"Copy {environment_dir / _PROVIDER_SETUP[provider][1]} "
+                        f"to {operator_environments / _PROVIDER_SETUP[provider][2]}."
+                        "\n\n" + _PROVIDER_GUIDANCE[provider].split("\n\n", 1)[1]
+                    ),
                 )
                 continue
             return Path(selected)

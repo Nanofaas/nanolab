@@ -742,7 +742,11 @@ def test_resumed_attest_skips_the_digests_it_already_signed(
     published = _stage_attest_inputs(phases)
     attest = phases["Attest published images"]
     journal = JournalConfig(tmp_path / "release.jsonl")
-    verifiers = {"cosign-attestation": signature_evidence_verifier}
+    verifiers = {
+        "cosign-attestation": lambda evidence: signature_evidence_verifier(
+            evidence, verify_signature=lambda reference: reference in verified
+        )
+    }
     only_attest = Selection(only="attest-published-images")
     pinned = {
         f"{reference.rsplit(':', 1)[0]}@{digest}"
@@ -766,6 +770,7 @@ def test_resumed_attest_skips_the_digests_it_already_signed(
     finished = _attested(executor.commands, pinned)
     assert finished, "run 1 finished no group, so there is nothing to skip"
     assert signs[-1] not in finished
+    verified = set(finished)
 
     # Run 2 resumes and must touch only the digests run 1 left unsigned.
     executor.fail_when = None
@@ -773,6 +778,7 @@ def test_resumed_attest_skips_the_digests_it_already_signed(
     workflow.run(select=only_attest, journal=journal, resume=True, verifiers=verifiers)
 
     resumed = executor.commands[mark:]
+    verified = finished | _attested(resumed, pinned)
     assert _touched(resumed, pinned) == pinned - finished
     assert _attested(resumed, pinned) == pinned - finished
     # The receipt claims what this run signed, not what it set out to sign.

@@ -1,0 +1,32 @@
+schemaVersion: 2
+name: validate-k8s-jvm
+
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: recipe-v2-k8s-jvm
+
+controlPlane:
+  modules: [k8s-deployment-provider, build-metadata, sync-queue]
+  build:
+    mode: jvm
+    variant: recipe-v2-k8s-jvm
+  jvm:
+    args: ["-XX:+UseSerialGC", "-Xmx256m"]
+  container:
+    image: control-plane
+  config:
+    nanofaas:
+      deployment:
+        default-backend: k8s
+      k8s:
+        image-pull-policy: IfNotPresent
+      metrics:
+        profile: advanced
+
+functions:
+  - name: word-stats
+    sdk: java
+    build:
+      mode: jvm
+    container:
+      image: word-stats-java

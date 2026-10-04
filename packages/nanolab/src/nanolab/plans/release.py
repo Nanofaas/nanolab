@@ -101,7 +101,9 @@ def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verif
     from invalidated evidence.
     """
     return release_evidence_verifiers(
-        provider, vm_request_for_role(request.environment, "stack", loadtest=True)
+        provider,
+        vm_request_for_role(request.environment, "stack", loadtest=True),
+        credentials=request.credentials,
     )
 
 

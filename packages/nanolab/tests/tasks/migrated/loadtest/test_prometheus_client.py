@@ -74,3 +74,58 @@ def test_other_failures_get_no_hint() -> None:
     from nanolab.tasks.loadtest.tasks import _unreachable_hint
 
     assert _unreachable_hint(RuntimeError("prometheus api failed: bad_data")) == ""
+
+
+def test_range_query_preserves_series_identity_for_independent_resets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sonata_tasks.prometheus import PrometheusSample, PrometheusSeries
+
+    class Client:
+        def query_range(self, *args: object) -> tuple:
+            return (
+                PrometheusSeries(
+                    {"pod": "a"}, (PrometheusSample(1, 100), PrometheusSample(2, 5))
+                ),
+                PrometheusSeries(
+                    {"pod": "b"}, (PrometheusSample(1, 100), PrometheusSample(2, 200))
+                ),
+            )
+
+    monkeypatch.setattr(prom, "_client", lambda _url: Client())
+    points = prom.query_prometheus_range_series(
+        "http://p", "function_dispatch_total", datetime.now(UTC), datetime.now(UTC)
+    )
+    assert len(points) == 4
+    assert {point["labels"]["pod"] for point in points} == {"a", "b"}
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [
+        "function_dispatch",
+        'function_dispatch{function="fn"}',
+        'function_dispatch_total{function="fn"}',
+    ],
+)
+def test_dispatch_counter_resets_before_aggregation(
+    monkeypatch: pytest.MonkeyPatch, metric: str
+) -> None:
+    from sonata_tasks.prometheus import PrometheusSample, PrometheusSeries
+
+    class Client:
+        def query_range(self, *args: object) -> tuple:
+            return (
+                PrometheusSeries(
+                    {"pod": "a"}, (PrometheusSample(1, 100), PrometheusSample(2, 5))
+                ),
+                PrometheusSeries(
+                    {"pod": "b"}, (PrometheusSample(1, 100), PrometheusSample(2, 210))
+                ),
+            )
+
+    monkeypatch.setattr(prom, "_client", lambda _url: Client())
+    points = prom.query_prometheus_range_series(
+        "http://p", metric, datetime.now(UTC), datetime.now(UTC)
+    )
+    assert prom.counter_delta(points) == 115

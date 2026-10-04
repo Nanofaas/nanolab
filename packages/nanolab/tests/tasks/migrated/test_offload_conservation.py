@@ -1,3 +1,5 @@
+import pytest
+
 from nanolab.tasks.loadtest.offload_conservation import evaluate_conservation
 
 OFFLOADABLE = "word-stats-java"
@@ -7,7 +9,7 @@ CONTROL = "json-transform-java"
 def _edge_metrics(
     *,
     success_offloadable: float = 1198,
-    depth: float = 400,
+    depth: float | str = 400,
     est_wait: float = 200,
     control_offload: float = 0,
     retry_offloadable: float = 0,
@@ -33,7 +35,7 @@ def _edge_metrics(
 
 
 def _cloud_metrics(
-    *, success_offloadable: float = 598, leak_control: bool = False
+    *, success_offloadable: float | str = 598, leak_control: bool = False
 ) -> str:
     lines = [
         f'function_success_total{{function="{OFFLOADABLE}"}} {success_offloadable}'
@@ -43,7 +45,9 @@ def _cloud_metrics(
     return "\n".join(lines) + "\n"
 
 
-def _k6_summary(*, offloadable_requests: float = 1200, offloaded: float = 600) -> dict:
+def _k6_summary(
+    *, offloadable_requests: float = 1200, offloaded: float | str = 600
+) -> dict:
     # k6's real --summary-export shape: counter fields are flat (no "values"
     # wrapper), and it only emits a per-tag submetric key for tag combinations
     # referenced by a threshold — neither of these counters qualifies, so both
@@ -158,3 +162,59 @@ def test_retries_on_edge_fail() -> None:
 
     assert report.passed is False
     assert any("function_retry_total" in failure for failure in report.failures)
+
+
+def test_conservation_matches_labels_independent_of_order_and_extra_labels() -> None:
+    edge = (
+        _edge_metrics()
+        .replace(
+            f'function="{OFFLOADABLE}",trigger="depth"',
+            f'trigger="depth",instance="edge",function="{OFFLOADABLE}"',
+        )
+        .replace(
+            f'function="{OFFLOADABLE}"}}', f'instance="edge",function="{OFFLOADABLE}"}}'
+        )
+    )
+    report = evaluate_conservation(
+        k6_summary=_k6_summary(),
+        edge_metrics=edge,
+        cloud_metrics=_cloud_metrics(),
+        offloadable=OFFLOADABLE,
+        control=CONTROL,
+    )
+    assert report.passed
+    assert report.numbers["edge_offload_total"] == 600
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), "bad"])
+@pytest.mark.parametrize("source", ["k6", "edge", "cloud"])
+def test_nonfinite_conservation_inputs_cannot_pass(
+    invalid: float | str, source: str
+) -> None:
+    report = evaluate_conservation(
+        k6_summary=_k6_summary(offloaded=invalid) if source == "k6" else _k6_summary(),
+        edge_metrics=_edge_metrics(depth=invalid)
+        if source == "edge"
+        else _edge_metrics(),
+        cloud_metrics=_cloud_metrics(success_offloadable=invalid)
+        if source == "cloud"
+        else _cloud_metrics(),
+        offloadable=OFFLOADABLE,
+        control=CONTROL,
+    )
+    assert not report.passed
+    assert any("invalid" in failure for failure in report.failures)
+
+
+def test_missing_required_conservation_counter_cannot_pass() -> None:
+    report = evaluate_conservation(
+        k6_summary=_k6_summary(offloadable_requests=0),
+        edge_metrics=_edge_metrics().replace(
+            f'function_success_total{{function="{OFFLOADABLE}"}} 1198\n', ""
+        ),
+        cloud_metrics=_cloud_metrics(),
+        offloadable=OFFLOADABLE,
+        control=CONTROL,
+    )
+    assert not report.passed
+    assert any("missing" in failure for failure in report.failures)
