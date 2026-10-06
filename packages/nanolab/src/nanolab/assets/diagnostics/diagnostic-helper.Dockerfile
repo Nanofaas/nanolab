@@ -11,7 +11,14 @@ COPY --from=jdk /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH=/opt/java/openjdk/bin:$PATH
 ENV PYTHONDONTWRITEBYTECODE=1
-COPY tasks/soak/processes.py /opt/nanolab/processes.py
+# Named context supplied by helper_build from the installed Sonata distribution.
+COPY --from=sonata owned_process.py /opt/nanolab/processes.py
+ARG OWNED_PROCESS_SHA256
+ARG SONATA_TASKS_VERSION
+RUN python3 -c "import hashlib, sys; \
+actual = hashlib.sha256(open('/opt/nanolab/processes.py', 'rb').read()).hexdigest(); \
+sys.exit('Sonata owned-process digest mismatch: ' + actual) if actual != '$OWNED_PROCESS_SHA256' else None"
+LABEL org.nanofaas.sonata-tasks.version="${SONATA_TASKS_VERSION}"
 COPY assets/diagnostics/diagnostic-worker.py assets/diagnostics/full-gc.jfc /opt/nanolab/
 # MAT_URL/MAT_SHA256 pin the released Linux AArch64 Memory Analyzer archive
 # (see mat.lock.json). Downloaded and hashed with the stdlib only, verified

@@ -14,11 +14,16 @@ application image to it and refuses to start when it does not answer.
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import re
 from dataclasses import dataclass
+from importlib.metadata import version
 from pathlib import Path
 from threading import Event
+
+from sonata_tasks.process import OwnedCommandRunner
 
 from nanolab.tasks.soak.processes import run_owned_command
 from nanolab.workspace.paths import bundled_assets_root
@@ -31,6 +36,8 @@ _DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
 # exists only under nanolab's own root, and nothing noticed until a real `run`
 # tried to build. Same derivation the asset lookup below already uses.
 BUILD_CONTEXT = bundled_assets_root().parent
+# This installed distribution module is stdlib-only and also runs in the helper.
+OWNED_PROCESS_MODULE = Path(inspect.getfile(OwnedCommandRunner)).resolve()
 _ASSETS = bundled_assets_root() / "diagnostics"
 MAT_LOCK = _ASSETS / "mat.lock.json"
 BASES_LOCK = _ASSETS / "helper-bases.lock.json"
@@ -97,6 +104,10 @@ def build_arguments() -> dict[str, str]:
     arguments: dict[str, str] = {
         "MAT_URL": str(mat["url"]),
         "MAT_SHA256": str(mat["sha256"]),
+        "OWNED_PROCESS_SHA256": hashlib.sha256(
+            OWNED_PROCESS_MODULE.read_bytes()
+        ).hexdigest(),
+        "SONATA_TASKS_VERSION": version("sonata-tasks"),
     }
     for name, key in (("JDK_BASE", "jdk_base"), ("PYTHON_BASE", "python_base")):
         entry = bases[key]
@@ -186,6 +197,8 @@ def build_helper_image(
         request.builder,
         "--platform",
         "linux/arm64",
+        "--build-context",
+        f"sonata={OWNED_PROCESS_MODULE.parent}",
         "--file",
         DOCKERFILE,
         "--tag",

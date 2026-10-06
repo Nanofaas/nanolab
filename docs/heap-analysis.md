@@ -111,6 +111,11 @@ the MAT archive in `assets/diagnostics/mat.lock.json` and the base images in
 `assets/diagnostics/helper-bases.lock.json`, all digest-pinned. Bumping either lock
 file changes the next run's helper with no scenario edit.
 
+The command supervisor comes from the installed `sonata-tasks` distribution,
+supplied to Buildx as the `sonata` named context. Its source SHA-256 is verified
+inside the image and the distribution version is retained as an image label.
+The worker runs that same stdlib-only implementation without installing Sonata.
+
 The cost is a build at the start of each run, which the layer cache absorbs
 after the first. `HeapAnalysisOptions.helper_image` skips it when a digest is
 already published, and `HeapAnalysisOptions.helper_builder` names the buildx
