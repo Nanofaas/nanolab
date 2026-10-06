@@ -91,7 +91,7 @@ to preserve existing numeric-key ordering. Keep local tree functions untouched.
   NanoLab terminal/cumulative/native integration cases.
 - [x] Install built Sonata wheels only in the trial venv. Run all NanoLab tests
   against the exact CI source pin, toolkit, hooks and installed-wheel smoke.
-- [ ] After authorized publication, update all three exact pins and lock,
+- [x] After authorized publication, update all three exact pins and lock,
   verify public-index installation, then deliver NanoLab's adoption PR.
 
 ## Progress
@@ -116,8 +116,9 @@ to preserve existing numeric-key ordering. Keep local tree functions untouched.
   preserved static-path contract; shared-usage producer synchronization remains
   the caller's responsibility; public-index adoption remains gated on publication.
   These limits are explicit in the API documentation and delivery boundary.
-- Delivery boundary: the next PyPI upload needs separate authorization. Before
-  publication, main and dependency pins remain on released Sonata 0.6.6.
+- Initial delivery boundary: PyPI 0.6.7 required separate authorization. The user
+  subsequently authorized publication after Sonata PR #17 merged. Engine then
+  tasks were published successfully; adoption pins change only in this branch.
 - Final: no Critical findings or deferred minors. All three Important findings
   were accepted and fixed in one pass with failing reproductions before fixes.
 - Final: Ruling: arbitrary concurrent directory replacement remains outside the
@@ -163,7 +164,33 @@ to preserve existing numeric-key ordering. Keep local tree functions untouched.
   published-pair adoption run passed 3,443 tests with 86.18% coverage; extracting
   storage removes generic consumer tests and changes the coverage denominator.
   The existing coverage deficit is recorded, not waived or presented as green CI.
-- Sonata commit `afdfbaf`: draft PR https://github.com/Nanofaas/sonata/pull/17.
-  NanoLab pins and lock intentionally remain on the published 0.6.6 pair.
+- Sonata commit `afdfbaf`: PR https://github.com/Nanofaas/sonata/pull/17 merged
+  as `ced86ed`; CI passed on the merge commit. The initial NanoLab trial kept
+  pins on 0.6.6 until publication was independently authorized and verified.
 - Sonata CI passed all nine jobs on both push and PR runs for that exact commit:
   engine, catalogue, required hooks and the six installed-wheel configurations.
+
+## Authorized publication and public adoption
+
+- Tag `v0.6.7` points to `ced86edc3a7a4a5bbeec79398bf931e4db48c144`.
+  Release https://github.com/Nanofaas/sonata/actions/runs/37507758237 succeeded,
+  publishing engine before tasks. Both projects expose wheel and sdist on PyPI.
+- Updated the three exact NanoLab pins and registry lock to 0.6.7. Only the two
+  Sonata package versions changed; all other dependency versions were preserved.
+  `uv lock --check` and locked workspace sync passed.
+- A clean Python 3.12 environment installed both packages from PyPI and ran the
+  ordinary command audit successfully; engine still has no runtime dependencies.
+  The installed artifact module exactly matches the merged, reviewed source.
+  An initial index-cache miss was resolved by refreshing only those packages.
+- Built NanoLab/toolkit wheel and sdist pairs with the public pins. A clean
+  wheel installation resolved Sonata and every optional integration from PyPI.
+  Installed CLI/assets smoke and storage adoption checks passed, including
+  terminal reservation, legacy ownership marker, torn-tail rows and numeric-key
+  fingerprints. Sonata metadata contains no local-wheel direct URL.
+- Required pre-commit hooks passed with the public pair. Toolkit: 51 passed,
+  coverage 93.71%.
+- Full public-pair NanoLab verification: 3,436 tests passed in 299.52 seconds.
+  Coverage is unchanged from the wheel trial at 86.16%; the command exits 1
+  because the existing 90% gate remains unmet. No functional test failed and
+  no coverage configuration was changed. Deliver the adoption as a draft PR
+  with this limitation explicit, leaving the broader issue #61 open.
