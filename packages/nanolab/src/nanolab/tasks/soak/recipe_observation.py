@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import yaml
 from sonata_tasks.execution.models import CommandOptions, CommandTaskSpec
+from sonata_tasks.sources import source_entry
 
 from nanolab.tasks.recipes.multiarch import (
     MultiarchDistribution,
@@ -47,7 +48,7 @@ from nanolab.tasks.soak.build_provenance import (
 )
 from nanolab.tasks.soak.builds import ObservedBuild
 from nanolab.tasks.soak.images import BuildRecipe
-from nanolab.tasks.soak.sources import SourceSnapshot, _entry, verify_snapshot
+from nanolab.tasks.soak.sources import SourceSnapshot, verify_snapshot
 from nanolab.workspace.recipe import RecipeRun
 
 
@@ -60,7 +61,10 @@ def verify_recipe_source(
     """Check original inputs independently of generated build files."""
     verify_snapshot(snapshot)
     paths = {entry.path for entry in snapshot.entries}
-    if any(_entry(workspace, entry.path, paths) != entry for entry in snapshot.entries):
+    if any(
+        source_entry(workspace, entry.path, paths) != entry
+        for entry in snapshot.entries
+    ):
         raise ValueError("Recipe source inputs changed across publication")
     outputs = {".git", ".gradle", "build"}
     outputs.update(

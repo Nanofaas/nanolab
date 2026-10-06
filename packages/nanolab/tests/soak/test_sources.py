@@ -256,3 +256,51 @@ def test_retargeted_dangling_symlink_invalidates_snapshot(source, tmp_path):
         SourceChangedError, match=r"snapshot no longer matches its frozen"
     ):
         verify_snapshot(snapshot)
+
+
+def test_snapshot_uses_shared_identity_with_unchanged_nanolab_receipt(source, tmp_path):
+    import hashlib
+    import json
+
+    from sonata_tasks.sources import SourceSnapshot as SharedSnapshot
+
+    from nanolab.tasks.soak.sources import capture_source_snapshot
+
+    (source / ".gitignore").chmod(0o644)
+    (source / "sdk.txt").chmod(0o644)
+    snapshot = capture_source_snapshot(source, tmp_path / "snapshot", max_bytes=100000)
+    assert isinstance(snapshot, SharedSnapshot)
+    records = [
+        {
+            "path": name,
+            "kind": "file",
+            "mode": 0o644,
+            "size_bytes": len(body),
+            "sha256": hashlib.sha256(body).hexdigest(),
+            "link_target": None,
+        }
+        for name, body in ((".gitignore", b"build/\n"), ("sdk.txt", b"original SDK"))
+    ]
+    manifest = b"".join(
+        (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        for record in records
+    )
+    digest = hashlib.sha256(
+        json.dumps({"entries": records}, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert snapshot.fingerprint == digest
+    assert snapshot.manifest_path.read_bytes() == manifest
+    receipt = json.loads((tmp_path / "snapshot/snapshot.json").read_bytes())
+    assert receipt == {
+        "schema": "nanolab-soak-v1",
+        "status": "captured",
+        "source_root": str(source),
+        "root": str(snapshot.root),
+        "revision": None,
+        "dirty": True,
+        "fingerprint": digest,
+        "manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+        "entry_count": 2,
+    }
+    assert (tmp_path / "snapshot/.soak-owner").is_file()
+    assert not (tmp_path / "snapshot/.artifact-owner").exists()
