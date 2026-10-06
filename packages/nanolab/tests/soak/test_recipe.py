@@ -12,13 +12,11 @@ from nanolab.cli.product import _scenario
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.config.soak import SoakConfig
 from nanolab.tasks.soak.sources import capture_source_snapshot
+from nanolab.workspace.paths import discover_tool_root
 
 
 def smoke_data():
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "scenarios-v2/memory-soak-smoke-container.yaml"
-    )
+    path = discover_tool_root() / "scenarios/memory-soak-smoke-container.yaml"
     data = yaml.safe_load(path.read_text())
     for image in data["soak"]["images"].values():
         image["platform"] = "linux/arm64"
@@ -88,10 +86,7 @@ def test_soak_recipe_path_is_relative_to_scenario(tmp_path, monkeypatch):
 def test_checked_in_recipe_smoke_resolves_and_matches_policy():
     from nanolab.tasks.soak.recipe import validate_soak_recipe
 
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "scenarios-v2/memory-soak-smoke-recipe-container.yaml"
-    )
+    path = discover_tool_root() / "scenarios/memory-soak-smoke-recipe-container.yaml"
     config = _scenario(path)
     assert config.recipe_profile is not None
     assert config.soak is not None
@@ -278,9 +273,7 @@ def test_staging_git_identity_includes_captured_tracked_ignored_file(tmp_path):
 
 
 P24_BASELINE = Path(__file__).parents[1] / "fixtures/soak/p24-sync-config.json"
-P24_SCENARIO = (
-    Path(__file__).parents[2] / "scenarios-v2/memory-soak-sync-container.yaml"
-)
+P24_SCENARIO = discover_tool_root() / "scenarios/memory-soak-sync-container.yaml"
 
 
 def p24_config():

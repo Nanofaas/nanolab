@@ -18,6 +18,7 @@ from nanolab.tasks.soak.helper_build import (
     build_arguments,
     build_helper_image,
 )
+from nanolab.workspace.paths import discover_tool_root
 
 DIGEST = "sha256:" + "c" * 64
 
@@ -153,8 +154,8 @@ def _soak_config(**diagnostics: object):
     from nanolab.config.soak import SoakConfig
 
     path = (
-        Path(__file__).resolve().parents[2]
-        / "scenarios-v2"
+        discover_tool_root()
+        / "scenarios"
         / "memory-soak-sync-candidate-diagnostic-container.yaml"
     )
     raw = yaml.safe_load(path.read_text())["soak"]

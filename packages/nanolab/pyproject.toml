@@ -48,10 +48,10 @@ nanolab = [
     # They must resolve from
     # the installed distribution and not from a checkout beside it.
     "assets/k6/*",
-    "assets/validation/*",
-    "assets/soak/*",
+    "assets/diagnostics/*",
     "assets/containerd-rootless/*",
-    "assets/presets/scenarios-v2/*",
+    "assets/presets/*.yaml",
+    "assets/presets/scenarios/*",
     "assets/presets/recipes/*",
     "assets/presets/environments/*",
     "assets/presets/scenarios/payloads/*",

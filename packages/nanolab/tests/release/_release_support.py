@@ -28,6 +28,7 @@ from nanolab.release.model import (
     digest_path,
 )
 from nanolab.release.versioning import read_project_version
+from nanolab.workspace.paths import discover_tool_root
 from tests.conftest import source_contract_root
 
 NANOFAAS_ROOT = source_contract_root()
@@ -38,7 +39,7 @@ GUARDED_COMMIT = "a" * 40
 
 
 def _environment(tmp_path: Path) -> Path:
-    source = NANOLAB_ROOT / "environments/azure-release.yaml.example"
+    source = discover_tool_root() / "environments/azure-release.yaml.example"
     data = yaml.safe_load(source.read_text(encoding="utf-8"))
     data["azure"]["operator_source_cidr"] = "8.8.8.8/32"
     destination = tmp_path / "azure-release.yaml"
@@ -52,12 +53,14 @@ def _settings() -> ReleaseSettings:
     `test_metrics.test_release_configuration_owns_the_versioned_policy` pins the
     file itself, so reading it here keeps the fixture from drifting from it.
     """
-    config = yaml.safe_load((NANOLAB_ROOT / "release.yaml").read_text(encoding="utf-8"))
+    config = yaml.safe_load(
+        (discover_tool_root() / "release.yaml").read_text(encoding="utf-8")
+    )
     benchmark = config["benchmark"]
     regression = benchmark["regression"]
     return ReleaseSettings(
         max_parallelism=int(config["build"]["maxParallelism"]),
-        scenario=NANOLAB_ROOT / str(benchmark["scenario"]),
+        scenario=discover_tool_root() / str(benchmark["scenario"]),
         scenario_name=str(benchmark["scenario"]),
         benchmark_runs=int(benchmark["runs"]),
         profile=str(benchmark["profile"]),
@@ -89,7 +92,7 @@ def _plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Amd64ReleasePlan:
         identity=ReleaseIdentity(
             source_commit=GUARDED_COMMIT,
             prepared_version=CURRENT_VERSION,
-            release_config_digest=digest_path(NANOLAB_ROOT / "release.yaml"),
+            release_config_digest=digest_path(discover_tool_root() / "release.yaml"),
             environment_digest=digest_path(environment_file),
         ),
         environment=EnvironmentConfig.model_validate(

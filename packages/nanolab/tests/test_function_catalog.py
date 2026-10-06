@@ -9,6 +9,7 @@ from nanolab.functions.catalog import (
     resolve_function_definition,
 )
 from nanolab.tasks.deployment import LOCAL_REGISTRY
+from nanolab.workspace.paths import discover_tool_root
 
 
 def _write(path: Path, text: str) -> None:
@@ -124,7 +125,7 @@ def test_dynamic_catalog_exposes_manifest_backed_roman_numeral_details() -> None
 def test_every_demo_function_declares_a_resolvable_default_payload() -> None:
     families = {"word-stats", "json-transform", "roman-numeral"}
     runtimes = {"java", "java-lite", "go", "python", "javascript", "exec"}
-    payloads_root = Path(__file__).resolve().parents[1] / "scenarios" / "payloads"
+    payloads_root = discover_tool_root() / "scenarios" / "payloads"
     functions = [
         function for function in list_functions() if function.family in families
     ]

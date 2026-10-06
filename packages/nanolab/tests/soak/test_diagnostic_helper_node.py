@@ -93,7 +93,7 @@ def test_private_node_control_enforces_runtime_events_and_target_writer_bounds(
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node interpreter required for synthetic VM harness")
-    source = bundled_assets_root() / "soak/node-diagnostic-control.cjs"
+    source = bundled_assets_root() / "diagnostics/node-diagnostic-control.cjs"
     result = subprocess.run(
         [node, "-e", HARNESS, str(source), scenario],
         capture_output=True,
@@ -119,7 +119,7 @@ def test_private_node_control_refuses_existing_inspector_listener():
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node interpreter required for synthetic VM harness")
-    source = bundled_assets_root() / "soak/node-diagnostic-control.cjs"
+    source = bundled_assets_root() / "diagnostics/node-diagnostic-control.cjs"
     result = subprocess.run(
         [node, "-e", HARNESS, str(source), "public-inspector"],
         capture_output=True,

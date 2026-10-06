@@ -4,7 +4,6 @@ import json
 import stat
 import subprocess
 from hashlib import sha256
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -26,11 +25,11 @@ from nanolab.tasks.soak.containerd_runtime import (
 )
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.sources import SourceEntry
-from nanolab.workspace.paths import bundled_assets_root
+from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
 
 def _scenario():
-    path = Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
+    path = discover_tool_root() / "scenarios/memory-soak-smoke-containerd.yaml"
     return ScenarioConfig.model_validate(yaml.safe_load(path.read_text()))
 
 

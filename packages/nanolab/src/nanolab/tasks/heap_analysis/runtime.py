@@ -454,7 +454,7 @@ class LocalHeapAnalysisSession:
         # nanolab.tasks.soak.runtime).
         output_root = self._root.absolute()
         provisioner = LocalDockerDiagnosticProvisioner(
-            assets_dir=bundled_assets_root() / "soak",
+            assets_dir=bundled_assets_root() / "diagnostics",
             cancelled=self._cancelled,
         )
         helper = provisioner.prepare(

@@ -8,18 +8,18 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanolab.tasks.recipe import _object
-from nanolab.tasks.recipe_multiarch import (
+from nanolab.tasks.recipes.multiarch import (
     MultiarchDistribution,
     sha256_digest,
     unique_json_object,
 )
-from nanolab.tasks.recipe_registry import (
+from nanolab.tasks.recipes.registry import (
     INDEX_TYPES,
     MANIFEST_TYPES,
     RegistryFetch,
     _baseline_platform,
 )
+from nanolab.tasks.recipes.workflow import _object
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.build_provenance import _materials, _predicate
 

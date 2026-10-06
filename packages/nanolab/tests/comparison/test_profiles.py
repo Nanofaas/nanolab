@@ -1,13 +1,11 @@
 """Comparison profiles preserve the selected runtime and shared functions."""
 
-from pathlib import Path
-
 import pytest
 import yaml
 
 from nanolab.comparison.profiles import comparison_profiles, declared_options
+from nanolab.workspace.paths import discover_tool_root
 
-ROOT = Path(__file__).resolve().parents[2]
 JVM = {
     "jvm": ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1"],
     "jvm-g1": ["-XX:+UseG1GC", "-XX:TieredStopAtLevel=1"],
@@ -28,7 +26,7 @@ NATIVE = {
 
 
 def test_nonbaseline_selection_prepares_shared_functions_first():
-    selected = comparison_profiles(ROOT, ("native-o3", "jvm-g1"))
+    selected = comparison_profiles(discover_tool_root(), ("native-o3", "jvm-g1"))
     assert list(selected) == ["jvm", "native-o3", "jvm-g1"]
     assert selected["jvm"].name == "comparison-jvm.yaml"
 
@@ -36,12 +34,12 @@ def test_nonbaseline_selection_prepares_shared_functions_first():
 @pytest.mark.parametrize("selection", [(), ("unknown",), ("jvm", "jvm")])
 def test_invalid_selection_refuses_preparation(selection):
     with pytest.raises(ValueError, match="comparison"):
-        comparison_profiles(ROOT, selection)
+        comparison_profiles(discover_tool_root(), selection)
 
 
 @pytest.mark.parametrize("key", [*JVM, *NATIVE])
 def test_profile_declares_runtime_and_only_baseline_functions(key):
-    path = comparison_profiles(ROOT, (key,))[key]
+    path = comparison_profiles(discover_tool_root(), (key,))[key]
     recipe = yaml.safe_load(path.read_text())
     options = declared_options(path)
     assert recipe["schemaVersion"] == 2
@@ -89,7 +87,9 @@ def test_profile_declares_runtime_and_only_baseline_functions(key):
 
 @pytest.mark.parametrize("change", ["sync", "strategy", "admin", "admin-canonical"])
 def test_conflicting_scheduler_profile_is_rejected(tmp_path, change):
-    recipe = yaml.safe_load(comparison_profiles(ROOT, ("jvm",))["jvm"].read_text())
+    recipe = yaml.safe_load(
+        comparison_profiles(discover_tool_root(), ("jvm",))["jvm"].read_text()
+    )
     if change == "sync":
         recipe["controlPlane"]["modules"].append("sync-queue")
     elif change == "strategy":
@@ -122,7 +122,9 @@ def test_conflicting_scheduler_profile_is_rejected(tmp_path, change):
 def test_flat_or_relaxed_spring_configuration_cannot_override_scheduler(
     tmp_path, config
 ):
-    recipe = yaml.safe_load(comparison_profiles(ROOT, ("jvm",))["jvm"].read_text())
+    recipe = yaml.safe_load(
+        comparison_profiles(discover_tool_root(), ("jvm",))["jvm"].read_text()
+    )
     recipe["controlPlane"]["config"] = config
     profile = tmp_path / "changed.yaml"
     profile.write_text(yaml.safe_dump(recipe))

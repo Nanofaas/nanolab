@@ -13,11 +13,12 @@ import yaml
 
 from nanolab.images.plan import ImageArchitecture, build_image_plan
 from nanolab.release import recipe
+from nanolab.workspace.paths import discover_tool_root
 from tests.conftest import source_contract_root
 
 pytestmark = pytest.mark.nanofaas
 
-PROFILES = Path(__file__).resolve().parents[2] / "recipes"
+PROFILES = discover_tool_root() / "recipes"
 MODULES = (
     "async-queue",
     "autoscaler",

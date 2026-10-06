@@ -3,7 +3,6 @@
 import hashlib
 import json
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,10 +13,8 @@ from typer.testing import CliRunner
 from nanolab.cli import comparison, product
 from nanolab.comparison.manifest import write_comparison_manifest
 from nanolab.comparison.profiles import PreparedComparison, declared_options
-from nanolab.tasks.recipe import read_distribution
-from nanolab.workspace.paths import ToolPaths
-
-PACKAGE = Path(__file__).resolve().parents[2]
+from nanolab.tasks.recipes.workflow import read_distribution
+from nanolab.workspace.paths import ToolPaths, discover_tool_root
 
 
 @pytest.fixture
@@ -32,7 +29,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
     root = tmp_path / "run"
     events = []
     state = {"cluster": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
-    paths = ToolPaths.from_roots(nanofaas_checkout, PACKAGE)
+    paths = ToolPaths.from_roots(nanofaas_checkout, discover_tool_root())
     monkeypatch.setattr(product, "default_tool_paths", lambda: paths)
 
     @contextmanager
@@ -194,7 +191,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
                 published=True,
             )
         write_comparison_manifest(root, manifest)
-        from nanolab.tasks.recipe_remote import remote_recipe_root
+        from nanolab.tasks.recipes.remote import remote_recipe_root
 
         return PreparedComparison(
             remote_recipe_root(kwargs["request"], str(manifest.identity["tag"]))

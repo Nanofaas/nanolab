@@ -1,5 +1,14 @@
 # NanoFaaS control-plane tool
 
+Distributed inputs live in `src/nanolab/assets/presets/{scenarios,recipes,environments}`;
+scenario payloads are under `scenarios/payloads`. CLI examples below use preset
+basenames, which also work from an installed wheel outside the checkout. Existing
+explicit paths override presets; named inputs in the operator workspace override
+distributed names. Relative recipe/policy paths resolve beside the scenario.
+Use `NANOLAB_WORKSPACE` to choose the writable workspace (default cwd), or
+`--run-dir` for explicit results. Custom scenarios, recipes, environment files and
+payloads belong to that workspace; distributed resources are read-only defaults.
+
 The control-plane tool is the orchestration entry point for provisioning and
 validating NanoFaaS. A scenario defines *what* to execute; an environment binds
 each role to a local host, a managed VM, or an external SSH host. Task
@@ -62,8 +71,8 @@ Inspect the plan before executing it. The container scenario is the smallest
 local path and does not require a Kubernetes cluster:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan deployment-lifecycle-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run deployment-lifecycle-container.yaml
 ```
 
 To validate the public handler envelope locally across the bundled SDK
@@ -71,7 +80,7 @@ functions, including request headers, body, function status, response headers,
 and binary payloads:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/handler-envelope-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run handler-envelope-container.yaml
 ```
 
 Sonata releases the functions, Compose project, and registry after the scenario,
@@ -82,9 +91,9 @@ To verify persistent recovery instead, use the dedicated scenarios. They scale
 the restored registration and unchanged managed resources before normal teardown:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/persistent-recovery-container.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/persistent-recovery-k8s.yaml \
-  --environment packages/nanolab/environments/multipass.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run persistent-recovery-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run persistent-recovery-k8s.yaml \
+  --environment multipass.yaml
 ```
 
 The interactive UI uses exactly the same plan/run implementation:
@@ -126,7 +135,7 @@ the environment variable named by `password_env`. Do not store secrets in YAML.
 | `tui` | Select and run the same workflows interactively. |
 
 Use `--help` after any command to see its supported options. The supported
-scenario files are in `packages/nanolab/scenarios-v2/`.
+scenario files are in `packages/nanolab/src/nanolab/assets/presets/scenarios/`.
 
 ## Environments and VM lifecycle
 
@@ -136,18 +145,18 @@ Local execution is the default. VM-backed workflows bind the `stack` and optiona
 | Environment | Use case | Lifecycle |
 |---|---|---|
 | none | Local container validation | No VM is created. |
-| `packages/nanolab/environments/multipass.yaml` | Local k3s VM | Managed VM; removed after the run by default. |
-| `packages/nanolab/environments/external.yaml.example` | Existing SSH-only VM | Never created or deleted by the tool. |
-| `packages/nanolab/environments/azure.yaml.example` | Azure VM | Managed VM; removed after the run by default. |
-| `packages/nanolab/environments/proxmox.yaml.example` | Proxmox VM | Managed VM; removed after the run by default. |
+| `packages/nanolab/src/nanolab/assets/presets/environments/multipass.yaml` | Local k3s VM | Managed VM; removed after the run by default. |
+| `packages/nanolab/src/nanolab/assets/presets/environments/external.yaml.example` | Existing SSH-only VM | Never created or deleted by the tool. |
+| `packages/nanolab/src/nanolab/assets/presets/environments/azure.yaml.example` | Azure VM | Managed VM; removed after the run by default. |
+| `packages/nanolab/src/nanolab/assets/presets/environments/proxmox.yaml.example` | Proxmox VM | Managed VM; removed after the run by default. |
 
 For a Multipass-backed Kubernetes run:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
-  --environment packages/nanolab/environments/multipass.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
-  --environment packages/nanolab/environments/multipass.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan deployment-lifecycle-k8s.yaml \
+  --environment multipass.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run deployment-lifecycle-k8s.yaml \
+  --environment multipass.yaml
 ```
 
 The selected managed environment creates or reuses its VM, runs the shared
@@ -166,11 +175,11 @@ Proxmox reads its password from the environment variable named by `password_env`
 Load testing follows the same plan-first workflow:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/autoscaling-cycle-k8s.yaml \
-  --environment packages/nanolab/environments/multipass.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/autoscaling-cycle-k8s.yaml \
-  --environment packages/nanolab/environments/multipass.yaml \
-  --run-dir packages/nanolab/runs/experiment-1
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan autoscaling-cycle-k8s.yaml \
+  --environment multipass.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run autoscaling-cycle-k8s.yaml \
+  --environment multipass.yaml \
+  --run-dir runs/experiment-1
 ```
 
 The workflow deploys the stack with Helm, registers the selected function, runs
@@ -205,10 +214,10 @@ uv run pydeps nanolab
 
 ## Image releases
 
-Official releases run only through `nanolab run scenarios-v2/release.yaml` on
+Official releases run only through `nanolab run scenarios/release.yaml` on
 the pinned Azure profile, after `nanolab release prepare` has committed the
 version. The standalone release configuration is in
-[`release.yaml`](release.yaml). GitHub Actions never publishes images, and
+[`release.yaml`](src/nanolab/assets/presets/release.yaml). GitHub Actions never publishes images, and
 local/Multipass/Proxmox builds cannot promote to GHCR.
 
 ## Recipe runtime comparison
@@ -222,8 +231,8 @@ running Pod identities and the active scheduler before k6, including on retry.
 
 ```bash
 NANOFAAS_ROOT=/path/to/nanofaas ./nanolab.sh compare \
-  packages/nanolab/scenarios-v2/runtime-comparison-jvm.yaml \
-  --environment packages/nanolab/environments/multipass.yaml \
+  runtime-comparison-jvm.yaml \
+  --environment multipass.yaml \
   --variants jvm --repetitions 1 --run-dir /tmp/comparison-my-run
 ```
 
@@ -260,7 +269,7 @@ comparison migration.
 Run `deployment-lifecycle-container-bash.yaml` for the same local Docker
 validation cycle with Bash word-stats. The reusable recipe is
 `recipes/validate-container-bash.yaml`; the catalog calls its runtime `exec`.
-See [profile, command and evidence](recipes/README.md#bash-container-validation).
+See [profile, command and evidence](src/nanolab/assets/presets/recipes/README.md#bash-container-validation).
 
 ## Recipe Java service validation
 
@@ -268,19 +277,19 @@ Run `deployment-lifecycle-container-services.yaml` to validate JVM warm-echo
 alongside JVM word-stats with Docker on the host. Java services selected by the
 recipe use the same managed registration and cleanup cycle as functions, with
 their own distribution component and image checks. See
-[profile, command and evidence](recipes/README.md#java-service-container-validation).
+[profile, command and evidence](src/nanolab/assets/presets/recipes/README.md#java-service-container-validation).
 
 The mixed scenarios `deployment-lifecycle-container-jvm-service-native.yaml`
 and `deployment-lifecycle-container-native-service-jvm.yaml` exercise independent
 control-plane and service modes. See
-[mixed build profiles and commands](recipes/README.md#independent-service-build-modes).
+[mixed build profiles and commands](src/nanolab/assets/presets/recipes/README.md#independent-service-build-modes).
 
 ## Recipe watchdog artifact validation
 
 Run `deployment-lifecycle-container-watchdog.yaml` to publish the Dockerfile
 watchdog and verify its executable version, image identity and exit code,
 alongside the usual JVM platform validation. See
-[profile, command, scope and evidence](recipes/README.md#watchdog-artifact-validation).
+[profile, command, scope and evidence](src/nanolab/assets/presets/recipes/README.md#watchdog-artifact-validation).
 
 ## Multiarch recipe container validation
 
@@ -289,7 +298,7 @@ both AMD64 and ARM64:
 
 ```bash
 NANOFAAS_ROOT=/path/to/pinned/nanofaas ./nanolab.sh run \
-  packages/nanolab/scenarios-v2/deployment-lifecycle-container-multiarch.yaml \
+  deployment-lifecycle-container-multiarch.yaml \
   --run-dir /tmp/nanolab-multiarch-run
 ```
 
@@ -342,8 +351,8 @@ Run the ARM64 JVM/Node smoke using the reusable
 
 ```bash
 NANOFAAS_ROOT=/path/to/pinned/nanofaas ./nanolab.sh run \
-  packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml \
-  --environment packages/nanolab/environments/local.yaml \
+  memory-soak-smoke-recipe-container.yaml \
+  --environment local.yaml \
   --run-dir /tmp/nanolab-soak-recipe-run
 ```
 

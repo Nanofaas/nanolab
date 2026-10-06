@@ -13,15 +13,15 @@ P24 criteria/retention/prerequisites block are omitted by construction.
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh run packages/nanolab/scenarios-v2/memory-heap-analysis-control-plane-container.yaml
+./nanolab.sh run memory-heap-analysis-control-plane-container.yaml
 ```
 
 `inspect` and `plan` resolve and compile the workflow without touching Docker,
 building anything, or making a network call:
 
 ```bash
-./nanolab.sh inspect packages/nanolab/scenarios-v2/memory-heap-analysis-control-plane-container.yaml
-./nanolab.sh plan packages/nanolab/scenarios-v2/memory-heap-analysis-control-plane-container.yaml
+./nanolab.sh inspect memory-heap-analysis-control-plane-container.yaml
+./nanolab.sh plan memory-heap-analysis-control-plane-container.yaml
 ```
 
 `run` requires a local container environment and `docker` and `k6` on the host.
@@ -97,7 +97,7 @@ reservation with nothing able to find it.
 ### The helper image is built per run, not pinned in the scenario
 
 The scenario names no helper image. Every run builds
-`assets/soak/diagnostic-helper.Dockerfile`, publishes it to the same registry
+`assets/diagnostics/diagnostic-helper.Dockerfile`, publishes it to the same registry
 preparation already pushes the application images to, and freezes the
 `repository@sha256:<64 hex>` digest that build reported. The capture side and
 MAT then use that one digest, so both ends of a run are provably the same
@@ -107,8 +107,8 @@ A digest written into the scenario instead would name bytes that exist only in
 whichever registry produced them: anyone else checking the repository out gets
 a reference nothing can pull, and a `docker image prune` breaks it even for the
 machine that built it. What must stay reproducible is the *input*, and it is —
-the MAT archive in `assets/soak/mat.lock.json` and the base images in
-`assets/soak/helper-bases.lock.json`, all digest-pinned. Bumping either lock
+the MAT archive in `assets/diagnostics/mat.lock.json` and the base images in
+`assets/diagnostics/helper-bases.lock.json`, all digest-pinned. Bumping either lock
 file changes the next run's helper with no scenario edit.
 
 The cost is a build at the start of each run, which the layer cache absorbs

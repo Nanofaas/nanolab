@@ -6,7 +6,7 @@ committing it hands everyone else a reference nothing can pull, and a prune
 makes it unresolvable even locally. Building per run keeps the guarantee that
 actually matters for comparing two dumps - that every capture and the analysis
 share one immutable image *within* the run - while the inputs stay pinned in
-`assets/soak/mat.lock.json` and `assets/soak/helper-bases.lock.json`.
+`assets/diagnostics/mat.lock.json` and `assets/diagnostics/helper-bases.lock.json`.
 
 The registry is not a new requirement: preparation already pushes every
 application image to it and refuses to start when it does not answer.
@@ -31,10 +31,10 @@ _DIGEST = re.compile(r"[^\s@]+@sha256:[a-f0-9]{64}")
 # exists only under nanolab's own root, and nothing noticed until a real `run`
 # tried to build. Same derivation the asset lookup below already uses.
 BUILD_CONTEXT = bundled_assets_root().parent
-_ASSETS = bundled_assets_root() / "soak"
+_ASSETS = bundled_assets_root() / "diagnostics"
 MAT_LOCK = _ASSETS / "mat.lock.json"
 BASES_LOCK = _ASSETS / "helper-bases.lock.json"
-DOCKERFILE = "assets/soak/diagnostic-helper.Dockerfile"
+DOCKERFILE = "assets/diagnostics/diagnostic-helper.Dockerfile"
 _LOG_BYTES = 4 * 1024 * 1024
 
 # The builder a run looks for when nothing overrides it. One home, because the

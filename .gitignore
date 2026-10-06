@@ -14,6 +14,9 @@
 dist/
 build/
 packages/nanolab/runs/
+/runs/
+/profiles/
+/environments/*.yaml
 packages/nanolab/profiles/azure.toml
 packages/nanolab/profiles/proxmox.toml
 packages/nanolab/environments/azure*.yaml

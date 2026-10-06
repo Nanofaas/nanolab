@@ -9,6 +9,7 @@ from nanolab.config import EnvironmentConfig
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmRequest
+from nanolab.workspace.paths import discover_tool_root
 from tests.conftest import source_contract_root
 
 pytestmark = pytest.mark.nanofaas
@@ -50,7 +51,7 @@ def _release_environment(**changes: object) -> EnvironmentConfig:
 
 
 def test_release_environment_example_requires_real_operator_cidr() -> None:
-    path = NANOLAB_ROOT / "environments/azure-release.yaml.example"
+    path = discover_tool_root() / "environments/azure-release.yaml.example"
     environment = EnvironmentConfig.model_validate(
         yaml.safe_load(path.read_text(encoding="utf-8"))
     )

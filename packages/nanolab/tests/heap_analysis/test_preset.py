@@ -4,15 +4,14 @@ Not a P24 measurement: no soakPolicyFile, no criteria, no retention, no
 prerequisites. Only checks that shape and the numbers the spec pins.
 """
 
-from pathlib import Path
-
 import yaml
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.workspace.paths import discover_tool_root
 
 PRESET = (
-    Path(__file__).resolve().parents[2]
-    / "scenarios-v2"
+    discover_tool_root()
+    / "scenarios"
     / "memory-heap-analysis-control-plane-container.yaml"
 )
 

@@ -10,7 +10,7 @@ from nanolab.workspace.paths import bundled_assets_root
 
 
 def worker():
-    path = bundled_assets_root() / "soak/diagnostic-worker.py"
+    path = bundled_assets_root() / "diagnostics/diagnostic-worker.py"
     spec = importlib.util.spec_from_file_location("jfr_worker", path)
     module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]

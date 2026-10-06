@@ -217,7 +217,7 @@ def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
     environment = EnvironmentConfig.model_validate(
         yaml.safe_load(
             _Path(
-                "packages/nanolab/environments/azure-comparison.yaml.example"
+                "packages/nanolab/src/nanolab/assets/presets/environments/azure-comparison.yaml.example"
             ).read_text()
         )
     )
@@ -362,7 +362,11 @@ def test_prepared_cells_use_distribution_images_and_fixed_scheduler(
     from pathlib import PurePosixPath
 
     from nanolab.comparison.profiles import PreparedComparison
-    from nanolab.tasks.recipe import RecipeComponent, RecipeDistribution, RecipeImage
+    from nanolab.tasks.recipes.workflow import (
+        RecipeComponent,
+        RecipeDistribution,
+        RecipeImage,
+    )
 
     def component(kind, name, sdk, image, mode):
         return RecipeComponent(

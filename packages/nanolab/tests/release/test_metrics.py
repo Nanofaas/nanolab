@@ -18,6 +18,7 @@ from nanolab.release.metrics import (
     render_history,
     render_release_record,
 )
+from nanolab.workspace.paths import discover_tool_root
 
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 PROFILE = PerformanceProfile(
@@ -27,7 +28,7 @@ PROFILE = PerformanceProfile(
     loadgen_vm="Standard_D2s_v5",
     architecture="amd64",
     flavor="native",
-    scenario="scenarios-v2/autoscaling-cycle-k8s.yaml",
+    scenario="scenarios/autoscaling-cycle-k8s.yaml",
 )
 POLICY = RegressionPolicy(
     throughput_max_loss_percent=10,
@@ -196,7 +197,7 @@ def test_aggregate_runs_preserves_zero_queue_wait() -> None:
         ("loadgen_vm", "Standard_D4s_v5"),
         ("architecture", "arm64"),
         ("flavor", "jvm"),
-        ("scenario", "scenarios-v2/other.yaml"),
+        ("scenario", "scenarios/other.yaml"),
     ],
 )
 def test_regression_comparison_rejects_different_profiles(
@@ -356,13 +357,13 @@ def test_regression_policy_checks_throughput_p95_and_error_rate() -> None:
 
 
 def test_release_configuration_owns_the_versioned_policy() -> None:
-    config = yaml.safe_load((NANOLAB_ROOT / "release.yaml").read_text())
+    config = yaml.safe_load((discover_tool_root() / "release.yaml").read_text())
 
     assert config == {
         "schemaVersion": 1,
         "build": {"maxParallelism": 4},
         "benchmark": {
-            "scenario": "scenarios-v2/autoscaling-cycle-k8s.yaml",
+            "scenario": "scenarios/autoscaling-cycle-k8s.yaml",
             "runs": 3,
             "profile": "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
             "regression": {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 _NANOFAAS_MARKERS = ("build.gradle", "settings.gradle")
@@ -21,26 +21,27 @@ class ToolPaths:
     scenario_payloads_dir: Path
 
     @classmethod
-    def from_roots(cls, nanofaas_root: Path, tool_root: Path) -> ToolPaths:
-        """Build a path set from an explicit checkout root and tool root."""
+    def from_roots(
+        cls, nanofaas_root: Path, tool_root: Path, *, workspace_root: Path | None = None
+    ) -> ToolPaths:
+        """Resolve source/resources separately from writable operator directories."""
         source_root = Path(nanofaas_root)
         product_root = Path(tool_root)
+        workspace = (
+            workspace_root if workspace_root is not None else operator_workspace_root()
+        )
         return cls(
             nanofaas_root=source_root,
             tool_root=product_root,
-            profiles_dir=product_root / "profiles",
-            runs_dir=product_root / "runs",
+            profiles_dir=workspace / "profiles",
+            runs_dir=workspace / "runs",
             scenarios_dir=product_root / "scenarios",
             scenario_payloads_dir=product_root / "scenarios" / "payloads",
         )
 
 
 def discover_tool_root() -> Path:
-    """Return preset resources from a source checkout or the installed package."""
-    checkout = Path(__file__).resolve().parents[3]
-    source_module = checkout / "src/nanolab/workspace/paths.py"
-    if source_module == Path(__file__).resolve():
-        return checkout
+    """Return the canonical distributed presets in source and installations."""
     return bundled_assets_root() / "presets"
 
 
@@ -73,10 +74,23 @@ def operator_workspace_root() -> Path:
     return Path(value).expanduser().resolve() if value else Path.cwd().resolve()
 
 
+def resolve_input_path(path: Path, directory: str) -> Path:
+    """Resolve an explicit input or a named workspace/distributed preset."""
+    path = path.expanduser()
+    candidates = [path]
+    if not path.is_absolute() and len(path.parts) == 1:
+        candidates.extend(
+            (
+                operator_workspace_root() / directory / path,
+                discover_tool_root() / directory / path,
+            )
+        )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    raise ValueError(f"configuration file does not exist: {path}")
+
+
 def default_tool_paths() -> ToolPaths:
     """Return the tool paths for the checkout named by ``NANOFAAS_ROOT``."""
-    paths = ToolPaths.from_roots(nanofaas_root_from_env(), discover_tool_root())
-    workspace = operator_workspace_root()
-    return replace(
-        paths, profiles_dir=workspace / "profiles", runs_dir=workspace / "runs"
-    )
+    return ToolPaths.from_roots(nanofaas_root_from_env(), discover_tool_root())

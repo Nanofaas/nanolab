@@ -189,7 +189,7 @@ def test_probe_accepts_observed_compatible_attachment(tmp_path):
 
 
 def worker():
-    path = bundled_assets_root() / "soak/diagnostic-worker.py"
+    path = bundled_assets_root() / "diagnostics/diagnostic-worker.py"
     module_spec = importlib.util.spec_from_file_location("diagnostic_worker", path)
     module = importlib.util.module_from_spec(module_spec)  # pyright: ignore[reportArgumentType]
     module_spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]
@@ -377,7 +377,7 @@ else:
 """
     )
     cli.chmod(0o700)
-    bridge = bundled_assets_root() / "soak/docker-diagnostic-bridge.py"
+    bridge = bundled_assets_root() / "diagnostics/docker-diagnostic-bridge.py"
     python = Path(sys.executable).resolve()
     cfg = {
         "docker": str(cli),
@@ -531,7 +531,7 @@ def test_prepare_observations_produce_usable_existing_adapter_without_docker(
     monkeypatch.setattr(
         helper, "_proc_identity", lambda pid: process if pid == 1234 else helper_process
     )
-    assets = bundled_assets_root() / "soak"
+    assets = bundled_assets_root() / "diagnostics"
     prepared = helper.LocalDockerDiagnosticProvisioner(assets_dir=assets).prepare(
         config
     )

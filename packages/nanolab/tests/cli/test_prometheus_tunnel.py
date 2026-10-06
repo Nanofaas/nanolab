@@ -169,7 +169,7 @@ def _azure() -> EnvironmentConfig:
     return EnvironmentConfig.model_validate(
         yaml.safe_load(
             Path(
-                "packages/nanolab/environments/azure-comparison.yaml.example"
+                "packages/nanolab/src/nanolab/assets/presets/environments/azure-comparison.yaml.example"
             ).read_text()
         )
     )

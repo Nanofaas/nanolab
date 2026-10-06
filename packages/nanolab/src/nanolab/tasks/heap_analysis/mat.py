@@ -41,7 +41,8 @@ CONTAINER_WORKER = "/opt/nanolab/mat-worker.py"
 CONTAINER_PYTHON = "/usr/local/bin/python3"
 
 # Every produced report is bound to exactly one of these (dump, report_id)
-# pairs. Kept in sync by hand with the eight invocations assets/soak/mat-worker.py
+# pairs. Kept in sync with the eight invocations in
+# assets/diagnostics/mat-worker.py.
 # runs - the report set the brief fixes, not a configurable surface.
 REQUIRED_REPORTS = (
     ("baseline", "org.eclipse.mat.api:overview"),
@@ -59,9 +60,9 @@ _REAP_TIMEOUT_S = 30
 _DOCKER_LOG_LIMIT_BYTES = 1024 * 1024
 
 # The lock lives beside this package: the same bundled-asset lookup runtime.py
-# and workload.py already use for assets/soak/*, and the only one that still
+# and workload.py already use for assets/diagnostics/*, and the only one that still
 # resolves once nanolab is installed rather than run from a checkout.
-_LOCK_PATH = bundled_assets_root() / "soak/mat.lock.json"
+_LOCK_PATH = bundled_assets_root() / "diagnostics/mat.lock.json"
 _UNKNOWN_MAT_VERSION = "unknown"
 
 

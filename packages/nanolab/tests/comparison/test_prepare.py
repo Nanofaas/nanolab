@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from nanolab.comparison.prepare import leftover_cleanup_operations
+from nanolab.workspace.paths import discover_tool_root
 
 
 def test_the_cleanup_cannot_stop_a_run() -> None:
@@ -31,7 +32,6 @@ def test_a_cell_is_retried_once_and_not_more() -> None:
 def test_multiple_profiles_share_one_captured_and_uploaded_source(tmp_path):
     import shutil
     import subprocess
-    from pathlib import Path
     from types import SimpleNamespace
     from typing import cast
 
@@ -80,9 +80,7 @@ def test_multiple_profiles_share_one_captured_and_uploaded_source(tmp_path):
     request = VmRequest(
         lifecycle="multipass", name="test", home=str(tmp_path / "remote")
     )
-    profiles = comparison_profiles(
-        Path(__file__).resolve().parents[2], ("jvm-g1", "native-o3")
-    )
+    profiles = comparison_profiles(discover_tool_root(), ("jvm-g1", "native-o3"))
     stage = stage_comparison(
         source=source,
         profiles=profiles,

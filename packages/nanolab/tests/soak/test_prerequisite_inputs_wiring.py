@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -11,6 +10,7 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.soak import build_soak_plan
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.prerequisites import _inputs
+from nanolab.workspace.paths import discover_tool_root
 
 _DIGEST = "sha256:" + "a" * 64
 
@@ -223,8 +223,8 @@ def test_a_coverage_with_no_builtin_injection_is_refused_before_any_lifetime(tmp
 def test_candidate_preset_is_runnable_at_two_hundred_requests_per_second():
     scenario = yaml.safe_load(
         (
-            Path(__file__).parents[2]
-            / "scenarios-v2/memory-soak-sync-candidate-diagnostic-container.yaml"
+            discover_tool_root()
+            / "scenarios/memory-soak-sync-candidate-diagnostic-container.yaml"
         ).read_text()
     )
 

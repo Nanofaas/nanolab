@@ -5,15 +5,15 @@ only to exercise resolver rejection and override boundaries.
 """
 
 from copy import deepcopy
-from pathlib import Path
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.workspace.paths import discover_tool_root
 
-SCENARIOS = Path(__file__).resolve().parents[2] / "scenarios-v2"
+SCENARIOS = discover_tool_root() / "scenarios"
 P24_ADVANCED = ("memory-soak-sync-container.yaml",)
 P24_SOAK = ("memory-soak-sync-candidate-diagnostic-container.yaml",)
 P24 = (*P24_ADVANCED, *P24_SOAK)

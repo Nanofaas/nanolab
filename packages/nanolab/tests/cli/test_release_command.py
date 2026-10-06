@@ -26,7 +26,7 @@ from nanolab.release.evidence import RECEIPT_KINDS
 from nanolab.release.model import GitState
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmInfo
-from nanolab.workspace.paths import ToolPaths
+from nanolab.workspace.paths import ToolPaths, discover_tool_root
 from tests.conftest import (
     RejectingProvider,
     captured_release_tree,
@@ -140,7 +140,8 @@ def release_cli_harness(
     tool_root = tmp_path / "tool"
     tool_root.mkdir()
     shutil.copytree(
-        Path(__file__).resolve().parents[2] / "recipes", tool_root / "recipes"
+        discover_tool_root() / "recipes",
+        tool_root / "recipes",
     )
     scenario_path, environment_path = canonical_release_configs
     secrets = tmp_path / "secrets"

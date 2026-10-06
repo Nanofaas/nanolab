@@ -24,8 +24,8 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 For example:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan deployment-lifecycle-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run deployment-lifecycle-container.yaml
 ```
 
 Or use the bundled launcher, which checks for `uv` and forwards all
@@ -33,8 +33,34 @@ arguments — equivalent to `uv run --package nanolab nanolab ...`:
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
+./nanolab.sh plan deployment-lifecycle-container.yaml
 ```
+
+## Presets and operator workspace
+
+Distributed scenarios, recipes, payloads and environment templates have one
+canonical home: `packages/nanolab/src/nanolab/assets/presets/`. Source and wheel
+installations use the same tree. Diagnostic helpers and probes live in
+`assets/diagnostics`; k6 workloads remain in `assets/k6`.
+
+CLI commands accept a preset name, such as `deployment-lifecycle-container.yaml`
+or `--environment multipass.yaml`, or an explicit file path. An existing explicit
+file wins; a basename next searches the operator's `scenarios/` or `environments/`
+directory, then the distributed presets. A missing nested path is an error.
+Relative recipe and soak-policy references resolve beside the selected scenario.
+
+`NANOLAB_WORKSPACE` selects the operator workspace; it defaults to the current
+directory. It owns `profiles/`, `runs/` and custom input directories. `--run-dir`
+overrides the result destination. Copy templates into that workspace before
+editing them; environment `.yaml.example` files contain placeholders and require
+operator configuration. The TUI combines distributed environment presets with
+operator environment files, with operator files taking precedence.
+
+The previous checkout directories (`scenarios-v2`, `recipes`, `environments`)
+are replaced by preset names or explicit operator paths. For example,
+`nanolab plan scenarios-v2/deployment-lifecycle-container.yaml` becomes
+`nanolab plan deployment-lifecycle-container.yaml`. Custom configurations and
+their sibling recipe/payload files remain ordinary operator-owned inputs.
 
 ## Tests and supported NanoFaaS source
 
@@ -102,21 +128,21 @@ uv pip install dist/*.whl --python .wheel-smoke/bin/python
 .wheel-smoke/bin/python -c "import nanolab, sonata_tasks, tui_toolkit"
 .wheel-smoke/bin/nanolab --help
 
-uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
-uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/local.yaml
-uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
-"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/recipes/validate-container-jvm.yaml"
-"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/recipes/validate-container-native.yaml"
-"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/recipes/validate-k8s-jvm.yaml"
-"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/recipes/validate-containerd-jvm.yaml"
-"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/recipes/loadtest-container-jvm.yaml"
+uv run --package nanolab nanolab plan deployment-lifecycle-container.yaml --environment local.yaml
+uv run --package nanolab nanolab plan deployment-lifecycle-k8s.yaml --environment local.yaml
+uv run --package nanolab nanolab plan deployment-lifecycle-k8s.yaml --environment multipass.yaml
+"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/src/nanolab/assets/presets/recipes/validate-container-jvm.yaml"
+"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/src/nanolab/assets/presets/recipes/validate-container-native.yaml"
+"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/src/nanolab/assets/presets/recipes/validate-k8s-jvm.yaml"
+"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/src/nanolab/assets/presets/recipes/validate-containerd-jvm.yaml"
+"$NANOFAAS_ROOT/gradlew" -p "$NANOFAAS_ROOT" validateRecipe -Precipe="$PWD/packages/nanolab/src/nanolab/assets/presets/recipes/loadtest-container-jvm.yaml"
 # Full Docker lifecycle E2E (requires Docker):
-uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --run-dir "packages/nanolab/runs/recipe-jvm-local"
-uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-container-native.yaml --run-dir "packages/nanolab/runs/recipe-native-local"
+uv run --package nanolab nanolab run deployment-lifecycle-container.yaml --run-dir "runs/recipe-jvm-local"
+uv run --package nanolab nanolab run deployment-lifecycle-container-native.yaml --run-dir "runs/recipe-native-local"
 # Kubernetes lifecycle E2E (requires running Docker-driver Minikube):
-uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --run-dir "packages/nanolab/runs/recipe-k8s-local"
+uv run --package nanolab nanolab run deployment-lifecycle-k8s.yaml --run-dir "runs/recipe-k8s-local"
 # Explicit Multipass uses the same scenario and builds inside the VM:
-uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml --run-dir "packages/nanolab/runs/recipe-k8s-multipass"
+uv run --package nanolab nanolab run deployment-lifecycle-k8s.yaml --environment multipass.yaml --run-dir "runs/recipe-k8s-multipass"
 ```
 
 Nothing in this gate should modify `uv.lock`; if it does, run `uv lock` and
@@ -125,7 +151,7 @@ commit the updated lockfile separately.
 ## AMD64 and ARM64 release recipes
 
 Each native release VM assembles three reusable profiles from
-[`packages/nanolab/recipes`](packages/nanolab/recipes):
+[`packages/nanolab/src/nanolab/assets/presets/recipes`](packages/nanolab/src/nanolab/assets/presets/recipes):
 
 | Profiles (one per architecture) | Images at NanoFaaS `e7914be0` | Build policy |
 | --- | ---: | --- |
@@ -193,7 +219,7 @@ checkout (e.g. picking up source changes that haven't been re-pinned yet),
 just point `NANOFAAS_ROOT` at that checkout instead:
 
 ```bash
-NANOFAAS_ROOT=/path/to/newer/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
+NANOFAAS_ROOT=/path/to/newer/nanofaas uv run --package nanolab nanolab plan deployment-lifecycle-container.yaml
 ```
 
 Bumping the pin used by CI means updating both the `ref:` in
@@ -214,5 +240,5 @@ Control-plane heap analysis: see the [operator guide](docs/heap-analysis.md) for
 `./nanolab.sh compare` publishes reusable comparison recipes on the measured VM
 and verifies images and scheduling before load. See the [usage and resume
 contract](packages/nanolab/README.md#recipe-runtime-comparison),
-[profiles](packages/nanolab/recipes/README.md) and
+[profiles](packages/nanolab/src/nanolab/assets/presets/recipes/README.md) and
 [migration roadmap](docs/recipes-roadmap.md).

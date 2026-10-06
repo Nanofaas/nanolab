@@ -41,42 +41,42 @@ from nanolab.tasks.containerd_rootless import (
 )
 from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.http_function import HttpFunctionExpectation
-from nanolab.tasks.recipe import (
-    RecipeBinding,
-    assembled_recipe_distribution_resource,
-    recipe_distribution_resource,
-    recipe_run_resource,
-)
-from nanolab.tasks.recipe_builder import recipe_builder_resource
-from nanolab.tasks.recipe_kubernetes import (
+from nanolab.tasks.recipes.builder import recipe_builder_resource
+from nanolab.tasks.recipes.kubernetes import (
     minikube_images_resource,
     minikube_target_resource,
     queue_probe_image_resource,
     recipe_namespace_resource,
 )
-from nanolab.tasks.recipe_multiarch import (
+from nanolab.tasks.recipes.multiarch import (
     is_multiarch_recipe,
     multiarch_recipe_distribution_resource,
     require_multiarch_validation_profile,
 )
-from nanolab.tasks.recipe_remote import (
+from nanolab.tasks.recipes.remote import (
     remote_recipe_distribution_resource,
     remote_recipe_root,
     remote_recipe_run_resource,
 )
-from nanolab.tasks.recipe_validation import (
+from nanolab.tasks.recipes.validation import (
     recipe_compose_resource,
     recipe_watchdog_resource,
 )
-from nanolab.tasks.validate import (
+from nanolab.tasks.recipes.workflow import (
+    RecipeBinding,
+    assembled_recipe_distribution_resource,
+    recipe_distribution_resource,
+    recipe_run_resource,
+)
+from nanolab.tasks.validation.recovery import managed_container_cleanup_resource
+from nanolab.tasks.validation.workflow import (
     AsyncCheck,
     EnvelopeCheck,
     ValidateWorkflowRequest,
     build_validate_workflow,
 )
-from nanolab.tasks.validate import ValidateFunction as SonataFunction
-from nanolab.tasks.validate_recovery import managed_container_cleanup_resource
-from nanolab.workspace.paths import bundled_assets_root
+from nanolab.tasks.validation.workflow import ValidateFunction as SonataFunction
+from nanolab.workspace.paths import bundled_assets_root, operator_workspace_root
 from nanolab.workspace.provenance import source_fingerprint
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -369,7 +369,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
     containerd_recipe_registry = None
     runtime_bindings = bindings
     if kubernetes and config.recipe_profile is not None:
-        selected_run_dir = run_dir or (tool_root or Path.cwd()) / "runs/recipe-preview"
+        selected_run_dir = run_dir or operator_workspace_root() / "runs/recipe-preview"
         recipe_tag = recipe_run_tag(selected_run_dir)
         recipe_namespace = f"nanofaas-recipe-{recipe_tag.removeprefix('recipe-')}"
         executor = RoleBoundCommandTaskExecutor(bindings)
@@ -490,7 +490,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             remote_root=recipe_remote_root,
         )
     if config.backend == "containerd" and config.recipe_profile is not None:
-        selected_run_dir = run_dir or (tool_root or Path.cwd()) / "runs/recipe-preview"
+        selected_run_dir = run_dir or operator_workspace_root() / "runs/recipe-preview"
         recipe_tag = recipe_run_tag(selected_run_dir)
         vm_request = vm_request_for_role(selected_environment, "stack")
         recipe_remote_root = remote_recipe_root(vm_request, recipe_tag)
@@ -621,7 +621,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             queue_burst_script=None
             if config.retry_backoff_burst
             else queue_burst_script,
-            retry_backoff_assets=queue_burst_script.parent.parent / "validation"
+            retry_backoff_assets=queue_burst_script.parent.parent / "diagnostics"
             if config.retry_backoff_burst
             else None,
         )
@@ -700,7 +700,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
         recipe_run_dir: Path | None = None
         if config.recipe_profile is not None:
             recipe_run_dir = (
-                run_dir or (tool_root or Path.cwd()) / "runs/recipe-preview"
+                run_dir or operator_workspace_root() / "runs/recipe-preview"
             )
             tag = (
                 "recipe-"

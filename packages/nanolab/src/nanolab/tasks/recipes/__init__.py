@@ -1,0 +1,1 @@
+"""Recipes domain tasks."""

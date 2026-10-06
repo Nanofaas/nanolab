@@ -14,6 +14,15 @@ a uv workspace with two local members:
 Sonata (`sonata-engine` and `sonata-tasks`) is a pinned published dependency,
 not a workspace member.
 
+Distributed presets have one canonical copy in
+`packages/nanolab/src/nanolab/assets/presets/{scenarios,recipes,environments}`.
+Scenario payloads are under `scenarios/payloads`; source and wheel use the same
+resources. CLI inputs accept preset basenames or explicit operator paths.
+`NANOLAB_WORKSPACE` (default cwd) owns custom inputs, `profiles/` and `runs/`.
+Diagnostic helpers/probes live in `assets/diagnostics`. Shared execution wiring
+remains in `application` from #59; recipes and validation tasks/tests have domain
+directories. No `tests/tasks/migrated` category remains.
+
 ## Setup
 
 ```bash

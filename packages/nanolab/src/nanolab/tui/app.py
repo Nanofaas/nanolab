@@ -157,14 +157,8 @@ _PROVIDER_SETUP = {
     "proxmox": ("Proxmox", "proxmox.yaml.example", "proxmox.yaml"),
 }
 _PROVIDER_GUIDANCE = {
-    "azure": (
-        "cp packages/nanolab/environments/azure.yaml.example "
-        "packages/nanolab/environments/azure.yaml\n\n"
-        "Set the Azure provider values and ssh_key_path, then run az login."
-    ),
+    "azure": ("Set the Azure provider values and ssh_key_path, then run az login."),
     "proxmox": (
-        "cp packages/nanolab/environments/proxmox.yaml.example "
-        "packages/nanolab/environments/proxmox.yaml\n\n"
         "Set host, node, template_id, and ssh_key_path. The template's password_env "
         "names PROXMOX_PASSWORD; export that environment variable."
     ),
@@ -278,7 +272,7 @@ class NanofaasTUI:
             if selected == "back":
                 return
             try:
-                scenario = _scenario(discover_tool_root() / "scenarios-v2" / selected)
+                scenario = _scenario(discover_tool_root() / "scenarios" / selected)
                 body = scenario.model_dump_json(by_alias=True, indent=2)
             except Exception as exc:
                 body = str(exc)
@@ -351,14 +345,14 @@ class NanofaasTUI:
                     body=(
                         f"Copy {environment_dir / _PROVIDER_SETUP[provider][1]} "
                         f"to {operator_environments / _PROVIDER_SETUP[provider][2]}."
-                        "\n\n" + _PROVIDER_GUIDANCE[provider].split("\n\n", 1)[1]
+                        "\n\n" + _PROVIDER_GUIDANCE[provider]
                     ),
                 )
                 continue
             return Path(selected)
 
     def _workflow_menu(self, scenario_name: str) -> None:
-        scenario_path = discover_tool_root() / "scenarios-v2" / scenario_name
+        scenario_path = discover_tool_root() / "scenarios" / scenario_name
         title = _SCENARIO_TITLES[scenario_name]
         environment_path: Path | None = None
         scenario: Any = None

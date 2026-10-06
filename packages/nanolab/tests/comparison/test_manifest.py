@@ -3,7 +3,6 @@
 import hashlib
 import json
 import subprocess
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,8 +20,7 @@ from nanolab.comparison.profiles import comparison_profiles
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import resolve_variants
-
-PACKAGE = Path(__file__).resolve().parents[2]
+from nanolab.workspace.paths import discover_tool_root
 
 
 def git(root, *args):
@@ -62,7 +60,7 @@ def captured(tmp_path):
         ),
         "nanofaas_root": roots["nanofaas"],
         "nanolab_root": roots["nanolab"],
-        "profiles": comparison_profiles(PACKAGE, ("jvm",)),
+        "profiles": comparison_profiles(discover_tool_root(), ("jvm",)),
         "variants": ("jvm",),
         "repetitions": 1,
         "tag": "recipe-test",
@@ -102,7 +100,12 @@ def test_capture_tracks_both_repositories_and_effective_defaults(captured):
     assert inputs["scenario"]["values"]["load_scale"] == 1.0
     assert inputs["roles"]["stack"]["cpus"] == 4
     assert inputs["functions"]["word-stats-java"]["max_retries"] == 3
-    assert inputs["functions"]["word-stats-java"]["payload"] == '{"input":{}}'
+    payload = json.loads(
+        (discover_tool_root() / "scenarios/payloads/word-stats-sample.json").read_text()
+    )
+    assert inputs["functions"]["word-stats-java"]["payload"] == json.dumps(
+        {"input": payload}, separators=(",", ":")
+    )
     assert (
         inputs["profiles"]["jvm"]["sha256"]
         == hashlib.sha256(kwargs["profiles"]["jvm"].read_bytes()).hexdigest()
@@ -159,7 +162,9 @@ def test_changed_effective_input_refuses_resume(captured, tmp_path, change):
             "parallelism": 2,
         }[change]
     if change == "variants":
-        kwargs["profiles"] = comparison_profiles(PACKAGE, kwargs["variants"])
+        kwargs["profiles"] = comparison_profiles(
+            discover_tool_root(), kwargs["variants"]
+        )
     with pytest.raises(ValueError, match="inputs"):
         require_matching_inputs(manifest, capture_comparison_inputs(**kwargs))
 

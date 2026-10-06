@@ -55,6 +55,7 @@ from nanolab.cli.catalogue import (
 from nanolab.cli.catalogue import (
     _workflow_catalog as _workflow_catalog,
 )
+from nanolab.cli.catalogue import environment_input, scenario_input
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
 from nanolab.cli.soak import (
@@ -102,8 +103,8 @@ from nanolab.release.tasks import versioned_release_run_dir
 from nanolab.release.versioning import normalize_version
 from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
 from nanolab.tasks.provisioning.providers import provider_for
-from nanolab.tasks.recipe_multiarch import is_multiarch_recipe
-from nanolab.tasks.recipe_remote import (
+from nanolab.tasks.recipes.multiarch import is_multiarch_recipe
+from nanolab.tasks.recipes.remote import (
     RemoteRecipeRun,
     cleanup_remote_recipe_run,
     remote_recipe_root,
@@ -890,9 +891,9 @@ def install_product_commands(
     # Typer's documented parameter API takes the spec as the default; ruff flags
     # only the Path parameters, and nothing mutable is shared between calls.
     def run_command(
-        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
+        scenario: Path = typer.Argument(..., callback=scenario_input),  # noqa: B008
         environment: Path | None = typer.Option(  # noqa: B008
-            None, "--environment", exists=True
+            None, "--environment", callback=environment_input
         ),
         keep: bool = typer.Option(False, "--keep"),
         teardown: bool = typer.Option(
@@ -905,7 +906,7 @@ def install_product_commands(
             None,
             "--only",
             help=(
-                "Run a single task. Migrated workflows address tasks by title slug "
+                "Run a single task by title slug "
                 "(e.g. list-functions) and do not run their prerequisites for you."
             ),
         ),
@@ -1197,15 +1198,15 @@ def install_product_commands(
     @app.command("plan")
     # See run_command: typer's parameter API, no shared mutable default.
     def plan_command(
-        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
+        scenario: Path = typer.Argument(..., callback=scenario_input),  # noqa: B008
         environment: Path | None = typer.Option(  # noqa: B008
-            None, "--environment", exists=True
+            None, "--environment", callback=environment_input
         ),
         only: str | None = typer.Option(
             None,
             "--only",
             help=(
-                "Run a single task. Migrated workflows address tasks by title slug "
+                "Run a single task by title slug "
                 "(e.g. list-functions) and do not run their prerequisites for you."
             ),
         ),
@@ -1322,13 +1323,13 @@ def install_product_commands(
 
     @app.command("list")
     def list_command() -> None:
-        for path in sorted((discover_tool_root() / "scenarios-v2").glob("*.yaml")):
+        for path in sorted((discover_tool_root() / "scenarios").glob("*.yaml")):
             typer.echo(path)
 
     @app.command("workflow")
     @app.command("workflows")
     def workflows_command() -> None:
-        scenarios_dir = discover_tool_root() / "scenarios-v2"
+        scenarios_dir = discover_tool_root() / "scenarios"
         table = Table(title="Nanolab workflows")
         table.add_column("Workflow", style="cyan", no_wrap=True)
         table.add_column("Environments", no_wrap=True)
@@ -1342,7 +1343,7 @@ def install_product_commands(
     @app.command("inspect")
     # See run_command: typer's parameter API, no shared mutable default.
     def inspect_command(
-        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
+        scenario: Path = typer.Argument(..., callback=scenario_input),  # noqa: B008
     ) -> None:
         typer.echo(
             json.dumps(

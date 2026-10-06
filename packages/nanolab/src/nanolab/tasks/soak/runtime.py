@@ -718,7 +718,7 @@ def _with_built_helper(
     A digest written into a scenario names bytes in whichever registry built
     them, so it is unpullable on any other machine and a prune breaks it even
     locally. The helper is built per run instead and pinned to the digest that
-    build reported; the inputs stay pinned in assets/soak/*.lock.json.
+    build reported; the inputs stay pinned in assets/diagnostics/*.lock.json.
 
     A scenario that still pins `helper_images`, or an injected
     `memory_helper_image`, is honoured as-is and skips the build.
@@ -822,7 +822,7 @@ class _MemoryHelperTransport:
         """Provision readers using observed credentials and architecture."""
         self.output_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         provisioner = LocalDockerDiagnosticProvisioner(
-            assets_dir=bundled_assets_root() / "soak",
+            assets_dir=bundled_assets_root() / "diagnostics",
             cancelled=self.cancelled,
         )
         try:
@@ -1127,7 +1127,9 @@ def create_local_deployment(
         }
         if decision["runtime"] == "node":
             if controller is None:
-                source = bundled_assets_root() / "soak/node-diagnostic-control.cjs"
+                source = (
+                    bundled_assets_root() / "diagnostics/node-diagnostic-control.cjs"
+                )
                 with source.open("rb") as stream:
                     body = stream.read(65537)
                 if not body or len(body) > 65536:

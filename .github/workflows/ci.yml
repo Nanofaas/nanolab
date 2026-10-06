@@ -165,19 +165,19 @@ jobs:
       - name: Generate representative plans
         if: ${{ steps.sync.outputs.nanofaas == 'true' }}
         run: |
-          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
-          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/local.yaml
-          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
-          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml --control-plane-url http://control-plane.example:30080
+          uv run --locked --package nanolab nanolab plan deployment-lifecycle-container.yaml --environment local.yaml
+          uv run --locked --package nanolab nanolab plan deployment-lifecycle-k8s.yaml --environment local.yaml
+          uv run --locked --package nanolab nanolab plan deployment-lifecycle-k8s.yaml --environment multipass.yaml
+          uv run --locked --package nanolab nanolab plan cli-contract-k8s.yaml --control-plane-url http://control-plane.example:30080
           # Without the ordinal: the gate is that the plan releases the control
           # plane, not that it does so tenth. Pinning the number made this stale
           # the moment the plan grew a registry, and the failure stayed hidden
           # behind an earlier red step for days.
-          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-container.yaml | grep -q 'release-local-control-plane'
+          uv run --locked --package nanolab nanolab plan cli-contract-container.yaml | grep -q 'release-local-control-plane'
           provisioned_plan="$(mktemp)"
           trap 'rm -f "$provisioned_plan"' EXIT
-          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml \
-            --environment packages/nanolab/environments/multipass.yaml >"$provisioned_plan"
+          uv run --locked --package nanolab nanolab plan cli-contract-k8s.yaml \
+            --environment multipass.yaml >"$provisioned_plan"
           # By position in the plan, not by ordinal: what matters is that the VM
           # is acquired before the chart needs it and released after, in reverse
           # order of acquisition. Pinning the numbers asserted the same thing
@@ -211,7 +211,7 @@ jobs:
         if: ${{ steps.sync.outputs.nanofaas == 'true' }}
         working-directory: .nanofaas-source
         run: |
-          for profile in "$GITHUB_WORKSPACE"/packages/nanolab/recipes/*.yaml; do
+          for profile in "$GITHUB_WORKSPACE"/packages/nanolab/src/nanolab/assets/presets/recipes/*.yaml; do
             ./gradlew validateRecipe -Precipe="$profile"
           done
 
@@ -245,7 +245,7 @@ jobs:
             exit 1
           fi
           uv run --locked --package nanolab \
-            nanolab run packages/nanolab/scenarios-v2/cli-contract-container.yaml
+            nanolab run cli-contract-container.yaml
           if curl -sS -m 2 http://127.0.0.1:18080/v1/functions >/dev/null 2>&1; then
             echo "API port 18080 remained open after cleanup" >&2
             exit 1

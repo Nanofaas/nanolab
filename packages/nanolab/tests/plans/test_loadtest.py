@@ -12,7 +12,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import _recipe_container_platform, build_loadtest_plan
 from nanolab.tasks.loadtest.models import TimeWindow
-from nanolab.workspace.paths import bundled_assets_root
+from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
 CONTROL_PLANE_LOG = "InternalScaler starting with poll interval 5000ms\n"
 
@@ -330,9 +330,7 @@ def test_container_loadtest_uses_compose_without_kubernetes(
 def test_container_recipe_loadtest_publishes_once_and_checks_images(
     tmp_path: Path, nanofaas_root: Path
 ) -> None:
-    profile = (
-        Path(__file__).resolve().parents[2] / "recipes/loadtest-container-jvm.yaml"
-    )
+    profile = discover_tool_root() / "recipes/loadtest-container-jvm.yaml"
     config = ScenarioConfig.model_validate(
         {
             "workflow": "loadtest",

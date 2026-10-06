@@ -6,12 +6,12 @@ import json
 import pytest
 import yaml
 
-from nanolab.tasks.recipe_multiarch import (
+from nanolab.tasks.recipes.multiarch import (
     MultiarchComponent,
     MultiarchDistribution,
     MultiarchImage,
 )
-from nanolab.tasks.recipe_registry import RegistryResponse
+from nanolab.tasks.recipes.registry import RegistryResponse
 
 MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 INDEX = "application/vnd.oci.image.index.v1+json"
@@ -240,8 +240,8 @@ def test_invalid_publication_fails_before_runtime(tmp_path, mutation):
 
 
 def test_buildx_reader_supports_one_attested_platform_without_local_id(tmp_path):
-    from nanolab.tasks.recipe_multiarch import read_buildx_distribution
-    from tests.tasks.test_recipe_multiarch import SOURCE, multiarch_fixture
+    from nanolab.tasks.recipes.multiarch import read_buildx_distribution
+    from tests.tasks.recipes.test_multiarch import SOURCE, multiarch_fixture
 
     recipe, report, data = multiarch_fixture(tmp_path)
     profile = yaml.safe_load(recipe.read_text())

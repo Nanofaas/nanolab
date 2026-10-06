@@ -12,8 +12,8 @@ from pathlib import Path
 import yaml
 
 from nanolab.config.soak import SoakConfig
-from nanolab.tasks.recipe import _object
-from nanolab.tasks.recipe_registry import fetch_local_registry
+from nanolab.tasks.recipes.registry import fetch_local_registry
+from nanolab.tasks.recipes.workflow import _object
 from nanolab.tasks.soak.artifacts import (
     ArtifactWriter,
     describe_artifact,
