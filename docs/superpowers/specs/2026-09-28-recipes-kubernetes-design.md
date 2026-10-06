@@ -1,7 +1,7 @@
 # Recipe-backed Kubernetes validation
 
 Date: 2026-09-28
-Status: design approved; implementation not started.
+Status: design approved; reviewed on 2026-09-29; implementation not started.
 
 ## Goal
 
@@ -56,20 +56,26 @@ to delegate recipe-schema and build semantics to NanoFaaS.
 ### Local Minikube
 
 1. Preflight the Minikube CLI and active Kubernetes context. Fail before building
-   if Minikube is unavailable or the context does not target the selected
-   Minikube profile. Do not change the context or cluster configuration.
+   if Minikube is unavailable or the context does not target a running Minikube
+   profile with the Docker driver. Derive the profile from the current context,
+   verify membership in Minikube profile metadata and pin that context/profile
+   in subsequent commands. Verify host Docker, Helm, kubectl and k6, and host/node
+   architecture compatibility. Do not change the context or cluster configuration.
 2. Stage the NanoFaaS source and profile in the run directory and run
    `assembleRecipe` on the host, preserving the selected source revision and
    tracked working-tree changes as the existing recipe flow does.
 3. Load each recipe image reference from the host Docker daemon into Minikube
    with `minikube image load --daemon`. Also load the existing Kubernetes queue
-   probe image, which remains built by its current task outside the recipe.
+   probe image, which remains outside the recipe but is built from the same
+   staged source using a run-specific tag. Disable its legacy Docker push on
+   this path. Give its build and load explicit dependency edges before registration.
 4. Set the recipe control-plane image from the distribution report when
    installing Helm. Register functions using the report references. Do not
    publish to or require the host's local registry for this path.
-5. After Helm and function cleanup, remove only run-tagged recipe images loaded
-   by this workflow. Preserve the queue-probe image according to its existing
-   lifecycle.
+5. After function deletion and Helm uninstall, wait for the run's Pods to
+   disappear, then remove only run-tagged recipe and probe images loaded by this
+   workflow. Track partial loads for compensation. Refuse to take ownership of
+   an image reference already present before this acquisition.
 
 Minikube documents `image load --daemon` for images already in the host Docker
 engine and supports image loading across its supported container runtimes. The
@@ -87,19 +93,33 @@ Minikube matches it, and record the deployed Pod's image reference and runtime
    retain the source provenance on the host.
 3. Run `publishRecipe` in the VM against its local registry. Fetch the report and
    Gradle log to the host run directory before consuming the distribution.
-4. Build and push the existing queue-probe image in the VM as its current
-   Kubernetes workflow does. Use the recipe report's control-plane and function
+4. Build and push the queue-probe image from the same staged source in the VM,
+   with a run-specific tag. Use the recipe report's control-plane and function
    references for Helm and function registration.
-5. Verify the deployed Pod's image reference and runtime image identity against
-   the published distribution digest; retain both the report and Pod evidence.
+5. Verify Pod image identity through node runtime inspection and the published
+   manifest/config relationship described below; retain report and Pod evidence.
 
 The VM staging path is an explicit exception to the existing local-only recipe
 flow. Transfer failures, Gradle failures and malformed reports must fail before
 Helm install or registration. Preserve staged inputs and logs on failure for
-diagnosis; remove only the temporary VM staging directory after successful
-verification and cleanup.
+diagnosis on the host before normal VM teardown. Retain the remote stage on
+failure when the environment retains its VM; this does not override the existing
+VM lifecycle. Remove only the temporary VM staging directory after successful
+verification and cleanup, before VM teardown. Keep an execution success marker after all checks;
+resource release alone does not prove success because it also runs on failure.
+Attempt to fetch diagnostics even when Gradle fails, without masking the original
+error or accepting a stale successful report. Transfer the staged Git metadata
+needed to reproduce revision/dirty identity, without credentials, hooks, caches,
+build output or Git alternates that point outside the stage. Verify source/profile
+hashes on the VM before invoking Gradle. Remote paths must never be treated as
+host filesystem paths. Use the existing VM provider transfer/exec/fetch interfaces.
 
 ## Shared workflow and evidence
+
+Allocate a unique namespace `nanofaas-recipe-<run-token>` for either path. Create
+it as an owned resource before Helm (the current helper sets namespace creation
+to false); refuse to acquire an existing namespace. Delete only this namespace
+after function/Helm teardown. Preserve the cluster and unrelated releases.
 
 Both provider paths use the same scenario, profile semantics, function binding,
 control-plane metadata check, invocation check, queue lifecycle, resource checks
@@ -110,15 +130,42 @@ Helm resolves the control-plane image reference from the distribution when the
 release is acquired. Function registration uses the report's `(name, sdk)`
 component mapping. Keep the existing Minikube/Kubernetes resource checks and
 readiness checks; do not route Kubernetes image checks through Docker Compose
-inspection.
+inspection. Remove the Compose requirement from the common recipe binding;
+Compose data stays optional and is consumed only by container validation.
+
+Local HTTP consumers cannot assume the Service ClusterIP is routable from the
+host. Acquire a loopback-only `kubectl port-forward` to the control-plane Service
+after Helm is ready, obtain the assigned local port, and expose it as an
+`Endpoint` resource. Registration, metadata, invocation and k6 use that resource.
+Multipass retains the ClusterIP endpoint and executes HTTP commands in role
+`stack`. Release the forwarding process before uninstalling Helm, including on
+partial acquisition failure. This is API access, not a registry tunnel.
+
+Recipe binding applies only to selected recipe functions. The queue probe must
+keep its ordinary registration and explicit build path when legacy recipe
+component builds are disabled; it must not index the recipe function mapping.
+Use the same staged source for the probe, chart and recipe to preserve source
+isolation. Carry dynamic endpoints through the existing `Endpoint` type rather
+than casting resource endpoints to strings.
 
 Add a Kubernetes-specific image check that records the control-plane and
-function Pod image references and runtime image IDs. For local Minikube, also
-prove the Minikube image store contains the reported local image ID. For
-Multipass, compare the Pod runtime image identity with the registry digest,
-normalizing the runtime's documented prefix. Keep the image metadata response,
-report, image-store evidence, Pod evidence and Gradle logs under the selected
-run directory after teardown.
+function Pod image references, node names and runtime image IDs. Resolve the
+actual Pod runtime image through node CRI inspection (Minikube node commands
+locally; k3s runtime commands in the VM). Verify the resolved image config digest
+against the report's Docker image ID. For published images, also verify the
+registry manifest digest and its config descriptor against the report.
+
+Docker image IDs identify image configuration; registry digests identify manifests.
+Do not equate them or merely strip a runtime prefix and compare arbitrary hashes.
+A runtime may report either identity: establish the manifest-to-config relation
+from runtime content/inspection before accepting it. Inspect every running target
+container selected through the Deployment's ownership chain; an unrelated Pod with
+a matching tag is not evidence. Require ready target containers and retain the
+raw Pod, CRI and (where needed) manifest evidence. A missing, changed or ambiguous
+identity fails validation, even if the tag matches.
+
+Keep metadata responses, reports, image-store evidence, Pod evidence and Gradle
+logs on the host under the selected run directory after teardown.
 
 Planning and dry-run remain side-effect free: they must not build, call Minikube,
 copy staged source to a VM, or create Kubernetes resources. Acquisitions use
@@ -160,3 +207,22 @@ finalizing the Kubernetes identity check, exercise the selected host Minikube
 runtime and assert the actual values; fail closed if the check cannot prove the
 loaded image matches the report. Do not weaken identity verification to a tag
 comparison to accommodate a runtime difference.
+
+## Review corrections (2026-09-29)
+
+The code review found and resolved these gaps in the original design:
+
+- `_helm_release_with_endpoint` returns a ClusterIP, which does not establish
+  host connectivity to Minikube. Local validation now owns an API port-forward.
+- `build_images=False` skips every function build, including the auxiliary queue
+  probe, while recipe registration would look up that probe in an absent mapping.
+  The probe now has an explicit staged build/delivery path and ordinary registration.
+- Kubernetes evidence must resolve configuration IDs and manifest digests rather
+  than assuming they are the same hash.
+- The Helm helper disables namespace creation, while local runs skip VM bootstrap.
+  The workflow now owns a unique namespace and has explicit teardown ordering.
+- Remote recipe commands cannot use host paths or read remote reports via host
+  `Path` operations. Transfers, remote verification and report fetching are explicit.
+
+The shared source/profile contract and the user's local/Multipass selection remain
+unchanged. No implementation or infrastructure run was performed during this review.

@@ -104,8 +104,8 @@ Notes that are easy to get wrong:
 released version** on PyPI:
 
 ```toml
-"sonata-engine==0.6.2"
-"sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.2"
+"sonata-engine==0.6.5"
+"sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.5"
 ```
 
 They are one lockstep pair: `sonata-tasks` carries
