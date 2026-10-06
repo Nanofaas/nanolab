@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from sonata_engine import (
@@ -11,6 +11,7 @@ from sonata_engine import (
     TaskOutcome,
     Workflow,
 )
+from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.release import tasks as release_tasks
@@ -408,19 +409,37 @@ def test_arm_tasks_form_gate_build_smoke_digest_chain(tmp_path: Path) -> None:
         prerequisites=(gate,),
         expected_images=("image:v1-arm64",),
         work=lambda _inputs: (
-            Evidence("local-registry-digest", "docker://image:v1-arm64", digest),
+            Evidence("local-image-digest", "docker-daemon:image:v1-arm64", digest),
         ),
     )
     gate.write_text("passed", encoding="utf-8")
     build.run(TaskInputs.empty())
-    smoke = arm64_smoke_task(
+    from nanolab.release.tasks import arm64_registry_push_task
+
+    push = arm64_registry_push_task(
         identity=_identity(),
         run_dir=tmp_path,
-        phase_inputs={"images": ["image:v1-arm64"]},
+        phase_inputs={},
         prerequisites=(build.receipt,),
         expected_images=("image:v1-arm64",),
         work=lambda _inputs: (
             Evidence("local-registry-digest", "docker://image:v1-arm64", digest),
+        ),
+    )
+    push.run(TaskInputs.empty())
+    smoke_file = tmp_path / "arm-smoke.json"
+    smoke_file.write_text(
+        json.dumps(
+            {"architecture": "linux/arm64", "images": {"image:v1-arm64": digest}}
+        )
+    )
+    smoke = arm64_smoke_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"images": ["image:v1-arm64"]},
+        prerequisites=(push.receipt,),
+        work=lambda _inputs: (
+            Evidence("file-digest", str(smoke_file), digest_path(smoke_file)),
         ),
     )
 
@@ -429,7 +448,8 @@ def test_arm_tasks_form_gate_build_smoke_digest_chain(tmp_path: Path) -> None:
     assert build.phase == "arm64-build"
     assert smoke.phase == "arm64-smoke"
     assert build.prerequisites == (gate,)
-    assert smoke.prerequisites == (build.receipt,)
+    assert push.prerequisites == (build.receipt,)
+    assert smoke.prerequisites == (push.receipt,)
 
 
 def test_arm_work_never_starts_without_its_prerequisite(tmp_path: Path) -> None:
@@ -629,7 +649,7 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(
     arm_receipt.write_text(
         json.dumps(
             {
-                "phase": "arm64-build",
+                "phase": "arm64-local-registry-push",
                 "evidence": [
                     {
                         "kind": "local-registry-digest",
@@ -659,7 +679,7 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(
             gate_file=gate_file,
             smoke_receipt=smoke_receipt,
             smoke_file=smoke_file,
-            arm_build_receipt=arm_receipt,
+            arm_push_receipt=arm_receipt,
             arm_images=(image,),
         )
 
@@ -676,7 +696,7 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(
             gate_file=gate_file,
             smoke_receipt=smoke_receipt,
             smoke_file=smoke_file,
-            arm_build_receipt=arm_receipt,
+            arm_push_receipt=arm_receipt,
             arm_images=(image,),
         )
 
@@ -770,7 +790,7 @@ def test_arm_receipt_parser_rejects_malformed_schema(payload, tmp_path: Path) ->
     receipt = tmp_path / "arm64-build.json"
     receipt.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="invalid arm64-build receipt"):
+    with pytest.raises(ValueError, match="invalid arm64-local-registry-push receipt"):
         registry_artifacts_from_receipt(receipt, ("image:v1",))
 
 
@@ -889,9 +909,9 @@ def test_run_image_steps_rejects_a_foreign_architecture() -> None:
                 "docker",
                 "image",
                 "inspect",
-                "--format={{.Architecture}}|{{.Id}}",
+                "--format={{.Os}}|{{.Architecture}}|{{.Id}}",
                 "img:v1",
-            ): f"arm64|{digest}",
+            ): f"linux|arm64|{digest}",
         }
     )
 
@@ -914,10 +934,10 @@ def test_run_image_steps_accepts_the_expected_architecture() -> None:
                 "docker",
                 "image",
                 "inspect",
-                "--format={{.Architecture}}|{{.Id}}",
+                "--format={{.Os}}|{{.Architecture}}|{{.Id}}",
                 "img-a:v1",
                 "img-b:v1",
-            ): f"amd64|{digest}\namd64|{digest}",
+            ): f"linux|amd64|{digest}\nlinux|amd64|{digest}",
         }
     )
 
@@ -965,3 +985,267 @@ def test_run_image_steps_retries_the_read_only_matrix_inspection(monkeypatch) ->
 
     assert executor.calls == 2
     assert [item.digest for item in evidence] == [digest]
+
+
+def _arm_recipe_phases(tmp_path):
+    from nanolab.plans import release_phases
+    from nanolab.release.recipe_execution import capture_release_inventory
+    from tests.release.test_recipe import _report
+    from tests.release.test_recipe_execution import _recipe_phase
+
+    source = tmp_path / "vm/source"
+    source.mkdir(parents=True)
+    (source / "settings.gradle").write_text('rootProject.name="probe"\n')
+    (source / "build.gradle").write_text("plugins {}\n")
+    inventory = capture_release_inventory(source, tmp_path / "inventory.json")
+    phase, provider, _producer, prerequisite, arguments = _recipe_phase(
+        (source, inventory), tmp_path, architecture="arm64"
+    )
+    ids = {
+        row["image"]["reference"]: row["image"]["id"]
+        for group in provider.groups
+        for row in _report(group)["components"]
+        if row["image"]
+    }
+
+    class PushExecutor:
+        def __init__(self):
+            self.commands = []
+            self.replaced = False
+            self.platform = "linux|arm64"
+
+        def binding_key(self, role):
+            return "daemon:" + role
+
+        def run(self, task, **kwargs):
+            self.commands.append(task)
+            if task.argv[:3] == ("docker", "image", "inspect"):
+                assert task.role == "arm-builder"
+                stdout = "\n".join(
+                    self.platform
+                    + "|"
+                    + ("sha256:" + "f" * 64 if self.replaced else ids[image])
+                    for image in task.argv[4:]
+                )
+            elif task.argv[:2] == ("docker", "push"):
+                assert task.role == "arm-builder"
+                stdout = ""
+            elif task.argv[:2] == ("skopeo", "inspect"):
+                assert task.role == "arm-builder"
+                stdout = "sha256:" + "e" * 64
+            else:
+                assert task.role == "stack" and task.argv[:2] == ("sh", "-c")
+                stdout = "\n".join("sha256:" + "e" * 64 for _image in task.argv[4:])
+            return TaskResult("", "passed", 0, stdout=stdout)
+
+    executor = PushExecutor()
+    push = release_phases.build_registry_push_phase(
+        identity=phase.identity,
+        run_dir=arguments["run_dir"],
+        image_plan=arguments["image_plan"],
+        release_images=phase.expected_images,
+        executor=cast(RoleBoundCommandTaskExecutor, executor),
+        prerequisite_phases=(prerequisite,),
+        assembly=phase,
+        architecture="arm64",
+        role="arm-builder",
+    )
+    return phase, push, executor
+
+
+def test_arm_assembly_and_push_have_distinct_receipts(tmp_path):
+    build, push, executor = _arm_recipe_phases(tmp_path)
+    build.run(TaskInputs.empty())
+    assert build.phase_inputs["recipeContract"] == 2
+    assert build.phase_inputs["architecture"] == "arm64"
+    assert build.phase_inputs["role"] == "arm-builder"
+    images = tuple("docker-daemon:" + image for image in build.expected_images)
+    assert (
+        len(
+            exact_receipt_artifacts(
+                build.receipt, "arm64-build", "local-image-digest", images
+            )
+        )
+        == 44
+    )
+    assert not receipt_artifacts(build.receipt, "arm64-build", "local-registry-digest")
+    workflow = Workflow("arm-push")
+    workflow.add(push)
+    workflow.run()
+    assert push.phase == "arm64-local-registry-push"
+    assert push.title == "Push ARM64 images to local registry"
+    refs = tuple("docker://" + image for image in build.expected_images)
+    assert (
+        len(
+            exact_receipt_artifacts(
+                push.receipt, push.phase, "local-registry-digest", refs
+            )
+        )
+        == 44
+    )
+    assert not receipt_artifacts(push.receipt, push.phase, "local-image-digest")
+    assert (
+        len([task for task in executor.commands if task.argv[:2] == ("docker", "push")])
+        == 44
+    )
+    assert executor.commands[0].role == "arm-builder"
+    assert executor.commands[-1].role == "stack"
+
+
+@pytest.mark.parametrize("mutation", ["id", "windows", "amd64"])
+def test_changed_local_image_blocks_push_before_first_command(tmp_path, mutation):
+    build, push, executor = _arm_recipe_phases(tmp_path)
+    build.run(TaskInputs.empty())
+    if mutation == "id":
+        executor.replaced = True
+    else:
+        executor.platform = "windows|arm64" if mutation == "windows" else "linux|amd64"
+    with pytest.raises(RuntimeError, match=r"image|platform|architecture"):
+        push.run(TaskInputs.empty())
+    assert not any(task.argv[:2] == ("docker", "push") for task in executor.commands)
+    assert not push.receipt.exists()
+
+
+def test_old_combined_arm_receipt_is_not_local_assembly_proof(tmp_path):
+    build, push, executor = _arm_recipe_phases(tmp_path)
+    build.receipt.parent.mkdir(parents=True, exist_ok=True)
+    build.receipt.write_text(
+        json.dumps(
+            {
+                "phase": "arm64-build",
+                "evidence": [
+                    {
+                        "kind": "local-registry-digest",
+                        "reference": "docker://" + image,
+                        "digest": "sha256:" + "e" * 64,
+                    }
+                    for image in build.expected_images
+                ],
+            }
+        )
+    )
+    with pytest.raises(RuntimeError, match="exact artifact coverage"):
+        push.run(TaskInputs.empty())
+    assert not executor.commands and not push.receipt.exists()
+
+
+@pytest.mark.parametrize("mutation", ["partial", "foreign", "duplicate"])
+def test_arm_push_rejects_partial_or_foreign_digest_set(tmp_path, mutation):
+    from nanolab.release.tasks import arm64_registry_push_task
+
+    images = ("image-a:arm64", "image-b:arm64")
+    refs = ["docker://" + image for image in images]
+    if mutation == "partial":
+        refs.pop()
+    elif mutation == "foreign":
+        refs[0] = "docker://foreign:arm64"
+    else:
+        refs[0] = refs[1]
+    task = arm64_registry_push_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={},
+        expected_images=images,
+        work=lambda _inputs: tuple(
+            Evidence("local-registry-digest", ref, "sha256:" + "e" * 64) for ref in refs
+        ),
+    )
+    with pytest.raises(RuntimeError, match="image matrix"):
+        task.run(TaskInputs.empty())
+    assert not task.receipt.exists()
+
+
+def test_run_image_steps_can_verify_without_running_build_or_push():
+    digest = "sha256:" + "a" * 64
+    executor = _ScriptedExecutor(
+        {
+            (
+                "docker",
+                "image",
+                "inspect",
+                "--format={{.Os}}|{{.Architecture}}|{{.Id}}",
+                "image:arm64",
+            ): f"linux|arm64|{digest}",
+        }
+    )
+    evidence = run_image_steps(
+        None,
+        TaskInputs.empty(),
+        executor,
+        ("image:arm64",),
+        registry=False,
+        architecture="arm64",
+        role="arm-builder",
+    )
+    assert evidence == (
+        Evidence("local-image-digest", "docker-daemon:image:arm64", digest),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["none", "legacy", "partial", "foreign", "duplicate", "stale-smoke"]
+)
+def test_smoke_and_publication_require_exact_arm_push_receipt(tmp_path, mutation):
+    images = ("registry/image-a:v1-arm64", "registry/image-b:v1-arm64")
+    digest = "sha256:" + "a" * 64
+    entries = [
+        {
+            "kind": "local-registry-digest",
+            "reference": "docker://" + image,
+            "digest": digest,
+        }
+        for image in images
+    ]
+    phase = "arm64-local-registry-push"
+    if mutation == "legacy":
+        phase = "arm64-build"
+    elif mutation == "partial":
+        entries.pop()
+    elif mutation == "foreign":
+        entries[0]["reference"] = "docker://foreign:arm64"
+    elif mutation == "duplicate":
+        entries[0] = entries[1]
+    receipt = tmp_path / "arm-push.json"
+    receipt.write_text(json.dumps({"phase": phase, "evidence": entries}))
+    gate_file = tmp_path / "gate-decision.json"
+    gate_file.write_text('{"passed": true}')
+    gate_receipt = tmp_path / "gate.json"
+    _file_receipt(gate_receipt, "regression-gate", gate_file)
+    smoke_file = tmp_path / "smoke-outcome.json"
+    smoke_file.write_text(
+        json.dumps(
+            {
+                "architecture": "linux/arm64",
+                "images": dict.fromkeys(
+                    images,
+                    "sha256:" + "b" * 64 if mutation == "stale-smoke" else digest,
+                ),
+            }
+        )
+    )
+    smoke_receipt = tmp_path / "smoke.json"
+    _file_receipt(smoke_receipt, "arm64-smoke", smoke_file)
+
+    def barriers():
+        return require_release_barriers(
+            gate_receipt=gate_receipt,
+            gate_file=gate_file,
+            smoke_receipt=smoke_receipt,
+            smoke_file=smoke_file,
+            arm_push_receipt=receipt,
+            arm_images=images,
+        )
+
+    if mutation == "none":
+        assert len(registry_artifacts_from_receipt(receipt, images)) == 2
+        assert len(barriers()) == 2
+    else:
+        if mutation != "stale-smoke":
+            with pytest.raises(
+                (ValueError, RuntimeError), match=r"receipt|coverage|matrix"
+            ):
+                registry_artifacts_from_receipt(receipt, images)
+        with pytest.raises(
+            (ValueError, RuntimeError), match=r"receipt|coverage|matrix|does not match"
+        ):
+            barriers()

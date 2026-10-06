@@ -125,7 +125,7 @@ le differenze reali fra backend e tipi di verifica.
      la fase separata di push e i contratti di benchmark/firma.
      Implementazione locale completata: tre profili riutilizzabili (9/12/23
      immagini), inventario dell'archivio, report e ID locali verificati,
-     fingerprint e resume coperti dai test. ARM64 mantiene Bake; benchmark,
+     fingerprint e resume coperti dai test. Benchmark,
      pubblicazione e firma conservano i gate esistenti.
      `validateRecipe` e il preflight reale con NanoFaaS `e7914be0` passano.
      Verifica nativa AMD64 ancora incompleta: Azure ha rifiutato la creazione
@@ -133,7 +133,17 @@ le differenze reali fra backend e tipi di verifica.
      runtime rappresentativi, resume e teardown. Nessuna release qualificata.
      [Spec approvata](superpowers/specs/2026-10-01-release-amd64-recipes-design.md),
      [piano e stato delle verifiche](superpowers/plans/2026-10-01-release-amd64-recipes.md).
-   - [ ] Release ARM64: migrazione successiva, con gli stessi contratti.
+   - [ ] Release ARM64: implementazione locale completata con tre profili
+     simmetrici AMD64/ARM64, assembly e push distinti, prove locali sulla VM
+     proprietaria e resume verificato nei test. I vecchi journal del DAG
+     combinato richiedono un nuovo run-dir; restano conservati.
+     Sei `validateRecipe` e preflight eseguibile passano con NanoFaaS `e7914be0`.
+     Il 2 ottobre 2026 la prova canonica si è fermata prima delle build: Azure
+     rifiuta la creazione delle risorse di rete senza MFA. Capability nativa ARM,
+     slice reale di 44 immagini/push/runtime e resume reale ancora incompleti.
+     Nessuna release qualificata; gate AMD64 indipendente ancora pendente.
+     [Spec](superpowers/specs/2026-10-02-release-arm64-recipes-design.md),
+     [piano e verifiche](superpowers/plans/2026-10-02-release-arm64-recipes.md).
    - [ ] Migrazione dei preset P24 e degli altri backend soak.
      Il preset canonico `memory-soak-sync-container.yaml` ora usa
      `soak-container-p24-jvm.yaml`, conservando policy, fasi e carico (20/20).

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nanolab.images.plan import build_image_plan
+from nanolab.images.plan import ImageArchitecture, build_image_plan
 from nanolab.release import recipe
 
 SOURCE = Path(os.environ["NANOFAAS_ROOT"])
@@ -29,9 +29,15 @@ MODULES = (
 )
 
 
-def _groups(profiles: Path = PROFILES):
-    plan = build_image_plan(SOURCE, "v9.9.9", architectures=("amd64",))
-    return recipe.prepare_release_recipe_groups(SOURCE, plan, profiles_root=profiles)
+def _groups(profiles: Path = PROFILES, architecture: ImageArchitecture = "amd64"):
+    plan = build_image_plan(SOURCE, "v9.9.9", architectures=(architecture,))
+    if architecture == "amd64":
+        return recipe.prepare_release_recipe_groups(
+            SOURCE, plan, profiles_root=profiles
+        )
+    return recipe.prepare_release_recipe_groups(
+        SOURCE, plan, profiles_root=profiles, architecture=architecture
+    )
 
 
 def test_release_profiles_cover_exact_guarded_matrix() -> None:
@@ -66,7 +72,13 @@ def profiles(tmp_path: Path) -> Path:
     destination.mkdir()
     for flavor in ("jvm", "native", "default"):
         name = f"release-amd64-{flavor}.yaml"
-        shutil.copyfile(PROFILES / name, destination / name)
+        raw = (PROFILES / name).read_bytes()
+        (destination / name).write_bytes(raw)
+        # Independent fixture for policy/byte-freeze tests; checked-in ARM
+        # profiles are exercised separately by exact coverage and Gradle.
+        (destination / f"release-arm64-{flavor}.yaml").write_bytes(
+            raw.replace(b"amd64", b"arm64")
+        )
     return destination
 
 
@@ -91,10 +103,11 @@ def profiles(tmp_path: Path) -> Path:
         "unknown",
     ],
 )
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_release_profile_drift_fails_before_acquisition(
-    profiles: Path, mutation: str
+    profiles: Path, mutation: str, architecture: ImageArchitecture
 ) -> None:
-    path = profiles / "release-amd64-jvm.yaml"
+    path = profiles / f"release-{architecture}-jvm.yaml"
     data = yaml.safe_load(path.read_text())
     if mutation == "missing":
         data["functions"].pop()
@@ -118,7 +131,7 @@ def test_release_profile_drift_fails_before_acquisition(
     elif mutation == "jvm":
         data["functions"][0]["jvm"]["args"] = ["-XX:+UseSerialGC"]
     elif mutation == "native":
-        path = profiles / "release-amd64-native.yaml"
+        path = profiles / f"release-{architecture}-native.yaml"
         data = yaml.safe_load(path.read_text())
         data["functions"][0]["build"]["native"]["gc"] = "serial"
     elif mutation == "modules":
@@ -133,7 +146,7 @@ def test_release_profile_drift_fails_before_acquisition(
         data["undeclared"] = True
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(ValueError, match=r"(?i)release recipe"):
-        _groups(profiles)
+        _groups(profiles, architecture)
 
 
 def test_profile_freeze_uses_raw_bytes(profiles: Path) -> None:
@@ -436,3 +449,56 @@ def test_null_archive_source_is_not_commit_evidence(tmp_path: Path) -> None:
         len(recipe.read_release_distribution(path, group=group, source_commit="a" * 40))
         == 9
     )
+
+
+def test_release_profiles_cover_both_architectures():
+    amd = _groups()
+    arm = _groups(architecture="arm64")
+    for architecture, groups in (("amd64", amd), ("arm64", arm)):
+        assert tuple(len(g.cells) for g in groups) == (9, 12, 23)
+        assert all(g.modules == MODULES for g in groups)
+        assert all(c.architecture == architecture for g in groups for c in g.cells)
+        assert [g.tag for g in groups] == [
+            f"v9.9.9-{architecture}-jvm",
+            f"v9.9.9-{architecture}-native",
+            f"v9.9.9-{architecture}",
+        ]
+        assert all(c.image.endswith(":" + g.tag) for g in groups for c in g.cells)
+        native = yaml.safe_load(groups[1].profile_bytes)
+        assert native["controlPlane"]["build"]["variant"] == "native-o3-g1"
+        assert native["controlPlane"]["build"]["native"] == {
+            "optimization": "3",
+            "gc": "G1",
+        }
+        assert all(
+            f["build"]["native"] == {"optimization": "3", "gc": "serial"}
+            for f in native["functions"]
+            if f["sdk"] == "java-lite"
+        )
+        assert (
+            "container" not in yaml.safe_load(groups[2].profile_bytes)["controlPlane"]
+        )
+    images = [c.image for g in (*amd, *arm) for c in g.cells]
+    assert len(images) == len(set(images)) == 88
+    assert "127.0.0.1:5000/nanofaas/java-lite-word-stats:v9.9.9-arm64-native" in images
+    assert "127.0.0.1:5000/nanofaas/java-warm-echo:v9.9.9-arm64-jvm" in images
+    assert "127.0.0.1:5000/nanofaas/watchdog:v9.9.9-arm64" in images
+
+
+def test_arm_profile_freeze_uses_raw_bytes(profiles):
+    groups = _groups(profiles, "arm64")
+    path = profiles / "release-arm64-jvm.yaml"
+    raw = path.read_bytes()
+    path.write_bytes(raw + b"\n# New raw input identity\n")
+    assert groups[0].profile_bytes == raw
+    assert groups[0].profile_digest == "sha256:" + hashlib.sha256(raw).hexdigest()
+    assert _groups(profiles, "arm64")[0].profile_digest != groups[0].profile_digest
+
+
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
+def test_recipe_group_rejects_wrong_or_mixed_architecture(architecture):
+    plan = build_image_plan(SOURCE, "v9.9.9", architectures=("amd64", "arm64"))
+    with pytest.raises(ValueError, match=r"matrix|architecture"):
+        recipe.prepare_release_recipe_groups(
+            SOURCE, plan, profiles_root=PROFILES, architecture=architecture
+        )

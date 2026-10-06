@@ -19,7 +19,6 @@ from typing import Any
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import CommandTaskSpec
 
-from nanolab.images.bake import render_bake_json
 from nanolab.images.plan import ImagePlan
 from nanolab.release import arm
 from nanolab.release.model import (
@@ -56,7 +55,6 @@ for path in output.rglob("*"):
 """
 
 _SHA256_PREFIX = "sha256:"
-_ARM64_BUILDER_ID = "release.arm64.builder"
 
 
 def _provider_exec(
@@ -524,86 +522,6 @@ def stage_source_archive(
     )
 
 
-def _build_arm64_images(
-    plan: Amd64ReleasePlan,
-    image_plan: ImagePlan,
-    bake_file: Path,
-    provider: object,
-    request: object,
-    remote_bake: str,
-    remote_buildkit: str,
-    remote_source_dir: str,
-    *,
-    registry_upstream: str,
-    stage_inputs: bool = True,
-    manage_resources: bool = True,
-) -> tuple[ArtifactEvidence, ...]:
-    if stage_inputs:
-        bake_file.write_text(render_bake_json(image_plan), encoding="utf-8")
-        _provider_exec(
-            provider, request, ("mkdir", "-p", str(Path(remote_bake).parent))
-        )
-        for source, destination in (
-            (bake_file, remote_bake),
-            (plan.buildkit_config, remote_buildkit),
-        ):
-            _provider_transfer_to(
-                provider,
-                request,
-                source=source,
-                destination=destination,
-                action=f"transfer {source.name}",
-            )
-    if manage_resources:
-        _reset_named_builder(plan, provider, request)
-    commands = arm.arm64_build_commands(
-        image_plan,
-        builder_name=plan.builder.name,
-        remote_bake_file=remote_bake,
-        remote_buildkit_config=remote_buildkit,
-        remote_source_dir=remote_source_dir,
-        registry_upstream=registry_upstream,
-    )
-    if not manage_resources:
-        commands = tuple(
-            command
-            for command in commands
-            if command.task_id
-            not in {
-                "release.arm64.registry-tunnel",
-                "release.arm64.builder-create",
-                _ARM64_BUILDER_ID,
-            }
-        )
-    for command in commands:
-        result = _provider_exec(
-            provider,
-            request,
-            command.argv,
-            remote_dir=command.options.remote_dir,
-            # The builder task's stdout is parsed below — keep it clean.
-            bounded=command.task_id != _ARM64_BUILDER_ID,
-        )
-        if command.task_id == _ARM64_BUILDER_ID:
-            arm.require_arm64_builder(str(getattr(result, "stdout", "")))
-
-    for cell in image_plan.cells:
-        _require_image_architecture(provider, request, cell.image, "arm64")
-        _inspect_image_digest(provider, request, cell.image)
-    for cell in image_plan.cells:
-        _provider_exec(provider, request, ("docker", "push", cell.image), bounded=True)
-    evidence = tuple(
-        ArtifactEvidence(
-            "remote",
-            f"docker://{cell.image}",
-            _inspect_registry_digest(provider, request, cell.image),
-        )
-        for cell in image_plan.cells
-    )
-    arm.require_complete_arm64_evidence(image_plan, evidence)
-    return evidence
-
-
 def _smoke_arm64_images(
     plan: Amd64ReleasePlan,
     image_plan: ImagePlan,
@@ -630,7 +548,7 @@ def _smoke_arm64_images(
         for cell in image_plan.cells
     )
     if _evidence_map(current) != _evidence_map(expected):
-        raise RuntimeError("arm64-build evidence changed before smoke")
+        raise RuntimeError("ARM64 registry evidence changed before smoke")
     digests = {artifact.reference: artifact.digest for artifact in expected}
     checked_servers: list[str] = []
     for smoke in arm.server_smoke_specs(image_plan):
@@ -682,25 +600,6 @@ def _smoke_arm64_images(
         },
     )
     return (marker,)
-
-
-def _require_image_architecture(
-    provider: object,
-    request: object,
-    reference: str,
-    expected: str,
-) -> None:
-    result = _provider_exec(
-        provider,
-        request,
-        ("docker", "image", "inspect", "--format={{.Architecture}}", reference),
-    )
-    actual = str(getattr(result, "stdout", "")).strip()
-    if actual != expected:
-        raise RuntimeError(
-            f"image architecture mismatch for {reference}: "
-            f"expected {expected}, got {actual or 'empty'}"
-        )
 
 
 def _smoke_arm64_server(
@@ -780,26 +679,6 @@ def _smoke_arm64_server(
 def _pinned_image(tagged: str, digest: str) -> str:
     repository, _ = tagged.rsplit(":", 1)
     return f"{repository}@{digest}"
-
-
-def _reset_named_builder(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-) -> None:
-    result = provider.exec_argv(  # type: ignore[attr-defined]
-        request,
-        ("docker", "buildx", "inspect", plan.builder.name),
-        env=None,
-        remote_dir=None,
-        dry_run=False,
-    )
-    if int(getattr(result, "return_code", 0)) == 0:
-        _provider_exec(
-            provider,
-            request,
-            ("docker", "buildx", "rm", "--force", plan.builder.name),
-        )
 
 
 def _evidence_map(

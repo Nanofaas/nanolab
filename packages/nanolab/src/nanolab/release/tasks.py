@@ -16,6 +16,7 @@ from sonata_engine import Evidence, ReusableTask, Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
 
+from nanolab.config.environment import ExecutionRole
 from nanolab.release.evidence import is_sha256_digest, receipt_artifacts
 from nanolab.release.model import ArtifactEvidence, ReleaseIdentity, digest_path
 from nanolab.release.remote_retry import retry_on_connection_death
@@ -158,6 +159,15 @@ def registry_push_task(**kwargs: Any) -> ReleasePhaseTask:
     )
 
 
+def arm64_registry_push_task(**kwargs: Any) -> ReleasePhaseTask:
+    """Build the phase that pushes assembled ARM64 images to the local registry."""
+    return ReleasePhaseTask(
+        phase="arm64-local-registry-push",
+        title="Push ARM64 images to local registry",
+        **kwargs,
+    )
+
+
 def benchmark_task(index: int, **kwargs: Any) -> ReleasePhaseTask:
     """Build the phase that runs benchmark number `index`."""
     return ReleasePhaseTask(
@@ -178,7 +188,7 @@ def regression_gate_task(**kwargs: Any) -> ReleasePhaseTask:
 
 
 def arm64_build_task(**kwargs: Any) -> ReleasePhaseTask:
-    """Build the phase that bakes and pushes the ARM64 images."""
+    """Build the phase that assembles the ARM64 recipes."""
     return ReleasePhaseTask(phase="arm64-build", title="Build ARM64 images", **kwargs)
 
 
@@ -229,23 +239,18 @@ def registry_evidence(artifacts: Iterable[ArtifactEvidence]) -> tuple[Evidence, 
 
 
 def registry_artifacts_from_receipt(
-    receipt: Path, images: tuple[str, ...]
+    receipt: Path,
+    images: tuple[str, ...],
+    *,
+    phase: str = "arm64-local-registry-push",
 ) -> tuple[ArtifactEvidence, ...]:
-    """Return the ARM64 build receipt's artifacts, checking image coverage.
-
-    Raises unless the receipt names exactly the `docker://` references in
-    `images`, each with a sha256 digest, so a partial build cannot be read as
-    a complete one.
-    """
-    evidence = receipt_artifacts(receipt, "arm64-build", "local-registry-digest")
-    expected = {f"docker://{image}" for image in images}
-    if (
-        len(evidence) != len(expected)
-        or {item.reference for item in evidence} != expected
-        or any(not is_sha256_digest(item.digest) for item in evidence)
-    ):
-        raise RuntimeError("ARM64 build receipt does not cover the image matrix")
-    return evidence
+    """Require the push receipt to cover exactly the complete registry matrix."""
+    return exact_receipt_artifacts(
+        receipt,
+        phase,
+        "local-registry-digest",
+        tuple("docker://" + image for image in images),
+    )
 
 
 def exact_receipt_artifacts(
@@ -301,21 +306,21 @@ def require_release_barriers(
     gate_file: Path,
     smoke_receipt: Path,
     smoke_file: Path,
-    arm_build_receipt: Path,
+    arm_push_receipt: Path,
     arm_images: tuple[str, ...],
 ) -> tuple[ArtifactEvidence, ...]:
-    """Return the ARM64 build evidence once the pre-publication gates agree.
+    """Return the ARM64 push evidence once the pre-publication gates agree.
 
     Requires a passing regression-gate decision and an ARM smoke record whose
-    architecture and image digests match the ARM build receipt, so publication
+    architecture and image digests match the ARM push receipt, so publication
     cannot start on a release that regressed or smoked the wrong images.
     """
     decision = verified_json_receipt(gate_receipt, "regression-gate", gate_file)
     if decision.get("passed") is not True:
         raise RuntimeError("publication requires a passing regression gate")
     arm_evidence = exact_receipt_artifacts(
-        arm_build_receipt,
-        "arm64-build",
+        arm_push_receipt,
+        "arm64-local-registry-push",
         "local-registry-digest",
         tuple(f"docker://{image}" for image in arm_images),
     )
@@ -327,7 +332,7 @@ def require_release_barriers(
         smoke.get("architecture") != "linux/arm64"
         or smoke.get("images") != expected_images
     ):
-        raise RuntimeError("ARM smoke evidence does not match the ARM build")
+        raise RuntimeError("ARM smoke evidence does not match the ARM push")
     return arm_evidence
 
 
@@ -367,7 +372,9 @@ def _image_inspection_argv(
             *images,
         )
     output_format = (
-        "--format={{.Architecture}}|{{.Id}}" if architecture else "--format={{.Id}}"
+        "--format={{.Os}}|{{.Architecture}}|{{.Id}}"
+        if architecture
+        else "--format={{.Id}}"
     )
     return ("docker", "image", "inspect", output_format, *images)
 
@@ -375,8 +382,14 @@ def _image_inspection_argv(
 def _digest_from_inspection(line: str, image: str, architecture: str | None) -> str:
     if architecture is None:
         return line.strip()
-    actual, separator, digest = line.partition("|")
-    if not separator or actual != architecture:
+    os_type, os_separator, platform = line.partition("|")
+    actual, separator, digest = platform.partition("|")
+    if (
+        os_type != "linux"
+        or not os_separator
+        or not separator
+        or actual != architecture
+    ):
         raise RuntimeError(
             f"image architecture mismatch for {image}: "
             f"expected {architecture}, got {actual or 'empty'}"
@@ -391,22 +404,26 @@ def _image_evidence(image: str, digest: str, *, registry: bool) -> Evidence:
 
 
 def run_image_steps(
-    steps: Task[Any],
+    steps: Task[Any] | None,
     inputs: TaskInputs,
     executor: CommandTaskExecutor,
     images: tuple[str, ...],
     *,
     registry: bool,
     architecture: str | None = None,
+    role: ExecutionRole = "stack",
 ) -> tuple[Evidence, ...]:
     """Run build/push steps and capture the complete current image matrix.
+
+    Pass `steps=None` to inspect only. `architecture` also requires Linux.
 
     `architecture`, when given, asserts every image really carries it: a
     cross-built or mistagged image otherwise inspects cleanly and reaches the
     manifest list, where the mismatch surfaces as a runtime failure on a
     user's machine instead of here.
     """
-    run_steps(steps, inputs)
+    if steps is not None:
+        run_steps(steps, inputs)
     if not images:
         return ()
 
@@ -417,7 +434,7 @@ def run_image_steps(
                 task_id="",
                 summary="Verify image matrix",
                 argv=argv,
-                role="stack",
+                role=role,
             )
         ),
         describe="image matrix verification",

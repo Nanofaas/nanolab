@@ -220,6 +220,9 @@ jobs:
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/release-amd64-jvm.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/release-amd64-native.yaml"
           ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/release-amd64-default.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/release-arm64-jvm.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/release-arm64-native.yaml"
+          ./gradlew validateRecipe -Precipe="$GITHUB_WORKSPACE/packages/nanolab/recipes/release-arm64-default.yaml"
           for profile in "$GITHUB_WORKSPACE"/packages/nanolab/recipes/comparison-*.yaml; do
             ./gradlew validateRecipe -Precipe="$profile"
           done

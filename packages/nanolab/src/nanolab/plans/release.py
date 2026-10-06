@@ -25,18 +25,17 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.plans.release_phases import (
-    build_amd64_phase,
     build_arm64_phase,
     build_attestation_phase,
     build_benchmark_phase,
     build_publication_phase,
+    build_recipe_assembly_phase,
     build_registry_push_phase,
     build_regression_phase,
     build_source_test_phase,
 )
 from nanolab.release import arm as release_arm
 from nanolab.release import publish as release_publish
-from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release.build import extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
@@ -50,7 +49,6 @@ from nanolab.release.model import (
 from nanolab.release.recipe import ReleaseRecipeGroup, prepare_release_recipe_groups
 from nanolab.release.recipe_execution import capture_release_inventory
 from nanolab.release.resources import (
-    build_inputs_resource,
     build_release_resources,
     preserve_release_builder_selection,
     release_execution_guard,
@@ -88,21 +86,35 @@ class ReleaseRequest:
     nanofaas_root: Path | None = None  # defaults to repo_root
     identity: ReleaseIdentity | None = None
     recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
+    arm_image_plan: ImagePlan | None = None
+    arm_recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
     source_archive: Path | None = None
     archive_digest: str = ""
     inventory_file: Path | None = None
 
 
 def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verifier]:
-    """Bind evidence verifiers to the VM that serves registry inspection.
-
-    Which host that is belongs to the release plan, not to the caller: a
-    verifier pointed at the wrong VM fails closed and is indistinguishable
-    from invalidated evidence.
-    """
+    """Route local image proof by frozen matrices and registry proof via stack."""
+    stack = vm_request_for_role(request.environment, "stack", loadtest=True)
+    arm = vm_request_for_role(request.environment, "arm-builder")
+    image_requests: dict[str, object] = {}
+    for plan, architecture, owner in (
+        (request.image_plan, "amd64", stack),
+        (request.arm_image_plan, "arm64", arm),
+    ):
+        if plan is None or not plan.cells:
+            raise ValueError("Release verifiers require both frozen image matrices")
+        for cell in plan.cells:
+            if cell.architecture != architecture:
+                raise ValueError("Release verifier matrix architecture differs")
+            reference = "docker-daemon:" + cell.image
+            if reference in image_requests:
+                raise ValueError(
+                    "Ambiguous or duplicate release verifier matrix reference"
+                )
+            image_requests[reference] = owner
     return release_evidence_verifiers(
-        provider,
-        vm_request_for_role(request.environment, "stack", loadtest=True),
+        provider, stack, local_image_requests=image_requests,
         credentials=request.credentials,
     )
 
@@ -208,6 +220,18 @@ def build_release_request(
     recipe_groups = prepare_release_recipe_groups(
         planning_root, image_plan, profiles_root=tool_root / "recipes"
     )
+    arm_image_plan = build_image_plan(
+        planning_root,
+        version_tag,
+        registry=image_plan.registry,
+        architectures=("arm64",),
+    )
+    arm_recipe_groups = prepare_release_recipe_groups(
+        planning_root,
+        arm_image_plan,
+        profiles_root=tool_root / "recipes",
+        architecture="arm64",
+    )
 
     after = git_state(source_root)
     if not after.clean or after.commit != source_commit:
@@ -240,6 +264,8 @@ def build_release_request(
         source_tree=planning_root,
         credentials=credentials,
         recipe_groups=recipe_groups,
+        arm_image_plan=arm_image_plan,
+        arm_recipe_groups=arm_recipe_groups,
         source_archive=source_archive,
         archive_digest=archive_digest,
         inventory_file=inventory_file,
@@ -286,6 +312,8 @@ def build_release_workflow(
 
     if (
         not request.recipe_groups
+        or request.arm_image_plan is None
+        or not request.arm_recipe_groups
         or request.source_archive is None
         or request.inventory_file is None
     ):
@@ -306,6 +334,27 @@ def build_release_workflow(
         for g in request.recipe_groups
     ):
         raise ValueError("Frozen recipe bytes changed")
+
+    arm_plan = request.arm_image_plan
+    if (
+        arm_plan.version != expected_image_tag
+        or arm_plan.registry != request.image_plan.registry
+        or not arm_plan.cells
+        or any(c.architecture != "arm64" for c in arm_plan.cells)
+    ):
+        raise ValueError("Frozen ARM recipe matrix does not match release")
+    arm_groups = request.arm_recipe_groups
+    if tuple(g.flavor for g in arm_groups) != ("jvm", "native", "default"):
+        raise ValueError("Release requires all three frozen ARM recipe groups")
+    if sorted(
+        (c for g in arm_groups for c in g.cells), key=lambda c: c.image
+    ) != sorted(arm_plan.cells, key=lambda c: c.image):
+        raise ValueError("Frozen ARM recipe image matrix changed")
+    if any(
+        g.profile_digest != "sha256:" + hashlib.sha256(g.profile_bytes).hexdigest()
+        for g in arm_groups
+    ):
+        raise ValueError("Frozen ARM recipe bytes changed")
 
     if provider is None:
         provider = provider_for(vm_request_for_role(env, "stack"), request.repo_root)
@@ -377,7 +426,9 @@ def build_release_workflow(
     amd64_builder = preserve_release_builder_selection(
         amd64_builder, executor=executor, name=amd64_builder_name
     )
-    release_images, amd64_build = build_amd64_phase(
+    release_images, amd64_build = build_recipe_assembly_phase(
+        architecture="amd64",
+        role="stack",
         identity=identity,
         run_dir=request.run_dir,
         image_plan=request.image_plan,
@@ -386,7 +437,7 @@ def build_release_workflow(
         remote_root=remote_root,
         source_dir=source_dir,
         executor=executor,
-        source_tests=source_tests,
+        prerequisite_phases=(source_tests,),
         recipe_groups=request.recipe_groups,
         provider=provider,
         request=stack_req,
@@ -396,13 +447,15 @@ def build_release_workflow(
 
     # --- Phase 3: Registry Push ---
     registry_push = build_registry_push_phase(
+        architecture="amd64",
+        role="stack",
         identity=identity,
         run_dir=request.run_dir,
         image_plan=request.image_plan,
         release_images=release_images,
         executor=executor,
-        source_tests=source_tests,
-        amd64_build=amd64_build,
+        prerequisite_phases=(source_tests,),
+        assembly=amd64_build,
     )
 
     # --- Phases 4-6: Benchmarks ---
@@ -445,15 +498,11 @@ def build_release_workflow(
     aggregate, reg_gate = regression_tasks
 
     # --- Phase 9: ARM64 Build ---
-    arm_plan = build_arm64_image_plan(
-        request.source_tree,
-        request.version,
-        registry=request.image_plan.registry,
-    )
-    arm_inputs = build_inputs_resource(
-        image_plan=arm_plan,
+    arm_plan = request.arm_image_plan
+    arm_inputs = release_recipe_inputs_resource(
+        groups=request.arm_recipe_groups,
         max_parallelism=request.settings.max_parallelism,
-        run_dir=release_dir,
+        run_dir=release_dir / "recipe-inputs/arm64",
         remote_root=remote_root,
         provider=provider,
         request=arm_req,
@@ -475,23 +524,33 @@ def build_release_workflow(
         executor=executor,
         role="arm-builder",
         requires=(infrastructure.arm_builder, arm_inputs),
-        buildkitd_config=f"{remote_root}/buildkitd-arm64.toml",
+        buildkitd_config=f"{remote_root}/recipe-inputs/arm64/buildkitd-arm64.toml",
+        driver_options=("default-load=true",),
         validate=release_arm.require_arm64_builder,
         validation_key="nanolab.release.arm64-builder:v1",
         replace_existing=True,
     )
-    arm_runtime_plan, arm_images, arm64_build, arm64_smoke = build_arm64_phase(
-        request=request,
-        identity=identity,
-        release_dir=release_dir,
-        nanofaas=nanofaas,
-        arm_plan=arm_plan,
-        remote_root=remote_root,
-        source_dir=source_dir,
-        provider=provider,
-        arm_request=arm_req,
-        reg_gate=reg_gate,
-        source_tests=source_tests,
+    arm64_builder = preserve_release_builder_selection(
+        arm64_builder,
+        executor=executor,
+        name=f"release-arm64-{request.version}",
+        role="arm-builder",
+    )
+    arm_runtime_plan, arm_images, arm64_build, arm64_push, arm64_smoke = (
+        build_arm64_phase(
+            request=request,
+            executor=executor,
+            identity=identity,
+            release_dir=release_dir,
+            nanofaas=nanofaas,
+            arm_plan=arm_plan,
+            remote_root=remote_root,
+            source_dir=source_dir,
+            provider=provider,
+            arm_request=arm_req,
+            reg_gate=reg_gate,
+            source_tests=source_tests,
+        )
     )
 
     # --- Publish, attest, and finalize ---
@@ -510,7 +569,7 @@ def build_release_workflow(
         release_images=release_images,
         registry_push=registry_push,
         reg_gate=reg_gate,
-        arm64_build=arm64_build,
+        arm64_push=arm64_push,
         arm64_smoke=arm64_smoke,
         arm_images=arm_images,
         arm_runtime_plan=arm_runtime_plan,
@@ -583,11 +642,14 @@ def build_release_workflow(
         requires=(
             infrastructure.stack,
             infrastructure.arm_builder,
-            tunnel,
             arm64_builder,
             sources.arm,
             arm_inputs,
         ),
+    )
+    wf.add(  # pyright: ignore[reportArgumentType]
+        arm64_push,
+        requires=(infrastructure.stack, infrastructure.arm_builder, tunnel),
     )
     # ARM64 gets a smoke phase and AMD64 does not, on purpose: the three
     # benchmark runs exercise every AMD64 image from the local registry and

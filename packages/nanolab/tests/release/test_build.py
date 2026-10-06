@@ -12,7 +12,7 @@ import pytest
 from nanolab.images.plan import build_image_plan
 from nanolab.release import arm
 from nanolab.release import build as release_build
-from nanolab.release.model import digest_path
+from nanolab.release.model import ArtifactEvidence, digest_path
 
 from ._release_support import (
     NANOFAAS_ROOT,
@@ -94,62 +94,29 @@ def test_amd64_commands_delegate_all_image_builds_to_root_recipes() -> None:
     }
 
 
-def test_sonata_owned_arm_resources_are_not_recreated_and_every_image_is_pushed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    plan = _plan(tmp_path, monkeypatch)
+def _arm_registry_fixture(plan, provider):
+    """External registry fixture for smoke, separate from assembly/push tests."""
     arm_plan = arm.build_arm64_image_plan(
         plan.repo_root, plan.version, registry=plan.image_plan.registry
     )
-    events: list[str] = []
-    provider = _ReleaseProvider(events)
-
-    evidence = release_build._build_arm64_images(
-        plan,
-        arm_plan,
-        tmp_path / "docker-bake-arm64.json",
-        provider,
-        object(),
-        "/release/docker-bake-arm64.json",
-        "/release/buildkitd.toml",
-        "/release/source",
-        registry_upstream="",
-        stage_inputs=False,
-        manage_resources=False,
+    for cell in arm_plan.cells:
+        provider.registry_digests[cell.image] = "sha256:" + "b" * 64
+    return arm_plan, tuple(
+        ArtifactEvidence(
+            "remote", "docker://" + cell.image, provider.registry_digests[cell.image]
+        )
+        for cell in arm_plan.cells
     )
 
-    assert len(evidence) == len(arm_plan.cells)
-    assert sum(event.startswith("exec:docker push") for event in events) == len(
-        arm_plan.cells
-    )
-    assert not any("buildx create" in event for event in events)
-    assert not any("nanofaas-registry-tunnel" in event for event in events)
 
-
-def _arm64_build_and_smoke(plan, provider, events: list[str]):
-    """Drive the two ARM64 phases the Sonata DAG calls, in DAG order."""
-    arm_plan = arm.build_arm64_image_plan(
-        plan.repo_root, plan.version, registry=plan.image_plan.registry
-    )
-    built = release_build._build_arm64_images(
-        plan,
-        arm_plan,
-        plan.run_dir / "docker-bake-arm64.json",
-        provider,
-        object(),
-        "/release/docker-bake-arm64.json",
-        "/release/buildkitd.toml",
-        "/release/source",
-        registry_upstream="",
-        stage_inputs=False,
-        manage_resources=False,
-    )
+def _arm64_smoke(plan, provider, events):
+    arm_plan, evidence = _arm_registry_fixture(plan, provider)
     return arm_plan, release_build._smoke_arm64_images(
         plan,
         arm_plan,
         provider,
         object(),
-        built,
+        evidence,
         registry_upstream="",
         ensure_tunnel=False,
     )
@@ -162,7 +129,7 @@ def test_arm64_smoke_health_checks_every_server_and_probes_the_watchdog(
     events: list[str] = []
     provider = _ReleaseProvider(events)
 
-    arm_plan, evidence = _arm64_build_and_smoke(plan, provider, events)
+    arm_plan, evidence = _arm64_smoke(plan, provider, events)
 
     marker = json.loads((plan.run_dir / "arm64-smoke.json").read_text(encoding="utf-8"))
     assert [artifact.reference for artifact in evidence] == [
@@ -191,22 +158,7 @@ def test_arm64_smoke_refuses_evidence_that_moved_since_the_build(
     plan = _plan(tmp_path, monkeypatch)
     events: list[str] = []
     provider = _ReleaseProvider(events)
-    arm_plan = arm.build_arm64_image_plan(
-        plan.repo_root, plan.version, registry=plan.image_plan.registry
-    )
-    built = release_build._build_arm64_images(
-        plan,
-        arm_plan,
-        plan.run_dir / "docker-bake-arm64.json",
-        provider,
-        object(),
-        "/release/docker-bake-arm64.json",
-        "/release/buildkitd.toml",
-        "/release/source",
-        registry_upstream="",
-        stage_inputs=False,
-        manage_resources=False,
-    )
+    arm_plan, built = _arm_registry_fixture(plan, provider)
     moved = arm_plan.cells[0].image
     provider.registry_digests[moved] = "sha256:" + "f" * 64
 
@@ -245,7 +197,7 @@ def test_arm64_smoke_server_failures_still_remove_the_container(
     provider = _ArmFailureProvider(events, failure)
 
     with pytest.raises(RuntimeError, match=error):
-        _arm64_build_and_smoke(plan, provider, events)
+        _arm64_smoke(plan, provider, events)
 
     assert "exec:docker rm --force nanofaas-arm64-smoke-1" in events
     assert not (plan.run_dir / "arm64-smoke.json").exists()
@@ -262,7 +214,7 @@ def test_arm64_smoke_cleanup_does_not_hide_a_provider_programming_error(
 
     plan = _plan(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="bad cleanup contract"):
-        _arm64_build_and_smoke(plan, BrokenCleanupProvider([], "health"), [])
+        _arm64_smoke(plan, BrokenCleanupProvider([], "health"), [])
 
 
 def test_arm64_smoke_rejects_a_watchdog_that_fails_the_wrong_way(
@@ -273,35 +225,9 @@ def test_arm64_smoke_rejects_a_watchdog_that_fails_the_wrong_way(
     provider = _ArmFailureProvider(events, "watchdog")
 
     with pytest.raises(RuntimeError, match="exec format error"):
-        _arm64_build_and_smoke(plan, provider, events)
+        _arm64_smoke(plan, provider, events)
 
     assert not (plan.run_dir / "arm64-smoke.json").exists()
-
-
-@pytest.mark.parametrize(
-    ("failure", "error"),
-    [
-        ("bake", "arm bake failed"),
-        ("architecture", "image architecture mismatch"),
-        ("push", "arm push failed"),
-    ],
-)
-def test_arm64_build_failures_never_produce_evidence(
-    failure: str,
-    error: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    plan = _plan(tmp_path, monkeypatch)
-    events: list[str] = []
-    provider = _ArmFailureProvider(events, failure)
-
-    with pytest.raises(RuntimeError, match=error):
-        _arm64_build_and_smoke(plan, provider, events)
-
-    rendered = "\n".join(events).lower()
-    assert "ghcr.io" not in rendered
-    assert "docker login" not in rendered
 
 
 def test_source_archive_contains_only_the_exact_guarded_commit(tmp_path: Path) -> None:

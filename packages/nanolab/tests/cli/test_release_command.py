@@ -651,8 +651,29 @@ def test_teardown_refuses_flags_that_describe_running_a_workflow(
     assert "Traceback" not in result.output
 
 
+@pytest.mark.parametrize(
+    ("until", "included", "excluded"),
+    [
+        (
+            "push-amd64-images-to-local-registry",
+            "Push AMD64 images to local registry",
+            "Run release benchmark 1",
+        ),
+        (
+            "build-arm64-images",
+            "Build ARM64 images",
+            "Push ARM64 images to local registry",
+        ),
+        (
+            "push-arm64-images-to-local-registry",
+            "Push ARM64 images to local registry",
+            "Test ARM64 images",
+        ),
+        ("test-arm64-images", "Test ARM64 images", "Publish architecture images"),
+    ],
+)
 def test_release_recipe_prefix_until_staging_push_compiles_without_cloud(
-    release_cli_harness, monkeypatch
+    release_cli_harness, monkeypatch, until, included, excluded
 ) -> None:
     from sonata_engine import Selection
 
@@ -662,9 +683,7 @@ def test_release_recipe_prefix_until_staging_push_compiles_without_cloud(
 
     def build(request, *, provider=None):
         workflow = build_release_workflow(request, provider=provider)
-        prefix = workflow.compile(
-            select=Selection(until="push-amd64-images-to-local-registry")
-        )
+        prefix = workflow.compile(select=Selection(until=until))
         compiled.extend(item.task.title for item in prefix.tasks)
         return workflow
 
@@ -681,16 +700,14 @@ def test_release_recipe_prefix_until_staging_push_compiles_without_cloud(
             "--run-dir",
             str(release_cli_harness.release_dir.parent.parent),
             "--until",
-            "push-amd64-images-to-local-registry",
+            until,
         ],
     )
     assert result.exit_code == 0, result.output
     assert "Run source tests" in compiled
     assert "Build AMD64 images" in compiled
-    assert "Push AMD64 images to local registry" in compiled
+    assert included in compiled
+    assert excluded not in compiled
     assert not any(
-        title.startswith("Run release benchmark")
-        or title.startswith("Publish")
-        or title.startswith("Attest")
-        for title in compiled
+        title.startswith("Publish") or title.startswith("Attest") for title in compiled
     )
