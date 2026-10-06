@@ -174,7 +174,7 @@ def test_aggregate_runs_rejects_error_rate_above_one() -> None:
     summary = cast(dict[str, Any], _summary(20))
     summary["k6"]["http_req_failed"]["values"]["rate"] = 1.01
 
-    with pytest.raises(ValueError, match=r"errorRate.*between 0 and 1"):
+    with pytest.raises(ValueError, match=r"http_req_failed.*between 0 and 1"):
         aggregate_runs(PROFILE, (summary,) * 3)
 
 

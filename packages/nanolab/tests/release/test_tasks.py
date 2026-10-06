@@ -1053,6 +1053,7 @@ def _arm_recipe_phases(tmp_path):
     return phase, push, executor
 
 
+@pytest.mark.nanofaas
 def test_arm_assembly_and_push_have_distinct_receipts(tmp_path):
     build, push, executor = _arm_recipe_phases(tmp_path)
     build.run(TaskInputs.empty())
@@ -1092,6 +1093,7 @@ def test_arm_assembly_and_push_have_distinct_receipts(tmp_path):
     assert executor.commands[-1].role == "stack"
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("mutation", ["id", "windows", "amd64"])
 def test_changed_local_image_blocks_push_before_first_command(tmp_path, mutation):
     build, push, executor = _arm_recipe_phases(tmp_path)
@@ -1106,6 +1108,7 @@ def test_changed_local_image_blocks_push_before_first_command(tmp_path, mutation
     assert not push.receipt.exists()
 
 
+@pytest.mark.nanofaas
 def test_old_combined_arm_receipt_is_not_local_assembly_proof(tmp_path):
     build, push, executor = _arm_recipe_phases(tmp_path)
     build.receipt.parent.mkdir(parents=True, exist_ok=True)

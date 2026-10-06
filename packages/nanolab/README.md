@@ -195,7 +195,7 @@ uv run pytest -q
 uv run ruff check .
 uv run basedpyright
 uv run lint-imports
-uv run nanolab-package-report
+uv run python -m nanolab.devtools.package_report
 uv run pydeps nanolab
 ```
 

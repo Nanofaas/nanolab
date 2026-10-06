@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,8 +9,11 @@ import pytest
 
 from nanolab.images.bake import render_bake, render_bake_json
 from nanolab.images.plan import build_image_plan
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 
 
 def _plan():

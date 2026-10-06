@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 
 # The .example, not the working copy: `.gitignore` excludes

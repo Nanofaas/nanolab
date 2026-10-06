@@ -18,6 +18,8 @@ from nanolab.release.tasks import source_test_task
 
 from ._release_support import _plan, _summary
 
+pytestmark = pytest.mark.nanofaas
+
 
 def _registry_receipt(plan) -> Path:
     path = plan.run_dir / "local-registry-push.json"

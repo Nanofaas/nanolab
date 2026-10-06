@@ -25,6 +25,7 @@ def test_no_profile_means_the_generator_keeps_its_built_in_text(tmp_path: Path) 
     assert payload_corpus_path(_config(), tmp_path, "word-stats-java") is None
 
 
+@pytest.mark.nanofaas
 def test_a_profile_resolves_to_the_family_corpus(tmp_path: Path) -> None:
     corpus = (
         tmp_path / "functions" / "test-data" / "word-stats" / "performance-medium.json"
@@ -39,6 +40,7 @@ def test_a_profile_resolves_to_the_family_corpus(tmp_path: Path) -> None:
     assert resolved == corpus
 
 
+@pytest.mark.nanofaas
 def test_the_family_is_shared_across_runtimes(tmp_path: Path) -> None:
     """word-stats-java and word-stats-java-lite are one family, and one corpus.
 
@@ -62,6 +64,7 @@ def test_the_family_is_shared_across_runtimes(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.nanofaas
 def test_a_missing_corpus_fails_loudly(tmp_path: Path) -> None:
     """Silently falling back would leave the run measuring an idle function.
 

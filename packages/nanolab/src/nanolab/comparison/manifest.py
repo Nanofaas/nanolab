@@ -15,12 +15,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.application.functions import ResolvedFunction, resolve_function
+from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.comparison.matrix import ComparisonCell
 from nanolab.comparison.profiles import COMPARISON_SCHEDULER_STRATEGY, declared_options
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.functions import ResolvedFunction, resolve_function
 from nanolab.tasks.vm.models import VmRequest
 
 

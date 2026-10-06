@@ -121,7 +121,7 @@ class _CompileOnlyExecutor:
 
 
 def test_function_registration_uses_api_not_management_readiness(tmp_path, monkeypatch):
-    import nanolab.plans.soak as module
+    import nanolab.tasks.soak.composition as module
 
     digest = "registry/image@sha256:" + "b" * 64
     request = PlatformRequest(
@@ -194,6 +194,7 @@ def test_the_plan_acquires_a_builder_that_can_reach_the_local_registry(
     assert seen[0]["driver_options"] == ("network=host",)
 
 
+@pytest.mark.nanofaas
 def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
     scenario = (
         Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
@@ -232,6 +233,7 @@ def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
     assert "-PcontainerdMavenLocal=true" in build.argv
 
 
+@pytest.mark.nanofaas
 def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
     scenario = (
         Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
@@ -256,6 +258,7 @@ def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
         )
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     ("role", "field", "value"),
     [
@@ -293,6 +296,7 @@ def test_containerd_soak_rejects_unapplied_image_recipe_before_acquisition(
     assert not (tmp_path / "run").exists()
 
 
+@pytest.mark.nanofaas
 def test_containerd_soak_refuses_unimplemented_p24_diagnostics(tmp_path):
     scenario = (
         Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"

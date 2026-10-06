@@ -11,9 +11,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from nanolab.metrics.interpretation import point_stats as _point_stats
 from nanolab.tasks.loadtest.models import PrometheusQuery, TimeWindow
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
-from nanolab.tasks.loadtest.prometheus import counter_delta, is_counter
+from nanolab.tasks.loadtest.prometheus import is_counter
 
 if TYPE_CHECKING:
     from nanolab.tasks.loadtest.autoscaling import AutoscalingResult
@@ -277,27 +278,6 @@ class WriteK6Report:
         dest = self.output_dir / "report.html"
         dest.write_text(html, encoding="utf-8")
         return dest
-
-
-def _point_stats(
-    points: list[dict], *, counter: bool = False
-) -> dict[str, float | int]:
-    merged: dict[str, float] = {}
-    for index, point in enumerate(points):
-        if "value" in point:
-            timestamp = point.get("timestamp", str(index))
-            merged[timestamp] = merged.get(timestamp, 0.0) + float(point["value"])
-    values = list(merged.values())
-    if not values:
-        return {"points": 0}
-    return {
-        "points": len(values),
-        "first": values[0],
-        "last": values[-1],
-        "delta": counter_delta(points) if counter else values[-1] - values[0],
-        "min": min(values),
-        "max": max(values),
-    }
 
 
 @dataclass

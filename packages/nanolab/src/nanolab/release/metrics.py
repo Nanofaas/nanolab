@@ -9,6 +9,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
+from nanolab.metrics.interpretation import k6_value, k6_values
+
 
 @dataclass(frozen=True, slots=True)
 class PerformanceProfile:
@@ -254,14 +256,7 @@ def _extract_metrics(summary: Mapping[str, Any]) -> dict[str, float]:
 
 
 def _k6_value(k6: Mapping[str, Any], metric: str, *names: str) -> float:
-    entry = _mapping(k6, metric)
-    values = entry.get("values", entry)
-    if not isinstance(values, Mapping):
-        raise ValueError(f"k6.{metric} must be a mapping")
-    for name in names:
-        if name in values:
-            return _number(values, name)
-    raise ValueError(f"k6.{metric} is missing {' or '.join(names)}")
+    return k6_value(k6_values(k6, metric), metric, *names)
 
 
 def _prometheus_value(prometheus: Mapping[str, Any], metric: str, name: str) -> float:

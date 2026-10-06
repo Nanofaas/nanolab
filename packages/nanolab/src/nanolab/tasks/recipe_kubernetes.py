@@ -146,7 +146,7 @@ def _node_images(
             "json",
         ),
     )
-    images = data.get("images", [])
+    images = data.get("images")
     if not isinstance(images, list):
         raise ValueError("CRI image list is malformed")
     return images

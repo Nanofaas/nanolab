@@ -26,8 +26,12 @@ import typer
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.vm.ports import VmCommandProvider
 
+from nanolab.application.functions import resolve_function
+from nanolab.application.vm_provider import (
+    provider_for_environment,
+    vm_request_for_role,
+)
 from nanolab.cli.progress import ConsoleProgressSink
-from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
 from nanolab.comparison.evidence import require_recorded_publications
 from nanolab.comparison.manifest import (
     ComparisonManifest,
@@ -57,7 +61,6 @@ from nanolab.comparison.target import read_comparison_target, require_comparison
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
-from nanolab.plans.functions import resolve_function
 from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
 from nanolab.tasks.recipe_remote import remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest

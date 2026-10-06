@@ -305,6 +305,7 @@ def test_heap_analysis_routes_before_comparison_and_plan_has_no_side_effects(
     assert not (tmp_path / "runs").exists()
 
 
+@pytest.mark.nanofaas
 def test_heap_analysis_rejects_non_local_environment(monkeypatch):
     from nanolab.cli import product
 

@@ -737,7 +737,7 @@ def test_public_terminal_is_published_only_after_cleanup(
 ):
     from sonata_engine import Resource, Task, TaskOutcome
 
-    import nanolab.plans.soak as plans
+    import nanolab.tasks.soak.composition as plans
     import nanolab.tasks.soak.runtime as module
     from nanolab.tasks.soak.runtime import RuntimeOptions
 
@@ -1131,7 +1131,7 @@ def test_explicit_helper_option_cannot_override_frozen_map(tmp_path):
 
 
 def process_arguments_fixture(tmp_path, monkeypatch, body=b"-XX:TieredStopAtLevel=1\n"):
-    import nanolab.tasks.soak.runtime as module
+    import nanolab.tasks.soak.observations as module
 
     directory = tmp_path / "proc/123"
     cgroup = directory / "root/sys/fs/cgroup"

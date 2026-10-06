@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import pytest
@@ -7,8 +6,11 @@ from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.offload import build_offload_plan
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 
 

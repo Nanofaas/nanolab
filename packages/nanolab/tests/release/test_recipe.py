@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -14,8 +13,10 @@ import yaml
 
 from nanolab.images.plan import ImageArchitecture, build_image_plan
 from nanolab.release import recipe
+from tests.conftest import source_contract_root
 
-SOURCE = Path(os.environ["NANOFAAS_ROOT"])
+pytestmark = pytest.mark.nanofaas
+
 PROFILES = Path(__file__).resolve().parents[2] / "recipes"
 MODULES = (
     "async-queue",
@@ -30,13 +31,15 @@ MODULES = (
 
 
 def _groups(profiles: Path = PROFILES, architecture: ImageArchitecture = "amd64"):
-    plan = build_image_plan(SOURCE, "v9.9.9", architectures=(architecture,))
+    plan = build_image_plan(
+        source_contract_root(), "v9.9.9", architectures=(architecture,)
+    )
     if architecture == "amd64":
         return recipe.prepare_release_recipe_groups(
-            SOURCE, plan, profiles_root=profiles
+            source_contract_root(), plan, profiles_root=profiles
         )
     return recipe.prepare_release_recipe_groups(
-        SOURCE, plan, profiles_root=profiles, architecture=architecture
+        source_contract_root(), plan, profiles_root=profiles, architecture=architecture
     )
 
 
@@ -160,21 +163,25 @@ def test_profile_freeze_uses_raw_bytes(profiles: Path) -> None:
 
 
 def test_matrix_catalog_change_fails_preflight() -> None:
-    plan = build_image_plan(SOURCE, "v9.9.9", architectures=("amd64",))
+    plan = build_image_plan(source_contract_root(), "v9.9.9", architectures=("amd64",))
     changed = replace(plan, cells=plan.cells[:-1])
     with pytest.raises(ValueError, match="matrix"):
-        recipe.prepare_release_recipe_groups(SOURCE, changed, profiles_root=PROFILES)
+        recipe.prepare_release_recipe_groups(
+            source_contract_root(), changed, profiles_root=PROFILES
+        )
 
 
 def test_module_catalog_change_fails_preflight(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    shutil.copytree(SOURCE / "platform/modules", source / "platform/modules")
+    shutil.copytree(
+        source_contract_root() / "platform/modules", source / "platform/modules"
+    )
     new = source / "platform/modules/another-module"
     new.mkdir()
     (new / "module.properties").write_text(
         "id=another-module\ndefaultEnabled=false\nconflicts=\n"
     )
-    plan = build_image_plan(SOURCE, "v9.9.9", architectures=("amd64",))
+    plan = build_image_plan(source_contract_root(), "v9.9.9", architectures=("amd64",))
     with pytest.raises(ValueError, match="modules"):
         recipe.prepare_release_recipe_groups(source, plan, profiles_root=PROFILES)
 
@@ -497,8 +504,13 @@ def test_arm_profile_freeze_uses_raw_bytes(profiles):
 
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_recipe_group_rejects_wrong_or_mixed_architecture(architecture):
-    plan = build_image_plan(SOURCE, "v9.9.9", architectures=("amd64", "arm64"))
+    plan = build_image_plan(
+        source_contract_root(), "v9.9.9", architectures=("amd64", "arm64")
+    )
     with pytest.raises(ValueError, match=r"matrix|architecture"):
         recipe.prepare_release_recipe_groups(
-            SOURCE, plan, profiles_root=PROFILES, architecture=architecture
+            source_contract_root(),
+            plan,
+            profiles_root=PROFILES,
+            architecture=architecture,
         )

@@ -12,8 +12,8 @@ from rich.text import Text
 from tui_toolkit import Choice, render_screen_frame, select
 from tui_toolkit.console import console as default_console
 
+from nanolab.application.execution import resolve_loadtest_urls
 from nanolab.cli import diagnostics
-from nanolab.cli.execution import resolve_loadtest_urls
 from nanolab.cli.product import (
     _environment,
     _scenario,

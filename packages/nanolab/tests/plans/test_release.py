@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import os
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import FrozenInstanceError, asdict, replace
@@ -37,9 +36,15 @@ from nanolab.release.recipe import ReleaseRecipeGroup
 from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmInfo
-from tests.conftest import RejectingProvider, captured_release_tree
+from tests.conftest import (
+    RejectingProvider,
+    captured_release_tree,
+    source_contract_root,
+)
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
 

@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import TaskResult
+from sonata_tasks.minikube import MinikubeTarget
 
 from nanolab.tasks.recipe import RecipeImage
 from nanolab.tasks.recipe_kubernetes import (
     RuntimeImageIdentity,
+    _node_images,
     _owned_pods,
     _pod_image_digest,
     _select_manifest_digest,
@@ -14,6 +16,31 @@ from nanolab.tasks.recipe_kubernetes import (
     recipe_namespace_resource,
     verify_runtime_image,
 )
+
+
+@pytest.mark.parametrize("response", ["{}", '{"images": null}', '{"images": {}}'])
+def test_missing_or_malformed_cri_inventory_is_not_an_empty_node(response):
+    executor = FakeExecutor(
+        {
+            (
+                "minikube",
+                "-p",
+                "minikube",
+                "ssh",
+                "--node",
+                "node",
+                "--",
+                "sudo",
+                "crictl",
+                "images",
+                "-o",
+                "json",
+            ): response,
+        }
+    )
+    target = MinikubeTarget(profile="minikube", context="minikube", nodes=("node",))
+    with pytest.raises(ValueError, match="CRI image list is malformed"):
+        _node_images(executor, TaskInputs.empty(), target, "node")
 
 
 class FakeExecutor:

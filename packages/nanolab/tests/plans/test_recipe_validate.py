@@ -23,6 +23,7 @@ def multiarch_profile(tmp_path: Path, **overrides) -> Path:
     return profile
 
 
+@pytest.mark.nanofaas
 def test_multiarch_plan_reuses_container_lifecycle_without_builds(
     tmp_path: Path,
 ) -> None:
@@ -54,6 +55,7 @@ def test_multiarch_plan_reuses_container_lifecycle_without_builds(
     assert not run_dir.exists()
 
 
+@pytest.mark.nanofaas
 def test_multiarch_planning_has_no_host_side_effects(tmp_path: Path) -> None:
     test_multiarch_plan_reuses_container_lifecycle_without_builds(tmp_path)
 
@@ -123,6 +125,7 @@ def test_multiarch_profile_matches_existing_jvm_contract() -> None:
     assert profile["registry"]["provenance"] is False
 
 
+@pytest.mark.nanofaas
 def test_recipe_plan_schedules_publish_without_legacy_builds(tmp_path: Path) -> None:
     profile = (
         Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
@@ -151,6 +154,7 @@ def test_recipe_plan_schedules_publish_without_legacy_builds(tmp_path: Path) -> 
     assert not executor.seen
 
 
+@pytest.mark.nanofaas
 def test_one_kubernetes_recipe_scenario_uses_provider_specific_delivery(
     tmp_path: Path,
 ) -> None:
@@ -217,6 +221,7 @@ def test_unsupported_recipe_provider_fails_before_provisioning(tmp_path: Path) -
         require_recipe_environment(config, external)
 
 
+@pytest.mark.nanofaas
 def test_container_recipe_services_join_existing_validation_cycle(
     tmp_path: Path,
 ) -> None:
@@ -258,6 +263,7 @@ def test_container_recipe_services_join_existing_validation_cycle(
     assert not executor.seen
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     ("entries", "message"),
     [
@@ -271,7 +277,7 @@ def test_invalid_recipe_service_fails_before_provisioning(
     tmp_path: Path, entries: list[dict[str, str]], message: str
 ) -> None:
 
-    from nanolab.plans.functions import resolve_recipe_services
+    from nanolab.application.functions import resolve_recipe_services
 
     profile = tmp_path / "recipe.yaml"
     profile.write_text(yaml.safe_dump({"services": entries}))
@@ -283,6 +289,7 @@ def test_invalid_recipe_service_fails_before_provisioning(
         )
 
 
+@pytest.mark.nanofaas
 def test_watchdog_recipe_uses_artifact_probe_instead_of_registration(
     tmp_path: Path,
 ) -> None:

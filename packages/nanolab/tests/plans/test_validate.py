@@ -8,10 +8,10 @@ from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.application.functions import resolve_function, sonata_function
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import list_functions
-from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.plans.validate import build_validate_plan
 
 DEPLOYMENT_PAYLOAD = '{"spec":{"template":{"spec":{"containers":[{"resources":{}}]}}}}'
@@ -128,6 +128,7 @@ def _argv(plan: Workflow, fragment: str) -> tuple[str, ...]:
     return matches[0]
 
 
+@pytest.mark.nanofaas
 def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
     host = RecordingExecutor()
     stack = RecordingExecutor()
@@ -143,6 +144,7 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
     assert host.seen == []
 
 
+@pytest.mark.nanofaas
 def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises() -> (
     None
 ):
@@ -151,6 +153,7 @@ def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises
     assert "-PcontrolPlaneModules=k8s-deployment-provider,sync-queue" in build
 
 
+@pytest.mark.nanofaas
 def test_kubernetes_validation_runs_the_queue_burst_with_k6() -> None:
     stack = RecordingExecutor()
     plan = build_validate_plan(
@@ -167,6 +170,7 @@ def test_kubernetes_validation_runs_the_queue_burst_with_k6() -> None:
     assert "NANOFAAS_FUNCTION=k8s-sync-queue" in burst.argv
 
 
+@pytest.mark.nanofaas
 def test_validate_plan_keeps_container_validation_local() -> None:
     host = RecordingExecutor()
     stack = RecordingExecutor()
@@ -180,6 +184,7 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     assert stack.seen == []
 
 
+@pytest.mark.nanofaas
 def test_containerd_plan_uses_rootless_resource_and_shared_http_checks() -> None:
     plan = _plan("containerd")
     titles = [task.task.title for task in plan.compile().tasks]
@@ -203,6 +208,7 @@ def test_containerd_plan_uses_rootless_resource_and_shared_http_checks() -> None
     )
 
 
+@pytest.mark.nanofaas
 def test_containerd_recovery_plan_uses_containerd_restart() -> None:
     titles = [
         task.task.title
@@ -213,6 +219,7 @@ def test_containerd_recovery_plan_uses_containerd_restart() -> None:
     assert "Acquire Docker Compose project nanofaas-recovery" not in titles
 
 
+@pytest.mark.nanofaas
 def test_persistent_recovery_container_plan_restarts_only_the_control_plane() -> None:
     plan = _plan("container", persistentRecovery=True)
 
@@ -223,6 +230,7 @@ def test_persistent_recovery_container_plan_restarts_only_the_control_plane() ->
     assert "Recover word-stats-java after control-plane restart" in titles
 
 
+@pytest.mark.nanofaas
 def test_persistent_recovery_k8s_plan_restarts_only_the_control_plane() -> None:
     plan = _plan("k8s", persistentRecovery=True)
 
@@ -230,6 +238,7 @@ def test_persistent_recovery_k8s_plan_restarts_only_the_control_plane() -> None:
     assert "Recover word-stats-java after Kubernetes control-plane restart" in titles
 
 
+@pytest.mark.nanofaas
 def test_handler_envelope_validation_adds_a_contract_task_per_function() -> None:
     plan = build_validate_plan(
         ScenarioConfig.model_validate(
@@ -252,6 +261,7 @@ def test_handler_envelope_validation_adds_a_contract_task_per_function() -> None
     assert "Verify word-stats-java HTTP envelope" in titles
 
 
+@pytest.mark.nanofaas
 def test_handler_envelope_validation_requires_every_contract_function() -> None:
     with pytest.raises(ValueError, match="handler envelope requires qr-code-java"):
         build_validate_plan(
@@ -271,6 +281,7 @@ def test_handler_envelope_validation_requires_every_contract_function() -> None:
         )
 
 
+@pytest.mark.nanofaas
 def test_handler_envelope_container_scenario_runs_every_deterministic_function() -> (
     None
 ):
@@ -319,6 +330,7 @@ def test_handler_envelope_container_excludes_only_nondeterministic_catalog_funct
     assert set(config.functions) == example_keys - EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
 
 
+@pytest.mark.nanofaas
 def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> None:
     config = ScenarioConfig.model_validate(
         {
@@ -368,6 +380,7 @@ def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> N
     assert binary[-2] == '{"input":{}}'
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     ("marker", "error"),
     [
@@ -424,6 +437,7 @@ def test_plain_and_header_probe_contracts_reject_unexpected_api_markers(
             )
 
 
+@pytest.mark.nanofaas
 def test_validate_plan_builds_java_lite_with_its_native_dockerfile() -> None:
     image_build = _argv(
         _plan("container", functions=["word-stats-java-lite"]),
@@ -433,6 +447,7 @@ def test_validate_plan_builds_java_lite_with_its_native_dockerfile() -> None:
     assert image_build[-2:] == ("functions/java/word-stats-lite/Dockerfile", ".")
 
 
+@pytest.mark.nanofaas
 def test_container_validation_builds_and_deploys_the_control_plane_with_compose() -> (
     None
 ):
@@ -453,6 +468,7 @@ def test_container_validation_builds_and_deploys_the_control_plane_with_compose(
     ]
 
 
+@pytest.mark.nanofaas
 def test_container_validation_owns_an_isolated_compose_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -585,6 +601,7 @@ def test_async_container_scenario_selects_every_json_output_function() -> None:
     }
 
 
+@pytest.mark.nanofaas
 def test_validate_plan_resolves_build_from_the_function_catalog() -> None:
     artifact_build = _argv(
         _plan("container"), "Build application artifact: word-stats-java"
@@ -595,6 +612,7 @@ def test_validate_plan_resolves_build_from_the_function_catalog() -> None:
     assert image_build[:2] == ("docker", "build")
 
 
+@pytest.mark.nanofaas
 def test_validate_plan_propagates_resource_requests_and_limits() -> None:
     """Assert the resource requests and limits from the manifest.
 
@@ -689,6 +707,7 @@ def test_validate_plan_resolves_function_manifest_from_its_repo_root(
     assert '"image":"registry.example/from-a"' in manifest
 
 
+@pytest.mark.nanofaas
 def test_kubernetes_run_installs_the_chart_and_registers_the_service_address() -> None:
     """Run the whole plan, not just its compiled unit list.
 
@@ -713,6 +732,7 @@ def test_kubernetes_run_installs_the_chart_and_registers_the_service_address() -
     assert stack.argv_for("v1/functions")[-1] == "http://10.43.0.7:8080/v1/functions"
 
 
+@pytest.mark.nanofaas
 def test_retry_backoff_validation_has_explicit_burst_and_hint_steps() -> None:
     plan = _plan("k8s", retryBackoffBurst=True)
     titles = [task.task.title for task in plan.compile().tasks]
@@ -726,6 +746,7 @@ def test_retry_backoff_validation_rejects_other_backends() -> None:
         _plan("container", retryBackoffBurst=True)
 
 
+@pytest.mark.nanofaas
 def test_retry_backoff_settings_have_no_sparse_helm_environment() -> None:
     stack = RecordingExecutor()
     plan = build_validate_plan(

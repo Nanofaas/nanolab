@@ -6,8 +6,8 @@ from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import CommandTaskSpec
 from sonata_tasks.vm.models import VmRequest
 
-import nanolab.cli.execution as execution
-from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
+import nanolab.application.execution as execution
+from nanolab.application.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
 
 
@@ -70,6 +70,7 @@ class RecordingVmProvider:
         return "pve.example", 43090
 
 
+@pytest.mark.nanofaas
 def test_external_stack_uses_ssh_in_remote_repository() -> None:
     runner = RecordingRunner()
     environment = EnvironmentConfig.model_validate(
@@ -220,6 +221,7 @@ def test_container_loadtest_uses_compose_ports() -> None:
     )
 
 
+@pytest.mark.nanofaas
 def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
     runner = RecordingRunner()
     provider = RecordingVmProvider()
@@ -246,6 +248,7 @@ def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
     assert runner.calls == []
 
 
+@pytest.mark.nanofaas
 def test_a_role_without_defaults_sends_no_environment(monkeypatch) -> None:
     """Send no environment when a role declares no defaults.
 
@@ -278,6 +281,7 @@ def test_a_role_without_defaults_sends_no_environment(monkeypatch) -> None:
     assert env is None
 
 
+@pytest.mark.nanofaas
 def test_remote_stack_exports_its_kubeconfig() -> None:
     runner = RecordingRunner()
     environment = EnvironmentConfig.model_validate(
@@ -306,6 +310,7 @@ def test_remote_stack_exports_its_kubeconfig() -> None:
     )
 
 
+@pytest.mark.nanofaas
 def test_distinct_external_loadgen_gets_distinct_executor_and_fetcher() -> None:
     runner = RecordingRunner()
     environment = EnvironmentConfig.model_validate(
@@ -324,6 +329,7 @@ def test_distinct_external_loadgen_gets_distinct_executor_and_fetcher() -> None:
     assert fetcher is not None
 
 
+@pytest.mark.nanofaas
 def test_multipass_three_role_environment_binds_cloud_like_stack(monkeypatch) -> None:
     runner = RecordingRunner()
     provider = RecordingVmProvider()

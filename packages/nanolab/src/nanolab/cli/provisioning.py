@@ -11,7 +11,10 @@ from typing import Any, cast
 from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
-from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
+from nanolab.application.vm_provider import (
+    provider_for_environment,
+    vm_request_for_role,
+)
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.environment import ExecutionRole
 from nanolab.release.environment import secure_release_endpoints

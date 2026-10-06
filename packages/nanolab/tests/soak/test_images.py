@@ -47,6 +47,7 @@ def test_build_key_changes_with_each_input():
     assert key != build_key("sdk-a", "recipe-a", "linux/arm64")
 
 
+@pytest.mark.nanofaas
 def test_all_required_images_have_recipes_without_existing_tags():
     recipes = {recipe.role: recipe for recipe in plan()}
     assert set(recipes) == {"control-plane", "word-stats-java", "word-stats-javascript"}
@@ -66,6 +67,7 @@ def test_all_required_images_have_recipes_without_existing_tags():
     assert target["dockerfile"] == "functions/javascript/word-stats/Dockerfile"
 
 
+@pytest.mark.nanofaas
 def test_native_function_is_compiled_not_replaced_with_jvm():
     recipes = {recipe.role: recipe for recipe in plan(native=True)}
     java = recipes["word-stats-java"]
@@ -78,6 +80,7 @@ def test_native_function_is_compiled_not_replaced_with_jvm():
     assert "-PnativeGc=G1" not in target["args"]["GRADLE_ARGS"]
 
 
+@pytest.mark.nanofaas
 def test_native_g1_preserves_its_explicit_distribution():
     images = specs(True)
     images["word-stats-java"] = ImageBuildSpec(
@@ -91,6 +94,7 @@ def test_native_g1_preserves_its_explicit_distribution():
     assert "-PnativeGc=G1" in args["GRADLE_ARGS"]
 
 
+@pytest.mark.nanofaas
 def test_different_run_tags_do_not_change_build_input_identity():
     first = plan(run_id="run-1")
     second = plan(run_id="run-2")
@@ -98,6 +102,7 @@ def test_different_run_tags_do_not_change_build_input_identity():
     assert first[0].recipe_fingerprint == second[0].recipe_fingerprint
 
 
+@pytest.mark.nanofaas
 def test_modules_are_part_of_the_recipe_identity():
     images = specs()
     images["control-plane"] = ImageBuildSpec(
@@ -106,6 +111,7 @@ def test_modules_are_part_of_the_recipe_identity():
     assert plan()[0].recipe_fingerprint != plan(images=images)[0].recipe_fingerprint
 
 
+@pytest.mark.nanofaas
 def test_prebuilt_is_explicit_and_has_no_build_recipe():
     images = specs()
     image = "registry.test:5000/fn@sha256:" + "a" * 64
@@ -124,11 +130,13 @@ def test_prebuilt_is_explicit_and_has_no_build_recipe():
     assert java.prerequisite_argv is None
 
 
+@pytest.mark.nanofaas
 def test_native_request_cannot_use_a_jvm_recipe():
     with pytest.raises(ValueError, match=r"runtime and variant disagree for"):
         plan(native=True, images=specs(False))
 
 
+@pytest.mark.nanofaas
 def test_unsupported_options_are_not_silently_ignored():
     images = specs()
     images["control-plane"] = ImageBuildSpec(
@@ -138,6 +146,7 @@ def test_unsupported_options_are_not_silently_ignored():
         plan(images=images)
 
 
+@pytest.mark.nanofaas
 def test_receipt_requires_real_base_and_toolchain_evidence(tmp_path):
     from nanolab.tasks.soak.images import freeze_build_receipt
 
@@ -166,6 +175,7 @@ def test_receipt_requires_real_base_and_toolchain_evidence(tmp_path):
     assert receipt.source_fingerprint == "source-fingerprint"
 
 
+@pytest.mark.nanofaas
 def test_prebuilt_digest_mismatch_cannot_be_frozen(tmp_path):
     from nanolab.tasks.soak.images import freeze_build_receipt
 

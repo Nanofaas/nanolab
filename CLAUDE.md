@@ -5,14 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Overview
 
 The standalone home for the operational tooling extracted from nanoFaaS. It is
-a uv workspace with three members:
+a uv workspace with two local members:
 
 - `packages/nanolab` — the nanoFaaS operations CLI and supporting tooling
-  (console scripts: `nanolab`, `nanolab-package-report`, `nanolab-quality`).
+  (console script: `nanolab`).
 - `packages/tui-toolkit` — shared terminal UI components, published separately
   and also consumed by other projects.
-- `sonata-tasks` — pinned to a released version from the Sonata repository, not
-  vendored here.
+Sonata (`sonata-engine` and `sonata-tasks`) is a pinned published dependency,
+not a workspace member.
 
 ## Setup
 
@@ -37,8 +37,9 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 ```
 
 `nanolab` **reads** it (the plan and smoke workflows drive it); it must never
-write to it. Several tests fail with `RuntimeError: NANOFAAS_ROOT must point to
-a nanoFaaS checkout` when the variable is unset — that is the guard, not a bug.
+write to it. Pure tests run without it. Checkout contracts use the `nanofaas` marker or the
+`nanofaas_root` / `nanofaas_checkout` fixtures and skip when it is unset. A supplied
+invalid checkout still fails configuration. Use the CI-pinned revision for contracts.
 
 CI checks that checkout out into `.nanofaas-source/`, which is gitignored, so
 pre-commit never sees it.
@@ -63,9 +64,8 @@ uv run --frozen --all-packages --all-groups basedpyright --project packages/tui-
 uv run pre-commit run --all-files
 ```
 
-Two nanolab tests fail against a checkout that does not match the pinned
-nanoFaaS revision. Check whether they failed before your change (`git stash`)
-before assuming you broke them.
+Contracts may fail against a revision other than the CI pin. Verify the pinned
+source first; never stash or edit the operator's NanoFaaS checkout.
 
 ## Tooling
 
@@ -86,10 +86,11 @@ Notes that are easy to get wrong:
   deliberate.
 - `tui-toolkit` supports Python 3.11, so `reportImplicitOverride` is off for it.
   nanolab is 3.12 but keeps the same setting so the two packages agree.
-- The coverage threshold is declared once, in `[tool.coverage.report]`. In
-  nanolab it is also named explicitly on the pytest command line
-  (`--cov=nanolab`), because a bare `--cov` means "everything importable" and
-  pulled the sibling `tui-toolkit` into nanolab's number.
+- The coverage threshold is declared in `[tool.coverage.report]`. From the
+  workspace root, pass `--cov-config=packages/nanolab/pyproject.toml` to apply
+  nanolab's branch coverage and threshold; pytest's `-c` selects pytest settings
+  only. `--cov=nanolab` selects the package being measured, because a bare
+  `--cov` also pulled the sibling `tui-toolkit` into nanolab's number.
 - Both packages set `extend-exclude = ["build", "dist"]`: ruff's built-in
   exclude list has `dist` but not `build`.
 - `reportAny`-style noise aside, bandit produces several false positives here by

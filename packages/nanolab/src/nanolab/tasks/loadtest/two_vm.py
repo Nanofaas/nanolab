@@ -1,21 +1,5 @@
-"""Pure two-VM loadtest constants (node ports, scenario set, remote dir name)."""
-
-from __future__ import annotations
-
-LOADTEST_SCENARIOS: frozenset[str] = frozenset(
-    {
-        "loadtest-one-vm",
-        "loadtest-two-vm",
-        "loadtest-azure",
-        "loadtest-proxmox",
-    }
-)
+"""Management NodePort retained for the public two-VM load-test API."""
 
 TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT = 30081
-TWO_VM_REMOTE_DIR_NAME = "two-vm-loadtest"
 
-__all__ = [
-    "LOADTEST_SCENARIOS",
-    "TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT",
-    "TWO_VM_REMOTE_DIR_NAME",
-]
+__all__ = ["TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT"]

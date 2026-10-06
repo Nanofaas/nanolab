@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import pytest
 
 from nanolab.release import publish
 from nanolab.release.model import ArtifactEvidence
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 LOCAL_REGISTRY = "localhost:5000/nanofaas"
 VERSION = "v0.18.0"
 

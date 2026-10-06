@@ -9,7 +9,7 @@ selectable.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,11 +19,11 @@ from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 
-from nanolab.cli.execution import build_role_bindings
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.application.execution import build_role_bindings
+from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
+from nanolab.images.plan import DEFAULT_REGISTRY, build_image_plan
 from nanolab.plans.release_phases import (
     build_arm64_phase,
     build_attestation_phase,
@@ -46,8 +46,9 @@ from nanolab.release.model import (
     digest_path,
     git_state,
 )
-from nanolab.release.recipe import ReleaseRecipeGroup, prepare_release_recipe_groups
+from nanolab.release.recipe import prepare_release_recipe_groups
 from nanolab.release.recipe_execution import capture_release_inventory
+from nanolab.release.request import ReleaseRequest as ReleaseRequest
 from nanolab.release.resources import (
     build_release_resources,
     preserve_release_builder_selection,
@@ -67,30 +68,6 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"configuration must be an object: {path}")
     return value
-
-
-@dataclass(frozen=True, slots=True)
-class ReleaseRequest:
-    """Everything needed to compile a release workflow."""
-
-    repo_root: Path
-    version: str
-    environment: EnvironmentConfig
-    scenario: ScenarioConfig
-    image_plan: ImagePlan
-    settings: ReleaseSettings
-    run_dir: Path
-    performance_root: Path
-    source_tree: Path
-    credentials: CredentialFiles | None = None
-    nanofaas_root: Path | None = None  # defaults to repo_root
-    identity: ReleaseIdentity | None = None
-    recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
-    arm_image_plan: ImagePlan | None = None
-    arm_recipe_groups: tuple[ReleaseRecipeGroup, ...] = ()
-    source_archive: Path | None = None
-    archive_digest: str = ""
-    inventory_file: Path | None = None
 
 
 def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verifier]:

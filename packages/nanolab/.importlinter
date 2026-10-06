@@ -21,13 +21,41 @@ forbidden_modules =
 name = runtime packages must not depend on tui
 type = forbidden
 source_modules =
+    nanolab.application
     nanolab.cli
     nanolab.config
     nanolab.core
     nanolab.functions
     nanolab.plans
+    nanolab.tasks
+    nanolab.release
+    nanolab.comparison
     nanolab.workspace
 forbidden_modules = nanolab.tui
+
+[importlinter:contract:runtime_below_presentation]
+name = runtime and application must not import presentation
+type = forbidden
+source_modules =
+    nanolab.application
+    nanolab.tasks
+    nanolab.release
+    nanolab.comparison
+    nanolab.plans
+forbidden_modules =
+    nanolab.app
+    nanolab.cli
+    nanolab.tui
+
+[importlinter:contract:runtime_below_plans]
+name = runtime must not import plan builders
+type = forbidden
+source_modules =
+    nanolab.tasks
+    nanolab.release
+    nanolab.comparison
+    nanolab.application
+forbidden_modules = nanolab.plans
 
 [importlinter:contract:sonata_tasks_is_independent]
 name = sonata_tasks must not depend on nanolab

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -8,8 +7,11 @@ import pytest
 
 from nanolab.functions.catalog import list_functions
 from nanolab.images.plan import NATIVE_JAVA_DOCKERFILE, build_image_plan
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 REGISTRY = "registry.test:5000/nanofaas"
 
 

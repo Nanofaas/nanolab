@@ -101,6 +101,7 @@ def test_recipe_container_platform_rejects_missing_profile(tmp_path: Path) -> No
         )
 
 
+@pytest.mark.nanofaas
 def test_containerd_loadtest_starts_rootless_runtime_without_compose(
     tmp_path: Path,
 ) -> None:
@@ -146,6 +147,7 @@ def test_containerd_loadtest_starts_rootless_runtime_without_compose(
     )
 
 
+@pytest.mark.nanofaas
 def test_containerd_co_tenancy_passes_core_count_and_budget(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     plan = build_loadtest_plan(
@@ -209,6 +211,7 @@ def _run(workflow, executor: "RecordingExecutor") -> list[str]:  # pyright: igno
     return [" ".join(spec.argv) for spec in executor.seen]
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     ("environment", "expected_role", "fetches"),
     [
@@ -279,6 +282,7 @@ def test_provider_contract_selects_role_and_result_transport(
     assert preflight.execution_role == expected_role
 
 
+@pytest.mark.nanofaas
 def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> None:
     executor = RecordingExecutor()
 
@@ -428,6 +432,7 @@ def test_scale_to_zero_scenario_rejects_an_environment_without_the_feature_gate(
         )
 
 
+@pytest.mark.nanofaas
 def test_scale_to_zero_scenario_accepts_an_environment_that_provides_the_gate(
     tmp_path: Path,
 ) -> None:
@@ -455,6 +460,7 @@ def test_scale_to_zero_scenario_accepts_an_environment_that_provides_the_gate(
     assert plan is not None
 
 
+@pytest.mark.nanofaas
 def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     environment = EnvironmentConfig.model_validate(
@@ -482,6 +488,7 @@ def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> N
     assert "/home/ubuntu/nanolab-assets/k6/two-vm-function-invoke.js" in k6
 
 
+@pytest.mark.nanofaas
 def test_explicit_remote_run_directory_is_cleaned_before_k6(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     fetcher = FakeFetcher()
@@ -532,6 +539,7 @@ def test_explicit_remote_run_directory_is_cleaned_before_k6(tmp_path: Path) -> N
     assert (tmp_path / "control-plane.log").read_text() == CONTROL_PLANE_LOG
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     "remote_run_dir",
     [
@@ -560,6 +568,7 @@ def test_remote_cleanup_rejects_paths_outside_release_benchmark_run(
         )
 
 
+@pytest.mark.nanofaas
 def test_a_remote_run_dir_must_be_an_absolute_run_child(tmp_path: Path) -> None:
     """Validate the remote run directory by shape.
 
@@ -607,6 +616,7 @@ def test_local_loadtest_reads_k6_script_from_the_nanolab_package(
     assert str(bundled_assets_root() / "k6/two-vm-function-invoke.js") in k6
 
 
+@pytest.mark.nanofaas
 def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     control_plane_image = "localhost:5000/nanofaas/control-plane:v0.18.0-amd64-native"
@@ -635,6 +645,7 @@ def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:
     assert function_image in register
 
 
+@pytest.mark.nanofaas
 def test_remote_prebuilt_loadtest_uses_the_staged_chart_path(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     staged_source = Path("/home/azureuser/nanofaas-release/v0.18.3/source")
@@ -662,6 +673,7 @@ def test_remote_prebuilt_loadtest_uses_the_staged_chart_path(tmp_path: Path) -> 
     assert str(staged_source / "deploy/helm/nanofaas") in install
 
 
+@pytest.mark.nanofaas
 def test_a_prebuilt_control_plane_still_lets_the_functions_be_built(
     tmp_path: Path,
 ) -> None:
@@ -687,6 +699,7 @@ def test_a_prebuilt_control_plane_still_lets_the_functions_be_built(
     assert plan is not None
 
 
+@pytest.mark.nanofaas
 def test_prebuilt_loadtest_reports_missing_selected_function_images(
     tmp_path: Path,
 ) -> None:
@@ -708,6 +721,7 @@ def test_prebuilt_loadtest_reports_missing_selected_function_images(
         )
 
 
+@pytest.mark.nanofaas
 def test_loadtest_plan_owns_stack_registration_and_cleanup(tmp_path: Path) -> None:
     executor = RecordingExecutor()
 
@@ -735,6 +749,7 @@ def test_loadtest_plan_owns_stack_registration_and_cleanup(tmp_path: Path) -> No
     ]
 
 
+@pytest.mark.nanofaas
 def test_loadtest_plan_enables_advanced_metrics(tmp_path: Path) -> None:
     executor = RecordingExecutor()
 
@@ -759,6 +774,7 @@ def test_loadtest_plan_enables_advanced_metrics(tmp_path: Path) -> None:
     assert "controlPlane.service.type=NodePort" in install
 
 
+@pytest.mark.nanofaas
 def test_autoscaling_loadtest_builds_registers_and_observes_scaler(
     tmp_path: Path,
 ) -> None:
@@ -806,6 +822,7 @@ def test_autoscaling_loadtest_builds_registers_and_observes_scaler(
     assert any("get deployment" in command for command in commands)
 
 
+@pytest.mark.nanofaas
 def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(
     tmp_path: Path,
 ) -> None:
@@ -854,6 +871,7 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(
     )
 
 
+@pytest.mark.nanofaas
 def test_hpa_scale_to_zero_loadtest_registers_a_zero_replica_floor(
     tmp_path: Path,
 ) -> None:
@@ -893,6 +911,7 @@ def test_hpa_scale_to_zero_loadtest_registers_a_zero_replica_floor(
     assert '"minReplicas":0' in register
 
 
+@pytest.mark.nanofaas
 def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
     tmp_path: Path,
 ) -> None:
@@ -932,6 +951,7 @@ def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
     assert not any(command.startswith("k6 run") for command in commands)
 
 
+@pytest.mark.nanofaas
 def test_internal_autoscaling_waits_for_the_park_at_zero_it_configures(
     tmp_path: Path,
 ) -> None:

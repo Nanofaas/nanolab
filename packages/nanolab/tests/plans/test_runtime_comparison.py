@@ -221,7 +221,7 @@ def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
             ).read_text()
         )
     )
-    from nanolab.cli.vm_provider import vm_request_for_role
+    from nanolab.application.vm_provider import vm_request_for_role
     from nanolab.tasks.components.bootstrap import remote_project_dir
 
     root = _Path(remote_project_dir(vm_request_for_role(environment, "stack")))
@@ -287,6 +287,7 @@ def test_the_container_memory_series_is_the_guard_instead() -> None:
     assert required == ["container_memory_bytes@control-plane"]
 
 
+@pytest.mark.nanofaas
 def test_comparison_pins_two_slots_and_twenty_queue_entries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

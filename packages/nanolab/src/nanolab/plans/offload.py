@@ -10,8 +10,8 @@ from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskEx
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.registry import docker_registry_resource
 
+from nanolab.application.functions import resolve_function
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.functions import resolve_function
 from nanolab.tasks.deployment import (
     LOCAL_CONTROL_PLANE_API_PORT,
     LOCAL_CONTROL_PLANE_MANAGEMENT_PORT,

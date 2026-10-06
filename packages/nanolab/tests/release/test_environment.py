@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -10,8 +9,11 @@ from nanolab.config import EnvironmentConfig
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmRequest
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 # The validator compares this against the checkout's own version, so reading it
 # keeps the test from failing on every release rather than on a real defect.
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)

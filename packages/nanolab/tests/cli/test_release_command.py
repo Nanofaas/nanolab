@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,9 +27,15 @@ from nanolab.release.model import GitState
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmInfo
 from nanolab.workspace.paths import ToolPaths
-from tests.conftest import RejectingProvider, captured_release_tree
+from tests.conftest import (
+    RejectingProvider,
+    captured_release_tree,
+    source_contract_root,
+)
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
 
 

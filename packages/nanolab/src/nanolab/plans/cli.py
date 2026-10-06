@@ -22,11 +22,14 @@ from sonata_tasks.process import managed_process_resource
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.vm.ssh import find_ssh_private_key_path, ssh_command
 
-from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
+from nanolab.application.functions import resolve_function
+from nanolab.application.vm_provider import (
+    provider_for_environment,
+    vm_request_for_role,
+)
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import _local_control_plane
-from nanolab.plans.functions import resolve_function
 from nanolab.release.environment import secure_release_endpoints
 from nanolab.release.publish import GHCR_REPOSITORY
 from nanolab.release.versioning import normalize_version, read_project_version

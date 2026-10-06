@@ -44,13 +44,19 @@ jobs:
         with:
           nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
-      # Only nanolab's tests read the pinned nanoFaaS checkout; tui-toolkit
-      # passes with NANOFAAS_ROOT unset, so a fork pull request still gets it.
-      # The type check and the import contracts never
-      # need the checkout either.
+      # Pure tests also run on forks, without the private checkout token.
       - name: Run ${{ matrix.package }} tests
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' && (matrix.package != 'nanolab' || steps.sync.outputs.nanofaas == 'true') }}
-        run: uv run --locked --all-packages --all-groups pytest -c packages/${{ matrix.package }}/pyproject.toml packages/${{ matrix.package }}/tests
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: |
+          if [ "${{ matrix.package }}" = nanolab ]; then
+            NANOFAAS_ROOT= uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -m 'not nanofaas' --cov-fail-under=0
+          else
+            uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
+          fi
+
+      - name: Run NanoFaaS contracts and combined coverage report
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' && matrix.package == 'nanolab' && steps.sync.outputs.nanofaas == 'true' }}
+        run: uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -m nanofaas --cov-append
 
       - name: Type-check ${{ matrix.package }}
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
@@ -139,6 +145,7 @@ jobs:
           # tree and fails only after an install -- which is how this broke twice.
           .wheel-smoke/bin/python -c "from nanolab.workspace.paths import bundled_assets_root; a = bundled_assets_root(); assert a.is_dir(), a; assert (a / 'k6/soak-workload.js').is_file(), a"
           .wheel-smoke/bin/nanolab --help
+          .wheel-smoke/bin/python scripts/smoke-installed-wheel.py
 
   plans:
     runs-on: ubuntu-latest

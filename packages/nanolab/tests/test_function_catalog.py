@@ -16,6 +16,29 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def test_explicit_catalog_root_does_not_require_operator_checkout(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("NANOFAAS_ROOT", raising=False)
+    _write(tmp_path / "functions/go/echo/function.yaml", "name: echo\n")
+    assert {item.key for item in list_functions(tmp_path)} == {
+        "echo-go",
+        "tool-metrics-echo",
+    }
+
+
+def test_supported_functions_survive_unsupported_runtime_directories(tmp_path):
+    _write(tmp_path / "functions/go/echo/function.yaml", "name: echo\n")
+    _write(
+        tmp_path / "functions/rust/echo/function.yaml",
+        "name: echo-rust\ncatalog:\n  runtime: rust\n",
+    )
+    assert resolve_function_definition("echo-go", tmp_path).runtime == "go"
+    with pytest.raises(ValueError, match=r"Unsupported function runtime: rust.*#57"):
+        resolve_function_definition("echo-rust", tmp_path)
+
+
+@pytest.mark.nanofaas
 def test_function_catalog_exposes_demo_families() -> None:
     keys = [function.key for function in list_functions()]
     assert "word-stats-java" in keys
@@ -57,6 +80,7 @@ def test_function_catalog_discovers_repository_examples(nanofaas_root: Path) -> 
     )
 
 
+@pytest.mark.nanofaas
 def test_resolve_function_definition_uses_dynamic_index() -> None:
     function = resolve_function_definition("roman-numeral-go")
 
@@ -66,6 +90,7 @@ def test_resolve_function_definition_uses_dynamic_index() -> None:
     assert function.example_dir.as_posix().endswith("functions/go/roman-numeral")
 
 
+@pytest.mark.nanofaas
 def test_dynamic_catalog_preserves_existing_metadata() -> None:
     function = resolve_function_definition("word-stats-java")
 
@@ -74,6 +99,7 @@ def test_dynamic_catalog_preserves_existing_metadata() -> None:
     assert function.default_payload_file == "word-stats-sample.json"
 
 
+@pytest.mark.nanofaas
 def test_real_catalog_default_images_share_the_local_registry_prefix() -> None:
     images = [
         function.default_image
@@ -85,6 +111,7 @@ def test_real_catalog_default_images_share_the_local_registry_prefix() -> None:
     assert all(image.startswith(f"{LOCAL_REGISTRY}/") for image in images)
 
 
+@pytest.mark.nanofaas
 def test_dynamic_catalog_exposes_manifest_backed_roman_numeral_details() -> None:
     function = resolve_function_definition("roman-numeral-java")
 
@@ -93,6 +120,7 @@ def test_dynamic_catalog_exposes_manifest_backed_roman_numeral_details() -> None
     assert function.default_payload_file == "roman-numeral-sample.json"
 
 
+@pytest.mark.nanofaas
 def test_every_demo_function_declares_a_resolvable_default_payload() -> None:
     families = {"word-stats", "json-transform", "roman-numeral"}
     runtimes = {"java", "java-lite", "go", "python", "javascript", "exec"}

@@ -1,6 +1,5 @@
 import contextlib
 import json
-import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -19,8 +18,11 @@ from nanolab.plans.offload_loadtest import (
 )
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from nanolab.workspace.paths import bundled_assets_root
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 
 SCENARIO = ScenarioConfig(

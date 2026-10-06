@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -16,8 +15,11 @@ from nanolab.release.versioning import (
     read_project_version,
     verify_version_consistency,
 )
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 CURATED_FILES = (
     Path("build.gradle"),
     Path("deploy/helm/nanofaas/Chart.yaml"),

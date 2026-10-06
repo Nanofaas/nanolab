@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config import EnvironmentConfig
 
 

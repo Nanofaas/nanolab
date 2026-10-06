@@ -182,6 +182,7 @@ def _queried_names(function: str, modules: tuple[str, ...]) -> set[str]:
     return {name for query in queries for name in re.findall(r"[a-z_0-9]+", query.expr)}
 
 
+@pytest.mark.nanofaas
 def test_every_module_is_classified() -> None:
     """A module is either queried or explicitly declared as publishing nothing.
 
@@ -201,6 +202,7 @@ def test_every_module_is_classified() -> None:
     )
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("module", sorted(MODULE_QUERIES))
 def test_a_queried_module_has_every_metric_it_publishes_collected(module: str) -> None:
     published = _published_metrics(
@@ -218,6 +220,7 @@ def test_a_queried_module_has_every_metric_it_publishes_collected(module: str) -
     )
 
 
+@pytest.mark.nanofaas
 def test_the_core_metrics_are_collected() -> None:
     published = _published_metrics(
         _nanofaas_root() / "platform" / "control-plane" / "src" / "main"
@@ -266,6 +269,7 @@ def test_async_queue_snapshot_collects_current_dispatch_diagnostics() -> None:
     assert {name for name in queries if name.startswith("function_scheduler_")} == set()
 
 
+@pytest.mark.nanofaas
 def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers() -> (
     None
 ):

@@ -7,6 +7,7 @@ from nanolab.tasks.platform import PlatformFunction
 from nanolab.workspace.paths import default_tool_paths
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     ("backend", "prebuilt", "build_images", "push_images"),
     [

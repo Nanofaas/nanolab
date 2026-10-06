@@ -19,7 +19,6 @@ from typing import cast
 from uuid import uuid4
 
 import typer
-import yaml
 from rich.console import Console
 from rich.table import Table
 from sonata_engine import (
@@ -34,17 +33,32 @@ from sonata_engine import Workflow as SonataWorkflow
 from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink
 
-from nanolab.cli import diagnostics
-from nanolab.cli.execution import (
+from nanolab.application.execution import (
     build_role_bindings,
     prometheus_over_ssh,
     resolve_loadtest_urls,
+)
+from nanolab.application.vm_provider import (
+    provider_for_environment,
+    vm_request_for_role,
+)
+from nanolab.cli import diagnostics
+from nanolab.cli.catalogue import (
+    _environment as _environment,
+)
+from nanolab.cli.catalogue import (
+    _read as _read,
+)
+from nanolab.cli.catalogue import (
+    _scenario as _scenario,
+)
+from nanolab.cli.catalogue import (
+    _workflow_catalog as _workflow_catalog,
 )
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
 from nanolab.cli.soak import (
     install_soak_commands,
-    load_soak_policy,
     require_unused_run_dir,
     soak_exit_code,
     soak_metadata_status,
@@ -52,12 +66,9 @@ from nanolab.cli.soak import (
     unique_soak_run_dir,
     validate_soak_selection,
 )
-from nanolab.cli.vm_provider import (
-    provider_for_environment,
-    vm_request_for_role,
-)
 from nanolab.comparison.profiles import PreparedComparison
 from nanolab.config import EnvironmentConfig, ScenarioConfig
+from nanolab.functions.catalog import require_supported_runtimes
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.plans.offload import build_offload_plan
@@ -106,66 +117,6 @@ from nanolab.workspace.recipe import RecipeRun
 _JOURNAL_FILENAME = "sonata.jsonl"
 _LOCAL_PROMETHEUS_URL = "http://127.0.0.1:9090"
 _ENVIRONMENT_PROVIDERS = ("local", "multipass", "external", "azure", "proxmox")
-
-
-def _read(path: Path) -> dict[str, object]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError(f"configuration must be an object: {path}")
-    return data
-
-
-def _scenario(path: Path) -> ScenarioConfig:
-    data = _read(path)
-    if "recipeProfile" in data:
-        data["recipeProfile"] = (
-            path.resolve().parent / str(data["recipeProfile"])
-        ).resolve()
-    if data.get("workflow") == "soak" or "soakPolicyFile" in data:
-        resolved, receipt = load_soak_policy(data, path)
-        config = ScenarioConfig.model_validate(resolved)
-        if receipt is not None:
-            object.__setattr__(config, "_soak_policy_receipt", receipt)
-        return config
-    return ScenarioConfig.model_validate(data)
-
-
-def _environment(path: Path | None) -> EnvironmentConfig:
-    return (
-        EnvironmentConfig.model_validate(_read(path))
-        if path
-        else EnvironmentConfig(provider="local")
-    )
-
-
-def _workflow_catalog(
-    scenarios_dir: Path,
-) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
-    workflows: dict[str, set[str]] = {}
-    scenarios: dict[str, list[str]] = {}
-    for path in scenarios_dir.glob("*.yaml"):
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or not isinstance(data.get("workflow"), str):
-            continue
-        workflow = data["workflow"]
-        environments = (
-            ("local",) if data.get("backend") == "container" else _ENVIRONMENT_PROVIDERS
-        )
-        if workflow == "release":
-            environments = ("azure",)
-        workflows.setdefault(workflow, set()).update(environments)
-        scenarios.setdefault(workflow, []).append(path.name)
-    return {
-        workflow: (
-            tuple(
-                provider
-                for provider in _ENVIRONMENT_PROVIDERS
-                if provider in environments
-            ),
-            tuple(sorted(scenarios[workflow])),
-        )
-        for workflow, environments in sorted(workflows.items())
-    }
 
 
 def _workflow_observers(scenario_path: Path) -> tuple[WorkflowObserver, ...]:
@@ -773,6 +724,12 @@ def _execute_workflow(
     # Command output routing (SubprocessShell._emit_output) reads the
     # same contextvar, so one bind covers the whole execution layer.
     with bind_workflow_sink(sink):
+        try:
+            require_supported_runtimes(
+                tuple(scenario_config.functions), paths.nanofaas_root
+            )
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from None
         require_recipe_environment(scenario_config, environment_config)
         provisioning = (
             _provisioning_context(scenario_config, environment_config, paths, keep)

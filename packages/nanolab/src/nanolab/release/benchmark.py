@@ -29,7 +29,7 @@ from nanolab.release.model import Amd64ReleasePlan, ArtifactEvidence, digest_pat
 from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
 
 if TYPE_CHECKING:
-    from nanolab.plans.release import ReleaseRequest
+    from nanolab.release.request import ReleaseRequest
     from nanolab.release.resources import ReleaseEndpoints
 
     # Benchmark phases read the same eight fields from the release plan and from

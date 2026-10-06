@@ -44,6 +44,7 @@ class Executor:
         )
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("filename", MATRIX)
 def test_containerd_matrix_compiles_without_docker_lifecycle(
     filename: str, tmp_path: Path

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from nanolab.cli.execution import prometheus_over_ssh
+from nanolab.application.execution import prometheus_over_ssh
 from nanolab.config.environment import EnvironmentConfig
 
 

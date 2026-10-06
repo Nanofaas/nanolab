@@ -14,7 +14,7 @@ import yaml
 
 from nanolab.core.models import FunctionRuntimeKind
 from nanolab.tasks.deployment import LOCAL_REGISTRY
-from nanolab.workspace.paths import default_tool_paths
+from nanolab.workspace.paths import discover_tool_root, nanofaas_root_from_env
 
 
 @dataclass(frozen=True)
@@ -177,7 +177,7 @@ def _discover_example_functions(
         path for path in examples_root.iterdir() if path.is_dir()
     ):
         runtime_dir = runtime_root.name
-        if runtime_dir in _IGNORED_DISCOVERY_DIRS:
+        if runtime_dir not in _RUNTIME_DIR_TO_CATALOG_RUNTIME:
             continue
 
         for example_dir in sorted(
@@ -207,11 +207,11 @@ _FIXTURE_FUNCTIONS: tuple[FunctionDefinition, ...] = (
 
 
 def _load_functions(root: Path | None = None) -> tuple[FunctionDefinition, ...]:
-    paths = default_tool_paths()
     functions = (
         *_discover_example_functions(
-            (Path(root) if root is not None else paths.nanofaas_root) / "functions",
-            paths.scenario_payloads_dir,
+            (Path(root) if root is not None else nanofaas_root_from_env())
+            / "functions",
+            discover_tool_root() / "scenarios" / "payloads",
         ),
         *_FIXTURE_FUNCTIONS,
     )
@@ -247,4 +247,26 @@ def resolve_function_definition(
 
     Raises ValueError when no function has that key.
     """
-    return _definition_from_index(_function_index(root), key)
+    require_supported_runtimes((key,), root)
+    index = _function_index(root)
+    return _definition_from_index(index, key)
+
+
+def require_supported_runtimes(keys: tuple[str, ...], root: Path | None = None) -> None:
+    """Reject explicitly selected unsupported runtimes before VM acquisition."""
+    for key in keys:
+        if any(key == fixture.key for fixture in _FIXTURE_FUNCTIONS):
+            continue
+        runtime = key.rsplit("-", 1)[-1]
+        if runtime in _DISCOVERABLE_RUNTIMES or key.endswith("-java-lite"):
+            continue
+        source = Path(root) if root is not None else nanofaas_root_from_env()
+        if (source / "functions" / runtime).is_dir():
+            detail = (
+                "Rust support is tracked in #57"
+                if runtime == "rust"
+                else "select a supported function"
+            )
+            raise ValueError(
+                f"Unsupported function runtime: {runtime} for {key}; {detail}"
+            )

@@ -41,9 +41,9 @@ from uuid import uuid4
 import httpx
 from sonata_engine import JournalConfig, Task, TaskInputs, TaskOutcome
 
-from nanolab.plans.soak import compose_frozen_soak_workflow
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact, fingerprint
 from nanolab.tasks.soak.collector import _docker_get
+from nanolab.tasks.soak.composition import compose_frozen_soak_workflow
 from nanolab.tasks.soak.prerequisite_runtime import (
     LivePlatform,
     UnsupportedPreflightError,

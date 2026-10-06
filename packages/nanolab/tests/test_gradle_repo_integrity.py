@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import os
 import re
-from pathlib import Path
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+import pytest
+
+from tests.conftest import source_contract_root
+
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 SETTINGS_GRADLE = NANOFAAS_ROOT / "settings.gradle"
 JAVA_INCLUDE_PATTERN = re.compile(
     r"""include(?:\()?\s*['"]functions:java:([^'")]+)['"]\)?"""

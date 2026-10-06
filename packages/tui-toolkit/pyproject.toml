@@ -4,6 +4,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 version = "0.6.0"
 description = "Reusable terminal UI widgets and workflow event renderer with a unified theme model."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "rich>=13.8",
