@@ -1,57 +1,32 @@
-"""Incremental, bounded evidence storage that does not overwrite prior runs."""
+"""NanoLab evidence policy over Sonata's bounded artifact storage."""
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import re
-import tempfile
 from collections.abc import Iterator
+from functools import partial
 from pathlib import Path
-from threading import Lock
 from typing import Any
 
-MAX_RECORD_BYTES = 1024 * 1024
-_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+from sonata_tasks.artifacts import MAX_RECORD_BYTES as MAX_RECORD_BYTES
+from sonata_tasks.artifacts import ArtifactCorruptionError as ArtifactCorruptionError
+from sonata_tasks.artifacts import (
+    ArtifactLimitExceededError as ArtifactLimitExceededError,
+)
+from sonata_tasks.artifacts import ArtifactWriter as _SharedWriter
+from sonata_tasks.artifacts import IncompleteRecordError
+from sonata_tasks.artifacts import describe_artifact as describe_artifact
+from sonata_tasks.artifacts import encode_record as encode_record
+from sonata_tasks.artifacts import read_records as _read_records
 
-
-class ArtifactLimitExceededError(OSError):
-    """Evidence could not be written without exceeding its declared disk budget."""
-
-
-class ArtifactCorruptionError(ValueError):
-    """A complete evidence record is malformed and cannot be silently discarded."""
-
-
-# The terminal-report space a producer must keep clear of its own writes. It is
-# deliberately not the writer's own reserve, which is `min(TERMINAL_RESERVE,
-# limit_bytes // 8)` and therefore smaller for limits under 32768 bytes.
+# Producers keep this space clear; the writer itself reserves min(4096, limit / 8).
 TERMINAL_RESERVE = 4096
 
 
-def encode_record(value: dict[str, object]) -> bytes:
-    """Encode one record exactly as `ArtifactWriter` publishes it, newline included."""
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
-    ).encode("utf-8")
-
-
 def fingerprint(value: dict[str, object]) -> str:
-    """Hash canonical JSON inputs, independent of mapping insertion order."""
-    body = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()
-
-
-def describe_artifact(path: Path) -> dict[str, object]:
-    """Hash an artifact with fixed memory usage, including its byte count."""
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as source:
-        while chunk := source.read(65536):
-            size += len(chunk)
-            digest.update(chunk)
-    return {"path": str(path), "size_bytes": size, "sha256": digest.hexdigest()}
+    """Keep strict JSON inputs and existing bare-hex canonical fingerprints."""
+    return hashlib.sha256(encode_record(value)[:-1]).hexdigest()
 
 
 def retained(root: Path, path: Path) -> bool:
@@ -134,7 +109,7 @@ def enforce_limit(root: Path, limit_bytes: int) -> int:
 
 
 class ArtifactWriter:
-    """Own a directory and persist bounded observations.
+    """Apply terminal reservation and run accounting to shared storage.
 
     Serialized producers may share ``budget_root`` to include direct writes and
     sibling owners in each pre-write quota check. Default accounting is local.
@@ -143,172 +118,52 @@ class ArtifactWriter:
     def __init__(
         self, root: Path, limit_bytes: int, *, budget_root: Path | None = None
     ) -> None:
-        """Exclusively acquire an empty directory and reserve terminal-report space."""
+        """Preserve NanoLab's exclusive directory and terminal-report policy."""
         if type(limit_bytes) is not int or limit_bytes < 128:
             raise ValueError("artifact limit must be an integer of at least 128 bytes")
-        if root.is_symlink():
-            raise ValueError("artifact root cannot be a symbolic link")
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if any(root.iterdir()):
-            raise FileExistsError(f"run directory already contains evidence: {root}")
-        # O_EXCL resolves the race between two owners both seeing an empty directory.
-        descriptor = os.open(
-            root / ".soak-owner", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
+        usage = partial(measure_tree, budget_root) if budget_root is not None else None
+        self._storage = _SharedWriter(
+            root,
+            limit_bytes,
+            owner_marker=".soak-owner",
+            reserve_bytes=min(TERMINAL_RESERVE, limit_bytes // 8),
+            measure_usage=usage,
         )
-        os.close(descriptor)
-        self.root = root
-        self.budget_root = budget_root
+        self.root = self._storage.root
         self.limit_bytes = limit_bytes
-        self._reserve = min(TERMINAL_RESERVE, limit_bytes // 8)
-        self._used_bytes = 0
-        self._closed = False
-        self._lock = Lock()
-
-    def _target(self, name: str) -> Path:
-        if _NAME.fullmatch(name) is None:
-            raise ValueError("artifact name must be a single safe path component")
-        return self.root / name
-
-    def _check_budget(self, size: int, *, terminal: bool = False) -> None:
-        if self._closed:
-            raise RuntimeError("artifact writer is closed")
-        budget = self.limit_bytes if terminal else self.limit_bytes - self._reserve
-        used = (
-            measure_tree(self.budget_root)
-            if self.budget_root is not None
-            else self._used_bytes
-        )
-        if used + size > budget:
-            raise ArtifactLimitExceededError(
-                "artifact budget exhausted; terminal space is reserved"
-            )
-
-    def _check_write(self, size: int, *, terminal: bool = False) -> None:
-        if self._closed:
-            raise RuntimeError("artifact writer is closed")
-        if size > MAX_RECORD_BYTES:
-            raise ArtifactLimitExceededError(
-                "individual evidence record exceeds its size limit"
-            )
-        self._check_budget(size, terminal=terminal)
+        self.budget_root = budget_root
 
     def append(self, stream: str, record: dict[str, object]) -> None:
-        """Append one complete JSONL record, accounting for partial writes."""
-        target = self._target(stream)
-        target = target.with_name(target.name + ".jsonl")
-        payload = encode_record(record)
-        with self._lock:
-            self._check_write(len(payload))
-            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
-            descriptor = os.open(target, flags, 0o600)
-            with os.fdopen(descriptor, "ab", buffering=0) as output:
-                before = os.fstat(output.fileno()).st_size
-                try:
-                    remaining = memoryview(payload)
-                    while remaining:
-                        written = output.write(remaining)
-                        if written is None or written <= 0:
-                            raise OSError("evidence append made no progress")
-                        remaining = remaining[written:]
-                finally:
-                    self._used_bytes += max(
-                        0, os.fstat(output.fileno()).st_size - before
-                    )
+        """Persist a record using the shared quota and partial-write accounting."""
+        self._storage.append(stream, record)
 
     def write_json(self, name: str, value: dict[str, object]) -> Path:
-        """Publish a new immutable document, never replacing an evaluation."""
-        target = self._target(name)
-        if target.suffix != ".json":
-            raise ValueError("complete JSON artifact names must end with .json")
-        payload = encode_record(value)
-        with self._lock:
-            self._check_write(len(payload), terminal=name == "terminal.json")
-            descriptor, filename = tempfile.mkstemp(prefix=".pending-", dir=self.root)
-            temporary = Path(filename)
-            try:
-                with os.fdopen(descriptor, "wb") as output:
-                    output.write(payload)
-                    output.flush()
-                    os.fsync(output.fileno())
-                # A hard link publishes complete content atomically and fails if an
-                # artifact (including a symbolic link) already owns the target name.
-                os.link(temporary, target)
-                self._used_bytes += len(payload)
-            finally:
-                temporary.unlink(missing_ok=True)
-        return target
+        """Only the terminal report can consume the reserved capacity."""
+        return self._storage.write_json(
+            name, value, use_reserve=name == "terminal.json"
+        )
 
     def write_blob(self, directory: str, name: str, body: bytes) -> Path:
-        """Publish immutable raw evidence without imposing the JSON-record cap."""
-        parent = self._target(directory)
-        if _NAME.fullmatch(name) is None:
-            raise ValueError("artifact name must be a single safe path component")
-        return self._write_raw(parent / name, body)
+        """Publish immutable raw evidence under the shared byte budget."""
+        return self._storage.write_blob(directory, name, body)
 
     def write_file(self, name: str, body: bytes) -> Path:
-        """Publish a raw input directly under the evidence owner."""
-        return self._write_raw(self._target(name), body)
-
-    def _write_raw(self, target: Path, body: bytes) -> Path:
-        parent = target.parent
-        with self._lock:
-            self._check_budget(len(body))
-            if parent.is_symlink():
-                raise ValueError("raw evidence directory cannot be a symbolic link")
-            parent.mkdir(exist_ok=True, mode=0o700)
-            fd, filename = tempfile.mkstemp(prefix=".pending-", dir=parent)
-            temporary = Path(filename)
-            published = False
-            try:
-                with os.fdopen(fd, "wb") as stream:
-                    stream.write(body)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.link(temporary, target)
-                published = True
-            finally:
-                # A later cleanup error must not leave a published file uncharged.
-                if published:
-                    self._used_bytes += len(body)
-                temporary.unlink(missing_ok=True)
-        return target
+        """Publish immutable raw input directly under the evidence owner."""
+        return self._storage.write_file(name, body)
 
     def close(self) -> None:
-        """Idempotently stop future writes; evidence and ownership marker remain."""
-        with self._lock:
-            self._closed = True
-
-
-def _reject_constant(value: str) -> None:
-    raise ValueError(f"non-finite JSON constant: {value}")
+        """Stop future writes while retaining evidence and the ownership marker."""
+        self._storage.close()
 
 
 def read_records(path: Path) -> Iterator[dict[str, Any]]:
-    """Stream evidence: a torn tail is a gap, other corruption is an error."""
-    with path.open("rb") as source:
-        line_number = 0
-        while payload := source.readline(MAX_RECORD_BYTES + 1):
-            line_number += 1
-            if len(payload) > MAX_RECORD_BYTES:
-                raise ArtifactCorruptionError(
-                    f"{path}:{line_number}: record exceeds size limit"
-                )
-            if not payload.endswith(b"\n"):
-                yield {
-                    "schema": "nanolab-soak-v1",
-                    "kind": "observation_gap",
-                    "line": line_number,
-                    "reason": "incomplete final record",
-                }
-                return
-            try:
-                record = json.loads(payload, parse_constant=_reject_constant)
-            except (ValueError, UnicodeDecodeError) as error:
-                raise ArtifactCorruptionError(
-                    f"{path}:{line_number}: malformed record"
-                ) from error
-            if not isinstance(record, dict):
-                raise ArtifactCorruptionError(
-                    f"{path}:{line_number}: record must be an object"
-                )
-            yield record
+    """Turn only a torn final record into NanoLab's observation-gap evidence."""
+    try:
+        yield from _read_records(path)
+    except IncompleteRecordError as error:
+        yield {
+            "schema": "nanolab-soak-v1",
+            "kind": "observation_gap",
+            "line": error.line_number,
+            "reason": "incomplete final record",
+        }

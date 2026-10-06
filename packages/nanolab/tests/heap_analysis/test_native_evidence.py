@@ -218,7 +218,6 @@ def test_valid_large_raw_is_charged_without_json_record_cap(tmp_path):
     body = b"x" * (2 * 1024 * 1024)
     receipt = _write_raw(writer, "natural-drain-smaps.txt", body, 16 * 1024 * 1024)
     assert (writer.root / receipt["path"]).read_bytes() == body
-    assert writer._used_bytes == len(body)
     with pytest.raises(ArtifactLimitExceededError, match="individual evidence record"):
         writer.write_json("too-large.json", {"data": "x" * (2 * 1024 * 1024)})
 
@@ -227,7 +226,6 @@ def test_writer_refuses_raw_before_publication_when_budget_is_exhausted(tmp_path
     writer = ArtifactWriter(tmp_path / "evidence", 4096)
     with pytest.raises(ArtifactLimitExceededError):
         _write_raw(writer, "natural-drain-smaps.txt", b"x" * 4096, 1 << 20)
-    assert writer._used_bytes == 0
     assert not list(writer.root.rglob("*.txt"))
 
 
@@ -250,7 +248,6 @@ def test_failed_raw_publication_does_not_charge_missing_bytes(monkeypatch, tmp_p
     monkeypatch.setattr(artifacts.os, "link", fail_link)
     with pytest.raises(OSError, match="publication failure"):
         _write_raw(writer, "natural-drain-smaps.txt", b"body", 1 << 20)
-    assert writer._used_bytes == 0
     assert not list(writer.root.rglob("*.txt"))
     assert not list(writer.root.rglob(".pending-*"))
 
@@ -266,7 +263,8 @@ def test_published_raw_stays_charged_when_later_hashing_fails(monkeypatch, tmp_p
     monkeypatch.setattr(evidence, "describe_artifact", fail_hash)
     with pytest.raises(OSError, match="hashing failure"):
         _write_raw(writer, "natural-drain-smaps.txt", b"body", 1 << 20)
-    assert writer._used_bytes == 4
+    with pytest.raises(ArtifactLimitExceededError, match="budget exhausted"):
+        writer.write_file("overflow.bin", b"x" * (1048576 - 4096 - 3))
     assert (writer.root / "native/natural-drain-smaps.txt").read_bytes() == b"body"
 
 

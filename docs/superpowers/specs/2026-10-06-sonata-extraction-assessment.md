@@ -36,7 +36,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `soak/processes.py`: summary framing | Preserve with the runner initially | Markers and a separate output path are configurable, and both outputs share one byte budget. Moving only the basic runner would leave a second supervisor implementation for diagnostics/workloads. Keep interpretation of the resulting summary in NanoLab. |
 | `soak/artifacts.py`: exclusive writer, atomic immutable publication, bounded append/raw writes | Extract after separating policy | Meaningful storage implementation used by soak and heap analysis. Ownership, partial-write accounting, quotas and immutable publication are reusable. `.soak-owner`, fixed terminal reservation and cumulative accounting exclusions need an explicit boundary. |
 | `soak/artifacts.py`: `read_records` | Extract only the decoder | Complete malformed records must fail; a torn tail must remain distinguishable. The current decoder fabricates a `nanolab-soak-v1` observation-gap record. That record construction belongs in a NanoLab adapter. |
-| `soak/artifacts.py`: `fingerprint` | Reuse existing Sonata functionality | `sonata_tasks.core.fingerprint.fingerprint_digest` already hashes canonical JSON. Preserve the existing bare-hex evidence format in the local adapter; Sonata returns a `sha256:` prefix and supports additional input types. No second canonical-hash implementation is needed. |
+| `soak/artifacts.py`: `fingerprint` | Keep byte-compatible hashing local | Storage review demonstrated that JSON normalization followed by `sonata_tasks.core.fingerprint.fingerprint_digest` changes hashes for accepted nested numeric-key mappings: numeric sorting before JSON encoding differs from lexical sorting after normalization. Preserve the current bare-hex hash of the codec's exact canonical bytes. The small stdlib hash does not justify another shared API or an evidence-identity migration. |
 | `soak/artifacts.py`: `describe_artifact` | Consolidate with artifact work | Streaming SHA-256 and byte count fit the storage capability. Do not create a separate hashing task or framework. |
 | `soak/artifacts.py`: `retained`, `describe_tree`, `measure_tree`, `enforce_limit` | Keep current accounting policy local | They encode scratch-directory exclusions, source-tree handling and acceptance inventory rules. A generic writer must not silently exclude all `workspace-*` or dot directories. Consider shared traversal only if separating storage actually requires it. |
 | `tasks/recipes/builder.py`: private Buildx builder and owner-node reconciliation | Extend existing Buildx resource | Sonata already creates, bootstraps, validates and compensates builders. The missing behavior is strict acquisition and identity-checked cleanup after partial creation, not another builder abstraction. Keep current callers' refusal to adopt/remove a pre-existing builder. |
@@ -153,8 +153,10 @@ checks with coverage disabled, not a full CI/coverage result:
   **41 passed**.
 - Three canonical-JSON probes, including nested values and non-ASCII text,
   produced equal NanoLab and Sonata hashes after removing Sonata's `sha256:`
-  prefix. This supports reuse; it does not establish compatibility for all
-  additional input types accepted by Sonata.
+  prefix. Storage review additionally tested nested numeric-key mappings and
+  found incompatible ordering after JSON normalization. That counterexample
+  changes the individual decision above: keep byte-compatible hashing local
+  while sharing the codec and artifact descriptors.
 
 Builder tests use fake command execution; passing them does not establish
 correctness across real Docker daemons, remote clients or binfmt namespaces.
