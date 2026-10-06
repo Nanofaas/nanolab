@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import cast
 
 from multipass_vm_sdk import find_ssh_public_key
+from sonata_tasks.ansible import build_ansible_argv
 from sonata_tasks.vm.ssh import find_ssh_private_key_path, ssh_command
 
 from nanolab.tasks.components.context import ScenarioExecutionContext
@@ -77,33 +78,22 @@ def _ansible_operation(
     from nanolab.tasks.infra.ansible import bundled_ansible_root
 
     ansible_root = bundled_ansible_root()
-    extra_args: list[str] = []
-    for key, value in extra_vars.items():
-        extra_args.extend(["-e", f"{key}={value}"])
-
     private_key = (
         find_ssh_private_key_path(find_ssh_public_key())
         if discover_private_key
         else None
     )
-    private_key_args: list[str] = (
-        ["--private-key", str(private_key)] if private_key is not None else []
+    command = build_ansible_argv(
+        playbook=ansible_root / "playbooks" / playbook_name,
+        inventory=_inventory_target(context.vm_request),
+        user=context.vm_request.user,
+        private_key_path=private_key,
+        extra_vars=extra_vars,
     )
-
-    command: list[str] = [
-        "ansible-playbook",
-        "-i",
-        _inventory_target(context.vm_request),
-        "-u",
-        context.vm_request.user,
-        *private_key_args,
-        *extra_args,
-        str(ansible_root / "playbooks" / playbook_name),
-    ]
     return RemoteCommandOperation(
         operation_id=operation_id,
         summary=summary,
-        argv=tuple(command),
+        argv=command,
         env=_frozen_env({"ANSIBLE_CONFIG": str(ansible_root / "ansible.cfg")}),
     )
 

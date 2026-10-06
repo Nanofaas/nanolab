@@ -1,11 +1,12 @@
 # nanolab
 
 `Nanofaas/nanolab` is the standalone home for the operational tooling extracted
-from nanofaas. It contains three Python workspace members:
+from nanofaas. It contains two local Python workspace members:
 
 - `packages/nanolab`: the nanofaas operations CLI and supporting tooling
-- the pinned `sonata-tasks` package from the Sonata repository: reusable workflow task primitives
 - `packages/tui-toolkit`: shared terminal UI components
+
+Sonata (`sonata-engine` and `sonata-tasks`) is a pinned, published dependency.
 
 The initial source snapshot comes from nanofaas commit
 `4e0aa0751b5f3a5008012994bd4a8843de801316`. Its Git history was intentionally
@@ -34,6 +35,31 @@ arguments — equivalent to `uv run --package nanolab nanolab ...`:
 export NANOFAAS_ROOT=/path/to/nanofaas
 ./nanolab.sh plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
 ```
+
+## Tests and supported NanoFaaS source
+
+The supported, CI-tested NanoFaaS revision is
+`e7914be065e844776af57fe9e449bce7f12e03c5`. Newer revisions can be used when they
+preserve the CLI and recipe v2 contracts. Unsupported runtime directories do not
+prevent discovery of supported functions. Explicitly selecting an unsupported
+runtime fails before provisioning; Rust support is tracked separately in #57.
+
+Pure tests run without a NanoFaaS checkout:
+
+```bash
+env -u NANOFAAS_ROOT uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -m 'not nanofaas' --no-cov
+```
+
+Checkout contracts carry the `nanofaas` marker (or request the `nanofaas_root` /
+`nanofaas_checkout` fixtures). With `NANOFAAS_ROOT` set, the suite reads an isolated
+`git archive` of HEAD; the operator checkout stays read-only. Run the complete
+suite for combined coverage, or select contracts with `-m nanofaas`.
+A configured but invalid checkout is an error, rather than an implicit skip.
+
+Repository quality commands are development tooling:
+`uv run --all-packages --all-groups python -m nanolab.devtools.quality` and
+`uv run --all-packages --all-groups python -m nanolab.devtools.package_report`.
+The public console command is `nanolab`.
 
 ## CI gate
 
@@ -69,7 +95,7 @@ uv run --locked --all-packages --all-groups lint-imports --config packages/tui-t
 # generic file-hygiene checks live here, not in the commands above.
 uv run --locked --all-packages --all-groups pre-commit run --all-files
 
-uv build --all-packages --out-dir dist --clear
+uv build --all-packages --out-dir dist
 
 uv venv .wheel-smoke
 uv pip install dist/*.whl --python .wheel-smoke/bin/python
@@ -145,7 +171,7 @@ workflow migrations and validation goals.
 ## Local SonarQube analysis
 
 With Docker running and `sonar-scanner` installed (`brew install sonar-scanner`
-on macOS), scan all three workspace packages with:
+on macOS), scan both local workspace packages with:
 
 ```bash
 ./scripts/sonar.sh

@@ -159,7 +159,11 @@ def pytest_configure(config: pytest.Config) -> None:
     `nanofaas_checkout` still hands out the real repository for the few tests that
     need git itself.
     """
-    del config
+    config.addinivalue_line(
+        "markers", "nanofaas: contract requiring an explicit NanoFaaS checkout"
+    )
+    if not os.environ.get("NANOFAAS_ROOT", "").strip():
+        return
     from nanolab.release.build import extract_commit_tree
 
     global _CHECKOUT, _SOURCE
@@ -193,15 +197,37 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 @pytest.fixture(scope="session")
 def nanofaas_root() -> Path:
     """Return the commit the suite plans from, materialized by `git archive`."""
-    assert _SOURCE is not None
+    if _SOURCE is None:
+        pytest.skip("NanoFaaS contract requires NANOFAAS_ROOT")
     return _SOURCE
 
 
 @pytest.fixture(scope="session")
 def nanofaas_checkout() -> Path:
     """Return the real git repository, for the few tests that need git itself."""
-    assert _CHECKOUT is not None
+    if _CHECKOUT is None:
+        pytest.skip("NanoFaaS contract requires NANOFAAS_ROOT")
     return _CHECKOUT
+
+
+def source_contract_root() -> Path:
+    """Require source before importing a module that derives checkout constants."""
+    value = os.environ.get("NANOFAAS_ROOT", "").strip()
+    if not value:
+        pytest.skip("NanoFaaS contract requires NANOFAAS_ROOT", allow_module_level=True)
+    return _require_checkout(value)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Make checkout contracts selectable without excluding pure neighboring tests."""
+    for item in items:
+        fixtures = getattr(item, "fixturenames", ())
+        if "nanofaas_root" in fixtures or "nanofaas_checkout" in fixtures:
+            item.add_marker(pytest.mark.nanofaas)
+        if item.get_closest_marker("nanofaas") and _SOURCE is None:
+            item.add_marker(
+                pytest.mark.skip(reason="NanoFaaS contract requires NANOFAAS_ROOT")
+            )
 
 
 def captured_release_tree(

@@ -18,16 +18,19 @@ from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskEx
 from sonata_tasks.kubectl import PinnedKubeconfigExecutor
 from sonata_tasks.registry import docker_registry_resource
 
-from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
-from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.functions.catalog import resolve_function_definition
-from nanolab.plans.functions import (
+from nanolab.application.functions import (
     resolve_function,
     resolve_function_payloads,
     resolve_recipe_services,
     sonata_function,
 )
+from nanolab.application.vm_provider import (
+    provider_for_environment,
+    vm_request_for_role,
+)
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.functions.catalog import resolve_function_definition
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
 from nanolab.tasks.containerd_maven import repository_for_build

@@ -14,7 +14,7 @@ from sonata_tasks.compensation import best_effort
 from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
 
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import (

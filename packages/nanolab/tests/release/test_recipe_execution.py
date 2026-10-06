@@ -164,6 +164,7 @@ def staged(tmp_path):
     return source, inventory
 
 
+@pytest.mark.nanofaas
 def test_release_recipe_commands_use_owned_builder_and_paths():
     groups = _groups()
     commands = execution.release_recipe_commands(
@@ -189,6 +190,7 @@ def test_release_recipe_commands_use_owned_builder_and_paths():
         )
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -236,6 +238,7 @@ def test_archive_inventory_rejects_source_mutation(staged, mutation, architectur
         )
 
 
+@pytest.mark.nanofaas
 def test_inventory_allows_only_source_derived_gradle_outputs(staged):
     source, inventory = staged
     (source / ".gradle/cache").mkdir(parents=True)
@@ -321,6 +324,7 @@ def _run(
     return result, provider, executor
 
 
+@pytest.mark.nanofaas
 def test_complete_reports_match_independent_daemon_inspection(staged, tmp_path):
     evidence, provider, executor = _run(staged, tmp_path)
     images = [e for e in evidence if e.kind == "local-image-digest"]
@@ -343,6 +347,7 @@ def test_complete_reports_match_independent_daemon_inspection(staged, tmp_path):
     )
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     "value",
     [
@@ -356,6 +361,7 @@ def test_daemon_disagreement_prevents_receipt(staged, tmp_path, value):
         _run(staged, tmp_path, image_override=value)
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_failed_group_cannot_reuse_stale_output(staged, tmp_path, architecture):
     stale = staged[0].parent / f"recipe-output/{architecture}/native"
@@ -371,12 +377,14 @@ def test_failed_group_cannot_reuse_stale_output(staged, tmp_path, architecture):
     assert not (tmp_path / "evidence/native/distribution.json").exists()
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_transfer_truncation_prevents_receipt(staged, tmp_path, architecture):
     with pytest.raises(ValueError, match=r"transfer|digest|size"):
         _run(staged, tmp_path, architecture=architecture, truncate=True)
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("failure", ["transfer", "cancel", "cleanup"])
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_partial_recipe_failure_compensates_owned_inputs(
@@ -434,6 +442,7 @@ def test_partial_recipe_failure_compensates_owned_inputs(
     assert (tmp_path / f"evidence/buildkitd-{architecture}.toml").exists()
 
 
+@pytest.mark.nanofaas
 def test_recipe_input_release_preserves_local_evidence(tmp_path):
     from dataclasses import dataclass
 
@@ -470,6 +479,7 @@ def test_recipe_input_release_preserves_local_evidence(tmp_path):
     assert len(list((tmp_path / "evidence").glob("*.yaml"))) == 3
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("which", ["archive", "config"])
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_acquired_input_digest_mismatch_prevents_assembly(
@@ -485,6 +495,7 @@ def test_acquired_input_digest_mismatch_prevents_assembly(
         )
 
 
+@pytest.mark.nanofaas
 def test_inventory_allows_guarded_included_build_cache(staged):
     source, inventory = staged
     (source / "settings.gradle").write_text("includeBuild('plugin')\n")
@@ -502,11 +513,13 @@ def test_inventory_allows_guarded_included_build_cache(staged):
     )
 
 
+@pytest.mark.nanofaas
 def test_final_inspection_rejects_earlier_tag_replaced_by_later_group(staged, tmp_path):
     with pytest.raises(ValueError, match="image"):
         _run(staged, tmp_path, replace_after_default=True)
 
 
+@pytest.mark.nanofaas
 def test_archive_staging_matches_planning_permissions_despite_vm_umask(tmp_path):
     import io
     import tarfile
@@ -609,6 +622,7 @@ def _recipe_phase(
     return phase, provider, executor, source_tests, arguments
 
 
+@pytest.mark.nanofaas
 def test_recipe_execution_retains_input_copies_only_when_build_runs(staged, tmp_path):
     phase, provider, _executor, _source_tests, arguments = _recipe_phase(
         staged, tmp_path
@@ -695,6 +709,7 @@ def test_owned_builder_preserves_previous_selection(fail_create, role):
     assert executor.selected == "unrelated-builder"
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     "changed",
     [
@@ -780,6 +795,7 @@ def test_recipe_phase_fingerprint_binds_all_inputs(
     assert other.reuse_key != original_key
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -900,6 +916,7 @@ def test_recipe_resume_verifies_files_and_images_without_build(
     )
 
 
+@pytest.mark.nanofaas
 def test_partial_recipe_outcome_removes_prior_complete_receipt(staged, tmp_path):
     phase, provider, _executor, _source, args = _recipe_phase(staged, tmp_path)
     phase.run(cast(TaskInputs, object()))
@@ -913,6 +930,7 @@ def test_partial_recipe_outcome_removes_prior_complete_receipt(staged, tmp_path)
     ).exists()
 
 
+@pytest.mark.nanofaas
 def test_inventory_rejects_build_outputs_from_undeclared_gradle_project(staged):
     source, inventory = staged
     (source / "foreign").mkdir()
@@ -929,6 +947,7 @@ def test_inventory_rejects_build_outputs_from_undeclared_gradle_project(staged):
         )
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_recipe_log_does_not_preclaim_producer_output(
     staged, tmp_path, monkeypatch, architecture
@@ -969,6 +988,7 @@ def test_recipe_log_does_not_preclaim_producer_output(
     assert len([e for e in evidence if e.reference.endswith("gradle.log")]) == 3
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     ("architecture", "role"), [("amd64", "stack"), ("arm64", "arm-builder")]
 )
@@ -1001,6 +1021,7 @@ def test_recipe_commands_bind_architecture_role_and_paths(architecture, role):
         }
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     ("architecture", "role", "mixed"),
     [
@@ -1042,6 +1063,7 @@ def test_recipe_wrong_architecture_or_role_fails_before_remote_work(
     assert not (tmp_path / "evidence").exists()
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("host", ["aarch64", "arm64"])
 def test_arm_recipe_reports_match_independent_daemon(staged, tmp_path, host):
     evidence, provider, executor = _run(
@@ -1059,6 +1081,7 @@ def test_arm_recipe_reports_match_independent_daemon(staged, tmp_path, host):
     assert ("uname", "-s") in provider.commands
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     "options",
     [
@@ -1076,11 +1099,13 @@ def test_arm_native_platform_disagreement_prevents_evidence(staged, tmp_path, op
         _run(staged, tmp_path, architecture="arm64", **options)
 
 
+@pytest.mark.nanofaas
 def test_arm_final_union_detects_earlier_tag_replacement(staged, tmp_path):
     with pytest.raises(ValueError, match="Final release image"):
         _run(staged, tmp_path, architecture="arm64", replace_after_default=True)
 
 
+@pytest.mark.nanofaas
 def test_arm_cleanup_preserves_amd64_inputs_and_diagnostics(tmp_path):
     root = tmp_path / "vm"
     root.mkdir()
@@ -1112,6 +1137,7 @@ def test_arm_cleanup_preserves_amd64_inputs_and_diagnostics(tmp_path):
     assert all(path.read_text() == "retained" for path in kept)
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("deleted", [False, True])
 def test_arm_reacquisition_does_not_repair_retained_evidence(tmp_path, deleted):
     root = tmp_path / "vm"
@@ -1136,6 +1162,7 @@ def test_arm_reacquisition_does_not_repair_retained_evidence(tmp_path, deleted):
     assert not retained.exists() if deleted else retained.read_text() == "tampered"
 
 
+@pytest.mark.nanofaas
 def test_arm_cancellation_after_first_group_retains_diagnostics(
     staged, tmp_path, monkeypatch
 ):
@@ -1445,6 +1472,7 @@ def _run_both_recipes(case, *, resume=False):
     )
 
 
+@pytest.mark.nanofaas
 def test_both_architecture_resume_performs_no_build_or_push(tmp_path):
     case = _both_recipe_workflow(tmp_path)
     _run_both_recipes(case)
@@ -1462,6 +1490,7 @@ def test_both_architecture_resume_performs_no_build_or_push(tmp_path):
     assert case["counts"] == initial
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -1511,6 +1540,7 @@ def test_arm_evidence_invalidation_preserves_verified_amd64_phase(tmp_path, muta
     }
 
 
+@pytest.mark.nanofaas
 def test_arm_failed_resume_invalidates_prior_receipts_and_preserves_amd64(tmp_path):
     case = _both_recipe_workflow(tmp_path)
     _run_both_recipes(case)
@@ -1533,6 +1563,7 @@ def test_arm_failed_resume_invalidates_prior_receipts_and_preserves_amd64(tmp_pa
     assert (retained.parent.parent / "native/gradle.log").is_file()
 
 
+@pytest.mark.nanofaas
 def test_legacy_arm_journal_requires_recipe_assembly_and_new_push(tmp_path):
     from dataclasses import replace
 
@@ -1565,6 +1596,7 @@ def test_legacy_arm_journal_requires_recipe_assembly_and_new_push(tmp_path):
     assert case["counts"]["smoke"] == 1 and case["counts"]["publish"] == 1
 
 
+@pytest.mark.nanofaas
 def test_stale_arm_smoke_cannot_publish(tmp_path):
     from sonata_engine import Selection
 

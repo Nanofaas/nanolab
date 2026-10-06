@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.functions import (
+import pytest
+
+from nanolab.application.functions import (
     ResolvedFunction,
     resolve_function,
     resolve_function_payloads,
     sonata_function,
 )
+from nanolab.config.scenario import ScenarioConfig
 
 
 def _scenario() -> ScenarioConfig:
@@ -43,6 +45,7 @@ def _checkout_with_function(tmp_path: Path, *, with_payloads: bool) -> Path:
     return checkout
 
 
+@pytest.mark.nanofaas
 def test_resolve_function_returns_the_shared_shape() -> None:
     resolved = resolve_function(_scenario(), "word-stats-java")
 
@@ -52,6 +55,7 @@ def test_resolve_function_returns_the_shared_shape() -> None:
     assert resolved.build_argv
 
 
+@pytest.mark.nanofaas
 def test_sonata_function_carries_the_name_and_image_across() -> None:
     resolved = resolve_function(_scenario(), "word-stats-java")
 

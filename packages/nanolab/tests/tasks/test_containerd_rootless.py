@@ -13,7 +13,7 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm.ports import VmCommandProvider
 
-from nanolab.cli.execution import build_role_bindings
+from nanolab.application.execution import build_role_bindings
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.tasks.containerd_rootless import (
     RootlessRun,

@@ -26,6 +26,7 @@ from pathlib import Path
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
+from nanolab.application.functions import resolve_function
 from nanolab.comparison.evidence import (
     verify_comparison_cell_registry,
     verify_comparison_scheduler,
@@ -39,7 +40,6 @@ from nanolab.comparison.profiles import (
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import resolve_variants
-from nanolab.plans.functions import resolve_function
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher

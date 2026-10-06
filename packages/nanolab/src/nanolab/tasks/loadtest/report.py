@@ -23,6 +23,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
+from nanolab.metrics.interpretation import k6_value, k6_values
 from nanolab.tasks.loadtest.prometheus import counter_delta, is_counter
 
 _PROMETHEUS_SNAPSHOT = "prometheus-snapshot.json"
@@ -332,8 +333,7 @@ def _k6_table(k6_summary: dict[str, Any]) -> pd.DataFrame:
     for name, entry in sorted(metrics.items()):
         if not isinstance(entry, dict):
             continue
-        nested = entry.get("values")
-        values: dict[str, Any] = nested if isinstance(nested, dict) else entry
+        values = k6_values(metrics, name)
         rows.append(
             {
                 "metric": name,
@@ -390,7 +390,12 @@ def _counter_table(queries: dict[str, Any]) -> pd.DataFrame:
         if not points:
             continue
         rows.append(
-            {"counter": key, "increase over run": f"{counter_delta(points):,.0f}"}
+            {
+                "counter": key,
+                "increase over run": "—"
+                if (delta := counter_delta(points)) is None
+                else f"{delta:,.0f}",
+            }
         )
     return pd.DataFrame(rows)
 
@@ -443,18 +448,28 @@ table.data tr:hover td { background: #f9fafb; }
 
 def _cards(frame: pd.DataFrame, k6_summary: dict[str, Any], queue_size: int) -> str:
     metrics = k6_summary.get("metrics", {})
-    duration = metrics.get("http_req_duration", {})
-    failed = metrics.get("http_req_failed", {})
-    requests = metrics.get("http_reqs", {})
+
+    def reading(
+        name: str, keys: tuple[str, ...], format_spec: str, *, factor: float = 1
+    ) -> str:
+        try:
+            value = k6_value(k6_values(metrics, name), name, *keys)
+        except ValueError:
+            return "—"
+        return format(value * factor, format_spec)
+
     refused = _scalar(frame["rejected"].sum())
     peak_depth = _scalar(frame["queue_depth"].max())
     mean_wait = _scalar(frame["mean_queue_wait_ms"].mean())
     entries = [
         # `requests` is the k6 summary's `http_reqs` metric dict, not the library.
-        ("requests", f"{_scalar(requests.get('count', 0)):,.0f}"),  # nosec B113
+        ("requests", reading("http_reqs", ("count",), ",.0f")),  # nosec B113
         ("refused", f"{refused:,.0f}"),
-        ("refused share", f"{_scalar(failed.get('value', 0)) * 100:.3f}%"),
-        ("end-to-end p95", f"{_scalar(duration.get('p(95)', float('nan'))):.1f} ms"),
+        (
+            "refused share",
+            reading("http_req_failed", ("rate", "value"), ".3f", factor=100) + "%",
+        ),
+        ("end-to-end p95", reading("http_req_duration", ("p(95)",), ".1f") + " ms"),
         ("peak queue fill", f"{peak_depth / queue_size * 100:.0f}%"),
         ("mean queue wait", f"{mean_wait:.1f} ms"),
     ]

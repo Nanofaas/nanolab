@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 from nanolab.images.plan import build_image_plan
 from nanolab.release import arm
 from nanolab.release.model import ArtifactEvidence
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 REGISTRY = "localhost:5000/nanofaas"
 
 

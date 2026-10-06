@@ -18,7 +18,7 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import CommandTaskSpec
 
-from nanolab.cli.execution import resolve_loadtest_urls
+from nanolab.application.execution import resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.containerd_rootless import RootlessRun

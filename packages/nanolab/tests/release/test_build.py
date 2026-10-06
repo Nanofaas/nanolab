@@ -22,6 +22,8 @@ from ._release_support import (
     _ReleaseProvider,
 )
 
+pytestmark = pytest.mark.nanofaas
+
 
 def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None:
     commands = release_build.source_test_commands(Path("/srv/nanofaas-source"))

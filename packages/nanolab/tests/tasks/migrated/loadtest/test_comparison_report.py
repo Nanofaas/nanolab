@@ -19,7 +19,11 @@ def _k6(rate: float, p95: float, failed: float = 0.0) -> dict:
         "metrics": {
             "http_reqs": {"count": rate * 100, "rate": rate},
             "http_req_duration": {"p(50)": 1.0, "p(95)": p95, "p(99)": p95 * 2},
-            "http_req_failed": {"value": failed},
+            "http_req_failed": {
+                "rate": failed,
+                "passes": failed * 100,
+                "fails": (1 - failed) * 100,
+            },
         }
     }
 

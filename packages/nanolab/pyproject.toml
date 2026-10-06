@@ -4,6 +4,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 version = "0.6.0"
 description = "Control-plane orchestration product for build, test, and reporting"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "azure-vm-sdk==0.6.0",
@@ -20,13 +21,11 @@ dependencies = [
     "rich>=13.8",
     "sonata-engine==0.6.5",
     "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.5",
-    "tui-toolkit",
+    "tui-toolkit>=0.6.0,<0.7",
 ]
 
 [project.scripts]
 nanolab = "nanolab.app.main:main"
-nanolab-package-report = "nanolab.devtools.package_report:main"
-nanolab-quality = "nanolab.devtools.quality:main"
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -49,6 +48,7 @@ nanolab = [
     # They must resolve from
     # the installed distribution and not from a checkout beside it.
     "assets/k6/*",
+    "assets/validation/*",
     "assets/soak/*",
     "assets/containerd-rootless/*",
     "assets/presets/scenarios-v2/*",

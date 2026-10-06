@@ -799,7 +799,7 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
 
     def _local_wiring(self, run_dir: Path) -> HeapAnalysisWiring:
         """Prepare images, deploy, and bind the owned local session and MAT."""
-        from nanolab.plans.soak import compose_frozen_soak_workflow
+        from nanolab.tasks.soak.composition import compose_frozen_soak_workflow
         from nanolab.tasks.soak.preparation import prepare_soak
         from nanolab.tasks.soak.runtime import create_local_deployment
         from nanolab.tasks.soak.teardown import cleanup_timeout_s

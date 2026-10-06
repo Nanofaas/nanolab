@@ -183,6 +183,7 @@ def test_doctor_uses_shared_diagnostics(monkeypatch) -> None:
     shared_check.assert_called_once_with()
 
 
+@pytest.mark.nanofaas
 def test_plan_builds_shared_validate_workflow() -> None:
     result = CliRunner().invoke(
         app,
@@ -202,6 +203,7 @@ def test_plan_builds_shared_validate_workflow() -> None:
     assert "inspect-resources-of-fn-word-stats-java" in result.stdout
 
 
+@pytest.mark.nanofaas
 def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     monkeypatch.setattr(
         "nanolab.cli.product._workflow",
@@ -294,6 +296,7 @@ def test_run_requires_an_explicit_url_for_k8s_cli(
     build.assert_not_called()
 
 
+@pytest.mark.nanofaas
 def test_run_container_cli_builds_and_runs_without_an_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -374,6 +377,7 @@ def test_run_container_cli_rejects_keep(
     build.assert_not_called()
 
 
+@pytest.mark.nanofaas
 def test_run_passes_custom_control_plane_url_to_cli_plan(
     monkeypatch,
 ) -> None:
@@ -400,6 +404,7 @@ def test_run_passes_custom_control_plane_url_to_cli_plan(
     )
 
 
+@pytest.mark.nanofaas
 def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -435,6 +440,7 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     )
 
 
+@pytest.mark.nanofaas
 def test_plan_provisioned_k8s_cli_shows_the_whole_contract_workflow() -> None:
     result = CliRunner().invoke(
         app,
@@ -455,6 +461,7 @@ def test_plan_provisioned_k8s_cli_shows_the_whole_contract_workflow() -> None:
     assert "registry" not in result.stdout
 
 
+@pytest.mark.nanofaas
 def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -> None:
     actions: list[str] = []
     workflow = _sonata_workflow()
@@ -568,6 +575,7 @@ def test_git_provenance_fingerprints_tracked_and_untracked_content(
     assert untracked_two["git_diff_sha256"] != untracked_one["git_diff_sha256"]
 
 
+@pytest.mark.nanofaas
 def test_failed_loadtest_writes_failure_metadata(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         "nanolab.cli.product._workflow",
@@ -622,6 +630,7 @@ def test_inspect_renders_recipe_profile_as_json_path() -> None:
     assert data["recipeProfile"].endswith("/recipes/loadtest-container-jvm.yaml")
 
 
+@pytest.mark.nanofaas
 def test_plan_can_select_one_task() -> None:
     result = CliRunner().invoke(
         app,
@@ -638,6 +647,7 @@ def test_plan_can_select_one_task() -> None:
     assert "build-image-word-stats-java" not in result.stdout
 
 
+@pytest.mark.nanofaas
 def test_recipe_plan_rejects_external_ssh_environment(tmp_path: Path) -> None:
     environment = tmp_path / "external.yaml"
     environment.write_text(
@@ -660,6 +670,7 @@ def test_recipe_plan_rejects_external_ssh_environment(tmp_path: Path) -> None:
     assert "does not support provider external" in str(result.exception)
 
 
+@pytest.mark.nanofaas
 def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
     scenario = tmp_path / "autoscaling-cycle-k8s.yaml"
     scenario.write_text(
@@ -675,6 +686,7 @@ def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
     assert "008.acquire-helm-release-nanofaas" in result.stdout
 
 
+@pytest.mark.nanofaas
 def test_plan_renders_the_compiled_cli_workflow() -> None:
     result = CliRunner().invoke(
         app, ["plan", "scenarios-v2/cli-contract-container.yaml"]
@@ -685,6 +697,7 @@ def test_plan_renders_the_compiled_cli_workflow() -> None:
     assert "024.release-local-registry" in result.stdout
 
 
+@pytest.mark.nanofaas
 def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
     result = CliRunner().invoke(
         app,
@@ -705,6 +718,7 @@ def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
     assert "build-nanofaas-cli" not in result.stdout
 
 
+@pytest.mark.nanofaas
 def test_run_passes_the_requested_selection_to_sonata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -729,6 +743,7 @@ def test_run_passes_the_requested_selection_to_sonata(
     )
 
 
+@pytest.mark.nanofaas
 def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
     result = CliRunner().invoke(
         app,
@@ -745,6 +760,7 @@ def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
     assert "Traceback" not in result.output
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("keep", [False, True])
 def test_containerd_recipe_staging_survives_kept_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, keep: bool

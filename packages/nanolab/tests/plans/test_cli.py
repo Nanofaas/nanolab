@@ -98,6 +98,7 @@ def _multipass_environment(**role_overrides: object) -> EnvironmentConfig:
     )
 
 
+@pytest.mark.nanofaas
 def test_containerd_cli_compiles_rootless_runtime_and_public_contract() -> None:
     executor = RecordingExecutor()
     plan = build_cli_plan(
@@ -190,6 +191,7 @@ def _scenario(**overrides: object) -> ScenarioConfig:
     return ScenarioConfig.model_validate(payload)
 
 
+@pytest.mark.nanofaas
 def test_cli_plan_uses_the_selected_role_binding() -> None:
     host = RecordingExecutor()
     stack = RecordingExecutor()
@@ -212,6 +214,7 @@ def test_cli_plan_uses_the_selected_role_binding() -> None:
     ]
 
 
+@pytest.mark.nanofaas
 def test_cli_plan_compiles_every_selected_function() -> None:
     plan = build_cli_plan(
         _scenario(
@@ -235,6 +238,7 @@ def test_cli_plan_compiles_every_selected_function() -> None:
     )
 
 
+@pytest.mark.nanofaas
 def test_cli_plan_passes_the_endpoint_and_resolved_resources_through() -> None:
     executor = RecordingExecutor()
 
@@ -251,6 +255,7 @@ def test_cli_plan_passes_the_endpoint_and_resolved_resources_through() -> None:
     assert '"memoryMiB":512' in apply_script
 
 
+@pytest.mark.nanofaas
 def test_cli_plan_sends_only_the_payload_input_to_invoke() -> None:
     executor = RecordingExecutor()
 
@@ -264,6 +269,7 @@ def test_cli_plan_sends_only_the_payload_input_to_invoke() -> None:
     assert '"input"' not in " ".join(invoke.argv)
 
 
+@pytest.mark.nanofaas
 def test_cli_plan_supports_slicing_by_slug() -> None:
     executor = RecordingExecutor()
 
@@ -294,6 +300,7 @@ def test_cli_plan_rejects_a_non_cli_scenario() -> None:
         )
 
 
+@pytest.mark.nanofaas
 def test_container_backend_wraps_the_workflow_in_a_local_control_plane() -> None:
     plan = build_cli_plan(
         _scenario(backend="container"),
@@ -321,6 +328,7 @@ def test_container_backend_wraps_the_workflow_in_a_local_control_plane() -> None
     )
 
 
+@pytest.mark.nanofaas
 def test_container_backend_builds_the_control_plane_with_the_container_module() -> None:
     plan = build_cli_plan(
         _scenario(backend="container"),
@@ -342,6 +350,7 @@ def test_container_backend_builds_the_control_plane_with_the_container_module() 
     )
 
 
+@pytest.mark.nanofaas
 def test_container_backend_targets_the_local_control_plane_port() -> None:
     executor = RecordingExecutor()
 
@@ -358,6 +367,7 @@ def test_container_backend_targets_the_local_control_plane_port() -> None:
     assert "http://127.0.0.1:18080" in " ".join(_argv(invoke.task))
 
 
+@pytest.mark.nanofaas
 def test_k8s_backend_keeps_the_explicit_endpoint_and_starts_nothing() -> None:
     plan = build_cli_plan(
         _scenario(backend="k8s"),
@@ -394,6 +404,7 @@ def test_container_backend_runs_only_on_the_host_role() -> None:
         )
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_plan_compiles_the_expected_12_task_topology() -> None:
     plan = _provisioned_plan(
         RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()})
@@ -418,6 +429,7 @@ def test_provisioned_k8s_plan_compiles_the_expected_12_task_topology() -> None:
     )
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_bootstrap_sets_up_no_local_registry() -> None:
     """Images come from GHCR, so a registry nothing reads must not be provisioned.
 
@@ -433,6 +445,7 @@ def test_provisioned_k8s_bootstrap_sets_up_no_local_registry() -> None:
     assert not any("registry" in task_id for task_id in task_ids)
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_uses_the_published_release_images() -> None:
     product_root = default_tool_paths().nanofaas_root
     values = yaml.safe_load(
@@ -456,6 +469,7 @@ def test_provisioned_k8s_uses_the_published_release_images() -> None:
     assert "localhost:5000/nanofaas" not in " ".join((*helm.argv, *apply.argv))
 
 
+@pytest.mark.nanofaas
 def test_published_image_maps_every_catalog_function_to_a_published_reference() -> None:
     product_root = default_tool_paths().nanofaas_root
     _, version_tag = normalize_version(read_project_version(product_root))
@@ -489,6 +503,7 @@ def test_published_image_maps_every_catalog_function_to_a_published_reference() 
     assert set(mapped) == {function.key for function in publishable}
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -509,6 +524,7 @@ def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
     assert len(plan.compile().tasks) == 24
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stack() -> (
     None
 ):
@@ -538,6 +554,7 @@ def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stac
     ]
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_bootstrap_argv_is_resolved_from_the_acquired_vm() -> None:
     host = RecordingExecutor()
     orchestrator = FakeMultipassOrchestrator(host="192.0.2.42")
@@ -553,6 +570,7 @@ def test_provisioned_k8s_bootstrap_argv_is_resolved_from_the_acquired_vm() -> No
     assert orchestrator.torn_down, "a non-kept run must destroy the VM at the end"
 
 
+@pytest.mark.nanofaas
 def test_azure_k8s_plan_restricts_nodeports_to_the_operator() -> None:
     provider = FakeAzureOrchestrator(host="192.0.2.42")
 
@@ -569,6 +587,7 @@ def test_azure_k8s_plan_restricts_nodeports_to_the_operator() -> None:
     ]
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_endpoint_is_the_incluster_node_port() -> None:
     stack = RecordingExecutor()
 
@@ -579,6 +598,7 @@ def test_provisioned_k8s_endpoint_is_the_incluster_node_port() -> None:
     assert PROVISIONED_ENDPOINT in " ".join(invoke.argv)
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_helm_requires_the_vm_and_the_function_requires_helm() -> None:
     plan = _provisioned_plan(
         RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()})
@@ -597,6 +617,7 @@ def test_provisioned_k8s_helm_requires_the_vm_and_the_function_requires_helm() -
     ]
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_slice_keeps_the_vm_helm_and_function() -> None:
     stack = RecordingExecutor()
 
@@ -615,6 +636,7 @@ def test_provisioned_k8s_slice_keeps_the_vm_helm_and_function() -> None:
     ]
 
 
+@pytest.mark.nanofaas
 def test_provisioned_k8s_keep_preserves_the_vm_and_helm_but_not_the_function() -> None:
     """`--keep` is for what is expensive to rebuild — the VM and the chart on it.
 

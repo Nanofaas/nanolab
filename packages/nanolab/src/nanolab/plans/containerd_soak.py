@@ -6,9 +6,9 @@ from pathlib import Path
 from sonata_engine import Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
+from nanolab.application.functions import resolve_function, sonata_function
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.tasks.containerd_maven import repository_for_build
 from nanolab.tasks.containerd_rootless import (
     control_plane_resource,

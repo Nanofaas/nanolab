@@ -1,53 +1,47 @@
-# Controlplane Tooling Conventions
+# NanoLab conventions
 
-## Module Naming
+## Responsibilities and dependencies
 
-| Suffix | Role | Example |
-|--------|------|---------|
-| `*_runner.py` | Orchestrates a complete E2E workflow | `k3s_curl_runner.py` |
-| `*_runtime.py` | Manages a long-lived service or process | `grafana_runtime.py` |
-| `*_adapter.py` | Bridge to an external system (Ansible, VM) | `vm_adapter.py` |
-| `*_ops.py` | Stateless helper functions (build, deploy) | `gradle_ops.py` |
-| `*_commands.py` | Thin Typer CLI wiring, zero business logic | `e2e_commands.py` |
-| `*_models.py` | Pydantic data classes / validation | `scenario_models.py` |
-| `*_catalog.py` | Static registries / lookup tables | `function_catalog.py` |
-| `*_helpers.py` | Pure stateless utility functions, shared | `scenario_helpers.py` |
+Use names describing the responsibility, following neighboring modules. Extract
+cohesive policy, evidence validation or observation code when it can change
+independently. File length alone is not a reason to split a module.
 
-## Architecture Principles
+- `application/` contains environment translation, executor bindings, endpoint
+  resolution, function resolution and workload policy shared by entry points.
+- `plans/` composes scenario workflows; `tasks/` owns runtime behavior and resources.
+- `release/` owns release data, evidence and execution; `comparison/` owns matrix data.
+- `cli/` and `tui/` parse, present and invoke the product.
+- `core/` remains independent of product packages.
 
-1. **Single Responsibility** — every module has one reason to change.
-2. **No duplication** — shared logic lives in `*_helpers.py`; never copy-paste across runners.
-3. **No god objects** — classes > 200 LOC are split; methods > 30 LOC are extracted.
-4. **Thin CLI layer** — `*_commands.py` files only parse args and call runner methods.
-5. **Testability via injection** — runners accept a `shell` / `vm_exec` callable so tests can record calls without spawning processes.
-6. **No shell delegation** — runners call Python APIs directly; subprocess is a last resort for external tools (gradle, helm, kubectl).
+Import contracts in `.importlinter` forbid runtime dependencies on presentation
+and plan builders. Sonata is a published dependency, not local source. Reuse its
+execution/resource primitives and argument builders before adding equivalents.
+Keep provider retargeting and resource ownership explicit.
 
-## File Size Targets
+## Output and execution
 
-| Category | Max LOC |
-|----------|---------|
-| Source file (`src/`) | 250 |
-| Test file (`tests/`) | 400 |
+CLI presentation may use Typer and Rich. Interactive rendering uses `tui_toolkit`;
+workflow event contexts and sinks come from `sonata_engine`. Runtime tasks emit
+workflow events and structured artifacts without importing the TUI. Theme setup
+lives in `nanolab.tui.setup.setup_ui()`.
 
-## Terminal output
+Use injected command executors/providers at external boundaries. Drive Gradle,
+Docker, Helm and kubectl through the existing Sonata command interfaces. Preserve
+cleanup, evidence budgets and validation at those boundaries.
 
-All terminal output goes through `tui_toolkit`:
+## Tests
 
-- `from tui_toolkit.console import console` — the Rich `Console` singleton for direct `console.print(...)` calls
-- `from tui_toolkit import phase, step, success, warning, skip, fail` — workflow event rendering
-- `from tui_toolkit import status, workflow_step, workflow_log` — workflow step/log helpers
-- `from tui_toolkit import bind_workflow_sink, bind_workflow_context, has_workflow_sink` — sink/context wiring
-- `from tui_toolkit import get_content_width` — terminal width helper
-- `from tui_toolkit.pickers import select, multiselect, Choice` — interactive pickers
-- `from tui_toolkit import render_screen_frame` — screen chrome
+Test behavior, formats and failure modes. A module does not need a corresponding
+test file merely because it exists; avoid tests repeating constant definitions.
+Use recording executors for unit tests and real exported samples for parsers.
+Missing measurements must remain distinct from zero.
 
-The active theme and brand are configured once in `nanolab.tui.setup.setup_ui()`
-and read implicitly by every widget. To override in tests: `with bind_ui(UIContext(theme=...))`.
+Pure tests must run with `NANOFAAS_ROOT` unset. Source contracts use
+`pytest.mark.nanofaas` or the `nanofaas_root` / `nanofaas_checkout` fixtures.
+Modules deriving checkout constants during collection use `source_contract_root`
+from the test conftest; shared helpers should defer source access until called.
+Configured sources are exported with `git archive` before collection. Installed
+wheel checks run outside the source tree and write to the operator workspace.
 
-Never use `print()` or `rich.print()` directly.
-
-## Test Conventions
-
-- Every source module has a corresponding `test_<module>.py`.
-- Use `RecordingShell` from `shell_backend` to capture subprocess calls in unit tests.
-- Integration guards requiring real VMs/K8s live in `conftest.py` markers.
+Quality tools belong to the dev dependency group; run repository commands with
+`python -m nanolab.devtools.quality` / `python -m nanolab.devtools.package_report`.

@@ -1,7 +1,10 @@
-import os
-from pathlib import Path
+import pytest
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+from tests.conftest import source_contract_root
+
+pytestmark = pytest.mark.nanofaas
+
+NANOFAAS_ROOT = source_contract_root()
 
 
 def test_javascript_example_images_copy_local_sdk_dependency_target() -> None:

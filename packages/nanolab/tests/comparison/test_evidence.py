@@ -287,11 +287,11 @@ def test_native_g1_requires_effective_jfr_evidence(publication):
 def resume_case(publication, tmp_path):
     from dataclasses import asdict
 
+    from nanolab.application.functions import ResolvedFunction
     from nanolab.comparison.manifest import (
         ComparisonManifest,
         write_comparison_manifest,
     )
-    from nanolab.plans.functions import ResolvedFunction
 
     verify, provider, inputs, stage = publication
     stage = ComparisonStage(

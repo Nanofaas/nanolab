@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -22,8 +23,6 @@ def test_distribution_and_console_scripts_use_nanolab_name() -> None:
     assert metadata["project"]["name"] == "nanolab"
     assert metadata["project"]["scripts"] == {
         "nanolab": "nanolab.app.main:main",
-        "nanolab-package-report": "nanolab.devtools.package_report:main",
-        "nanolab-quality": "nanolab.devtools.quality:main",
     }
 
 
@@ -32,7 +31,7 @@ def test_help_does_not_require_nanofaas_root() -> None:
     environment.pop("NANOFAAS_ROOT", None)
 
     result = subprocess.run(
-        ("nanolab", "--help"),
+        (str(Path(sys.executable).with_name("nanolab")), "--help"),
         capture_output=True,
         env=environment,
         text=True,

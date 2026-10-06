@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from itertools import pairwise
 from typing import Any
 
 from sonata_tasks.prometheus import (
@@ -11,6 +10,9 @@ from sonata_tasks.prometheus import (
     PrometheusRetryPolicy,
     PrometheusSeries,
 )
+
+from nanolab.metrics.interpretation import counter_delta as counter_delta
+from nanolab.metrics.interpretation import is_counter as is_counter
 
 
 def sum_series_by_timestamp(series: tuple[PrometheusSeries, ...]) -> dict[float, float]:
@@ -20,33 +22,6 @@ def sum_series_by_timestamp(series: tuple[PrometheusSeries, ...]) -> dict[float,
         for sample in item.samples:
             merged[sample.timestamp] = merged.get(sample.timestamp, 0.0) + sample.value
     return merged
-
-
-def is_counter(name: str, metric_type: str | None = None) -> bool:
-    """Identify counters by an explicit type or the Prometheus name convention."""
-    if metric_type is not None:
-        return metric_type == "counter"
-    metric = name.split("@", 1)[0].split("{", 1)[0].strip()
-    return (
-        metric.endswith(("_total", "_count", "_sum")) or metric == "function_dispatch"
-    )
-
-
-def counter_delta(points: list[dict[str, Any]]) -> float:
-    """Count increments and resets independently for every labelled series."""
-    series: dict[tuple, list[dict[str, Any]]] = {}
-    for point in points:
-        if "value" in point:
-            key = tuple(sorted(point.get("labels", {}).items()))
-            series.setdefault(key, []).append(point)
-    total = 0.0
-    for samples in series.values():
-        if all("timestamp" in point for point in samples):
-            samples = sorted(samples, key=lambda point: point["timestamp"])
-        values = [float(point["value"]) for point in samples]
-        for previous, current in pairwise(values):
-            total += current - previous if current >= previous else current
-    return total
 
 
 def _client(base_url: str, timeout_seconds: float = 20) -> HttpPrometheusClient:

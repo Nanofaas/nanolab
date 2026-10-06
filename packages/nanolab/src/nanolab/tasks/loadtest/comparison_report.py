@@ -27,6 +27,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
+from nanolab.metrics.interpretation import k6_value as _required_k6_value
+from nanolab.metrics.interpretation import k6_values
 from nanolab.tasks.loadtest.report import _STYLE, _scalar, _table_html
 
 _SNAPSHOT = "metrics/prometheus-snapshot.json"
@@ -68,27 +70,6 @@ class CellData:
         )
 
 
-def _k6_values(summary: dict[str, Any], name: str) -> dict[str, Any]:
-    entry = summary.get("metrics", {}).get(name, {})
-    # k6 has moved this shape between versions: the values sat under a "values"
-    # key in one and at the top level in another. Accept both rather than pin a
-    # version, since a wrong guess here reports every metric as zero.
-    return entry.get("values", entry) if isinstance(entry, dict) else {}
-
-
-def _required_k6_value(values: dict[str, Any], name: str, *keys: str) -> float:
-    for key in keys:
-        if key in values:
-            try:
-                value = float(values[key])
-            except (ValueError, TypeError):
-                break
-            if math.isfinite(value):
-                return value
-            break
-    raise ValueError(f"missing or invalid required k6 metric {name}: {'/'.join(keys)}")
-
-
 def _series(snapshot: dict[str, Any], name: str) -> pd.DataFrame:
     entry = snapshot.get("queries", {}).get(name)
     if not entry or not entry.get("points"):
@@ -113,9 +94,9 @@ def read_cell(root: Path, variant: str, repetition: int) -> CellData | None:
     if not k6_path.is_file():
         return None
     summary = json.loads(k6_path.read_text(encoding="utf-8"))
-    reqs = _k6_values(summary, "http_reqs")
-    duration = _k6_values(summary, "http_req_duration")
-    failed = _k6_values(summary, "http_req_failed")
+    reqs = k6_values(summary.get("metrics", {}), "http_reqs")
+    duration = k6_values(summary.get("metrics", {}), "http_req_duration")
+    failed = k6_values(summary.get("metrics", {}), "http_req_failed")
 
     snapshot: dict[str, Any] = {}
     snapshot_path = cell / _SNAPSHOT

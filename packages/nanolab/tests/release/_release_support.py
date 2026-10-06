@@ -28,8 +28,9 @@ from nanolab.release.model import (
     digest_path,
 )
 from nanolab.release.versioning import read_project_version
+from tests.conftest import source_contract_root
 
-NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+NANOFAAS_ROOT = source_contract_root()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
 CURRENT_TAG = f"v{CURRENT_VERSION}"
