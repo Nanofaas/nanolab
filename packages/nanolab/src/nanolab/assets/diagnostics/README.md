@@ -210,8 +210,12 @@ produces a timeout rather than fabricated data.
 (`helper_build.BUILD_CONTEXT`). Supply
 digest-pinned `JDK_BASE` and `PYTHON_BASE` for linux/arm64. The JDK stage must expose
 a glibc-compatible JDK25 at `/opt/java/openjdk`; Python must be 3.12+ at
-`/usr/local/bin/python3`. The final image copies the existing `processes.py`
-supervisor and new worker/JFC assets. `tasks/soak/helper_build.py` builds,
+`/usr/local/bin/python3`. Buildx also receives a named `sonata` context resolved
+from the installed `sonata-tasks` distribution. The final image copies its
+stdlib-only `owned_process.py` as the worker's `processes.py`, verifies the
+supplied SHA-256, and records the distribution version in an image label.
+It copies the worker/JFC assets from NanoLab's context.
+`tasks/soak/helper_build.py` builds,
 publishes and resolves the RepoDigest once per run and supplies it to prepare,
 so no scenario carries a helper digest; the provisioner is unchanged and still
 only checks local RepoDigests. A local tag or
@@ -240,7 +244,8 @@ private collectGarbage request window. Snapshots use inspector chunk callbacks,
 synchronous writes, the target-visible tmpfs bound and an additional byte limit.
 No response is acknowledged while a snapshot callback is still writing.
 
-Host Docker clients and remote JDK commands use the existing OwnedCommandRunner.
+Host Docker clients and remote JDK commands use Sonata's OwnedCommandRunner;
+the helper worker uses the same implementation, without installing the engine.
 Timeout/protocol/remote-completion failures stop the exact owned target first,
 then remove the owned helper. Killing the PID-namespace init also terminates
 namespace members. Ownership/incarnation changes prevent signaling and produce

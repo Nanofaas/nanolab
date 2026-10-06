@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
 import json
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -64,7 +68,14 @@ def _argv(tmp_path: Path) -> list[str]:
 def test_the_checked_in_locks_supply_every_build_argument() -> None:
     """The real lock files must actually drive the build, not just exist."""
     arguments = build_arguments()
-    assert set(arguments) == {"MAT_URL", "MAT_SHA256", "JDK_BASE", "PYTHON_BASE"}
+    assert set(arguments) == {
+        "MAT_URL",
+        "MAT_SHA256",
+        "JDK_BASE",
+        "PYTHON_BASE",
+        "OWNED_PROCESS_SHA256",
+        "SONATA_TASKS_VERSION",
+    }
     mat = json.loads(MAT_LOCK.read_text())
     assert arguments["MAT_URL"] == mat["url"]
     assert arguments["MAT_SHA256"] == mat["sha256"]
@@ -90,6 +101,46 @@ def test_build_publishes_and_returns_the_digest_it_just_pushed(tmp_path) -> None
     joined = " ".join(argv)
     for name in ("MAT_URL", "MAT_SHA256", "JDK_BASE", "PYTHON_BASE"):
         assert f"{name}=" in joined
+
+
+def test_build_supplies_the_installed_sonata_module_to_the_worker(tmp_path) -> None:
+    docker = _fake_docker(tmp_path)
+    build_helper_image(_request(tmp_path, docker=str(docker)))
+    argv = _argv(tmp_path)
+    context = argv[argv.index("--build-context") + 1]
+    name, _, directory = context.partition("=")
+    assert name == "sonata"
+    source = Path(directory) / "owned_process.py"
+    assert source.is_file()
+    arguments = {
+        value.partition("=")[0]: value.partition("=")[2]
+        for index, value in enumerate(argv)
+        if index and argv[index - 1] == "--build-arg"
+    }
+    assert (
+        arguments["OWNED_PROCESS_SHA256"]
+        == hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    assert arguments["SONATA_TASKS_VERSION"] == importlib.metadata.version(
+        "sonata-tasks"
+    )
+
+    # Execute the exact distribution file supplied to Buildx in isolation:
+    # the worker has only this module, Python and the standard library.
+    worker = tmp_path / "worker"
+    worker.mkdir()
+    (worker / "processes.py").write_bytes(source.read_bytes())
+    code = (
+        "import sys;sys.path.insert(0,sys.argv[1]);"
+        "import processes;from pathlib import Path;from threading import Event;"
+        "assert 'sonata_tasks' not in sys.modules;"
+        "r=processes.run_owned_command([sys.executable,'-c',\"print('worker')\"],"
+        "cwd=Path(sys.argv[1]),env={},log_path=Path(sys.argv[1])/'command.log',"
+        "timeout_s=2,cancelled=Event(),output_limit_bytes=1024);"
+        "assert r.returncode==0 and r.reaped and not r.errors"
+    )
+    subprocess.run([sys.executable, "-I", "-S", "-c", code, str(worker)], check=True)
+    assert (worker / "command.log").read_text() == "worker\n"
 
 
 def test_the_digest_comes_from_this_build_not_a_registry_lookup(tmp_path) -> None:
