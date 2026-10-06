@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from sonata_engine import Resource, TaskInputs
+from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.command import CommandTask
 from sonata_tasks.docker import DockerTask
 from sonata_tasks.execution.ports import CommandTaskExecutor
@@ -70,8 +71,7 @@ def recipe_builder_resource(
         raise ValueError("Invalid recipe builder tag")
     name = f"nanolab-{tag}"
     lock_fd: int | None = None
-    owned_builder = False
-    creation_attempted = False
+    builder_pending_cleanup = False
     owner_node = f"{name}-{uuid4().hex}"
     owned_registration: str | None = None
     registration_name = ""
@@ -115,53 +115,52 @@ def recipe_builder_resource(
             raise RuntimeError("Registration helper returned no result")
         return result.stdout.strip()
 
+    def validate_bootstrap(stdout: str) -> None:
+        evidence["bootstrap"] = stdout
+        platforms = {
+            platform.strip().rstrip("*")
+            for line in re.findall(r"^\s*Platforms:\s*(.*)$", stdout, re.MULTILINE)
+            for platform in line.split(",")
+        }
+        if not {"linux/amd64", "linux/arm64"}.issubset(platforms):
+            raise RuntimeError(
+                "Recipe builder does not advertise both required platforms"
+            )
+
+    builder = buildx_builder_resource(
+        name=name,
+        executor=executor,
+        role="host",
+        exclusive=True,
+        owner_node=owner_node,
+        use=False,
+        driver_options=("network=host",),
+        buildkitd_config=str(run_dir / "buildkitd.toml"),
+        validate=validate_bootstrap,
+        validation_key="nanolab-recipe-amd64-arm64",
+    )
+
     def cleanup(inputs: TaskInputs) -> None:
-        nonlocal lock_fd, owned_builder, owned_registration
+        nonlocal lock_fd, builder_pending_cleanup, owned_registration
         errors: list[str] = []
         try:
-            if creation_attempted:
+            if builder_pending_cleanup:
                 try:
-                    try:
-                        state = command(
-                            inputs,
-                            ("docker", "buildx", "inspect", name),
-                            "Reconcile owned recipe builder",
-                        )
-                    except RuntimeError as error:
-                        if "no builder" not in str(error).lower():
-                            raise
-                        state = ""
-                    matches_owner = bool(
-                        re.search(
-                            r"^\s*Name:\s*" + re.escape(owner_node) + r"\s*$",
-                            state,
-                            re.MULTILINE,
-                        )
-                    )
-                    if matches_owner:
-                        owned_builder = True
-                        command(
-                            inputs,
-                            ("docker", "buildx", "rm", name),
-                            "Remove owned recipe builder",
-                        )
-                        owned_builder = False
-                    elif owned_builder and state:
-                        raise RuntimeError("Owned builder cleanup identity conflict")
-                    else:
-                        owned_builder = False
-                except Exception as error:
+                    builder.release(inputs, name)
+                except BaseException as error:
                     errors.append(str(error))
-            if owned_registration is not None and not owned_builder:
+                else:
+                    builder_pending_cleanup = False
+            if owned_registration is not None and not builder_pending_cleanup:
                 try:
                     current = registration(inputs, "inspect-registration")
                     if current != owned_registration:
                         raise RuntimeError("Owned binfmt registration cleanup conflict")
                     registration(inputs, "remove-registration", owned_registration)
                     owned_registration = None
-                except Exception as error:
+                except BaseException as error:
                     errors.append(f"registration cleanup conflict: {error}")
-            if owned_registration is not None and owned_builder:
+            if owned_registration is not None and builder_pending_cleanup:
                 errors.append(
                     "Retained registration because owned builder cleanup failed"
                 )
@@ -185,8 +184,8 @@ def recipe_builder_resource(
             raise RuntimeError("Recipe builder cleanup failed: " + "; ".join(errors))
 
     def acquire(inputs: TaskInputs) -> RecipeBuilder:
-        nonlocal lock_fd, owned_builder, owned_registration
-        nonlocal registration_name, helper_image, creation_attempted
+        nonlocal lock_fd, builder_pending_cleanup, owned_registration
+        nonlocal registration_name, helper_image
         info = json.loads(
             command(
                 inputs,
@@ -301,50 +300,8 @@ def recipe_builder_resource(
             )
             config = run_dir / "buildkitd.toml"
             config.write_text('[registry."127.0.0.1:5000"]\n  http = true\n')
-            creation_attempted = True
-            command(
-                inputs,
-                (
-                    "docker",
-                    "buildx",
-                    "create",
-                    "--name",
-                    name,
-                    "--node",
-                    owner_node,
-                    "--driver",
-                    "docker-container",
-                    "--driver-opt",
-                    "network=host",
-                    "--buildkitd-config",
-                    str(config),
-                ),
-                "Create owned recipe builder",
-            )
-            owned_builder = True
-            bootstrap = command(
-                inputs,
-                (
-                    "docker",
-                    "buildx",
-                    "inspect",
-                    "--bootstrap",
-                    name,
-                ),
-                "Bootstrap recipe builder",
-            )
-            evidence["bootstrap"] = bootstrap
-            platforms = {
-                platform.strip().rstrip("*")
-                for line in re.findall(
-                    r"^\s*Platforms:\s*(.*)$", bootstrap, re.MULTILINE
-                )
-                for platform in line.split(",")
-            }
-            if not {"linux/amd64", "linux/arm64"}.issubset(platforms):
-                raise RuntimeError(
-                    "Recipe builder does not advertise both required platforms"
-                )
+            builder_pending_cleanup = True
+            builder.acquire(inputs)
             (run_dir / "builder.json").write_text(json.dumps(evidence, indent=2) + "\n")
             return RecipeBuilder(name, f"linux/{architecture}")
         except BaseException as error:
@@ -357,7 +314,7 @@ def recipe_builder_resource(
                 error.add_note(f"Cannot retain builder evidence: {evidence_error}")
             try:
                 cleanup(inputs)
-            except Exception as cleanup_error:
+            except BaseException as cleanup_error:
                 error.add_note(str(cleanup_error))
             raise
 

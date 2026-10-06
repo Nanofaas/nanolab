@@ -33,12 +33,16 @@ class BuilderExecutor:
             )
         elif argv[1:3] == ("buildx", "ls"):
             stdout = "nanolab-heap-analysis\n" + (
-                "nanolab-recipe-test\n" if self.failure == "collision" else ""
+                self.builder + "\n"
+                if self.builder
+                else "nanolab-recipe-test\n"
+                if self.failure == "collision"
+                else ""
             )
         elif argv[1:3] == ("buildx", "create"):
             failed = self.failure == "create"
             if not failed:
-                self.builder = "nanolab-recipe-test"
+                self.builder = argv[argv.index("--name") + 1]
                 self.node = (
                     argv[argv.index("--node") + 1]
                     if "--node" in argv
@@ -58,7 +62,8 @@ class BuilderExecutor:
                     stderr="no builder found",
                 )
             stdout = (
-                f"Name: nanolab-recipe-test\nNodes:\nName: {self.node}\n"
+                f"Name: {self.builder}\nDriver: docker-container\nNodes:\n"
+                f"Name: {self.node}\n"
                 "Platforms: linux/amd64, linux/arm64\n"
             )
         elif argv[1:3] == ("buildx", "rm"):
@@ -91,12 +96,10 @@ class BuilderExecutor:
         )
 
 
-def resource(tmp_path: Path, executor: BuilderExecutor):
+def resource(tmp_path: Path, executor: BuilderExecutor, *, tag="recipe-test"):
     from nanolab.tasks.recipes.builder import recipe_builder_resource
 
-    return recipe_builder_resource(
-        executor=executor, run_dir=tmp_path, tag="recipe-test"
-    )
+    return recipe_builder_resource(executor=executor, run_dir=tmp_path, tag=tag)
 
 
 def test_builder_uses_daemon_architecture_and_explicit_name(tmp_path: Path) -> None:
@@ -190,7 +193,7 @@ def test_builder_name_collision_never_removes_existing_builder(tmp_path: Path) -
 def test_two_runs_serialize_registration_lifetime(tmp_path: Path) -> None:
     executor = BuilderExecutor()
     first = resource(tmp_path / "one", executor)
-    second = resource(tmp_path / "two", executor)
+    second = resource(tmp_path / "two", executor, tag="recipe-second")
     value = first.acquire(TaskInputs._for_resources({}, set()))
     try:
         with pytest.raises(RuntimeError, match=r"busy|lock"):
@@ -209,7 +212,7 @@ def test_binfmt_lock_is_independent_of_process_tmpdir(
     second_dir.mkdir()
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(first_dir))
     first = resource(tmp_path / "one", executor)
-    second = resource(tmp_path / "two", executor)
+    second = resource(tmp_path / "two", executor, tag="recipe-second")
     inputs = TaskInputs._for_resources({}, set())
     value = first.acquire(inputs)
     second_value = None
@@ -263,3 +266,204 @@ def test_evidence_failure_cannot_bypass_compensation(
     retry = resource(tmp_path / "retry", executor)
     value = retry.acquire(TaskInputs._for_resources({}, set()))
     retry.release(TaskInputs._for_resources({}, set()), value)
+
+
+def test_recipe_builder_obeys_shared_acquisition_failure(tmp_path, monkeypatch):
+    from sonata_engine import Resource
+
+    from nanolab.tasks.recipes import builder as module
+
+    def denied(_inputs):
+        raise RuntimeError("shared builder acquisition denied")
+
+    monkeypatch.setattr(
+        module,
+        "buildx_builder_resource",
+        lambda **_kwargs: Resource(
+            title="Deny shared builder", acquire=denied, release=lambda *_args: None
+        ),
+        raising=False,
+    )
+    executor = BuilderExecutor()
+    run = resource(tmp_path, executor)
+    inputs = TaskInputs.empty()
+    try:
+        with pytest.raises(RuntimeError, match="shared builder acquisition denied"):
+            run.acquire(inputs)
+    finally:
+        if executor.builder:
+            run.release(inputs, module.RecipeBuilder(executor.builder, "linux/arm64"))
+    assert executor.registration == ""
+    assert all(argv[1:3] != ("buildx", "create") for argv in executor.commands)
+
+
+def test_unresolved_partial_builder_cleanup_retains_emulation(tmp_path):
+    class InterruptedBuilder(BuilderExecutor):
+        def run(self, task, *, dry_run=False):
+            argv = task.argv
+            if argv[1:3] == ("buildx", "create"):
+                self.builder = "nanolab-recipe-test"
+                self.node = argv[argv.index("--node") + 1]
+                self.commands.append(argv)
+                raise KeyboardInterrupt("partial creation interrupted")
+            if argv[1:3] == ("buildx", "inspect"):
+                self.commands.append(argv)
+                raise RuntimeError("builder identity unavailable")
+            return super().run(task, dry_run=dry_run)
+
+    executor = InterruptedBuilder()
+    with pytest.raises(KeyboardInterrupt, match="partial creation") as caught:
+        resource(tmp_path, executor).acquire(TaskInputs.empty())
+    assert executor.builder == "nanolab-recipe-test"
+    assert executor.registration == REGISTRATION
+    receipt = json.loads((tmp_path / "builder-cleanup.json").read_text())
+    assert receipt["registrationRetained"] is True
+    assert any("cleanup" in note for note in caught.value.__notes__)
+    assert not any("remove-registration" in argv for argv in executor.commands)
+
+
+@pytest.mark.parametrize("change", ["replacement", "additional-node", "remove-failure"])
+def test_failed_builder_release_retains_registration_and_releases_lock(
+    tmp_path, change
+):
+    class ChangedExecutor(BuilderExecutor):
+        def run(self, task, *, dry_run=False):
+            if change == "remove-failure" and task.argv[1:3] == ("buildx", "rm"):
+                self.commands.append(task.argv)
+                raise RuntimeError("builder removal unavailable")
+            result = super().run(task, dry_run=dry_run)
+            if change == "additional-node" and task.argv[1:3] == ("buildx", "inspect"):
+                return TaskResult(
+                    task_id="",
+                    status="passed",
+                    return_code=0,
+                    stdout=result.stdout + "Name: foreign-node\n",
+                )
+            return result
+
+    executor = ChangedExecutor()
+    # Introduce additional-node mutation only after successful acquisition.
+    original_change = change
+    if change == "additional-node":
+        change = "unchanged"
+    run = resource(tmp_path / "first", executor)
+    inputs = TaskInputs.empty()
+    value = run.acquire(inputs)
+    change = original_change
+    if change == "replacement":
+        executor.node = "replacement-node"
+    with pytest.raises(RuntimeError, match="cleanup"):
+        run.release(inputs, value)
+    assert executor.builder == value.name
+    assert executor.registration == REGISTRATION
+    receipt = json.loads((tmp_path / "first" / "builder-cleanup.json").read_text())
+    assert receipt["registrationRetained"] is True
+    assert not any("remove-registration" in argv for argv in executor.commands)
+
+    # A distinct builder can acquire after cleanup failure: the local lock closed.
+    retry_executor = BuilderExecutor(registration=executor.registration)
+    retry = resource(tmp_path / "retry", retry_executor, tag="recipe-second")
+    retry_value = retry.acquire(inputs)
+    retry.release(inputs, retry_value)
+    assert executor.builder == value.name
+    assert retry_executor.registration == REGISTRATION
+    assert executor.registration == REGISTRATION
+
+
+def test_recipe_keeps_receipt_and_removes_builder_before_registration(tmp_path):
+    executor = BuilderExecutor()
+    run = resource(tmp_path, executor)
+    inputs = TaskInputs.empty()
+    value = run.acquire(inputs)
+    receipt = json.loads((tmp_path / "builder.json").read_text())
+    assert receipt["ownerNode"] == executor.node
+    assert receipt["builder"] == value.name
+    assert "Platforms: linux/amd64, linux/arm64" in receipt["bootstrap"]
+    run.release(inputs, value)
+    remove_builder = next(
+        i for i, argv in enumerate(executor.commands) if argv[1:3] == ("buildx", "rm")
+    )
+    remove_registration = next(
+        i for i, argv in enumerate(executor.commands) if "remove-registration" in argv
+    )
+    assert remove_builder < remove_registration
+
+
+def test_recipe_platform_validation_failure_cleans_builder_and_emulation(tmp_path):
+    class MissingPlatform(BuilderExecutor):
+        def run(self, task, *, dry_run=False):
+            result = super().run(task, dry_run=dry_run)
+            if "--bootstrap" in task.argv:
+                return TaskResult(
+                    task_id="",
+                    status="passed",
+                    return_code=0,
+                    stdout=result.stdout.replace(
+                        "Platforms: linux/amd64, linux/arm64", "Platforms: linux/arm64"
+                    ),
+                )
+            return result
+
+    executor = MissingPlatform()
+    with pytest.raises(RuntimeError, match="both required platforms"):
+        resource(tmp_path, executor).acquire(TaskInputs.empty())
+    assert executor.builder == ""
+    assert executor.registration == ""
+
+
+def test_failed_rm_with_missing_client_record_retains_emulation(tmp_path):
+    class RemovedRecordExecutor(BuilderExecutor):
+        daemon_alive = True
+
+        def run(self, task, *, dry_run=False):
+            if task.argv[1:3] == ("buildx", "rm"):
+                self.commands.append(task.argv)
+                self.builder = ""
+                raise RuntimeError("client record removed but daemon stop failed")
+            return super().run(task, dry_run=dry_run)
+
+    executor = RemovedRecordExecutor(failure="bootstrap")
+    with pytest.raises(RuntimeError, match="forced failure"):
+        resource(tmp_path, executor).acquire(TaskInputs.empty())
+    assert executor.daemon_alive
+    assert executor.builder == ""
+    assert executor.registration == REGISTRATION
+    receipt = json.loads((tmp_path / "builder-cleanup.json").read_text())
+    assert receipt["registrationRetained"] is True
+    assert any("unconfirmed" in error for error in receipt["errors"])
+    assert not any("remove-registration" in argv for argv in executor.commands)
+
+
+@pytest.mark.parametrize("cleanup_error", [KeyboardInterrupt, ValueError])
+def test_interrupted_compensation_preserves_primary_receipt_and_lock(
+    tmp_path, monkeypatch, cleanup_error
+):
+    from sonata_engine import Resource
+
+    from nanolab.tasks.recipes import builder as module
+
+    def acquire(_inputs):
+        raise ValueError("primary acquisition failure")
+
+    def release(_inputs, _value):
+        raise cleanup_error("secondary cleanup failure")
+
+    monkeypatch.setattr(
+        module,
+        "buildx_builder_resource",
+        lambda **_kwargs: Resource(
+            title="Interrupted", acquire=acquire, release=release
+        ),
+    )
+    executor = BuilderExecutor()
+    with pytest.raises(ValueError, match="primary acquisition failure") as caught:
+        resource(tmp_path / "first", executor).acquire(TaskInputs.empty())
+    assert any("secondary cleanup failure" in note for note in caught.value.__notes__)
+    assert executor.registration == REGISTRATION
+    receipt = json.loads((tmp_path / "first" / "builder-cleanup.json").read_text())
+    assert receipt["registrationRetained"] is True
+    assert any("secondary cleanup failure" in error for error in receipt["errors"])
+
+    # The same daemon's local lock was closed even when release was interrupted.
+    with pytest.raises(ValueError, match="primary acquisition failure"):
+        resource(tmp_path / "retry", executor).acquire(TaskInputs.empty())

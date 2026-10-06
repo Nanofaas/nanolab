@@ -39,7 +39,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `soak/artifacts.py`: `fingerprint` | Keep byte-compatible hashing local | Storage review demonstrated that JSON normalization followed by `sonata_tasks.core.fingerprint.fingerprint_digest` changes hashes for accepted nested numeric-key mappings: numeric sorting before JSON encoding differs from lexical sorting after normalization. Preserve the current bare-hex hash of the codec's exact canonical bytes. The small stdlib hash does not justify another shared API or an evidence-identity migration. |
 | `soak/artifacts.py`: `describe_artifact` | Consolidate with artifact work | Streaming SHA-256 and byte count fit the storage capability. Do not create a separate hashing task or framework. |
 | `soak/artifacts.py`: `retained`, `describe_tree`, `measure_tree`, `enforce_limit` | Keep current accounting policy local | They encode scratch-directory exclusions, source-tree handling and acceptance inventory rules. A generic writer must not silently exclude all `workspace-*` or dot directories. Consider shared traversal only if separating storage actually requires it. |
-| `tasks/recipes/builder.py`: private Buildx builder and owner-node reconciliation | Extend existing Buildx resource | Sonata already creates, bootstraps, validates and compensates builders. The missing behavior is strict acquisition and identity-checked cleanup after partial creation, not another builder abstraction. Keep current callers' refusal to adopt/remove a pre-existing builder. |
+| `tasks/recipes/builder.py`: private Buildx builder and owner-node reconciliation | Extend existing Buildx resource; third slice trial implemented | Add opt-in strict ownership to the existing `Resource[str]`, preserving default reuse/replacement. Refuse existing names, use a unique owner node and remove only the unchanged single-node docker-container builder. Reconcile partial creation/cancellation; callers serialize client-store mutation during inspect/remove. The ordinary installed-wheel AMD64/ARM64 build passed with an isolated Docker client. NanoLab adoption awaits a published coherent pair. |
 | `tasks/recipes/builder.py`: binfmt installation, lock and registration compensation | Defer generic API pending ownership validation | This affects a shared host facility. The current lock lives on the client and is keyed by Docker daemon ID. That does not demonstrate protection for remote clients or multiple daemons sharing a binfmt instance. Preserve inspection/compare-before-removal and builder-before-registration cleanup ordering. |
 | `tasks/recipes/builder.py`: pinned installer/probe images, platform pair, registry config, evidence names | Keep local | These select the supported AMD64/ARM64 recipe setup and registry `127.0.0.1:5000`. They are inputs/policy for shared resources, not Sonata defaults. |
 | `application/execution.py`: `_RemoteProjectExecutor` | Candidate for a later execution-adapter extension | Mapping a local project subtree to an explicit remote root is reusable. Preserve rejection of escaping cwd and simultaneous cwd/remote_dir, binding identity and dry-run. Keep default `/nanofaas`, environment/provider selection and role assembly local. |
@@ -160,3 +160,26 @@ checks with coverage disabled, not a full CI/coverage result:
 
 Builder tests use fake command execution; passing them does not establish
 correctness across real Docker daemons, remote clients or binfmt namespaces.
+
+## Third slice: owned Buildx trial
+
+The [implementation plan](../plans/2026-10-06-owned-buildx-extraction.md) starts
+from NanoLab `d49c228` and Sonata `ced86ed` (published pair 0.6.7). The next pair,
+0.6.8, is prepared locally; NanoLab's declared pins and lock remain 0.6.7 until
+publication. Trial verification explicitly installs the built pair in an
+isolated environment.
+
+Buildx ownership and binfmt remain separate decisions. The shared resource
+handles strict name refusal, owner-node identity, bootstrap/validation and
+compensation. NanoLab retains daemon architecture, pinned installer/probes,
+registration comparison, registry configuration, platform pair and evidence.
+If cleanup cannot confirm builder removal or absence, including interrupted
+creation, NanoLab retains its registration, records the error and closes its
+local lock. That lock still provides no cross-client or shared-kernel guarantee.
+
+The installed base wheels performed an ordinary scratch application build on
+the local Docker daemon with a fresh `DOCKER_CONFIG`, using cached BuildKit.
+The OCI output contained AMD64 and ARM64 manifests; client selection remained
+unchanged and release removed the builder and its container. This proves the
+Buildx capability independently of NanoLab. No emulation was installed; the
+experiment does not establish remote-client or binfmt locking correctness.
