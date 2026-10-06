@@ -12,9 +12,10 @@ from typer.testing import CliRunner
 
 import nanolab.cli.product as product_module
 from nanolab.app.main import app
+from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import git_provenance
 
-# These tests pass repo-relative paths (scenarios-v2/..., environments/...) to the
+# These tests pass repo-relative paths (scenarios/..., environments/...) to the
 # CLI, so they must run from the project root regardless of pytest's cwd.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -142,7 +143,7 @@ def test_workflows_discovers_added_and_removed_scenarios(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    scenarios = tmp_path / "scenarios-v2"
+    scenarios = tmp_path / "scenarios"
     scenarios.mkdir()
     scenario = scenarios / "temporary.yaml"
     scenario.write_text("workflow: temporary\nbackend: k8s\n", encoding="utf-8")
@@ -189,9 +190,9 @@ def test_plan_builds_shared_validate_workflow() -> None:
         app,
         [
             "plan",
-            "scenarios-v2/deployment-lifecycle-k8s.yaml",
+            "deployment-lifecycle-k8s.yaml",
             "--environment",
-            "environments/local.yaml",
+            "local.yaml",
         ],
     )
 
@@ -210,7 +211,7 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
         lambda *args, **kwargs: _sonata_workflow(),
     )
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/autoscaling-cycle-k8s.yaml"])
+    result = CliRunner().invoke(app, ["run", "autoscaling-cycle-k8s.yaml"])
 
     assert result.exit_code == 0
     # The compiler owns the id, so progress lines carry NNN.slug.
@@ -229,9 +230,7 @@ def test_run_container_loadtest_requires_k6_before_building_the_workflow(
         lambda required=(): ["k6"] if required == ("k6",) else [],
     )
 
-    result = CliRunner().invoke(
-        app, ["run", "scenarios-v2/autoscaling-cycle-container.yaml"]
-    )
+    result = CliRunner().invoke(app, ["run", "autoscaling-cycle-container.yaml"])
 
     assert result.exit_code != 0
     assert "requires k6 on the host" in result.output
@@ -248,7 +247,7 @@ def test_generic_release_run_requires_an_environment_and_never_provisions(
 
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/release.yaml"],
+        ["run", "release.yaml"],
     )
 
     assert result.exit_code != 0
@@ -273,7 +272,7 @@ def test_generic_run_rejects_resume_for_non_release_workflows(
 
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/autoscaling-cycle-k8s.yaml", "--resume"],
+        ["run", "autoscaling-cycle-k8s.yaml", "--resume"],
     )
 
     assert result.exit_code != 0
@@ -288,7 +287,7 @@ def test_run_requires_an_explicit_url_for_k8s_cli(
     build = MagicMock()
     monkeypatch.setattr(product_module, "_workflow", build)
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/cli-contract-k8s.yaml"])
+    result = CliRunner().invoke(app, ["run", "cli-contract-k8s.yaml"])
 
     assert result.exit_code != 0
     assert "--control-plane-url is required for a k8s cli scenario" in result.output
@@ -306,7 +305,7 @@ def test_run_container_cli_builds_and_runs_without_an_endpoint(
 
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/cli-contract-container.yaml"],
+        ["run", "cli-contract-container.yaml"],
     )
 
     assert result.exit_code == 0, result.output
@@ -324,9 +323,9 @@ def test_run_container_cli_requires_local_environment(
         app,
         [
             "run",
-            "scenarios-v2/cli-contract-container.yaml",
+            "cli-contract-container.yaml",
             "--environment",
-            "environments/multipass.yaml",
+            "multipass.yaml",
         ],
     )
 
@@ -348,9 +347,9 @@ def test_run_container_cli_rejects_nonlocal_environment(
         app,
         [
             "run",
-            "scenarios-v2/cli-contract-container.yaml",
+            "cli-contract-container.yaml",
             "--environment",
-            "environments/multipass.yaml",
+            "multipass.yaml",
         ],
     )
 
@@ -368,7 +367,7 @@ def test_run_container_cli_rejects_keep(
 
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/cli-contract-container.yaml", "--keep"],
+        ["run", "cli-contract-container.yaml", "--keep"],
     )
 
     assert result.exit_code != 0
@@ -392,7 +391,7 @@ def test_run_passes_custom_control_plane_url_to_cli_plan(
         app,
         [
             "run",
-            "scenarios-v2/cli-contract-k8s.yaml",
+            "cli-contract-k8s.yaml",
             "--control-plane-url",
             "http://control-plane.example:8181",
         ],
@@ -426,9 +425,9 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
         app,
         [
             "run",
-            "scenarios-v2/cli-contract-k8s.yaml",
+            "cli-contract-k8s.yaml",
             "--environment",
-            "environments/multipass.yaml",
+            "multipass.yaml",
         ],
     )
 
@@ -446,9 +445,9 @@ def test_plan_provisioned_k8s_cli_shows_the_whole_contract_workflow() -> None:
         app,
         [
             "plan",
-            "scenarios-v2/cli-contract-k8s.yaml",
+            "cli-contract-k8s.yaml",
             "--environment",
-            "environments/multipass.yaml",
+            "multipass.yaml",
         ],
     )
 
@@ -516,9 +515,9 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
         app,
         [
             "run",
-            "scenarios-v2/autoscaling-cycle-k8s.yaml",
+            "autoscaling-cycle-k8s.yaml",
             "--environment",
-            "environments/multipass.yaml",
+            "multipass.yaml",
             "--run-dir",
             str(tmp_path),
         ],
@@ -590,7 +589,7 @@ def test_failed_loadtest_writes_failure_metadata(monkeypatch, tmp_path: Path) ->
         app,
         [
             "run",
-            "scenarios-v2/autoscaling-cycle-k8s.yaml",
+            "autoscaling-cycle-k8s.yaml",
             "--run-dir",
             str(tmp_path),
         ],
@@ -606,7 +605,7 @@ def test_failed_loadtest_writes_failure_metadata(monkeypatch, tmp_path: Path) ->
 def test_run_rejects_provisioning_for_local_environment() -> None:
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/deployment-lifecycle-container.yaml", "--provision"],
+        ["run", "deployment-lifecycle-container.yaml", "--provision"],
     )
 
     assert result.exit_code != 0
@@ -614,16 +613,14 @@ def test_run_rejects_provisioning_for_local_environment() -> None:
 
 
 def test_inspect_renders_validated_configuration() -> None:
-    result = CliRunner().invoke(app, ["inspect", "scenarios-v2/cli-contract-k8s.yaml"])
+    result = CliRunner().invoke(app, ["inspect", "cli-contract-k8s.yaml"])
 
     assert result.exit_code == 0
     assert '"workflow": "cli"' in result.stdout
 
 
 def test_inspect_renders_recipe_profile_as_json_path() -> None:
-    result = CliRunner().invoke(
-        app, ["inspect", "scenarios-v2/autoscaling-cycle-container.yaml"]
-    )
+    result = CliRunner().invoke(app, ["inspect", "autoscaling-cycle-container.yaml"])
 
     assert result.exit_code == 0
     data = json.loads(result.stdout)
@@ -636,7 +633,7 @@ def test_plan_can_select_one_task() -> None:
         app,
         [
             "plan",
-            "scenarios-v2/deployment-lifecycle-k8s.yaml",
+            "deployment-lifecycle-k8s.yaml",
             "--only",
             "invoke-word-stats-java",
         ],
@@ -660,7 +657,7 @@ def test_recipe_plan_rejects_external_ssh_environment(tmp_path: Path) -> None:
         app,
         [
             "plan",
-            "scenarios-v2/deployment-lifecycle-k8s.yaml",
+            "deployment-lifecycle-k8s.yaml",
             "--environment",
             str(environment),
         ],
@@ -688,9 +685,7 @@ def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
 
 @pytest.mark.nanofaas
 def test_plan_renders_the_compiled_cli_workflow() -> None:
-    result = CliRunner().invoke(
-        app, ["plan", "scenarios-v2/cli-contract-container.yaml"]
-    )
+    result = CliRunner().invoke(app, ["plan", "cli-contract-container.yaml"])
 
     assert result.exit_code == 0, result.output
     assert "001.build-nanofaas-cli" in result.stdout
@@ -703,7 +698,7 @@ def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
         app,
         [
             "plan",
-            "scenarios-v2/cli-contract-container.yaml",
+            "cli-contract-container.yaml",
             "--only",
             "list-functions",
         ],
@@ -733,7 +728,7 @@ def test_run_passes_the_requested_selection_to_sonata(
 
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/cli-contract-container.yaml", "--only", "list-functions"],
+        ["run", "cli-contract-container.yaml", "--only", "list-functions"],
     )
 
     assert result.exit_code == 0, result.output
@@ -749,7 +744,7 @@ def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
         app,
         [
             "plan",
-            "scenarios-v2/cli-contract-container.yaml",
+            "cli-contract-container.yaml",
             "--only",
             "cli.function.list",
         ],
@@ -766,7 +761,9 @@ def test_containerd_recipe_staging_survives_kept_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, keep: bool
 ) -> None:
     """A kept systemd unit still needs its staged launcher and JAR."""
-    scenario_path = _PROJECT_ROOT / "scenarios-v2/deployment-lifecycle-containerd.yaml"
+    scenario_path = (
+        discover_tool_root() / "scenarios/deployment-lifecycle-containerd.yaml"
+    )
     scenario = product_module._scenario(scenario_path)
     environment = product_module.EnvironmentConfig.model_validate(
         {
@@ -813,7 +810,9 @@ def test_containerd_recipe_staging_survives_kept_run(
 
 @pytest.mark.parametrize("extra", [[], ["--keep"]])
 def test_recipe_soak_reaches_own_preflight(monkeypatch, extra):
-    scenario = _PROJECT_ROOT / "scenarios-v2/memory-soak-smoke-recipe-container.yaml"
+    scenario = (
+        discover_tool_root() / "scenarios/memory-soak-smoke-recipe-container.yaml"
+    )
     monkeypatch.setattr(
         product_module.diagnostics,
         "missing_executables",

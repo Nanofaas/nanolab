@@ -18,7 +18,9 @@ from nanolab.config.environment import EnvironmentConfig
 # `environments/azure*.yaml` because a real one carries a resource group, a key
 # path and the operator's own address. A test that read the working copy would
 # pass here and fail on every clean checkout.
-ENVIRONMENT = Path("packages/nanolab/environments/azure-comparison.yaml.example")
+ENVIRONMENT = Path(
+    "packages/nanolab/src/nanolab/assets/presets/environments/azure-comparison.yaml.example"
+)
 
 
 def _environment() -> EnvironmentConfig:

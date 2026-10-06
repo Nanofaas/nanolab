@@ -34,6 +34,12 @@ def main() -> None:
         from nanolab.app.main import app
         from nanolab.cli.product import _environment, _scenario
         from nanolab.functions.catalog import list_functions
+        from nanolab.tasks.soak.helper_build import (
+            BASES_LOCK,
+            BUILD_CONTEXT,
+            DOCKERFILE,
+            MAT_LOCK,
+        )
         from nanolab.tui.app import NanofaasTUI
         from nanolab.workspace.paths import default_tool_paths
         from typer.testing import CliRunner
@@ -44,9 +50,11 @@ def main() -> None:
             "tool-metrics-echo",
         }
         assert Path(nanolab.__file__).is_relative_to(installed_root)
+        assert (BUILD_CONTEXT / DOCKERFILE).is_file()
+        assert MAT_LOCK.is_file() and BASES_LOCK.is_file()
         for probe in ("retry_hint_probe.py", "retry_backoff_burst.py"):
             assert (
-                Path(nanolab.__file__).parent / "assets/validation" / probe
+                Path(nanolab.__file__).parent / "assets/diagnostics" / probe
             ).is_file()
         listing = CliRunner().invoke(app, ["list"])
         assert listing.exit_code == 0, listing.output
@@ -58,11 +66,17 @@ def main() -> None:
         )
         config = _scenario(scenario)
         assert config.recipe_profile.is_file()
+        inspected = CliRunner().invoke(
+            app, ["inspect", "deployment-lifecycle-container.yaml"]
+        )
+        assert inspected.exit_code == 0, (inspected.output, inspected.exception)
         planned = CliRunner().invoke(
             app,
             [
                 "plan",
-                str(scenario.parent / "cli-contract-container.yaml"),
+                "cli-contract-container.yaml",
+                "--environment",
+                "local.yaml",
                 "--only",
                 "list-functions",
             ],
@@ -89,10 +103,14 @@ def main() -> None:
         for name in NanofaasTUI.SCENARIO_FILES.values():
             assert (scenario.parent / name).is_file(), name
         paths = default_tool_paths()
+        assert paths.scenarios_dir == scenario.parent
         assert paths.runs_dir == Path.cwd() / "runs", paths
+        assert paths.profiles_dir == Path.cwd() / "profiles", paths
         assert paths.scenario_payloads_dir.joinpath("echo-sample.json").is_file()
         paths.runs_dir.mkdir()
         (paths.runs_dir / "receipt.txt").write_text("operator output")
+        paths.profiles_dir.mkdir()
+        (paths.profiles_dir / "operator.yaml").write_text("operator input")
         custom = Path.cwd() / "environments/local.yaml"
         custom.parent.mkdir()
         custom.write_text("provider: local\n")

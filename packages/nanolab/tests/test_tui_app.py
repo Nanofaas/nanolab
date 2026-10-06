@@ -146,7 +146,7 @@ def _install_paths(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
     environment_dir.mkdir(parents=True)
     environment_path = environment_dir / "local.yaml"
     environment_path.write_text("provider: local\n", encoding="utf-8")
-    (root / "scenarios-v2").mkdir()
+    (root / "scenarios").mkdir()
     monkeypatch.setattr(tui_app, "discover_tool_root", lambda: root)
     monkeypatch.setattr(
         tui_app,
@@ -286,7 +286,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         "memory-soak-sync-container.yaml",
     ]
     assert loaded_paths == [
-        tmp_path / "scenarios-v2" / "deployment-lifecycle-container.yaml"
+        tmp_path / "scenarios" / "deployment-lifecycle-container.yaml"
     ]
     assert json.loads(str(frame_calls[0]["body"])) == {
         "workflow": "offload-loadtest",
@@ -305,7 +305,7 @@ def test_tool_navigation_does_not_require_nanofaas_root(
     environment_dir = tmp_path / "environments"
     environment_dir.mkdir()
     (environment_dir / "local.yaml").write_text("provider: local\n", encoding="utf-8")
-    scenarios_dir = tmp_path / "scenarios-v2"
+    scenarios_dir = tmp_path / "scenarios"
     scenarios_dir.mkdir()
     (scenarios_dir / "deployment-lifecycle-container.yaml").write_text(
         "workflow: offload\nbackend: container\n",
@@ -432,7 +432,7 @@ def test_plan_uses_cli_helpers_and_renders_without_running(
     assert [call[0] for call in helper_calls] == ["scenario", "environment", "workflow"]
     assert helper_calls[0] == (
         "scenario",
-        tmp_path / "scenarios-v2" / "cli-contract-container.yaml",
+        tmp_path / "scenarios" / "cli-contract-container.yaml",
     )
     assert workflow.run_calls == 0
     assert len(frame_calls) == 1

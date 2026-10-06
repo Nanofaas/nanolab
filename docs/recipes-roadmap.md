@@ -14,7 +14,7 @@ le differenze reali fra backend e tipi di verifica.
 ## Stato attuale
 
 - [x] Profilo JVM per la validazione container salvato in
-  `packages/nanolab/recipes/validate-container-jvm.yaml`.
+  `packages/nanolab/src/nanolab/assets/presets/recipes/validate-container-jvm.yaml`.
 - [x] Task NanoLab parametrizzati dalla recipe per `assembleRecipe` e
   `publishRecipe`; il secondo assembla e pubblica nello stesso comando.
 - [x] Workflow `deployment-lifecycle-container` migrato al profilo e al report
@@ -29,8 +29,8 @@ le differenze reali fra backend e tipi di verifica.
 - [x] Il ciclo Multipass con staging e `publishRecipe` nella VM è verificato:
   identità delle immagini su k3s, invocazioni, coda, k6 e cleanup sono passati.
 - [x] Containerd migrato con
-  `packages/nanolab/recipes/validate-containerd-jvm.yaml` e
-  `packages/nanolab/scenarios-v2/deployment-lifecycle-containerd.yaml`.
+  `packages/nanolab/src/nanolab/assets/presets/recipes/validate-containerd-jvm.yaml` e
+  `deployment-lifecycle-containerd.yaml`.
   `publishRecipe` nella VM fornisce JAR, immagini e `distribution.json`;
   metadati, digest dell'immagine in containerd, limiti OCI, invocazione e
   cleanup sono passati nel ciclo Multipass del 29 settembre 2026. Nessuna

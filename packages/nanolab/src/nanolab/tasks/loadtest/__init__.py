@@ -39,7 +39,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteLoadtestSummary,
 )
 from nanolab.tasks.platform import Platform, PlatformRequest, add_platform
-from nanolab.tasks.recipe_validation import (
+from nanolab.tasks.recipes.validation import (
     RecipeImageCheckTask,
     RecipeMetadataCheckTask,
 )

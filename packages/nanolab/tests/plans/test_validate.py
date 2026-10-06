@@ -13,6 +13,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import list_functions
 from nanolab.plans.validate import build_validate_plan
+from nanolab.workspace.paths import discover_tool_root
 
 DEPLOYMENT_PAYLOAD = '{"spec":{"template":{"spec":{"containers":[{"resources":{}}]}}}}'
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -287,7 +288,9 @@ def test_handler_envelope_container_scenario_runs_every_deterministic_function()
 ):
     config = ScenarioConfig.model_validate(
         yaml.safe_load(
-            (NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text()
+            (
+                discover_tool_root() / "scenarios/handler-envelope-container.yaml"
+            ).read_text()
         )
     )
     plan = build_validate_plan(
@@ -316,7 +319,9 @@ def test_handler_envelope_container_excludes_only_nondeterministic_catalog_funct
 ) -> None:
     config = ScenarioConfig.model_validate(
         yaml.safe_load(
-            (NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text()
+            (
+                discover_tool_root() / "scenarios/handler-envelope-container.yaml"
+            ).read_text()
         )
     )
 
@@ -588,7 +593,9 @@ def test_async_load_builds_an_async_check_for_every_payload_file(
 def test_async_container_scenario_selects_every_json_output_function() -> None:
     config = ScenarioConfig.model_validate(
         yaml.safe_load(
-            (NANOLAB_ROOT / "scenarios-v2/validate-async-container.yaml").read_text()
+            (
+                discover_tool_root() / "scenarios/validate-async-container.yaml"
+            ).read_text()
         )
     )
 

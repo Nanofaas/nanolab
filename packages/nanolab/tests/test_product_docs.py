@@ -12,8 +12,14 @@ def test_product_docs_use_the_standalone_command_surface() -> None:
 
     assert f"{COMMAND_PREFIX} plan" in text
     assert f"{COMMAND_PREFIX} run" in text
-    assert "packages/nanolab/environments/multipass.yaml" in text
-    assert "packages/nanolab/environments/external.yaml.example" in text
+    assert (
+        "packages/nanolab/src/nanolab/assets/presets/environments/multipass.yaml"
+        in text
+    )
+    assert (
+        "packages/nanolab/src/nanolab/assets/presets/environments/external.yaml.example"
+        in text
+    )
     assert "scripts/controlplane.sh" not in text
     for legacy in (
         "--saved-profile",
@@ -47,10 +53,7 @@ def test_nanolab_readme_describes_the_adapted_tui_surface() -> None:
 def test_nanolab_readme_documents_local_handler_envelope_validation() -> None:
     text = (NANOLAB_ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert (
-        f"{COMMAND_PREFIX} run "
-        "packages/nanolab/scenarios-v2/handler-envelope-container.yaml"
-    ) in text
+    assert (f"{COMMAND_PREFIX} run handler-envelope-container.yaml") in text
     assert "public handler envelope" in text
     assert "functions, Compose project, and registry" in text
 

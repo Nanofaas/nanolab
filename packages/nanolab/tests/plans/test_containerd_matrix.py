@@ -14,9 +14,9 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.plans.validate import build_validate_plan
-from nanolab.workspace.paths import default_tool_paths
+from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
-SCENARIOS = Path(__file__).resolve().parents[2] / "scenarios-v2"
+SCENARIOS = discover_tool_root() / "scenarios"
 MATRIX = (
     "deployment-lifecycle-containerd.yaml",
     "persistent-recovery-containerd.yaml",

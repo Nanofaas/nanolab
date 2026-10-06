@@ -310,7 +310,7 @@ def validate(
         target_tmp_volume=VOLUME,
     )
     failures: list[str] = []
-    assets = bundled_assets_root() / "soak"
+    assets = bundled_assets_root() / "diagnostics"
     prepared = LocalDockerDiagnosticProvisioner(assets_dir=assets).prepare(
         spec, timeout_s=TIMEOUT_S
     )

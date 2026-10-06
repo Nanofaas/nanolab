@@ -30,7 +30,7 @@ from sonata_tasks.vm.ports import VmCommandProvider
 from nanolab.comparison.manifest import ComparisonManifest
 from nanolab.comparison.profiles import PreparedComparison
 from nanolab.tasks.components.operations import RemoteCommandOperation
-from nanolab.tasks.recipe_remote import bundle_recipe_source, remote_recipe_root
+from nanolab.tasks.recipes.remote import bundle_recipe_source, remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
@@ -242,7 +242,7 @@ def prepare_comparison(
     )
     from nanolab.comparison.manifest import write_comparison_manifest
     from nanolab.comparison.profiles import declared_options
-    from nanolab.tasks.recipe import (
+    from nanolab.tasks.recipes.workflow import (
         RecipeDistribution,
         read_distribution,
         recipe_command,

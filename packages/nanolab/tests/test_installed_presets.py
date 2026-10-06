@@ -71,20 +71,22 @@ def test_installed_wheel_catalogue_presets_and_writable_workspace(
     assert checked.returncode == 0, checked.stdout + checked.stderr
 
 
-def test_bundled_presets_match_public_source_resources() -> None:
-    package = Path(__file__).resolve().parents[1]
-    bundled = package / "src/nanolab/assets/presets"
-    for directory in ("scenarios-v2", "recipes", "environments", "scenarios/payloads"):
-        tracked = subprocess.run(
-            ["git", "ls-files", directory],
-            cwd=package,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.splitlines()
-        assert tracked
-        assert {path.name for path in (bundled / directory).iterdir()} == {
-            Path(name).name for name in tracked
-        }
-        for name in tracked:
-            assert (bundled / name).read_bytes() == (package / name).read_bytes(), name
+def test_bundled_scenario_recipe_and_policy_references_resolve() -> None:
+    import yaml
+
+    from nanolab.cli.catalogue import _scenario
+    from nanolab.workspace.paths import discover_tool_root
+
+    scenarios = discover_tool_root() / "scenarios"
+    checked = []
+    for path in scenarios.glob("*.yaml"):
+        data = yaml.safe_load(path.read_text())
+        if not isinstance(data, dict) or "workflow" not in data:
+            continue
+        config = _scenario(path)
+        if config.recipe_profile is not None:
+            assert config.recipe_profile.is_file(), path
+        if "soakPolicyFile" in data:
+            assert (path.parent / data["soakPolicyFile"]).is_file(), path
+        checked.append(path)
+    assert checked

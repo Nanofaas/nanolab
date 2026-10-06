@@ -25,8 +25,8 @@ from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import _provider_exec, _require_result
 from nanolab.release.model import digest_path
 from nanolab.release.recipe import ReleaseRecipeGroup, read_release_distribution
-from nanolab.tasks.recipe import recipe_command
-from nanolab.tasks.recipe_multiarch import unique_json_object
+from nanolab.tasks.recipes.multiarch import unique_json_object
+from nanolab.tasks.recipes.workflow import recipe_command
 from nanolab.tasks.vm.models import VmRequest
 
 # Collect archive and VM entries without following links.

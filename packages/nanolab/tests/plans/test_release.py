@@ -36,6 +36,7 @@ from nanolab.release.recipe import ReleaseRecipeGroup
 from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
 from nanolab.tasks.vm.models import VmInfo
+from nanolab.workspace.paths import discover_tool_root
 from tests.conftest import (
     RejectingProvider,
     captured_release_tree,
@@ -1191,7 +1192,9 @@ def test_missing_execution_credentials_fail_before_any_provider_call(
 def test_release_scenario_matches_comparable_history() -> None:
     scenario = ScenarioConfig.model_validate(
         yaml.safe_load(
-            (NANOLAB_ROOT / "scenarios-v2/release.yaml").read_text(encoding="utf-8")
+            (discover_tool_root() / "scenarios/release.yaml").read_text(
+                encoding="utf-8"
+            )
         )
     )
 
@@ -1768,13 +1771,14 @@ def test_arm_profile_drift_fails_before_acquisition(
 ):
     tool = tmp_path / "tool"
     tool.mkdir()
-    shutil.copytree(release_request.repo_root / "recipes", tool / "recipes")
+    shutil.copytree(discover_tool_root() / "recipes", tool / "recipes")
     profile = tool / "recipes/release-arm64-jvm.yaml"
     profile.write_text("schemaVersion: 2\nname: invalid\n")
     scenario, environment = canonical_release_configs
     with pytest.raises(ValueError, match="release recipe"):
         release_plan.build_release_request(
             repo_root=tool,
+            presets_root=tool,
             nanofaas_root=release_request.nanofaas_root,
             scenario_path=scenario,
             environment_path=environment,

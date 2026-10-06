@@ -22,6 +22,7 @@ from nanolab.comparison.profiles import COMPARISON_SCHEDULER_STRATEGY, declared_
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.vm.models import VmRequest
+from nanolab.workspace.paths import discover_tool_root
 
 
 class _Identity(BaseModel):
@@ -145,9 +146,7 @@ def capture_comparison_inputs(
         )
         for role in ("stack", "loadgen")
     }
-    tool_root = nanolab_root / "packages" / "nanolab"
-    if not tool_root.is_dir():
-        tool_root = nanolab_root
+    tool_root = discover_tool_root()
     inputs: dict[str, object] = {
         "nanofaas": _source_identity(nanofaas_root),
         "nanolab": _source_identity(nanolab_root),

@@ -16,7 +16,7 @@ coverage is still an integration requirement: the shipped required metrics cover
 process/cgroup memory and JVM heap where applicable, not every P24 ownership
 population. Do not accept a memory-only policy as complete P24 qualification.
 
-| Preset in `packages/nanolab/scenarios-v2/` | Purpose and boundary |
+| Preset in `packages/nanolab/src/nanolab/assets/presets/scenarios/` | Purpose and boundary |
 | --- | --- |
 | `memory-soak-sync-container.yaml` | ARM64 JVM/Node recipe preparation; shipped policy, full P24 readiness pending |
 | `memory-soak-smoke-container.yaml` | Short observation/artifact exercise with inline smoke criteria |
@@ -192,12 +192,12 @@ Distroless images may lack diagnostic tools. JVM capture requires compatible
 execution. Node capture requires private, verified inspector control. Provision
 and identify helpers explicitly; no placeholder helper digest is shipped.
 The helper is built at the start of each run from
-`assets/soak/diagnostic-helper.Dockerfile`, published to the run's own registry
+`assets/diagnostics/diagnostic-helper.Dockerfile`, published to the run's own registry
 — acquired before the run and, if the run started it, removed again when it ends
 — and pinned to the digest that build reported. No
 scenario carries one: a digest names bytes in whichever registry built them, so
 it is unpullable elsewhere and a prune breaks it even locally. The inputs stay
-pinned in `assets/soak/mat.lock.json` and `assets/soak/helper-bases.lock.json`.
+pinned in `assets/diagnostics/mat.lock.json` and `assets/diagnostics/helper-bases.lock.json`.
 A scenario that still sets `helper_images`, or an injected
 `RuntimeOptions.memory_helper_image`, is honoured as-is and skips the build.
 
@@ -218,7 +218,7 @@ that measures a difference: a `native_memory_diff` declared after `gc` would
 include that GC's own reclamation in its delta. Declare `gc` last.
 
 Native Memory Tracking is captured that way, in the two spikes under
-`scenarios-v2/memory-soak-p24-*-spike-container.yaml`: `native_memory_baseline`
+`scenarios/memory-soak-p24-*-spike-container.yaml`: `native_memory_baseline`
 at the baseline checkpoint, then `native_memory_diff` at drain for what grew per
 category over steady and drain, and `native_memory` for the absolute reading.
 They exist because NMT needs `-XX:NativeMemoryTracking` and costs a few percent,
@@ -241,17 +241,17 @@ above are satisfied and the resource/diagnostic costs have been approved.
 
 ```bash
 export NANOFAAS_ROOT=/home/michele/Documenti/nanofaas
-./nanolab.sh inspect packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
-./nanolab.sh plan packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
-./nanolab.sh run packages/nanolab/scenarios-v2/memory-soak-sync-container.yaml
+./nanolab.sh inspect memory-soak-sync-container.yaml
+./nanolab.sh plan memory-soak-sync-container.yaml
+./nanolab.sh run memory-soak-sync-container.yaml
 ```
 
 For the separately authorized integrated smoke:
 
 ```bash
-./nanolab.sh inspect packages/nanolab/scenarios-v2/memory-soak-smoke-container.yaml
-./nanolab.sh plan packages/nanolab/scenarios-v2/memory-soak-smoke-container.yaml
-./nanolab.sh run packages/nanolab/scenarios-v2/memory-soak-smoke-container.yaml
+./nanolab.sh inspect memory-soak-smoke-container.yaml
+./nanolab.sh plan memory-soak-smoke-container.yaml
+./nanolab.sh run memory-soak-smoke-container.yaml
 ```
 
 `inspect` must show the resolved policy, and `plan` must show all application build
@@ -312,15 +312,15 @@ tests, without an actual image build during test execution.
 ## Recipe preparation for container smoke
 
 The reusable profile is
-[`soak-container-smoke-jvm.yaml`](../packages/nanolab/recipes/soak-container-smoke-jvm.yaml).
+[`soak-container-smoke-jvm.yaml`](../packages/nanolab/src/nanolab/assets/presets/recipes/soak-container-smoke-jvm.yaml).
 Run its
-[scenario](../packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml)
+[scenario](../packages/nanolab/src/nanolab/assets/presets/scenarios/memory-soak-smoke-recipe-container.yaml)
 from the repository root:
 
 ```bash
 NANOFAAS_ROOT=/path/to/pinned/nanofaas ./nanolab.sh run \
-  packages/nanolab/scenarios-v2/memory-soak-smoke-recipe-container.yaml \
-  --environment packages/nanolab/environments/local.yaml \
+  memory-soak-smoke-recipe-container.yaml \
+  --environment local.yaml \
   --run-dir /tmp/nanolab-soak-recipe-run
 ```
 
@@ -408,7 +408,7 @@ costs are recorded in the [implementation plan](superpowers/plans/2026-09-30-soa
 
 ## Recipe preparation for the canonical P24 preset
 
-[`soak-container-p24-jvm.yaml`](../packages/nanolab/recipes/soak-container-p24-jvm.yaml)
+[`soak-container-p24-jvm.yaml`](../packages/nanolab/src/nanolab/assets/presets/recipes/soak-container-p24-jvm.yaml)
 is selected by `memory-soak-sync-container.yaml`. It uses the same snapshot,
 publication, registry verification and frozen-receipt path as recipe smoke.
 The full resolved preset matches its pre-migration configuration except for

@@ -13,7 +13,7 @@ import yaml
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
-from nanolab.tasks.validate import ValidateFunction as SonataFunction
+from nanolab.tasks.validation.workflow import ValidateFunction as SonataFunction
 from nanolab.workspace.paths import discover_tool_root
 
 

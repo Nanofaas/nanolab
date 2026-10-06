@@ -14,7 +14,7 @@ import sys
 
 from nanolab.workspace.paths import bundled_assets_root
 
-WORKER = bundled_assets_root() / "soak" / "mat-worker.py"
+WORKER = bundled_assets_root() / "diagnostics" / "mat-worker.py"
 
 FAKE_LAUNCHER = """#!/usr/bin/env python3
 import json, os, sys

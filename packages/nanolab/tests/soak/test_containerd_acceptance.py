@@ -3,7 +3,6 @@
 import hashlib
 import json
 from dataclasses import asdict
-from pathlib import Path
 
 import pytest
 import yaml
@@ -12,12 +11,11 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.soak.acceptance import verify_containerd_builds
 from nanolab.tasks.soak.artifacts import describe_artifact
 from nanolab.tasks.soak.sources import SourceEntry, SourceSnapshot
+from nanolab.workspace.paths import discover_tool_root
 
 
 def _case(tmp_path):
-    scenario = (
-        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
-    )
+    scenario = discover_tool_root() / "scenarios/memory-soak-smoke-containerd.yaml"
     config = ScenarioConfig.model_validate(yaml.safe_load(scenario.read_text())).soak
     assert config is not None
     entry = SourceEntry("x", "file", 0o644, 1, "a" * 64)

@@ -30,6 +30,7 @@ from nanolab.tasks.soak.runtime import (
 )
 from nanolab.tasks.soak.scheduler_switch import SwitchReceipt
 from nanolab.tasks.soak.sources import SourceSnapshot
+from nanolab.workspace.paths import discover_tool_root
 
 
 def fake_deployment(**fields: object) -> RuntimeDeployment:
@@ -58,7 +59,7 @@ def prepared(
     metrics_profile=None,
     scenario="memory-soak-smoke-container.yaml",
 ):
-    path = Path(__file__).resolve().parents[2] / "scenarios-v2" / scenario
+    path = discover_tool_root() / "scenarios" / scenario
     raw = yaml.safe_load(path.read_text())["soak"]
     if not raw["criteria"]:
         smoke = path.with_name("memory-soak-smoke-container.yaml")

@@ -31,6 +31,7 @@ from nanolab.application.vm_provider import (
     provider_for_environment,
     vm_request_for_role,
 )
+from nanolab.cli.catalogue import environment_input, scenario_input
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.comparison.evidence import require_recorded_publications
 from nanolab.comparison.manifest import (
@@ -62,7 +63,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
 from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
-from nanolab.tasks.recipe_remote import remote_recipe_root
+from nanolab.tasks.recipes.remote import remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
@@ -222,8 +223,10 @@ def register(app: typer.Typer) -> None:
     # call builds a fresh object that is not shared between invocations, so
     # B008's mutable-default concern does not apply.
     def compare_command(
-        scenario: Path = typer.Argument(..., exists=True),  # noqa: B008
-        environment: Path = typer.Option(..., "--environment", exists=True),  # noqa: B008
+        scenario: Path = typer.Argument(..., callback=scenario_input),  # noqa: B008
+        environment: Path = typer.Option(  # noqa: B008
+            ..., "--environment", callback=environment_input
+        ),
         repetitions: int = typer.Option(
             3,
             "--repetitions",

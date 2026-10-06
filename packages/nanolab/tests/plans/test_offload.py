@@ -6,6 +6,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.offload import build_offload_plan
+from nanolab.workspace.paths import discover_tool_root
 from tests.conftest import source_contract_root
 
 pytestmark = pytest.mark.nanofaas
@@ -84,7 +85,9 @@ def test_offload_scenario_file_parses() -> None:
     import yaml
 
     payload = yaml.safe_load(
-        (NANOLAB_ROOT / "scenarios-v2/edge-cloud-offload-contract.yaml").read_text()
+        (
+            discover_tool_root() / "scenarios/edge-cloud-offload-contract.yaml"
+        ).read_text()
     )
     config = ScenarioConfig.model_validate(payload)
     assert config.workflow == "offload"

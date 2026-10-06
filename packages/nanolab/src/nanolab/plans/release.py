@@ -61,6 +61,7 @@ from nanolab.release.tasks import (
 )
 from nanolab.release.versioning import normalize_version, verify_version_consistency
 from nanolab.tasks.provisioning.providers import provider_for
+from nanolab.workspace.paths import discover_tool_root
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -119,9 +120,11 @@ def build_release_request(
     performance_root: Path,
     source_tree: Path,
     executable: bool = False,
+    presets_root: Path | None = None,
 ) -> ReleaseRequest:
     """Validate local release inputs without constructing cloud infrastructure."""
     tool_root = Path(repo_root).expanduser().resolve()
+    resources = presets_root or discover_tool_root()
     source_root = Path(nanofaas_root).expanduser().resolve()
     scenario_file = Path(scenario_path).expanduser().resolve()
     environment_file = Path(environment_path).expanduser().resolve()
@@ -197,7 +200,7 @@ def build_release_request(
     if not image_plan.cells:
         raise ValueError("release image matrix must not be empty")
     recipe_groups = prepare_release_recipe_groups(
-        planning_root, image_plan, profiles_root=tool_root / "recipes"
+        planning_root, image_plan, profiles_root=resources / "recipes"
     )
     arm_image_plan = build_image_plan(
         planning_root,
@@ -208,7 +211,7 @@ def build_release_request(
     arm_recipe_groups = prepare_release_recipe_groups(
         planning_root,
         arm_image_plan,
-        profiles_root=tool_root / "recipes",
+        profiles_root=resources / "recipes",
         architecture="arm64",
     )
 

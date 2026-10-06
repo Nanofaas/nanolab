@@ -159,11 +159,11 @@ from nanolab.tasks.loadtest.tasks import (
     WriteLoadtestSummary,
 )
 from nanolab.tasks.platform import Backend, Build, Platform, PlatformRequest
-from nanolab.tasks.recipe import RecipeBinding, recipe_distribution_resource
-from nanolab.tasks.recipe_validation import (
+from nanolab.tasks.recipes.validation import (
     RecipeImageCheckTask,
     recipe_compose_resource,
 )
+from nanolab.tasks.recipes.workflow import RecipeBinding, recipe_distribution_resource
 from nanolab.workspace.paths import bundled_assets_root
 from nanolab.workspace.provenance import source_fingerprint
 

@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from nanolab.config.soak import SoakConfig
-from nanolab.tasks.recipe_multiarch import read_buildx_distribution
-from nanolab.tasks.recipe_registry import RegistryResponse
+from nanolab.tasks.recipes.multiarch import read_buildx_distribution
+from nanolab.tasks.recipes.registry import RegistryResponse
 from nanolab.tasks.soak.artifacts import fingerprint
 from nanolab.tasks.soak.build_provenance import (
     BuildProvenanceCollector,

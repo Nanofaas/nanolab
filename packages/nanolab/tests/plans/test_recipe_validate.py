@@ -10,11 +10,63 @@ from sonata_tasks.execution.bindings import RoleBindings
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.validate import build_validate_plan, require_recipe_environment
+from nanolab.workspace.paths import discover_tool_root
 from tests.plans.test_validate import RecordingExecutor
 
 
+@pytest.mark.parametrize("backend", ["container", "containerd", "k8s"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_default_recipe_outputs_belong_to_operator_workspace(
+    tmp_path, monkeypatch, nanofaas_root, backend, explicit
+):
+    from nanolab.cli.catalogue import _scenario
+    from nanolab.plans import validate
+
+    workspace = tmp_path / "operator"
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(workspace))
+    output = tmp_path / "explicit" if explicit else None
+    selected = []
+
+    class CapturedError(Exception):
+        pass
+
+    def capture(**kwargs):
+        selected.append(kwargs["run_dir"])
+        raise CapturedError
+
+    monkeypatch.setattr(
+        validate,
+        "recipe_distribution_resource"
+        if backend == "container"
+        else "recipe_run_resource",
+        capture,
+    )
+    config = _scenario(Path(f"deployment-lifecycle-{backend}.yaml"))
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass" if backend == "containerd" else "local",
+            "roles": {"stack": {"name": "test-stack"}}
+            if backend == "containerd"
+            else {},
+        }
+    )
+    executor = RecordingExecutor()
+    with pytest.raises(CapturedError):
+        validate.build_validate_plan(
+            config,
+            RoleBindings({"host": executor, "stack": executor}),
+            repo_root=nanofaas_root,
+            tool_root=discover_tool_root(),
+            environment=environment,
+            run_dir=output,
+        )
+    assert selected == [(output or workspace / "runs/recipe-preview") / "recipe"]
+    assert not workspace.exists()
+    assert not executor.seen
+
+
 def multiarch_profile(tmp_path: Path, **overrides) -> Path:
-    base = Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
+    base = discover_tool_root() / "recipes/validate-container-jvm.yaml"
     data = yaml.safe_load(base.read_text())
     data["registry"].update(platforms=["linux/amd64", "linux/arm64"], provenance=False)
     data.update(overrides)
@@ -113,9 +165,13 @@ def test_unsupported_multiarch_workflow_fails_before_resources(
 
 def test_multiarch_profile_matches_existing_jvm_contract() -> None:
     root = Path(__file__).resolve().parents[2]
-    base = yaml.safe_load((root / "recipes/validate-container-jvm.yaml").read_text())
+    base = yaml.safe_load(
+        (discover_tool_root() / "recipes/validate-container-jvm.yaml").read_text()
+    )
     profile = yaml.safe_load(
-        (root / "recipes/validate-container-multiarch-jvm.yaml").read_text()
+        (
+            discover_tool_root() / "recipes/validate-container-multiarch-jvm.yaml"
+        ).read_text()
     )
     assert profile["controlPlane"]["modules"] == base["controlPlane"]["modules"]
     assert profile["controlPlane"]["jvm"] == base["controlPlane"]["jvm"]
@@ -127,9 +183,7 @@ def test_multiarch_profile_matches_existing_jvm_contract() -> None:
 
 @pytest.mark.nanofaas
 def test_recipe_plan_schedules_publish_without_legacy_builds(tmp_path: Path) -> None:
-    profile = (
-        Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
-    )
+    profile = discover_tool_root() / "recipes/validate-container-jvm.yaml"
     config = ScenarioConfig.model_validate(
         {
             "workflow": "validate",
@@ -144,7 +198,7 @@ def test_recipe_plan_schedules_publish_without_legacy_builds(tmp_path: Path) -> 
         config,
         RoleBindings({"host": executor}),
         repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-        tool_root=Path(__file__).resolve().parents[2],
+        tool_root=discover_tool_root(),
         run_dir=run_dir,
     )
     titles = [task.task.title for task in workflow.compile().tasks]
@@ -158,7 +212,7 @@ def test_recipe_plan_schedules_publish_without_legacy_builds(tmp_path: Path) -> 
 def test_one_kubernetes_recipe_scenario_uses_provider_specific_delivery(
     tmp_path: Path,
 ) -> None:
-    profile = Path(__file__).resolve().parents[2] / "recipes/validate-k8s-jvm.yaml"
+    profile = discover_tool_root() / "recipes/validate-k8s-jvm.yaml"
     config = ScenarioConfig.model_validate(
         {
             "workflow": "validate",
@@ -181,7 +235,7 @@ def test_one_kubernetes_recipe_scenario_uses_provider_specific_delivery(
             config,
             bindings,
             repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-            tool_root=Path(__file__).resolve().parents[2],
+            tool_root=discover_tool_root(),
             environment=environment,
             run_dir=run_dir,
         )
@@ -202,7 +256,7 @@ def test_one_kubernetes_recipe_scenario_uses_provider_specific_delivery(
 
 
 def test_unsupported_recipe_provider_fails_before_provisioning(tmp_path: Path) -> None:
-    profile = Path(__file__).resolve().parents[2] / "recipes/validate-k8s-jvm.yaml"
+    profile = discover_tool_root() / "recipes/validate-k8s-jvm.yaml"
     config = ScenarioConfig.model_validate(
         {
             "workflow": "validate",
@@ -226,7 +280,7 @@ def test_container_recipe_services_join_existing_validation_cycle(
     tmp_path: Path,
 ) -> None:
 
-    base = Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
+    base = discover_tool_root() / "recipes/validate-container-jvm.yaml"
     profile = tmp_path / "services.yaml"
     data = yaml.safe_load(base.read_text())
     data["services"] = [
@@ -251,7 +305,7 @@ def test_container_recipe_services_join_existing_validation_cycle(
         config,
         RoleBindings({"host": executor}),
         repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-        tool_root=Path(__file__).resolve().parents[2],
+        tool_root=discover_tool_root(),
         run_dir=tmp_path / "run",
     )
     titles = [step.task.title for step in workflow.compile().tasks]
@@ -285,7 +339,7 @@ def test_invalid_recipe_service_fails_before_provisioning(
         resolve_recipe_services(
             profile,
             source_root=Path(os.environ["NANOFAAS_ROOT"]),
-            tool_root=Path(__file__).resolve().parents[2],
+            tool_root=discover_tool_root(),
         )
 
 
@@ -294,7 +348,7 @@ def test_watchdog_recipe_uses_artifact_probe_instead_of_registration(
     tmp_path: Path,
 ) -> None:
 
-    base = Path(__file__).resolve().parents[2] / "recipes/validate-container-jvm.yaml"
+    base = discover_tool_root() / "recipes/validate-container-jvm.yaml"
     data = yaml.safe_load(base.read_text())
     data["services"] = [
         {"name": "watchdog", "sdk": "dockerfile", "container": {"image": "watchdog"}}
@@ -314,7 +368,7 @@ def test_watchdog_recipe_uses_artifact_probe_instead_of_registration(
         config,
         RoleBindings({"host": executor}),
         repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-        tool_root=Path(__file__).resolve().parents[2],
+        tool_root=discover_tool_root(),
         run_dir=tmp_path / "run",
     )
     titles = [step.task.title for step in workflow.compile().tasks]

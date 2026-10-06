@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import yaml
 from pydantic import ValidationError
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.workspace.paths import discover_tool_root
 
 
 def test_containerd_soak_requires_process_cp_and_actual_cgroup_source() -> None:
-    scenario = (
-        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
-    )
+    scenario = discover_tool_root() / "scenarios/memory-soak-smoke-containerd.yaml"
     data = yaml.safe_load(scenario.read_text())
     assert ScenarioConfig.model_validate(data).backend == "containerd"
     data["soak"]["roles"]["control-plane"]["collection_sources"] = [

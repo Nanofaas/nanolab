@@ -18,12 +18,12 @@ from uuid import uuid4
 import yaml
 from sonata_tasks.execution.models import CommandOptions, CommandTaskSpec
 
-from nanolab.tasks.recipe import _object, recipe_command
-from nanolab.tasks.recipe_multiarch import (
+from nanolab.tasks.recipes.multiarch import (
     MultiarchDistribution,
     read_buildx_distribution,
     unique_json_object,
 )
+from nanolab.tasks.recipes.workflow import _object, recipe_command
 from nanolab.tasks.soak.artifacts import (
     ArtifactWriter,
     describe_artifact,
@@ -211,7 +211,7 @@ def observe_soak_recipe(
         request_path = writer.write_json("request.json", request)
         asset = (
             Path(__file__).resolve().parents[2]
-            / "assets/soak/recipe-docker-observer.py"
+            / "assets/diagnostics/recipe-docker-observer.py"
         )
         observer = writer.write_blob("files", "docker-observer.py", asset.read_bytes())
         launcher = writer.write_blob(

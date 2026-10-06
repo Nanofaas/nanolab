@@ -19,6 +19,7 @@ from nanolab.tasks.soak.containerd_runtime import (
     BuildExecutionRecorder,
     ContainerdSoakRun,
 )
+from nanolab.workspace.paths import discover_tool_root
 
 
 def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
@@ -196,9 +197,7 @@ def test_the_plan_acquires_a_builder_that_can_reach_the_local_registry(
 
 @pytest.mark.nanofaas
 def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
-    scenario = (
-        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
-    )
+    scenario = discover_tool_root() / "scenarios/memory-soak-smoke-containerd.yaml"
     config = ScenarioConfig.model_validate(yaml.safe_load(scenario.read_text()))
     environment = EnvironmentConfig.model_validate(
         {
@@ -213,7 +212,7 @@ def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
         RoleBindings({"host": _CompileOnlyExecutor(), "stack": _CompileOnlyExecutor()}),
         run_dir=tmp_path / "run",
         repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-        tool_root=Path(__file__).parents[4],
+        tool_root=discover_tool_root(),
     )
     titles = [task.task.title for task in workflow.compile().tasks]
     assert any("rootless containerd test registry" in title for title in titles)
@@ -235,9 +234,7 @@ def test_containerd_soak_plan_uses_stack_runtime_without_compose(tmp_path):
 
 @pytest.mark.nanofaas
 def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
-    scenario = (
-        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
-    )
+    scenario = discover_tool_root() / "scenarios/memory-soak-smoke-containerd.yaml"
     data = yaml.safe_load(scenario.read_text())
     data["soak"]["roles"]["control-plane"]["runtime"] = "native"
     data["soak"]["images"]["control-plane"]["variant"] = "native"
@@ -254,7 +251,7 @@ def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
             ),
             run_dir=tmp_path / "run",
             repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-            tool_root=Path(__file__).parents[4],
+            tool_root=discover_tool_root(),
         )
 
 
@@ -270,9 +267,7 @@ def test_containerd_soak_rejects_native_until_binary_build_is_bound(tmp_path):
 def test_containerd_soak_rejects_unapplied_image_recipe_before_acquisition(
     tmp_path, role, field, value
 ):
-    scenario = (
-        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
-    )
+    scenario = discover_tool_root() / "scenarios/memory-soak-smoke-containerd.yaml"
     data = yaml.safe_load(scenario.read_text())
     data["soak"]["images"][role][field] = value
     if field == "mode":
@@ -291,16 +286,14 @@ def test_containerd_soak_rejects_unapplied_image_recipe_before_acquisition(
             ),
             run_dir=tmp_path / "run",
             repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-            tool_root=Path(__file__).parents[4],
+            tool_root=discover_tool_root(),
         )
     assert not (tmp_path / "run").exists()
 
 
 @pytest.mark.nanofaas
 def test_containerd_soak_refuses_unimplemented_p24_diagnostics(tmp_path):
-    scenario = (
-        Path(__file__).parents[2] / "scenarios-v2/memory-soak-smoke-containerd.yaml"
-    )
+    scenario = discover_tool_root() / "scenarios/memory-soak-smoke-containerd.yaml"
     config = ScenarioConfig.model_validate(yaml.safe_load(scenario.read_text()))
     assert config.soak is not None
     config.soak.prerequisites.required_coverage.append("sync")
@@ -316,11 +309,11 @@ def test_containerd_soak_refuses_unimplemented_p24_diagnostics(tmp_path):
             ),
             run_dir=tmp_path / "run",
             repo_root=Path(os.environ["NANOFAAS_ROOT"]),
-            tool_root=Path(__file__).parents[4],
+            tool_root=discover_tool_root(),
         )
 
 
-SCENARIOS = Path(__file__).resolve().parents[2] / "scenarios-v2"
+SCENARIOS = discover_tool_root() / "scenarios"
 
 
 def _load_soak_scenario(name: str) -> ScenarioConfig:
@@ -483,10 +476,7 @@ def test_the_switch_soaks_gc_evidence_names_sources_the_worker_emits():
 def recipe_scenario():
     from nanolab.cli.product import _scenario
 
-    path = (
-        Path(__file__).parents[2]
-        / "scenarios-v2/memory-soak-smoke-recipe-container.yaml"
-    )
+    path = discover_tool_root() / "scenarios/memory-soak-smoke-recipe-container.yaml"
     return _scenario(path)
 
 
@@ -591,8 +581,7 @@ def test_recipe_owned_resources_cleanup_preserves_selection(
         recipe_scenario()
         if purpose == "smoke"
         else _scenario(
-            Path(__file__).resolve().parents[2]
-            / "scenarios-v2/memory-soak-sync-container.yaml"
+            discover_tool_root() / "scenarios/memory-soak-sync-container.yaml"
         ),
         EnvironmentConfig(provider="local"),
         RoleBindings({"host": Executor()}),
@@ -625,7 +614,7 @@ def test_p24_recipe_plan_is_deferred(tmp_path):
     from nanolab.tasks.soak.runtime import RunSingleVersionSoak
 
     config = _scenario(
-        Path(__file__).parents[2] / "scenarios-v2/memory-soak-sync-container.yaml"
+        discover_tool_root() / "scenarios/memory-soak-sync-container.yaml"
     )
     require_recipe_environment(config, EnvironmentConfig(provider="local"))
     workflow = build_soak_plan(

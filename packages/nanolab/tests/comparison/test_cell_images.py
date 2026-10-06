@@ -100,7 +100,11 @@ def test_prepared_cell_verifies_all_identities_before_k6(
     from nanolab.config.scenario import ScenarioConfig
     from nanolab.plans.runtime_comparison import _prepared_checks
     from nanolab.tasks.platform import Platform
-    from nanolab.tasks.recipe import RecipeComponent, RecipeDistribution, RecipeImage
+    from nanolab.tasks.recipes.workflow import (
+        RecipeComponent,
+        RecipeDistribution,
+        RecipeImage,
+    )
 
     digest = "sha256:" + "a" * 64
     config_id = "sha256:" + "b" * 64

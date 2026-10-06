@@ -1,5 +1,0 @@
-workflow: validate
-backend: containerd
-functions:
-  - word-stats-java
-recipeProfile: ../recipes/validate-containerd-jvm.yaml

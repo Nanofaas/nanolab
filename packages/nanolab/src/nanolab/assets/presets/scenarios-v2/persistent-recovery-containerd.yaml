@@ -1,6 +1,0 @@
-workflow: validate
-backend: containerd
-build: docker
-functions:
-  - word-stats-java
-persistentRecovery: true

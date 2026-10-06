@@ -6,6 +6,7 @@ import pytest
 
 from nanolab.cli.product import _scenario
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.workspace.paths import discover_tool_root
 
 
 def test_scenario_resolves_recipe_relative_to_yaml(
@@ -114,10 +115,7 @@ def test_container_loadtest_recipe_rejects_incompatible_options(
 
 
 def test_autoscaling_container_scenario_selects_loadtest_recipe() -> None:
-    scenario = (
-        Path(__file__).resolve().parents[2]
-        / "scenarios-v2/autoscaling-cycle-container.yaml"
-    )
+    scenario = discover_tool_root() / "scenarios/autoscaling-cycle-container.yaml"
 
     config = _scenario(scenario)
 

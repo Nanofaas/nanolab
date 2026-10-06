@@ -1,7 +1,6 @@
 """Deferred preparation contracts; all source/build effects are injected."""
 
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,13 +13,11 @@ from nanolab.tasks.soak.preparation import (
     check_preparation_support,
     prepare_soak,
 )
+from nanolab.workspace.paths import discover_tool_root
 
 
 def policy():
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "scenarios-v2/memory-soak-smoke-container.yaml"
-    )
+    path = discover_tool_root() / "scenarios/memory-soak-smoke-container.yaml"
     return SoakConfig.model_validate(yaml.safe_load(path.read_text())["soak"])
 
 

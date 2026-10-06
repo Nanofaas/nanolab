@@ -37,12 +37,12 @@ from nanolab.tasks.kubectl import (
     k8s_deployment_readiness,
 )
 from nanolab.tasks.manifest import FunctionManifest
-from nanolab.tasks.recipe import RecipeBinding
-from nanolab.tasks.recipe_kubernetes import (
+from nanolab.tasks.recipes.kubernetes import (
     MinikubeTarget,
     kubernetes_api_endpoint_resource,
 )
-from nanolab.tasks.recipe_validation import RecipeFunctionRegisterTask
+from nanolab.tasks.recipes.validation import RecipeFunctionRegisterTask
+from nanolab.tasks.recipes.workflow import RecipeBinding
 
 Backend = Literal["container", "containerd", "k8s"]
 Build = Literal["docker", "buildpack"]

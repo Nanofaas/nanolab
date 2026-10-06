@@ -44,9 +44,9 @@ from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 from nanolab.tasks.platform import Platform
-from nanolab.tasks.recipe import RecipeDistribution
-from nanolab.tasks.recipe_kubernetes import RecipeKubernetesImageCheckTask
-from nanolab.tasks.recipe_validation import RecipeMetadataCheckTask
+from nanolab.tasks.recipes.kubernetes import RecipeKubernetesImageCheckTask
+from nanolab.tasks.recipes.validation import RecipeMetadataCheckTask
+from nanolab.tasks.recipes.workflow import RecipeDistribution
 
 SCRIPT_NAME = "runtime-comparison.js"
 

@@ -125,7 +125,7 @@ HISTOGRAM = (
 
 def worker():
     """Load the script asset directly, independently of pytest import mode."""
-    path = bundled_assets_root() / "soak/diagnostic-worker.py"
+    path = bundled_assets_root() / "diagnostics/diagnostic-worker.py"
     spec = importlib.util.spec_from_file_location("operations_worker", path)
     module = importlib.util.module_from_spec(spec)  # pyright: ignore[reportArgumentType]
     spec.loader.exec_module(module)  # pyright: ignore[reportOptionalMemberAccess]

@@ -33,19 +33,19 @@ NanoLab checkout in `NANOLAB_ROOT`:
 
 ```bash
 ./gradlew validateRecipe \
-  -Precipe="$NANOLAB_ROOT/packages/nanolab/recipes/validate-container-jvm.yaml"
+  -Precipe="$NANOLAB_ROOT/packages/nanolab/src/nanolab/assets/presets/recipes/validate-container-jvm.yaml"
 
 ./gradlew validateRecipe \
-  -Precipe="$NANOLAB_ROOT/packages/nanolab/recipes/validate-container-native.yaml"
+  -Precipe="$NANOLAB_ROOT/packages/nanolab/src/nanolab/assets/presets/recipes/validate-container-native.yaml"
 
 ./gradlew validateRecipe \
-  -Precipe="$NANOLAB_ROOT/packages/nanolab/recipes/validate-k8s-jvm.yaml"
+  -Precipe="$NANOLAB_ROOT/packages/nanolab/src/nanolab/assets/presets/recipes/validate-k8s-jvm.yaml"
 
 ./gradlew validateRecipe \
-  -Precipe="$NANOLAB_ROOT/packages/nanolab/recipes/validate-containerd-jvm.yaml"
+  -Precipe="$NANOLAB_ROOT/packages/nanolab/src/nanolab/assets/presets/recipes/validate-containerd-jvm.yaml"
 
 ./gradlew assembleRecipe \
-  -Precipe="$NANOLAB_ROOT/packages/nanolab/recipes/validate-container-jvm.yaml" \
+  -Precipe="$NANOLAB_ROOT/packages/nanolab/src/nanolab/assets/presets/recipes/validate-container-jvm.yaml" \
   -PrecipeTag=recipe-v2-jvm-my-run \
   -PrecipeOutput="$PWD/build/recipes/my-run"
 ```
@@ -85,11 +85,11 @@ environment, it stages the same captured inputs in the VM and runs
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
-  --run-dir packages/nanolab/runs/recipe-k8s-local
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
-  --environment packages/nanolab/environments/multipass.yaml \
-  --run-dir packages/nanolab/runs/recipe-k8s-multipass
+./nanolab.sh run deployment-lifecycle-k8s.yaml \
+  --run-dir runs/recipe-k8s-local
+./nanolab.sh run deployment-lifecycle-k8s.yaml \
+  --environment multipass.yaml \
+  --run-dir runs/recipe-k8s-multipass
 ```
 
 `deployment-lifecycle-containerd.yaml` selects the containerd profile. NanoLab
@@ -101,13 +101,13 @@ the owned containerd image and OCI resource limits, then removes the VM.
 
 The environment must provide an absolute host path to the Maven repository
 produced by `scripts/bootstrap-containerd-dependencies.sh` in NanoFaaS. Copy
-`packages/nanolab/environments/multipass-containerd.yaml.example`, set that
+`packages/nanolab/src/nanolab/assets/presets/environments/multipass-containerd.yaml.example`, set that
 path, and run:
 
 ```bash
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-containerd.yaml \
+./nanolab.sh run deployment-lifecycle-containerd.yaml \
   --environment /path/to/multipass-containerd.yaml \
-  --run-dir packages/nanolab/runs/recipe-containerd-multipass
+  --run-dir runs/recipe-containerd-multipass
 ```
 
 `autoscaling-cycle-container.yaml` uses `loadtest-container-jvm.yaml`.
@@ -119,8 +119,8 @@ earlier would change the initial scale-to-zero measurement.
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh run packages/nanolab/scenarios-v2/autoscaling-cycle-container.yaml \
-  --run-dir packages/nanolab/runs/recipe-loadtest-container
+./nanolab.sh run autoscaling-cycle-container.yaml \
+  --run-dir runs/recipe-loadtest-container
 ```
 
 The run directory retains `recipe/gradle.log`, `recipe/distribution/distribution.json`,
@@ -139,7 +139,7 @@ first, including when JVM is not selected for measurement.
 Native comparison profiles use the host builder on the measured VM. G1 requires
 Oracle GraalVM and records effective JFR monitoring. These profiles have passed
 `validateRecipe`; native publication and the complete native matrix remain to be
-verified. See [runtime comparison usage and evidence](../README.md#recipe-runtime-comparison).
+verified. See [runtime comparison usage and evidence](../../../../../README.md#recipe-runtime-comparison).
 
 ## Bash container validation
 
@@ -151,7 +151,7 @@ those of the catalog function.
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-bash.yaml \
+./nanolab.sh run deployment-lifecycle-container-bash.yaml \
   --run-dir /tmp/nanolab-bash-my-run
 ```
 
@@ -172,7 +172,7 @@ entry or new scenario field is needed for services.
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-services.yaml \
+./nanolab.sh run deployment-lifecycle-container-services.yaml \
   --run-dir /tmp/nanolab-services-my-run
 ```
 
@@ -202,9 +202,9 @@ so the host needs Docker with BuildKit and does not need a local GraalVM.
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-jvm-service-native.yaml \
+./nanolab.sh run deployment-lifecycle-container-jvm-service-native.yaml \
   --run-dir /tmp/nanolab-jvm-service-native-my-run
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-native-service-jvm.yaml \
+./nanolab.sh run deployment-lifecycle-container-native-service-jvm.yaml \
   --run-dir /tmp/nanolab-native-service-jvm-my-run
 ```
 
@@ -236,7 +236,7 @@ word-stats and the standalone Dockerfile watchdog. Its Docker build context is
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh run packages/nanolab/scenarios-v2/deployment-lifecycle-container-watchdog.yaml \
+./nanolab.sh run deployment-lifecycle-container-watchdog.yaml \
   --run-dir /tmp/nanolab-watchdog-my-run
 ```
 
@@ -280,8 +280,8 @@ are tested. On 2 October 2026 the real canonical run stopped at stack VM
 provisioning with Azure's MFA requirement, also after renewed login, before any build. Native ARM binary
 export, the real 44-image staging/runtime slice and unchanged real resume remain
 incomplete; AMD64 native qualification remains independently pending. See the
-[ARM64 verification plan](../../../docs/superpowers/plans/2026-10-02-release-arm64-recipes.md)
-and [AMD64 plan](../../../docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).
+[ARM64 verification plan](../../../../../../../docs/superpowers/plans/2026-10-02-release-arm64-recipes.md)
+and [AMD64 plan](../../../../../../../docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).
 
 
 ## P24 container preparation
@@ -295,5 +295,5 @@ GC/C1 and Java function JVM defaults; the strict P24 validator rejects drift.
 Pinned `validateRecipe` and native ARM64 publication/receipt/runtime probes pass.
 Full preparation remains blocked by the undeclared Node diagnostic preload and
 missing automatic fault-capable prerequisite coverage. A short smoke or successful
-publication cannot qualify P24. See the [P24 verification gates](../../../docs/soak.md#p24-preparation-verification)
+publication cannot qualify P24. See the [P24 verification gates](../../../../../../../docs/soak.md#p24-preparation-verification)
 before attempting a multi-hour run.

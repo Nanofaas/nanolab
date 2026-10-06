@@ -26,7 +26,7 @@ from nanolab.comparison.profiles import (
     COMPARISON_SCHEDULER_STRATEGY,
     declared_options,
 )
-from nanolab.tasks.recipe import (
+from nanolab.tasks.recipes.workflow import (
     RecipeDistribution,
     RecipeImage,
     read_distribution,

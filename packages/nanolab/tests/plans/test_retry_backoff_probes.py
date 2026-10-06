@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-ASSETS = Path(__file__).parents[2] / "src/nanolab/assets/validation"
+ASSETS = Path(__file__).parents[2] / "src/nanolab/assets/diagnostics"
 
 
 @pytest.fixture

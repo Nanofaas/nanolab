@@ -13,6 +13,7 @@ from nanolab.images.plan import build_image_plan
 from nanolab.release import arm
 from nanolab.release import build as release_build
 from nanolab.release.model import ArtifactEvidence, digest_path
+from nanolab.workspace.paths import discover_tool_root
 
 from ._release_support import (
     NANOFAAS_ROOT,
@@ -83,7 +84,9 @@ def test_amd64_commands_delegate_all_image_builds_to_root_recipes() -> None:
 
     plan = build_image_plan(NANOFAAS_ROOT, "v9.9.9", architectures=("amd64",))
     groups = prepare_release_recipe_groups(
-        NANOFAAS_ROOT, plan, profiles_root=Path(__file__).parents[2] / "recipes"
+        NANOFAAS_ROOT,
+        plan,
+        profiles_root=discover_tool_root() / "recipes",
     )
     commands = release_recipe_commands(
         groups, source_dir="/remote/source", remote_root="/remote", builder_name="owned"

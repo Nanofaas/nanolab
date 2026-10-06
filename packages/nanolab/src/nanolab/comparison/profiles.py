@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY
-from nanolab.tasks.recipe import RecipeDistribution
+from nanolab.tasks.recipes.workflow import RecipeDistribution
 
 COMPARISON_FUNCTIONS = {
     "word-stats-java": ("word-stats", "java"),

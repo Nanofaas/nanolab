@@ -19,8 +19,13 @@ from nanolab.images.plan import (
     ImageFlavor,
     ImagePlan,
 )
-from nanolab.tasks.recipe import RecipeComponent, RecipeImage, _object, _string
-from nanolab.tasks.recipe_multiarch import sha256_digest, unique_json_object
+from nanolab.tasks.recipes.multiarch import sha256_digest, unique_json_object
+from nanolab.tasks.recipes.workflow import (
+    RecipeComponent,
+    RecipeImage,
+    _object,
+    _string,
+)
 
 
 @dataclass(frozen=True, slots=True)

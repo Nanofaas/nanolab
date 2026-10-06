@@ -14,8 +14,9 @@ from sonata_tasks.vm.ports import VmCommandProvider
 from nanolab.comparison.evidence import verify_comparison_publication
 from nanolab.comparison.prepare import SOURCE_PROBE, ComparisonStage
 from nanolab.comparison.profiles import comparison_profiles, declared_options
-from nanolab.tasks.recipe import read_distribution
+from nanolab.tasks.recipes.workflow import read_distribution
 from nanolab.tasks.vm.models import VmRequest
+from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.recipe import RecipeRun
 
 FIXED = [
@@ -116,7 +117,7 @@ def publication(tmp_path):
     git("add", ".")
     git("commit", "-qm", "initial")
     profiles = comparison_profiles(
-        Path(__file__).resolve().parents[2], ("jvm", "native-o3-g1", "native-o3")
+        discover_tool_root(), ("jvm", "native-o3-g1", "native-o3")
     )
     copied = {}
     (tmp_path / "profiles").mkdir()
@@ -479,7 +480,7 @@ def test_single_platform_index_with_attestation_has_verified_config(
     indexed_id, multi_platform
 ):
     from nanolab.comparison.evidence import _registry_identity
-    from nanolab.tasks.recipe import RecipeImage
+    from nanolab.tasks.recipes.workflow import RecipeImage
 
     digest = "sha256:" + "a" * 64
     config = "sha256:" + "b" * 64

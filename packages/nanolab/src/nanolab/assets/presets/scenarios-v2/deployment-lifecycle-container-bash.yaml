@@ -1,5 +1,0 @@
-workflow: validate
-backend: container
-recipeProfile: ../recipes/validate-container-bash.yaml
-functions:
-  - word-stats-exec
