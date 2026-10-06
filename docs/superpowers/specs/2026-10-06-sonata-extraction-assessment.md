@@ -39,7 +39,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `soak/artifacts.py`: `fingerprint` | Keep byte-compatible hashing local | Storage review demonstrated that JSON normalization followed by `sonata_tasks.core.fingerprint.fingerprint_digest` changes hashes for accepted nested numeric-key mappings: numeric sorting before JSON encoding differs from lexical sorting after normalization. Preserve the current bare-hex hash of the codec's exact canonical bytes. The small stdlib hash does not justify another shared API or an evidence-identity migration. |
 | `soak/artifacts.py`: `describe_artifact` | Consolidate with artifact work | Streaming SHA-256 and byte count fit the storage capability. Do not create a separate hashing task or framework. |
 | `soak/artifacts.py`: `retained`, `describe_tree`, `measure_tree`, `enforce_limit` | Keep current accounting policy local | They encode scratch-directory exclusions, source-tree handling and acceptance inventory rules. A generic writer must not silently exclude all `workspace-*` or dot directories. Consider shared traversal only if separating storage actually requires it. |
-| `tasks/recipes/builder.py`: private Buildx builder and owner-node reconciliation | Extend existing Buildx resource | Sonata already creates, bootstraps, validates and compensates builders. The missing behavior is strict acquisition and identity-checked cleanup after partial creation, not another builder abstraction. Keep current callers' refusal to adopt/remove a pre-existing builder. |
+| `tasks/recipes/builder.py`: private Buildx builder and owner-node reconciliation | Extend existing Buildx resource; third slice implemented and published | Add opt-in strict ownership to the existing `Resource[str]`, preserving default reuse/replacement. Refuse existing names, use a unique owner node and remove only the unchanged single-node docker-container builder. Reconcile partial creation/cancellation; callers serialize client-store mutation during inspect/remove. The ordinary installed-wheel AMD64/ARM64 build passed with an isolated Docker client. The coherent 0.6.8 pair is published; NanoLab adoption uses exact public-index pins. |
 | `tasks/recipes/builder.py`: binfmt installation, lock and registration compensation | Defer generic API pending ownership validation | This affects a shared host facility. The current lock lives on the client and is keyed by Docker daemon ID. That does not demonstrate protection for remote clients or multiple daemons sharing a binfmt instance. Preserve inspection/compare-before-removal and builder-before-registration cleanup ordering. |
 | `tasks/recipes/builder.py`: pinned installer/probe images, platform pair, registry config, evidence names | Keep local | These select the supported AMD64/ARM64 recipe setup and registry `127.0.0.1:5000`. They are inputs/policy for shared resources, not Sonata defaults. |
 | `application/execution.py`: `_RemoteProjectExecutor` | Candidate for a later execution-adapter extension | Mapping a local project subtree to an explicit remote root is reusable. Preserve rejection of escaping cwd and simultaneous cwd/remote_dir, binding identity and dry-run. Keep default `/nanofaas`, environment/provider selection and role assembly local. |
@@ -160,3 +160,56 @@ checks with coverage disabled, not a full CI/coverage result:
 
 Builder tests use fake command execution; passing them does not establish
 correctness across real Docker daemons, remote clients or binfmt namespaces.
+
+## Third slice: owned Buildx trial
+
+The [implementation plan](../plans/2026-10-06-owned-buildx-extraction.md) starts
+from NanoLab `d49c228` and Sonata `ced86ed` (published pair 0.6.7). At trial
+start, pair 0.6.8 was prepared locally and NanoLab kept declared pins
+and lock at 0.6.7. Trial verification explicitly installed the built pair in an
+isolated environment. Public-index adoption is recorded below.
+
+Buildx ownership and binfmt remain separate decisions. The shared resource
+handles strict name refusal, owner-node identity, bootstrap/validation and
+compensation. NanoLab retains daemon architecture, pinned installer/probes,
+registration comparison, registry configuration, platform pair and evidence.
+If cleanup cannot confirm builder removal or absence, including interrupted
+creation, NanoLab retains its registration, records the error and closes its
+local lock. That lock still provides no cross-client or shared-kernel guarantee.
+
+The installed base wheels performed an ordinary scratch application build on
+the local Docker daemon with a fresh `DOCKER_CONFIG`, using cached BuildKit.
+The OCI output contained AMD64 and ARM64 manifests; client selection remained
+unchanged and release removed the builder and its container. This proves the
+Buildx capability independently of NanoLab. No emulation was installed; the
+experiment does not establish remote-client or binfmt locking correctness.
+
+Delivery evidence: [Sonata PR #18](https://github.com/Nanofaas/sonata/pull/18)
+passes all CI checks. The reviewed trial has 509 catalogue tests (91.16%),
+227 engine tests (96.17%), six installed-wheel configurations and 81 installed
+NanoLab recipe tests passing. Full NanoLab against the exact CI source pin has
+3446 passing tests; its unchanged 90% coverage gate fails at 86.20%, compared
+with the prior storage baseline of 86.16%. These results describe the
+pre-publication trial.
+
+## Third-slice publication and adoption
+
+The user authorized publication and NanoLab adoption after merging Sonata PR
+#18. Tag `v0.6.8` names merge commit `c57ffc0eade6e806848b018a1de845b784615701`.
+[Release run 37517416738](https://github.com/Nanofaas/sonata/actions/runs/37517416738)
+published engine successfully before tasks. Both wheel/sdist pairs were checked
+through PyPI's version API; a fresh environment installed the pair from the
+public simple index and ran the independent catalogue consumer.
+
+NanoLab's three exact pins now select 0.6.8. The refreshed lock changes only
+that external pair and the consuming workspace requirement metadata; all four
+artifact hashes match PyPI. The consumer environment was forced to reinstall
+both packages from the lock, replacing the local trial wheels. Binfmt remains
+local under the individual decision above; this slice does not close #61.
+
+Final public-index consumer verification: **3446 tests passed** in **293.38 s**
+against the exact CI NanoFaaS pin. The explicit branch-coverage gate still exits
+1 at **86.20%** versus 90%, matching the local trial. Toolkit (51 tests), hooks,
+lock checks, build and installed CLI/assets smoke passed. The public Sonata
+wheel repeated the independent real Docker build and cleanup checks. No gate
+was weakened and no operator NanoFaaS checkout was used.
