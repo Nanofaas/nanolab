@@ -89,12 +89,12 @@ even if acquisition failed; registration removal requires confirmed cleanup.
   nodes in the integration tests.
 - [x] Delegate strict lifecycle, retain emulation policies and evidence. Observe
   GREEN; test cleanup ordering, cancellation and an immediate second attempt.
-- [ ] Trial built Sonata wheels only in the isolated venv. Run full NanoLab
+- [x] Trial built Sonata wheels only in the isolated venv. Run full NanoLab
   against the exact CI NanoFaaS pin, toolkit, hooks and installed-wheel smoke.
   Record functional results and the known 90% coverage-gate deficit separately.
-- [ ] Obtain fresh whole-slice review, reproduce Important/Critical findings RED
+- [x] Obtain fresh whole-slice review, reproduce Important/Critical findings RED
   and fix in one pass, then run the affected full suites and required checks.
-- [ ] Deliver the reviewed Sonata PR and preserve the NanoLab trial branch.
+- [x] Deliver the reviewed Sonata PR and preserve the NanoLab trial branch.
   Publication and public-index adoption follow separate authorization after merge.
 
 ## Progress and rulings
@@ -162,3 +162,18 @@ even if acquisition failed; registration removal requires confirmed cleanup.
 - Final: Ruling: other assessment candidates stay in later slices — this lot is Buildx — cost: remaining local implementations persist.
 - Final: Ruling: the executor completes final full/wheel verification the reviewer did not rerun — use fresh command exits/logs with explicit coverage configuration — cost: CI remains independent confirmation.
 - Ruling: refuse disappeared records after unsuccessful rm without a new daemon API — local-store absence cannot establish daemon teardown — cost: manual reconciliation when Buildx has already discarded its record.
+
+- Sonata PR: https://github.com/Nanofaas/sonata/pull/18, commit
+  `14d1c2f41ac3fe0b01f2984b51bf4cbcc418af1d`; all 18 push/PR CI checks succeeded.
+- Final pinned NanoLab trial: **3446 passed** in **296.34 s**; process exit 1
+  solely because the unchanged 90% branch-coverage gate reports **86.20%**.
+  Previous published storage baseline: 3436 passed, 86.16%. No functional test
+  failed. Coverage configuration was supplied explicitly and output was isolated
+  from the toolkit run. Toolkit remains 51 passed, 93.71%; all delivery hooks pass.
+- Ruling: retain the existing coverage gate and leave its baseline deficit outside
+  this Buildx slice. Cost: NanoLab's gate continues to fail until separate coverage
+  work; do not present the trial as a green coverage result.
+- Consumer trial preserves all three exact Sonata pins and the lock at 0.6.7.
+  Local implementation commit: `c37d788`, branch `feat/61-owned-buildx`.
+  It is a tested implementation branch, not a public-index adoption PR.
+  Publication of coherent 0.6.8 and subsequent consumer adoption remain pending.

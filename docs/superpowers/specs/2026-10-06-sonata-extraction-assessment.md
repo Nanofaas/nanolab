@@ -183,3 +183,10 @@ The OCI output contained AMD64 and ARM64 manifests; client selection remained
 unchanged and release removed the builder and its container. This proves the
 Buildx capability independently of NanoLab. No emulation was installed; the
 experiment does not establish remote-client or binfmt locking correctness.
+
+Delivery evidence: [Sonata PR #18](https://github.com/Nanofaas/sonata/pull/18)
+passes all CI checks. The reviewed trial has 509 catalogue tests (91.16%),
+227 engine tests (96.17%), six installed-wheel configurations and 81 installed
+NanoLab recipe tests passing. Full NanoLab against the exact CI source pin has
+3446 passing tests; its unchanged 90% coverage gate fails at 86.20%, compared
+with the prior storage baseline of 86.16%. No public-index adoption has occurred.
