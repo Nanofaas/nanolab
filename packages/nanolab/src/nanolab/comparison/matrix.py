@@ -17,9 +17,7 @@ comparison and a coincidence.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from nanolab.images.control_plane_variants import ControlPlaneVariant
@@ -83,50 +81,3 @@ def pending(
 ) -> tuple[ComparisonCell, ...]:
     """Return the cells that have not completed yet, in matrix order."""
     return tuple(cell for cell in cells if not completed(cell, root))
-
-
-def write_manifest(
-    root: Path,
-    cells: tuple[ComparisonCell, ...],
-    *,
-    functions: tuple[str, ...],
-    registry: str,
-    regime: dict[str, object] | None = None,
-) -> Path:
-    """Record what was compared, so the report never has to infer it.
-
-    Written before the first run rather than after the last: a matrix that dies
-    halfway still says what it was attempting, which is the difference between a
-    partial result and an unreadable directory.
-    """
-    variants: list[dict[str, object]] = []
-    seen: set[str] = set()
-    for cell in cells:
-        if cell.variant.key in seen:
-            continue
-        seen.add(cell.variant.key)
-        variants.append(
-            {
-                "key": cell.variant.key,
-                "label": cell.variant.label,
-                "rationale": cell.variant.rationale,
-                "build_env": dict(cell.variant.build_env),
-                "image": cell.variant.image(registry),
-            }
-        )
-    manifest = {
-        "started_at": datetime.now(UTC).isoformat(),
-        "functions": list(functions),
-        "repetitions": max(cell.repetition for cell in cells),
-        "order": [cell.label for cell in cells],
-        "variants": variants,
-        # What the cells ran against, not just what they compared. A run
-        # directory that does not say which CPU budget produced it cannot be
-        # read a week later: the four matrices of the 2026-08-23 sweep differ in
-        # nothing else, and the manifest could not tell them apart.
-        "regime": regime or {},
-    }
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / "comparison-manifest.json"
-    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return path

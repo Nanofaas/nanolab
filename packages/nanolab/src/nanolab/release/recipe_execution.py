@@ -33,7 +33,6 @@ from nanolab.tasks.vm.models import VmRequest
 _INVENTORY_SCRIPT = r"""
 import hashlib, json, os, re, stat, sys
 from pathlib import Path
-from typing import cast
 root = Path(sys.argv[1])
 entries = {}
 for directory, dirs, files in os.walk(root, followlinks=False):
@@ -100,7 +99,6 @@ Path(sys.argv[2]).write_text(
 _FILE_FACTS = r"""
 import hashlib, json, sys
 from pathlib import Path
-from typing import cast
 p = Path(sys.argv[1])
 if p.is_symlink() or not p.is_file():
     raise ValueError("Not a regular evidence file")
@@ -112,17 +110,15 @@ print(json.dumps({"size": p.stat().st_size, "digest": "sha256:"+h.hexdigest()}))
 """
 
 
-def _remote(provider: object, request: object, argv: tuple[str, ...]) -> object:
-    return _provider_exec(provider, request, argv)
-
-
 def _fetch_verified(
     provider: object, request: object, remote: str, local: Path, *, limit: int
 ) -> None:
     facts = json.loads(
         str(
             getattr(
-                _remote(provider, request, ("python3", "-c", _FILE_FACTS, remote)),
+                _provider_exec(
+                    provider, request, ("python3", "-c", _FILE_FACTS, remote)
+                ),
                 "stdout",
                 "",
             )
@@ -140,7 +136,9 @@ def _fetch_verified(
         after = json.loads(
             str(
                 getattr(
-                    _remote(provider, request, ("python3", "-c", _FILE_FACTS, remote)),
+                    _provider_exec(
+                        provider, request, ("python3", "-c", _FILE_FACTS, remote)
+                    ),
                     "stdout",
                     "",
                 )
@@ -161,7 +159,7 @@ def _verify_remote_digest(
     provider: object, request: object, remote: str, digest: str, label: str
 ) -> None:
     actual = str(
-        getattr(_remote(provider, request, ("sha256sum", remote)), "stdout", "")
+        getattr(_provider_exec(provider, request, ("sha256sum", remote)), "stdout", "")
     ).split()
     if not actual or "sha256:" + actual[0] != digest:
         raise ValueError(f"Staged release {label} digest differs")
@@ -184,7 +182,7 @@ def verify_release_source(
     source = Path(source_dir)
     remote_inventory = str(source.parent / "source-current.json")
     current_file = inventory_file.with_name("source-current.json")
-    _remote(
+    _provider_exec(
         provider,
         request,
         ("python3", "-c", _INVENTORY_SCRIPT, source_dir, remote_inventory),
@@ -349,7 +347,7 @@ def run_release_recipe_steps(
         ("builderInspection", ("docker", "buildx", "inspect", builder_name)),
     ):
         facts[label] = str(
-            getattr(_remote(provider, request, argv), "stdout", "")
+            getattr(_provider_exec(provider, request, argv), "stdout", "")
         ).strip()
     aliases = {"amd64": {"x86_64", "amd64"}, "arm64": {"aarch64", "arm64"}}[
         architecture
@@ -372,7 +370,9 @@ def run_release_recipe_steps(
         remote_profile = f"{remote_root}/recipe-inputs/{architecture}/{profile.name}"
         staged_hash = str(
             getattr(
-                _remote(provider, request, ("sha256sum", remote_profile)), "stdout", ""
+                _provider_exec(provider, request, ("sha256sum", remote_profile)),
+                "stdout",
+                "",
             )
         ).split()[0]
         if "sha256:" + staged_hash != group.profile_digest:
@@ -382,15 +382,15 @@ def run_release_recipe_steps(
         local_output = evidence_dir / group.flavor
         report = local_output / "distribution.json"
         report.unlink(missing_ok=True)
-        _remote(provider, request, ("rm", "-rf", "--", output))
-        _remote(provider, request, ("mkdir", "-p", output))
+        _provider_exec(provider, request, ("rm", "-rf", "--", output))
+        _provider_exec(provider, request, ("mkdir", "-p", output))
         log = local_output / "gradle.log"
         log.unlink(missing_ok=True)
         # cleanRecipe claims/clears its output; logging must stay outside it.
         log_dir = f"{remote_root}/recipe-output/{architecture}/logs"
         log_path = f"{log_dir}/{group.flavor}.log"
-        _remote(provider, request, ("mkdir", "-p", log_dir))
-        _remote(provider, request, ("rm", "-f", "--", log_path))
+        _provider_exec(provider, request, ("mkdir", "-p", log_dir))
+        _provider_exec(provider, request, ("rm", "-f", "--", log_path))
         remote_log = shlex.quote(log_path)
         script = (
             f"{{ {shlex.join(command.argv)}; }} > {remote_log} 2>&1; "
@@ -425,7 +425,7 @@ def run_release_recipe_steps(
         components = read_release_distribution(
             report, group=group, source_commit=source_commit
         )
-        inspect = _remote(
+        inspect = _provider_exec(
             provider,
             request,
             (
@@ -463,7 +463,7 @@ def run_release_recipe_steps(
     images = [item for item in evidence if item.kind == "local-image-digest"]
     if len(images) != len({item.reference for item in images}):
         raise ValueError("Duplicate release recipe image coverage")
-    inspected = _remote(
+    inspected = _provider_exec(
         provider,
         request,
         (

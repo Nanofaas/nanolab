@@ -279,8 +279,6 @@ def test_control_plane_gets_a_writable_catalog_directory(tmp_path, monkeypatch):
     user, so the catalog write the platform does at startup is denied. Only
     the declared registry path is made writable; nothing else is relaxed.
     """
-    import os
-
     value = prepared(tmp_path)
     leases = []
 

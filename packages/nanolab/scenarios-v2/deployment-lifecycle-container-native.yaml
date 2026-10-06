@@ -1,6 +1,5 @@
 workflow: validate
 backend: container
-build: docker
 recipeProfile: ../recipes/validate-container-native.yaml
 functions:
   - word-stats-java

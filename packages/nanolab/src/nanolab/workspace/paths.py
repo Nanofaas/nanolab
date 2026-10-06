@@ -81,14 +81,3 @@ def default_tool_paths() -> ToolPaths:
         paths, profiles_dir=workspace / "profiles", runs_dir=workspace / "runs"
     )
 
-
-def scenario_path_from_env(cli_path: Path | None = None) -> Path | None:
-    """Return the scenario path to use, preferring an explicit CLI argument.
-
-    Falls back to ``NANOFAAS_SCENARIO_PATH``; None when neither is supplied.
-    """
-    if cli_path is not None:
-        return cli_path
-
-    s = os.getenv("NANOFAAS_SCENARIO_PATH", "").strip()
-    return Path(s) if s else None

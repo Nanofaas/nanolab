@@ -55,24 +55,6 @@ class Probe:
         )
 
 
-def test_absolute_deadlines():
-    from nanolab.tasks.soak.observer import sample_deadlines
-
-    assert list(sample_deadlines(100, 130, 10)) == [100, 110, 120, 130]
-
-
-@pytest.mark.parametrize(
-    "args", [(0, 1, 0), (0, 1, -1), (2, 1, 1), (0, float("inf"), 1)]
-)
-def test_invalid_schedule(args):
-    from nanolab.tasks.soak.observer import sample_deadlines
-
-    with pytest.raises(
-        ValueError, match=r"expected positive finite|invalid observation window"
-    ):
-        list(sample_deadlines(*args))
-
-
 def test_slow_scrapes_skip_deadlines_and_persist_drain(tmp_path):
     from nanolab.tasks.soak.observer import Observer
 

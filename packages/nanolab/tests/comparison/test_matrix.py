@@ -1,39 +1,13 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from nanolab.comparison.matrix import build_matrix, completed, pending, write_manifest
+from nanolab.comparison.matrix import build_matrix, completed, pending
 from nanolab.images.control_plane_variants import resolve_variants
 
 VARIANTS = resolve_variants(("jvm", "native-os", "native-o3", "native-o3-g1"))
-
-
-def test_the_manifest_records_the_regime_the_cells_ran_against() -> None:
-    """Four matrices of the CPU sweep differ in nothing the manifest recorded.
-
-    They compared the same four builds under the same profile with the same
-    repetitions, and only the control plane's CPU budget told them apart - which
-    was exactly the field a run directory did not carry. A result whose regime
-    has to be reconstructed from a shell history is not reproducible.
-    """
-    cells = build_matrix(VARIANTS, 1)
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        path = write_manifest(
-            Path(tmp),
-            cells,
-            functions=("word-stats-java",),
-            registry="r:5000",
-            regime={"control_plane_cpu": "4", "load_profile": "comparison"},
-        )
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-
-    assert manifest["regime"]["control_plane_cpu"] == "4"
-    assert manifest["regime"]["load_profile"] == "comparison"
 
 
 def test_variants_interleave_instead_of_running_in_blocks() -> None:
@@ -78,33 +52,6 @@ def test_matrix_rejects_an_empty_request() -> None:
         build_matrix(VARIANTS, 0)
     with pytest.raises(ValueError, match="at least one variant"):
         build_matrix((), 3)
-
-
-def test_manifest_records_what_was_attempted(tmp_path: Path) -> None:
-    """Written up front, so a matrix that dies halfway still says what it was doing."""
-    cells = build_matrix(VARIANTS, 3)
-
-    path = write_manifest(
-        tmp_path,
-        cells,
-        functions=("word-stats-java", "word-stats-javascript"),
-        registry="r:5000",
-    )
-    manifest = json.loads(path.read_text(encoding="utf-8"))
-
-    assert manifest["repetitions"] == 3
-    assert manifest["functions"] == ["word-stats-java", "word-stats-javascript"]
-    assert [v["key"] for v in manifest["variants"]] == [
-        "jvm",
-        "native-os",
-        "native-o3",
-        "native-o3-g1",
-    ]
-    assert manifest["variants"][3]["build_env"]["NATIVE_GC"] == "G1"
-    assert manifest["variants"][0]["image"] == "r:5000/nanofaas/control-plane:jvm"
-    # The order is the record of how drift was spread; without it a reader cannot
-    # tell an interleaved matrix from a blocked one after the fact.
-    assert manifest["order"][:2] == ["jvm run 1", "native-os run 1"]
 
 
 def test_a_matrix_resumes_the_cells_that_have_no_results(tmp_path: Path) -> None:

@@ -93,7 +93,6 @@ def setup_adapter(
         DiagnosticBudget,
         DiagnosticCapabilities,
         JvmDiagnosticAdapter,
-        NativeDiagnosticAdapter,
         NodeDiagnosticAdapter,
     )
 
@@ -128,7 +127,6 @@ def setup_adapter(
     cls = {
         "jvm": JvmDiagnosticAdapter,
         "node": NodeDiagnosticAdapter,
-        "native": NativeDiagnosticAdapter,
     }[runtime]
     kwargs = {"command_prefix": ("/opt/jdk/bin/jcmd",)} if runtime == "jvm" else {}
     if natural_phase is not None:
@@ -231,19 +229,6 @@ def test_dump_count_shared_across_checkpoints(tmp_path):
     second = adapter.capture(TARGET, "heap_dump", tmp_path / "second", 1)
     assert json.loads(second.read_text())["status"] == "INCONCLUSIVE"
     assert len(executor.requests) == 1
-
-
-def test_native_does_not_inherit_jvm_capabilities(tmp_path):
-    adapter, executor = setup_adapter(
-        tmp_path, runtime="native", operations=frozenset()
-    )
-    native = replace(TARGET, runtime="native")
-    assert adapter.capabilities(native) == frozenset()
-    receipt = capture(adapter, tmp_path, target=native)
-    assert receipt["availability"] == "unavailable"
-    assert adapter.metric_availability("jvm_memory_used_bytes") == "not_applicable"
-    assert adapter.metric_availability("process_rss_bytes") == "unavailable"
-    assert executor.requests == []
 
 
 def test_node_uses_explicit_private_inspector_transport(tmp_path):

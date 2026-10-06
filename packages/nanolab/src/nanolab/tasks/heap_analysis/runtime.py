@@ -408,7 +408,6 @@ class LocalHeapAnalysisSession:
     ) -> None:
         """Freeze the run's inputs without discovering or provisioning anything."""
         self._config = config
-        self._helper_image = helper_image
         self._prepared = prepared
         self._deployment = deployment
         self._root = prepared.evidence_dir

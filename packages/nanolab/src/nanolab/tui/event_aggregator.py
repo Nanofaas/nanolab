@@ -6,7 +6,6 @@ import time
 from collections.abc import Callable
 
 from sonata_engine.workflow.events import WorkflowEvent
-from sonata_engine.workflow.models import WorkflowState
 
 from nanolab.tui.models import (
     TuiPhaseSnapshot,
@@ -62,70 +61,6 @@ class WorkflowEventAggregator:
         self._logs.append(message)
         if len(self._logs) > self.log_limit:
             self._logs = self._logs[-self.log_limit :]
-
-    def upsert_phase(
-        self,
-        label: str,
-        *,
-        task_id: str | None = None,
-        detail: str = "",
-        activate: bool = False,
-    ) -> int:
-        """Create or update the top-level phase labelled ``label``.
-
-        ``task_id`` binds the phase to an engine task so later events find it
-        again; ``activate`` marks it running immediately. Returns the phase's
-        1-based position in the rendered step list.
-        """
-        phase = self._upsert_top_level_phase(label, task_id=task_id, detail=detail)
-        if activate:
-            self._mark_phase_running(phase)
-        return self._phases.index(phase) + 1
-
-    def mark_phase_running(self, phase_index: int) -> None:
-        """Mark the 1-based top-level phase at ``phase_index`` as running."""
-        phase = self._phases[phase_index - 1]
-        self._mark_phase_running(phase)
-
-    def mark_phase_success(self, phase_index: int, detail: str = "") -> None:
-        """Mark the phase at ``phase_index`` succeeded, with an optional detail."""
-        phase = self._phases[phase_index - 1]
-        self._mark_phase_success(phase, detail=detail)
-
-    def mark_phase_failed(self, phase_index: int, detail: str = "") -> None:
-        """Mark the phase at ``phase_index`` failed, optionally replacing its detail."""
-        phase = self._phases[phase_index - 1]
-        self._mark_phase_failed(phase, detail=detail)
-
-    def mark_phase_cancelled(self, phase_index: int, detail: str = "") -> None:
-        """Mark the phase at ``phase_index`` cancelled, keeping any existing detail."""
-        phase = self._phases[phase_index - 1]
-        self._mark_phase_cancelled(phase, detail=detail)
-
-    def complete_running_phases(
-        self,
-        *,
-        status: WorkflowState = "success",
-        detail: str = "",
-    ) -> None:
-        """Close out every phase still marked running, at any nesting depth.
-
-        Each one takes ``status`` and a finish time; ``detail`` replaces the
-        phase's existing detail only when it is non-empty.
-        """
-        finished_at = time.time()
-
-        def complete_phase(phase: TuiPhaseSnapshot) -> None:
-            if phase.status == "running":
-                phase.status = status
-                if detail:
-                    phase.detail = detail
-                phase.finished_at = finished_at
-            for child in phase.children:
-                complete_phase(child)
-
-        for phase in self._phases:
-            complete_phase(phase)
 
     # The engine bus emits the single task vocabulary (started/passed/failed,
     # plus skipped and log.line); one aggregator reads it.
@@ -343,12 +278,6 @@ class WorkflowEventAggregator:
 
     def _mark_phase_failed(self, phase: TuiPhaseSnapshot, detail: str = "") -> None:
         phase.status = "failed"
-        if detail:
-            phase.detail = detail
-        phase.finished_at = time.time()
-
-    def _mark_phase_cancelled(self, phase: TuiPhaseSnapshot, detail: str = "") -> None:
-        phase.status = "cancelled"
         if detail:
             phase.detail = detail
         phase.finished_at = time.time()

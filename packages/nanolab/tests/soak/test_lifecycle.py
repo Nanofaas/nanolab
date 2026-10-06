@@ -5,7 +5,7 @@ import pytest
 from sonata_engine import Workflow
 
 from nanolab.config.soak import SoakConfig
-from nanolab.tasks.soak.workflow import LifecycleHooks, SoakLifecycle, phase_order
+from nanolab.tasks.soak.workflow import LifecycleHooks, SoakLifecycle
 
 
 def fake_config(**fields: object) -> SoakConfig:
@@ -83,13 +83,6 @@ def make_lifecycle(
         run_dir=tmp_path,
         under_load=under_load,
     )
-
-
-def test_phase_contract():
-    order = phase_order()
-    assert order.index("freeze-digests") < order.index("deploy")
-    assert order.index("drain") < order.index("final-diagnostics")
-    assert order.index("report") < order.index("cleanup")
 
 
 def test_actual_sonata_lifecycle_full_schedule(tmp_path):

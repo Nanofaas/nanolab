@@ -87,7 +87,6 @@ def test_recipe_owns_platform_builds(
     titles = [entry.task.title for entry in workflow.compile().tasks]
     assert not any(title.startswith(("Build", "Push")) for title in titles)
     assert titles.index("Published recipe") < titles.index("Acquire word-stats-java")
-    assert "Acquire word-stats-java" in titles
     assert not (request.build_images or request.build_control_plane)
     assert not request.push_function_images
     assert executor.specs == []
@@ -198,7 +197,6 @@ def test_recipe_compose_uses_report_image_without_build(tmp_path: Path) -> None:
 
 
 def test_validation_rejects_unselected_recipe_component(tmp_path: Path) -> None:
-    from dataclasses import replace
 
     from nanolab.tasks.recipe import require_validation_distribution
 
@@ -214,7 +212,7 @@ def test_validation_rejects_unselected_recipe_component(tmp_path: Path) -> None:
         None,
         None,
     )
-    with __import__("pytest").raises(ValueError, match="selected functions"):
+    with pytest.raises(ValueError, match="selected functions"):
         require_validation_distribution(
             replace(value, components=(*value.components, extra)),
             functions=(("word-stats", "java"),),
@@ -495,7 +493,6 @@ def test_recipe_failure_releases_acquired_resources(
 def test_bash_recipe_registers_published_image_for_exec_catalog(
     tmp_path: Path, catalog_sdk: str
 ) -> None:
-    from dataclasses import replace
 
     from nanolab.tasks.recipe import require_validation_distribution
 
@@ -550,7 +547,6 @@ def test_bash_recipe_registers_published_image_for_exec_catalog(
 def test_recipe_service_selection_and_registration_keep_component_kind(
     tmp_path: Path,
 ) -> None:
-    from dataclasses import replace
 
     from nanolab.tasks.recipe import require_validation_distribution
 

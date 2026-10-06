@@ -164,6 +164,24 @@ le differenze reali fra backend e tipi di verifica.
      13 task passati, una sola `publishRecipe`, metadati, immagini, invocazione,
      limiti e cleanup. I percorsi senza recipe e con immagini precompilate
      conservano le proprie opzioni.
+   - [x] Review Ponytail della migrazione `68a992e..1107de7` (78 commit):
+     CI con un solo ciclo per gli stessi 25 profili, 10 scenari recipe senza
+     `build: docker` ridondante, directory automatiche gestite nella stessa
+     funzione e release con chiamate dirette; eliminati import e assert
+     duplicati nei test.
+   - [x] Pulizia dei residui confermati da Vulture: rimossi il vecchio writer
+     del manifest di confronto e la relativa build senza recipe, i metodi VM
+     e l'adapter Ansible non più chiamati, i mutatori TUI sostituiti dagli
+     eventi Sonata e gli helper soak/scenario utilizzati solo dai vecchi test.
+     Conservati i playbook attivi, gli hook dei framework e i guardrail delle
+     recipe. La dashboard è verificata con le suite TUI e una prova in PTY.
+   - [x] Aggiornato il pin Sonata a `0.6.5` dopo la pubblicazione della
+     [PR #15](https://github.com/Nanofaas/sonata/pull/15): i comandi inoltrano
+     stdout e stderr alla dashboard anche senza un listener esplicito.
+     Verificati suite TUI e log del processo reale in PTY con i pacchetti PyPI.
+   - [x] Sostituiti i quattro assert dei percorsi recipe/confronto con controlli
+     espliciti, attivi anche con Python ottimizzato. Eliminato il piano di
+     confronto completato; evidenze JVM e limiti restano nella tappa 1.
    - [ ] Migrare i chiamanti rimanenti prima di rimuovere le build legacy:
      load test degli altri backend, offload e soak containerd. La fase runtime
      del soak usa già immagini fissate senza build e conserva i suoi guardrail.

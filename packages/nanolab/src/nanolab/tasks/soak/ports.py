@@ -33,20 +33,6 @@ class ProcessProbe(Protocol):
         ...
 
 
-class DiagnosticAdapter(Protocol):
-    """Advertise real capabilities and preserve evidence of actual completion."""
-
-    def capabilities(self, target: Target) -> frozenset[str]:
-        """Return operations this adapter can perform against the target."""
-        ...
-
-    def capture(
-        self, target: Target, checkpoint: str, output_dir: Path, timeout_s: float
-    ) -> Path:
-        """Write a diagnostic receipt, including failed or unverified operations."""
-        ...
-
-
 # The receipt a driver writes into the output directory it is handed. Part of
 # the contract rather than an implementation detail: `run` persists this file
 # before it raises, so a caller that only reads the return value loses the

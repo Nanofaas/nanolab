@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from sonata_engine import Steps
 from sonata_tasks.command import CommandTask
-from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.loadtest import build_loadtest_plan
+from nanolab.plans.loadtest import _recipe_container_platform, build_loadtest_plan
 from nanolab.tasks.loadtest.models import TimeWindow
 from nanolab.workspace.paths import bundled_assets_root
 
@@ -85,6 +85,20 @@ CONTAINER_SCENARIO = ScenarioConfig(
     functions=["word-stats-java"],
     autoscaling=True,
 )
+
+
+def test_recipe_container_platform_rejects_missing_profile(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    bindings = RoleBindings({"host": executor})
+    with pytest.raises(ValueError, match="recipe profile"):
+        _recipe_container_platform(
+            CONTAINER_SCENARIO,
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            root=tmp_path,
+            run_dir=tmp_path / "run",
+            functions=(),
+            additional_modules=(),
+        )
 
 
 def test_containerd_loadtest_starts_rootless_runtime_without_compose(
