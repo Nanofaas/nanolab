@@ -49,7 +49,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `tasks/components/bootstrap.py`: bootstrap/sync/retarget plans | Keep composition local | Uses shared `build_ansible_argv` and SSH helpers already. Playbooks, namespaces, remote layout, registry and operation IDs belong to NanoLab. Revisit only an independently demonstrated missing Ansible primitive. |
 | `tasks/compose.py`: isolated Compose acquisition | Small extension to existing resource | Sonata already owns deploy/wait/compensation and teardown flags. NanoLab adds teardown before deployment. An opt-in pre-clean step can remove this duplicate composition; retain explicit role/env inputs and fresh-project policy locally. Do not enable destructive pre-clean by default. |
 | `soak/retention.py`: `CleanupState`, generated Compose validation and release journal | Keep local | Cleanup records, release-only replay, dependent cleanup gates, ownership labels, allowed mounts and artifact retention are soak contracts. This is not interchangeable with a generic workflow journal. No generic journaling framework is justified by this module. |
-| `soak/sources.py`: capture/verify/materialize snapshot and entry identity | Extract after artifact storage | Real generic contract: tracked plus nonignored working-tree inputs, deletions, modes, safe relative symlinks, bounded size and independently verified workspaces. Keep `nanolab-soak-v1` receipts and recipe/source selection locally. |
+| `soak/sources.py`: capture/verify/materialize snapshot and entry identity | Fourth slice implemented; prepared wheel trial | Shared `sonata_tasks.sources` captures tracked/nonignored working-tree inputs, deletions, modes and safe/dangling relative links, with byte/file bounds and independently verified workspaces. Caller-owned artifact storage keeps receipts, quotas, markers and source selection local. Snapshot identity and manifest bytes remain compatible; prepared 0.6.9 is not yet published. |
 | `workspace/provenance.py`: provenance helpers and `source_fingerprint` | Keep for now | Git observation is generic, but current return shape and fallback behavior support NanoLab run metadata and image rollout tags. Its hash identifies commit/status/diff/untracked bytes, unlike the snapshot's file inventory. Do not unify those identities merely because both use SHA-256. |
 | `release/build.py` and `release/resources.py`: immutable archive transfer | Extend `sonata_tasks.archive` in a later slice | Existing Sonata archive exports a commit anew for each acquisition. Release shares one frozen archive across VMs, checks it again and reports cleanup failures. Support those behaviors before adopting it; retain clean-source guards, remote-path policy and recipe staging locally. |
 | `tasks/loadtest/prometheus.py`: HTTP transport | Already shared | It delegates HTTP/time/range acquisition to Sonata. Retain NanoLab retry defaults and representation adapters; do not move another HTTP client. |
@@ -213,3 +213,46 @@ against the exact CI NanoFaaS pin. The explicit branch-coverage gate still exits
 lock checks, build and installed CLI/assets smoke passed. The public Sonata
 wheel repeated the independent real Docker build and cleanup checks. No gate
 was weakened and no operator NanoFaaS checkout was used.
+
+## Fourth slice: source snapshots
+
+The [source plan](../plans/2026-10-06-source-snapshot-extraction.md) evaluates
+capture, entry inspection, verification and materialization individually. The
+existing `archive` resource transfers committed Git archives remotely; it cannot
+replace working-tree snapshots. No new engine API or runtime dependency is added.
+`SourceSnapshot` retains the existing bare-hex inventory identity and sealed
+manifest. General NanoLab provenance fingerprints remain separate.
+
+Shared capture uses caller-owned bounded artifact storage. NanoLab retains its
+16 MiB manifest/receipt quota, reservation, `.soak-owner`, existing evidence paths
+and `nanolab-soak-v1` receipt. Failed Git/input-budget preflight may now leave an
+ownership marker because storage is acquired before shared capture; a retry uses
+a fresh destination. No successful receipt is written for failed capture.
+
+The prepared wheel pair is 0.6.9; NanoLab's three pins and lock remain on the
+publicly released 0.6.8 pair. This is a deliberately installed-wheel local trial
+until Sonata merge and separate publication authorization. PR #67 has merged
+at `c4b66e92833f2bc66238456582465ca0232d1719`; local main is aligned. The pending
+trial base had the identical product tree and rebases onto that merge without product changes.
+
+One fresh whole-slice review found an Important replacement race: copying a
+regular source replaced by a symlink could apply chmod to an external target
+before rejecting capture. Its regression failed on the external permissions,
+then passed with a copied-regular-file check and no-follow chmod. No Critical or
+Minor findings remained. Caller namespace control/serialization and the exclusion
+of empty directories/directory metadata are explicit limits of the contract.
+
+The ordinary installed-wheel consumer uses a committed Git application with
+modified/untracked/deleted inputs, executable modes, safe/dangling links and
+ignored build outputs. It executes two independent workspace builds and rejects
+snapshot tampering without creating a workspace. NanoFaaS is not needed by this
+consumer; the operator's NanoFaaS checkout is untouched by NanoLab checks.
+
+Final shared verification: **537 passed, 91.24% catalogue coverage** and
+**227 passed, 96.17% engine coverage**; all required hooks and six final wheel
+configurations pass. [Sonata PR #19](https://github.com/Nanofaas/sonata/pull/19)
+at `dc0137a256d01ab12e80296db82073d73c4aff6c` has all 18 GitHub checks successful.
+Final corrected-wheel NanoLab trial: **3447 passed, 86.20% coverage**, full command
+exit 1 solely because the established 90% gate remains unsatisfied. Toolkit:
+**51 passed, 93.71%**; product hooks and installed-wheel smoke pass. This slice
+does not resolve that existing coverage deficit or close issue #61.
