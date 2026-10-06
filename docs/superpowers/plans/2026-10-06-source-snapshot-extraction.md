@@ -78,8 +78,34 @@
 - Fresh whole-slice review: one Important ordinary file→symlink replacement could chmod an unrelated external target. Regression failed on 0600→0755, then passed with regular-file validation and no-follow chmod; caller failure receipts remain writable. Full catalogue passes after the fix. No Critical or Minor findings. No second review is dispatched.
 - NanoLab PR67 merged `c4b66e9`, tree-identical to the original trial base d170a20. Main is aligned and clean; the local trial rebases onto that merge without product changes. NanoLab's declared dependencies/lock stay on public 0.6.8 until 0.6.9 publication.
 
-- Shared delivery: [Sonata PR19](https://github.com/Nanofaas/sonata/pull/19), head dc0137a, two reviewed commits. No merge/publication performed.
+- Initial shared delivery: [Sonata PR19](https://github.com/Nanofaas/sonata/pull/19), head dc0137a, two reviewed commits. Subsequent merge/publication is recorded below.
 - Final six wheel configurations pass after the correction; the independent consumer and installed NanoLab CLI/assets smoke also pass against the rebuilt pair.
 
 - Final verification: corrected installed pair matches the shared source bytes. NanoLab full suite passes all 3447 functional cases; its unchanged package branch-coverage gate still fails at 86.20%. Final source cases19/19, toolkit51/51, hooks and installed product smoke pass.
 - Sonata PR19 head dc0137a has all18 GitHub push/PR checks successful. The consumer trial stays local; no consumer PR is opened against unpublished dependencies.
+
+## Authorized publication and adoption
+
+- User reported Sonata PR19 merged and then explicitly authorized publication
+  and consumer commit/push/PR. Merge `13921ec` is tree-identical to the reviewed
+  head; local Sonata main is aligned and clean.
+- Tag `v0.6.9` names that merge.
+  [Release 37523146164](https://github.com/Nanofaas/sonata/actions/runs/37523146164)
+  succeeded for both distributions, engine before tasks. PyPI wheel/sdist hashes
+  and all packaged Python source bytes were verified against the tested merge.
+- Initial resolver failure was index propagation: version JSON exposed 0.6.9
+  before the installer index did. Resolution then succeeded normally; no local
+  dependency source or index workaround was introduced.
+- Three exact NanoLab pins and public lock now select 0.6.9; all other registry
+  packages remain unchanged. Installed package metadata has no direct_url.json.
+  Dependency compatibility checks pass.
+- The public PyPI pair passes the ordinary independent source-snapshot consumer,
+  including two executable builds in independent workspaces and tamper refusal.
+  Full public-index NanoLab verification: 3447 tests passed in 307.18 s; full command exits 1 solely for the established 86.20% branch coverage against the unchanged 90% gate.
+
+- Public-index toolkit: 51 passed, 93.71%; required hooks and dependency checks
+  pass. Fresh installed NanoLab CLI/assets smoke passes with ordinary public
+  dependencies, with no local wheel replacement.
+- Source adapter trial commit `71ebbc1` is based on merged NanoLab PR67
+  `c4b66e9`; the adoption commit updates pins, lock and evidence only.
+  No coverage thresholds or operator NanoFaaS files were changed.

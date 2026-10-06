@@ -49,7 +49,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `tasks/components/bootstrap.py`: bootstrap/sync/retarget plans | Keep composition local | Uses shared `build_ansible_argv` and SSH helpers already. Playbooks, namespaces, remote layout, registry and operation IDs belong to NanoLab. Revisit only an independently demonstrated missing Ansible primitive. |
 | `tasks/compose.py`: isolated Compose acquisition | Small extension to existing resource | Sonata already owns deploy/wait/compensation and teardown flags. NanoLab adds teardown before deployment. An opt-in pre-clean step can remove this duplicate composition; retain explicit role/env inputs and fresh-project policy locally. Do not enable destructive pre-clean by default. |
 | `soak/retention.py`: `CleanupState`, generated Compose validation and release journal | Keep local | Cleanup records, release-only replay, dependent cleanup gates, ownership labels, allowed mounts and artifact retention are soak contracts. This is not interchangeable with a generic workflow journal. No generic journaling framework is justified by this module. |
-| `soak/sources.py`: capture/verify/materialize snapshot and entry identity | Fourth slice implemented; prepared wheel trial | Shared `sonata_tasks.sources` captures tracked/nonignored working-tree inputs, deletions, modes and safe/dangling relative links, with byte/file bounds and independently verified workspaces. Caller-owned artifact storage keeps receipts, quotas, markers and source selection local. Snapshot identity and manifest bytes remain compatible; prepared 0.6.9 is not yet published. |
+| `soak/sources.py`: capture/verify/materialize snapshot and entry identity | Fourth slice implemented and published; public-index adoption | Shared `sonata_tasks.sources` captures tracked/nonignored working-tree inputs, deletions, modes and safe/dangling relative links, with byte/file bounds and independently verified workspaces. Caller-owned artifact storage keeps receipts, quotas, markers and source selection local. Snapshot identity and manifest bytes remain compatible; the coherent 0.6.9 pair is published and NanoLab uses exact public-index pins. |
 | `workspace/provenance.py`: provenance helpers and `source_fingerprint` | Keep for now | Git observation is generic, but current return shape and fallback behavior support NanoLab run metadata and image rollout tags. Its hash identifies commit/status/diff/untracked bytes, unlike the snapshot's file inventory. Do not unify those identities merely because both use SHA-256. |
 | `release/build.py` and `release/resources.py`: immutable archive transfer | Extend `sonata_tasks.archive` in a later slice | Existing Sonata archive exports a commit anew for each acquisition. Release shares one frozen archive across VMs, checks it again and reports cleanup failures. Support those behaviors before adopting it; retain clean-source guards, remote-path policy and recipe staging locally. |
 | `tasks/loadtest/prometheus.py`: HTTP transport | Already shared | It delegates HTTP/time/range acquisition to Sonata. Retain NanoLab retry defaults and representation adapters; do not move another HTTP client. |
@@ -229,11 +229,11 @@ and `nanolab-soak-v1` receipt. Failed Git/input-budget preflight may now leave a
 ownership marker because storage is acquired before shared capture; a retry uses
 a fresh destination. No successful receipt is written for failed capture.
 
-The prepared wheel pair is 0.6.9; NanoLab's three pins and lock remain on the
-publicly released 0.6.8 pair. This is a deliberately installed-wheel local trial
-until Sonata merge and separate publication authorization. PR #67 has merged
-at `c4b66e92833f2bc66238456582465ca0232d1719`; local main is aligned. The pending
-trial base had the identical product tree and rebases onto that merge without product changes.
+The initial prepared-wheel trial used 0.6.9 with declarations still on public
+0.6.8, pending merge and publication authorization. PR #67 merged at
+`c4b66e92833f2bc66238456582465ca0232d1719`; the trial was rebased onto that
+identical product tree and local main is aligned. Public-index adoption below
+supersedes the trial dependency declarations.
 
 One fresh whole-slice review found an Important replacement race: copying a
 regular source replaced by a symlink could apply chmod to an external target
@@ -256,3 +256,27 @@ Final corrected-wheel NanoLab trial: **3447 passed, 86.20% coverage**, full comm
 exit 1 solely because the established 90% gate remains unsatisfied. Toolkit:
 **51 passed, 93.71%**; product hooks and installed-wheel smoke pass. This slice
 does not resolve that existing coverage deficit or close issue #61.
+
+### Published 0.6.9 and public-index adoption
+
+After the user authorized publication, tag `v0.6.9` was pushed on Sonata PR #19's
+merge `13921ec6822b1f3104568a4c76a7aa4084b7e125`. The
+[release workflow](https://github.com/Nanofaas/sonata/actions/runs/37523146164)
+completed successfully: engine published before tasks. Both packages' wheel and
+sdist hashes match their PyPI descriptors; every published Python module matches
+the tested merge. Engine retains zero runtime dependencies; tasks pins engine
+exactly at 0.6.9.
+
+NanoLab's three exact pins now use public 0.6.9. The lock changes only those two
+distributions' versions/artifacts and the local package declarations. Normal
+`uv sync --locked --all-packages --all-groups` installs registry packages without
+local-wheel/Git/sibling source bindings; installed dependency checks pass.
+
+A fresh ordinary PyPI installation passes the independent committed-Git source
+consumer: two executable workspace builds, local changes, deleted inputs, safe
+and dangling links, ignored outputs and snapshot-tamper refusal. NanoLab's
+public-index full suite has **3447 passing tests in 307.18 s**. The full command
+exits 1 solely at the unchanged **86.20% branch coverage versus the 90% gate**.
+Toolkit: **51 passed, 93.71%**; required hooks, dependency consistency and fresh
+installed NanoLab CLI/assets smoke pass. No local wheel replacement is needed;
+no operator NanoFaaS checkout or coverage threshold was changed.
