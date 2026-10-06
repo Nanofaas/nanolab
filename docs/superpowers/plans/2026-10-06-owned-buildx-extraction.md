@@ -158,7 +158,7 @@ even if acquisition failed; registration removal requires confirmed cleanup.
 - Final: Ruling: concurrent acquisition on the same resource remains unsupported — one resource instance represents one active lifetime — cost: callers must create/serialize instances.
 - Final: Ruling: explicit owner nodes must remain unique — identity cannot distinguish deliberate reuse/spoofing — cost: caller-supplied duplicate identities defeat ownership proof.
 - Final: Ruling: post-install binfmt inspection failure stays in the existing local implementation — generic host ownership is separately deferred — cost: uncertain installer side effects may need operator reconciliation.
-- Final: Ruling: NanoLab trial stays on declared 0.6.7 until public 0.6.8 — install built wheels explicitly only for verification — cost: local trial is not merge-ready adoption.
+- Final: Ruling: pre-publication NanoLab trial stayed on declared 0.6.7 until public 0.6.8 — install built wheels explicitly only for verification — cost: local trial is not merge-ready adoption.
 - Final: Ruling: other assessment candidates stay in later slices — this lot is Buildx — cost: remaining local implementations persist.
 - Final: Ruling: the executor completes final full/wheel verification the reviewer did not rerun — use fresh command exits/logs with explicit coverage configuration — cost: CI remains independent confirmation.
 - Ruling: refuse disappeared records after unsuccessful rm without a new daemon API — local-store absence cannot establish daemon teardown — cost: manual reconciliation when Buildx has already discarded its record.
@@ -173,7 +173,37 @@ even if acquisition failed; registration removal requires confirmed cleanup.
 - Ruling: retain the existing coverage gate and leave its baseline deficit outside
   this Buildx slice. Cost: NanoLab's gate continues to fail until separate coverage
   work; do not present the trial as a green coverage result.
-- Consumer trial preserves all three exact Sonata pins and the lock at 0.6.7.
+- The pre-publication trial preserved all three Sonata pins and the lock at 0.6.7.
   Local implementation commit: `c37d788`, branch `feat/61-owned-buildx`.
-  It is a tested implementation branch, not a public-index adoption PR.
-  Publication of coherent 0.6.8 and subsequent consumer adoption remain pending.
+  At that stage it was a tested implementation branch, before public adoption.
+  Publication of coherent 0.6.8 and adoption were pending at that stage;
+  the completed publication and adoption are recorded below.
+
+
+## Publication and public-index adoption
+
+- User authorization received after merging Sonata PR #18.
+- Tag `v0.6.8` points at `c57ffc0eade6e806848b018a1de845b784615701`.
+- Release workflow: https://github.com/Nanofaas/sonata/actions/runs/37517416738.
+  Engine published successfully before tasks; PyPI exposes wheel and sdist for
+  each. A fresh base installation from the public index runs the independent
+  catalogue consumer. Initial simple-index propagation lag was confirmed by
+  probing the version API and both simple representations, then resolved.
+- Root engine pin, NanoLab engine pin and catalogue/extras pin are 0.6.8.
+  Lock source is `https://pypi.org/simple`; all four hashes match the version API.
+  Only the two external Sonata entries and their consuming workspace requirement
+  metadata changed. No other dependency was upgraded.
+- Forced public-index reinstall replaced both local trial wheels in the consumer
+  venv. Full pinned NanoLab, toolkit, hooks and installed-wheel checks follow.
+
+- Final public-index verification: full NanoLab against the exact CI NanoFaaS
+  pin **3446 passed in 293.38 s**, coverage **86.20%**, command exit 1 solely
+  from the unchanged 90% gate (same as the local trial). Toolkit **51 passed**,
+  **93.71%**; all hooks and `uv lock --check` passed. Wheel/sdist builds, installed
+  CLI/assets smoke and normal wheel dependency resolution passed. Both Sonata
+  installations have no direct URL override; engine runtime dependencies are zero.
+- The public Sonata base installation also repeated the real Docker scratch
+  AMD64/ARM64 OCI build: selected builder unchanged, private builder/container
+  removed and duplicate release harmless. No binfmt installation was performed.
+- Adoption is ready for the NanoLab PR; #61 remains open for the assessed later
+  slices and deferred capabilities. Coverage thresholds and CI were not changed.
