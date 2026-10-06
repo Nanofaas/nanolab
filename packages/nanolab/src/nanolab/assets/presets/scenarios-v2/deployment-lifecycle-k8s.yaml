@@ -1,6 +1,5 @@
 workflow: validate
 backend: k8s
-build: docker
 recipeProfile: ../recipes/validate-k8s-jvm.yaml
 functions:
   - word-stats-java

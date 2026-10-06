@@ -80,4 +80,3 @@ def default_tool_paths() -> ToolPaths:
     return replace(
         paths, profiles_dir=workspace / "profiles", runs_dir=workspace / "runs"
     )
-

@@ -114,7 +114,9 @@ def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verif
                 )
             image_requests[reference] = owner
     return release_evidence_verifiers(
-        provider, stack, local_image_requests=image_requests,
+        provider,
+        stack,
+        local_image_requests=image_requests,
         credentials=request.credentials,
     )
 
