@@ -47,7 +47,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `tasks/vm/sync.py`: `repo_rsync_command` | Keep as a small policy adapter | The useful behavior here is the repository exclusion list and destructive mirror options. Ordinary rsync argv construction alone does not justify an abstraction. Sonata file transfer is not equivalent to a filtered mirror. |
 | `tasks/infra/ansible.py`: `bundled_ansible_root` | Keep local | It locates NanoLab's packaged playbooks; there is no generic execution implementation to extract. |
 | `tasks/components/bootstrap.py`: bootstrap/sync/retarget plans | Keep composition local | Uses shared `build_ansible_argv` and SSH helpers already. Playbooks, namespaces, remote layout, registry and operation IDs belong to NanoLab. Revisit only an independently demonstrated missing Ansible primitive. |
-| `tasks/compose.py`: isolated Compose acquisition | Small extension to existing resource | Sonata already owns deploy/wait/compensation and teardown flags. NanoLab adds teardown before deployment. An opt-in pre-clean step can remove this duplicate composition; retain explicit role/env inputs and fresh-project policy locally. Do not enable destructive pre-clean by default. |
+| `tasks/compose.py`: isolated Compose acquisition | Fifth slice implemented; publication pending | Sonata already owns deploy/wait/compensation and teardown flags. NanoLab adds teardown before deployment. Shared `pre_clean=False` now provides an explicit opt-in that removes this duplicate composition; retain explicit role/env inputs and fresh-project policy locally. Do not enable destructive pre-clean by default. |
 | `soak/retention.py`: `CleanupState`, generated Compose validation and release journal | Keep local | Cleanup records, release-only replay, dependent cleanup gates, ownership labels, allowed mounts and artifact retention are soak contracts. This is not interchangeable with a generic workflow journal. No generic journaling framework is justified by this module. |
 | `soak/sources.py`: capture/verify/materialize snapshot and entry identity | Fourth slice implemented and published; public-index adoption | Shared `sonata_tasks.sources` captures tracked/nonignored working-tree inputs, deletions, modes and safe/dangling relative links, with byte/file bounds and independently verified workspaces. Caller-owned artifact storage keeps receipts, quotas, markers and source selection local. Snapshot identity and manifest bytes remain compatible; the coherent 0.6.9 pair is published and NanoLab uses exact public-index pins. |
 | `workspace/provenance.py`: provenance helpers and `source_fingerprint` | Keep for now | Git observation is generic, but current return shape and fallback behavior support NanoLab run metadata and image rollout tags. Its hash identifies commit/status/diff/untracked bytes, unlike the snapshot's file inventory. Do not unify those identities merely because both use SHA-256. |
@@ -280,3 +280,41 @@ exits 1 solely at the unchanged **86.20% branch coverage versus the 90% gate**.
 Toolkit: **51 passed, 93.71%**; required hooks, dependency consistency and fresh
 installed NanoLab CLI/assets smoke pass. No local wheel replacement is needed;
 no operator NanoFaaS checkout or coverage threshold was changed.
+
+
+## Fifth slice: Compose pre-clean and remote project cwd
+
+The [fifth-slice plan](../plans/2026-10-06-compose-project-mapping-extraction.md)
+evaluates the two existing-API extensions independently. Compose adds one
+opt-in `pre_clean` flag; its existing volume/orphan flags apply to both cleanup
+steps. The default remains deploy/readiness/teardown. Acquisition failures
+(including pre-clean) compensate partial state and preserve primary errors.
+Generic resource typing returns the caller's original project subclass.
+NanoLab retains its explicit fresh-project policy, role/environment and all
+soak ownership/retention contracts in a thin delegating facade.
+
+`VmCommandTaskExecutor` accepts paired `local_root`/`remote_root` options.
+Resolved local cwd must stay inside the root, including symlink resolution;
+conflicting directory options and dry-run escapes fail before invoking a runner.
+Nonempty relative POSIX remote roots retain the runner's interpretation.
+Without cwd, remote_dir/backend defaults remain unchanged. The binding key
+includes target and normalized mapping roots: review of the previous local
+wrapper showed that changing only the remote checkout did not change a compiled
+command fingerprint. Both SSH/provider consumer paths now cover that regression.
+NanoLab retains provider selection, role assembly, KUBECONFIG/home defaults and
+its default `/nanofaas` checkout selection.
+
+The coordinated 0.6.10 pair is prepared locally, with no new dependency or
+engine API. The isolated NanoLab trial explicitly installs built wheels while
+all three public pins and lock remain 0.6.9. It cannot be adopted through normal
+public dependency resolution until Sonata merges and the user separately
+authorizes publication. Source NanoFaaS remains the isolated CI pin; operator
+checkouts and other worktrees are untouched.
+
+Shared verification: **561 catalogue tests**, **227 engine tests**, coverage
+**91.37%/96.17%** against unchanged gates, all hooks and six wheel configurations
+passed. An ordinary installed-wheel application ran mapped cwd through a
+concrete runner and a real disposable BusyBox Compose deployment: pre-clean
+replaced its previous container and removed old volume data; readiness passed
+and teardown left no project containers/volumes. NanoLab's **60 focused tests**,
+**51 toolkit tests**, all hooks, build and installed CLI/assets smoke passed.

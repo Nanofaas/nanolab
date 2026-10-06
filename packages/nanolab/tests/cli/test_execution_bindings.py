@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from sonata_engine import Workflow
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import CommandTaskSpec
 from sonata_tasks.vm.models import VmRequest
@@ -68,6 +70,49 @@ class RecordingVmProvider:
         assert service == "PROMETHEUS_HTTP"
         assert guest_port == 30090
         return "pve.example", 43090
+
+
+@pytest.mark.parametrize("provider", ["external", "multipass"])
+def test_remote_project_root_changes_compiled_command_fingerprint(
+    tmp_path, provider
+) -> None:
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": provider,
+            "roles": {
+                "stack": {
+                    "host": "vm.example",
+                    "name": "test-vm",
+                    "user": "alice",
+                    "home": "/srv/alice",
+                }
+            },
+        }
+    )
+
+    def fingerprint(remote_root):
+        bindings, _ = build_role_bindings(
+            environment,
+            runner=RecordingRunner(),
+            vm_provider=RecordingVmProvider() if provider == "multipass" else None,
+            repo_root=tmp_path,
+            remote_project_root=remote_root,
+        )
+        workflow = Workflow("mapping")
+        workflow.add(
+            CommandTask(
+                title="Check",
+                argv=("pwd",),
+                executor=bindings.executor_for("stack"),
+                role="stack",
+                options=CommandOptions(cwd=tmp_path),
+            )
+        )
+        return workflow.compile().fingerprint
+
+    initial = fingerprint("/srv/release-one")
+    assert initial == fingerprint("/srv/release-one")
+    assert initial != fingerprint("/srv/release-two")
 
 
 @pytest.mark.nanofaas
