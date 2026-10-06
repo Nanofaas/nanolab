@@ -36,12 +36,12 @@
 
 **Interfaces:** `docker_compose_resource[T: DockerComposeProject](project:T,...,pre_clean:bool=False)->Resource[T]`. `VmCommandTaskExecutor(runner,*,target_key:str,local_root:Path|None=None,remote_root:str|None=None)`.
 
-- [ ] Baseline focused Compose/adapters/bindings and consumer mapping/lifecycle groups. Expected: no functional failures.
-- [ ] Write missing-option RED tests for pre-clean ordering/flags, failure/compensation, original defaults, generic project identity; cwd mapping, escapes, paired config, preserved options/dry-run, relative roots and changed mapping fingerprints. Run focused tests. Expected: new options unsupported.
-- [ ] Implement opt-in behavior using existing steps/teardown, VM adapter and semantic-key helper. Run focused tests. Expected: GREEN, old cases preserved.
-- [ ] Check PyPI0.6.10 unused; coordinate package versions/lock, document neutral ordinary examples and build wheels/sdists. Run catalogue/engine with explicit coverage configs, required hooks and six wheel installations. Expected: unchanged gates pass.
-- [ ] Exercise installed wheels in an ordinary Git-independent application: mapped remote directory through a concrete runner and an isolated opt-in Compose lifecycle, including real deployment/readiness/teardown when Docker is available. Only uniquely named disposable resources may be touched.
-- [ ] Commit shared API changes. Expected: concrete reviewable diff.
+- [x] Baseline focused Compose/adapters/bindings and consumer mapping/lifecycle groups. Expected: no functional failures.
+- [x] Write missing-option RED tests for pre-clean ordering/flags, failure/compensation, original defaults, generic project identity; cwd mapping, escapes, paired config, preserved options/dry-run, relative roots and changed mapping fingerprints. Run focused tests. Expected: new options unsupported.
+- [x] Implement opt-in behavior using existing steps/teardown, VM adapter and semantic-key helper. Run focused tests. Expected: GREEN, old cases preserved.
+- [x] Check PyPI0.6.10 unused; coordinate package versions/lock, document neutral ordinary examples and build wheels/sdists. Run catalogue/engine with explicit coverage configs, required hooks and six wheel installations. Expected: unchanged gates pass.
+- [x] Exercise installed wheels in an ordinary Git-independent application: mapped remote directory through a concrete runner and an isolated opt-in Compose lifecycle, including real deployment/readiness/teardown when Docker is available. Only uniquely named disposable resources may be touched.
+- [x] Commit shared API changes. Expected: concrete reviewable diff.
 
 ## Task 2: Thin NanoLab policy adapters and delivery
 
@@ -49,11 +49,11 @@
 
 **Interfaces:** Keep `isolated_compose_resource(project,*,executor,cwd=None,requires=())`; delegate with pre_clean=True, project.role/env and both teardown flags. Keep `build_role_bindings` public signature; pass explicit project roots when constructing VM executors in SSH/provider paths, remove the private translation wrapper.
 
-- [ ] Add a RED public mapping fingerprint regression and consumer lifecycle/dependency/identity tests. Expected: changing only remote_project_root currently leaves fingerprint unchanged; Compose lifecycle cases characterize existing consumer policy during delegation.
-- [ ] Trial exact built0.6.10 wheel pair only in isolated venv; retain public manifest/lock0.6.9 and use direct venv commands/UV_NO_SYNC=1 for hooks. Replace mechanics with shared APIs. Run focused cases. Expected: GREEN, provider default cwd/env and fresh project policy preserved.
-- [ ] Run full NanoLab with explicit coverage configuration against isolated CI pin, toolkit/hooks and installed product smoke. Expected: all functional cases pass; existing coverage deficit remains separately recorded.
-- [ ] Commit the local consumer trial and obtain ONE fresh whole-slice review. Regrade findings; reproduce/fix Important/Critical items RED→GREEN in one pass, run affected full suites/checks. Record every ruling and deferred minor.
-- [ ] Push reviewed Sonata branch and open PR; preserve consumer trial locally pending publication. Expected: public shared PR with verifiable evidence; no unpublished consumer dependency declarations.
+- [x] Add a RED public mapping fingerprint regression and consumer lifecycle/dependency/identity tests. Expected: changing only remote_project_root currently leaves fingerprint unchanged; Compose lifecycle cases characterize existing consumer policy during delegation.
+- [x] Trial exact built0.6.10 wheel pair only in isolated venv; retain public manifest/lock0.6.9 and use direct venv commands/UV_NO_SYNC=1 for hooks. Replace mechanics with shared APIs. Run focused cases. Expected: GREEN, provider default cwd/env and fresh project policy preserved.
+- [x] Run full NanoLab with explicit coverage configuration against isolated CI pin, toolkit/hooks and installed product smoke. Expected: all functional cases pass; existing coverage deficit remains separately recorded.
+- [x] Commit the local consumer trial and obtain ONE fresh whole-slice review. Regrade findings; reproduce/fix Important/Critical items RED→GREEN in one pass, run affected full suites/checks. Record every ruling and deferred minor.
+- [x] Push reviewed Sonata branch and open PR; preserve consumer trial locally pending publication. Expected: public shared PR with verifiable evidence; no unpublished consumer dependency declarations.
 
 ## Decisions
 
@@ -63,3 +63,40 @@
 - Pre-flight: Task1's pre_clean and paired-root interfaces are consumed by Task2; generic project typing must preserve NanoLab's subclass, and default_dir/home policy stays solely in consumer runners.
 
 Task 2: Ruling: Keep consumer Compose lifecycle tests as characterization — extraction preserves behavior that already exists; new shared options and the consumer mapping fingerprint have genuine RED→GREEN regressions — cost if wrong: delegation itself is checked through behavior and types rather than a mock asserting the chosen implementation.
+
+## Review and verification
+
+One fresh whole-slice reviewer found no Critical, Important or Minor issues;
+37 focused reviewer cases passed. No fix or re-review pass was needed.
+
+Final: Ruling: Preserve best_effort's existing treatment of cleanup programming errors — operational cleanup failures retain primary errors, while changing programming-error propagation is a separate shared policy change — cost if wrong: a cleanup programming error may replace an acquisition error.
+Final: Ruling: Leave configuration captured by resource callbacks under existing ResourceOp semantics — command binding identity is corrected here and no engine API is justified by this extraction — cost if wrong: hidden callback configuration changes may escape fingerprint invalidation.
+Final: Ruling: Fingerprint declared mapping configuration, not mutable symlink targets — execution still resolves and rejects local containment escapes; filesystem-state evidence remains caller-owned — cost if wrong: changed symlink targets may not invalidate otherwise identical command fingerprints.
+Final: Ruling: Leave remote canonicalization/symlink containment to the injected backend — the adapter translates explicit POSIX roots without inspecting remote state, preserving documented relative-root compatibility — cost if wrong: remote symlinks or backend-relative resolution can select another physical directory.
+Final: Ruling: Compose namespace ownership remains caller policy — pre-clean is explicitly opt-in and the existing lifecycle is extended without introducing an ownership registry — cost if wrong: choosing a shared name with removal flags can delete another caller's state.
+Final: Ruling: Keep NanoLab's 0.6.10 use as an explicit local wheel trial — publication requires separate authorization and public pins/lock must change only after index availability — cost if wrong: normal installation of this provisional consumer branch cannot use the new APIs until pins are updated.
+
+Deferred minors: none.
+
+Full trial: 3451 passed in 301.23s, original branch-coverage gate86.19%/90%
+(previous86.20%). Shared catalogue561/91.37%, engine227/96.17%, all hooks,
+six wheel configurations, ordinary real Compose/mapping probe, toolkit51,
+installed CLI/assets and focused consumer60 passed.
+
+
+## Delivery
+
+Sonata commit `93844d1898dc2496cec00fe10022aa5984ffa95f` is pushed in
+[PR #20](https://github.com/Nanofaas/sonata/pull/20). The consumer implementation
+is local on `feat/61-compose-project-mapping` (`3c65264` plus evidence updates),
+with all public dependency declarations/lock still on 0.6.9. Publishing0.6.10
+requires separate user authorization after merge; public-index pin/lock adoption
+and its NanoLab PR follow publication. The current task does not publish or merge.
+
+CI for Sonata PR #20 at `93844d1`: all 18 checks succeeded (push and PR runs),
+including isolated engine, catalogue, hooks and six wheel configurations.
+
+Execution ledger completion records:
+
+Task 1: complete (commits 7aed4c3..7aed4c3, tests: bash /tmp/verify-compose-mapping-shared.sh → 227 passed in 1.33s)
+Task 2: complete (commits 7aed4c3..3c65264, tests: bash /tmp/verify-compose-mapping-consumer.sh → Trial verified: 60 focused + 3451 full functional passes; original coverage gate remains unmet at 86.19%/90%; toolkit51 and hooks pass)

@@ -42,7 +42,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `tasks/recipes/builder.py`: private Buildx builder and owner-node reconciliation | Extend existing Buildx resource; third slice implemented and published | Add opt-in strict ownership to the existing `Resource[str]`, preserving default reuse/replacement. Refuse existing names, use a unique owner node and remove only the unchanged single-node docker-container builder. Reconcile partial creation/cancellation; callers serialize client-store mutation during inspect/remove. The ordinary installed-wheel AMD64/ARM64 build passed with an isolated Docker client. The coherent 0.6.8 pair is published; NanoLab adoption uses exact public-index pins. |
 | `tasks/recipes/builder.py`: binfmt installation, lock and registration compensation | Defer generic API pending ownership validation | This affects a shared host facility. The current lock lives on the client and is keyed by Docker daemon ID. That does not demonstrate protection for remote clients or multiple daemons sharing a binfmt instance. Preserve inspection/compare-before-removal and builder-before-registration cleanup ordering. |
 | `tasks/recipes/builder.py`: pinned installer/probe images, platform pair, registry config, evidence names | Keep local | These select the supported AMD64/ARM64 recipe setup and registry `127.0.0.1:5000`. They are inputs/policy for shared resources, not Sonata defaults. |
-| `application/execution.py`: `_RemoteProjectExecutor` | Candidate for a later execution-adapter extension | Mapping a local project subtree to an explicit remote root is reusable. Preserve rejection of escaping cwd and simultaneous cwd/remote_dir, binding identity and dry-run. Keep default `/nanofaas`, environment/provider selection and role assembly local. |
+| `application/execution.py`: `_RemoteProjectExecutor` | Fifth slice implemented; publication pending | The existing VM executor now maps a local project subtree to an explicit remote root; NanoLab removes its private wrapper. Preserve rejection of escaping cwd and simultaneous cwd/remote_dir, binding identity and dry-run. Keep default `/nanofaas`, environment/provider selection and role assembly local. |
 | `application/execution.py`: `prometheus_over_ssh` and process cleanup | Reuse process lifecycle; defer a new tunnel API | Sonata's managed-process resource already has readiness, termination and failed-acquire compensation. `registry_tunnel_resource` is a remote systemd/socat forwarder and is not an SSH substitute. Keep provider selection, URL policy and identity discovery in NanoLab; extract a dedicated SSH forwarder only when a distinct reusable contract is demonstrated. |
 | `tasks/vm/sync.py`: `repo_rsync_command` | Keep as a small policy adapter | The useful behavior here is the repository exclusion list and destructive mirror options. Ordinary rsync argv construction alone does not justify an abstraction. Sonata file transfer is not equivalent to a filtered mirror. |
 | `tasks/infra/ansible.py`: `bundled_ansible_root` | Keep local | It locates NanoLab's packaged playbooks; there is no generic execution implementation to extract. |
@@ -318,3 +318,17 @@ concrete runner and a real disposable BusyBox Compose deployment: pre-clean
 replaced its previous container and removed old volume data; readiness passed
 and teardown left no project containers/volumes. NanoLab's **60 focused tests**,
 **51 toolkit tests**, all hooks, build and installed CLI/assets smoke passed.
+
+Full trial verification: **3451 tests passed** in **301.23 s**. The original
+90% branch-coverage gate exits 1 at **86.19%**, versus prior **86.20%**;
+there are no functional failures and no threshold/configuration changes.
+
+One fresh whole-slice review found no Critical/Important/Minor issues; 37 reviewer
+cases passed. The plan records every declined-review boundary and its cost.
+
+The shared implementation is committed/pushed as `93844d1` in
+[Sonata PR #20](https://github.com/Nanofaas/sonata/pull/20). The consumer trial
+is kept locally on `feat/61-compose-project-mapping`; merge and separately
+authorized publication precede public-index adoption and a NanoLab PR.
+
+Sonata CI at PR #20 head `93844d1` passed every check in both push and PR runs.
