@@ -380,7 +380,9 @@ Shared validation now retains unavailable evidence without emitting Inf/NaN.
 Credential lifetime extraction was evaluated separately and deferred: owned
 0600 file identity/copy, remote staging and sanitized cleanup require their own
 typed transfer/lifetime contract. GHCR and cosign policy remain product adapters.
-This slice does not close #61.
+This slice does not finish the remaining candidate assessment. The GitHub
+tracker currently reports #61 closed; delivery continues under the explicit
+request for the next slice.
 
 Sonata commit0c6d3b7 prepares coherent0.6.11 (both PyPI version endpoints returned
 404 before preparation). Catalogue **606 passed /91.62%**, engine
@@ -393,5 +395,23 @@ NanoLab's isolated local trial passed **247** focused metrics/loadtest/release
 cases, toolkit **51 /93.71%**, hooks, build and fresh installed CLI/assets smoke.
 The normal consumer install resolved public0.6.10 first; explicit built0.6.11
 wheel replacement is limited to this trial. All public pins and lock stay0.6.10.
-The full original consumer gate and whole-slice review are recorded below when
-complete; package publication requires separate authorization after merge.
+The first full consumer trial passed **3462 tests in300.20s**, with the command
+exit1 solely at **86.19% branch coverage versus the original90% gate**.
+
+One fresh whole-slice review reproduced three Important input-boundary defects:
+nonfinite/boolean timestamps manufactured chronological counter evidence;
+synthetic string-index keys collided with real timestamps; bool/numeric label
+values merged independent publishers. One RED→GREEN pass validates hashable,
+non-null/non-boolean keys (finite when numeric), uses distinct internal identities
+for absent timestamps and requires string-to-string publisher labels. Ordinary
+numeric, string and datetime timestamp ordering remains caller-controlled.
+The final shared suite passed **619 /91.65%**; focused consumer **254** cases,
+all hooks, rebuilt wheel matrix and independent installed application/CLI passed.
+No Critical or Minor findings; no second review was dispatched.
+
+Final full consumer verification: **3469 passed in296.03s**. The original
+command exits1 solely at **86.19% branch coverage versus90%**, identical to the
+prior trial and public slice; no threshold changed. Shared final commit
+a0078a7 contains all three verified review fixes. Public NanoLab pins/lock remain
+0.6.10; the local consumer branch is retained for adoption after shared merge
+and separately authorized publication.

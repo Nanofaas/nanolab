@@ -120,3 +120,31 @@ def test_real_k6_exports_agree_across_reports_and_release(tmp_path, filename):
         {"rejected": [1], "queue_depth": [0], "mean_queue_wait_ms": [0]}
     )
     assert "25.000%" in _cards(frame, summary, 20)
+
+
+@pytest.mark.parametrize(
+    "timestamp", [float("nan"), float("inf"), -float("inf"), True, None]
+)
+def test_malformed_timestamps_remain_unavailable_through_consumer_facades(timestamp):
+    points = [
+        {"timestamp": 2, "value": 5},
+        {"timestamp": timestamp, "value": 110},
+        {"timestamp": 1, "value": 100},
+    ]
+    assert counter_delta(points) is None
+    assert _point_stats(points) == {"points": 2, "invalid_points": 1}
+
+
+def test_missing_timestamps_do_not_manufacture_zero_change_in_summary():
+    points = [{"timestamp": "1", "value": 100}, {"value": 110}]
+    assert _point_stats(points)["points"] == 2
+    assert _point_stats(points)["delta"] == 10
+
+
+def test_malformed_publisher_labels_do_not_conflate_singleton_evidence():
+    points = [
+        {"labels": {"worker": True}, "value": 100},
+        {"labels": {"worker": 1}, "value": 110},
+    ]
+    assert counter_delta(points) is None
+    assert "delta" not in _point_stats(points, counter=True)
