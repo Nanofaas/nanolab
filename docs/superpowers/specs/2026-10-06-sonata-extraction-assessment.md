@@ -55,7 +55,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `tasks/loadtest/prometheus.py`: HTTP transport | Already shared | It delegates HTTP/time/range acquisition to Sonata. Retain NanoLab retry defaults and representation adapters; do not move another HTTP client. |
 | `tasks/loadtest/tasks.py`: `CapturePrometheusSnapshot` and window alignment | Later candidate, with explicit policies | Acquisition over an explicit query set can be reusable. Required-query decisions, leading/trailing margins, skew tolerance, diagnostic hints and JSON layout need separation. Preserve collecting all queries and retaining partial results before failing. |
 | `tasks/loadtest/models.py`: `K6Config`, `TimeWindow`, `PrometheusQuery` | Keep until a consuming shared API needs them | Sonata already owns `K6Stage`, `K6RunResult` and generic `K6Config`. NanoLab adds target resources and payload selection. Avoid duplicating those shared models or moving isolated dataclasses with no shared consumer. |
-| `metrics/interpretation.py`: k6 normalization, per-label counter delta, point statistics | Sixth slice implemented; local wheel trial | Used by detailed reports and release evidence; not provided by Sonata's scrape checks. Preserve missing/invalid versus zero and resets per publisher. `is_counter` includes NanoFaaS's `function_dispatch` exception, which must remain a local rule. |
+| `metrics/interpretation.py`: k6 normalization, per-label counter delta, point statistics | Sixth slice implemented and published; public-index adoption | Used by detailed reports and release evidence; not provided by Sonata's scrape checks. Preserve missing/invalid versus zero and resets per publisher. `is_counter` includes NanoFaaS's `function_dispatch` exception, which must remain a local rule. |
 | `release/metrics.py`: aggregation, regression, baseline selection and record rendering | Keep local | Uses `statistics.median` already. Metrics, comparable-profile fields, autoscaling/k6 gates, thresholds and release records form a product contract. A generic benchmark framework would add API without removing that contract. Use the shared k6 interpretation through the local facade. |
 | `release/secrets.py`: private-file validation/copy and temporary remote staging | Separately assessed later slice | Private regular files, no-follow/identity-checked copying, temporary directories and cleanup are reusable. Use Sonata execution/transfer ports rather than copying the loosely typed provider access. Preserve sanitization of errors and no secret values in command/journal metadata. |
 | `release/secrets.py`: GHCR login, cosign credentials and release error names | Keep adapters local | Registry/login/signing decisions and release-facing results belong to the release workflow; feed them shared private-file lifetimes when available. |
@@ -423,3 +423,34 @@ awaits shared merge and separately authorized publication.
 GitHub verification: all nine Sonata jobs passed on both push and PR events
 ([PR CI](https://github.com/Nanofaas/sonata/actions/runs/37603287517),
 [push CI](https://github.com/Nanofaas/sonata/actions/runs/37603279326)).
+
+
+## Sixth-slice publication and adoption
+
+After explicit authorization, tag `v0.6.11` targets the tested PR21 merge
+`0f4bc721a5564738f87662336307ae1ac605f132`. The merge repeated 619 catalogue
+and 227 engine cases at 91.65%/96.17%, with the original 90% gates unchanged.
+The [release workflow](https://github.com/Nanofaas/sonata/actions/runs/37610382088) succeeded in engine-first/tasks-second order.
+Both PyPI wheels and sdists match index hashes and sizes; all packaged Python
+modules and py.typed bytes match the tested merge in both archive formats.
+Engine runtime dependencies remain empty; tasks pin engine exactly 0.6.11.
+
+All three NanoLab pins and the registry lock now use public 0.6.11. All unrelated
+registry entries, SDK versions and Python/platform requirements are identical.
+Normal locked sync removes the trial wheel provenance; installed module bytes
+and lock hashes match independently verified PyPI artifacts. No Git/path
+dependency or wheel replacement is needed for adoption.
+
+A fresh base-only ordinary application resolves sonata-tasks 0.6.11 and engine
+from the public index itself. Job/worker reset statistics, two real k6 exports,
+missing/invalid evidence and standard JSON allow_nan=False pass without HTTP
+or provider extras. A fresh normal consumer install also resolves both Sonata
+packages from PyPI itself; CLI, bundled assets and temporary workspace smoke
+pass without dependency replacements.
+
+Final public-index consumer verification: **3469 passed in 295.29 s**.
+The original full command exits1 solely at **86.19% branch coverage versus
+the original90% gate**, identical to the built-wheel trial and prior slice.
+Toolkit **51 /93.71%**, all hooks, locked dependency checks, build, fresh
+normal installed CLI/assets and the public base-only application passed.
+Operator NanoFaaS source and unrelated worktrees remain untouched.

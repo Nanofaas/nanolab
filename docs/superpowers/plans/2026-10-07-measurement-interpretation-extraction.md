@@ -81,3 +81,27 @@ Shared PR: https://github.com/Nanofaas/sonata/pull/21 (head a0078a7). Consumer l
 GitHub verification: all nine Sonata jobs passed on both push and PR events
 ([PR CI](https://github.com/Nanofaas/sonata/actions/runs/37603287517),
 [push CI](https://github.com/Nanofaas/sonata/actions/runs/37603279326)).
+
+
+## Authorized publication and public adoption
+
+The user explicitly authorized publication after the shared merge. Tag `v0.6.11`
+targets `0f4bc72`; the engine-first/tasks-second release succeeded. PyPI wheel/sdist
+hashes, sizes and all module/py.typed bytes match the tested merge. The merge
+repeated 619 catalogue/91.65% and 227 engine/96.17% at unchanged shared gates.
+
+Three consumer pins and the registry lock now use 0.6.11; unrelated package
+entries, SDK pins and Python/platform requirements are unchanged. Locked sync
+uses public artifacts, with no direct_url provenance or explicit wheel override.
+A fresh ordinary base-only application/two real k6 exports resolves 0.6.11
+from PyPI itself and passes.
+
+Final public-index consumer verification: **3469 passed in 295.29 s**.
+The original full command exits1 solely at **86.19% branch coverage versus
+the original90% gate**, identical to the built-wheel trial and prior slice.
+Toolkit **51 /93.71%**, all hooks, locked dependency checks, build, fresh
+normal installed CLI/assets and the public base-only application passed.
+Operator NanoFaaS source and unrelated worktrees remain untouched.
+
+The public adoption commit is pushed as feat/61-measurement-interpretation for
+a NanoLab PR against main; package publication is complete.
