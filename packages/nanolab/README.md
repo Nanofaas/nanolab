@@ -28,6 +28,12 @@ k3s and Helm, distributes images, and runs end-to-end or load-test workflows.
 - SSH and Ansible for an external VM; provider credentials for Azure or Proxmox
   when using managed VMs.
 
+For containerd workflows, set `containerdMavenRepository` to the isolated Maven
+repository produced by NanoFaaS's `scripts/bootstrap-containerd-dependencies.sh`.
+Staging accepts `containerd-java` and `containerd-java-cni` 0.24.0 with
+`libcni-java` 0.23.0, and transfers only the reviewed artifact files and a checksum
+receipt.
+
 Run the CLI from the standalone repository root:
 
 ```bash

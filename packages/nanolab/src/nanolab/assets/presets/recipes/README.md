@@ -93,8 +93,8 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 ```
 
 `deployment-lifecycle-containerd.yaml` selects the containerd profile. NanoLab
-creates a disposable Multipass VM, stages the pinned 0.23.0 containerd Maven
-artifacts, and runs `publishRecipe` once in the VM. The systemd control plane
+creates a disposable Multipass VM, stages containerd-java core/CNI 0.24.0 and
+libcni-java 0.23.0 Maven artifacts, and runs `publishRecipe` once in the VM. The systemd control plane
 uses the JAR from that staged build; the function registration uses the image
 reference in `distribution.json`. NanoLab checks the running build metadata,
 the owned containerd image and OCI resource limits, then removes the VM.
