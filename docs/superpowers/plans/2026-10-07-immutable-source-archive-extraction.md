@@ -63,3 +63,11 @@
 - Pre-flight: Task1's stage/remove signatures match Task2's wrapper inputs; optional prefixed digest matches ArtifactEvidence.digest. Product resource dependency/always_release remains unchanged. Trial uses built wheels without public pin edits.
 
 Verification before final review: NanoLab3480 functional cases/302.31s, original branch coverage86.18%/90% (exit1 solely coverage debt); toolkit51/93.71%, hooks, build and fresh installed CLI/assets plus guarded two-VM receipt/cleanup smoke pass. Public pins/lock remain0.6.12.
+
+## Execution record before review
+
+Shared range3471f82..f3fd605 (two commits); NanoLab trial53b2722. Final catalogue726/92.11%, engine227/96.17%; six wheel modes, hooks, verified distributions and base-only ordinary Python3.12 target proof pass. Final local wheels reinstalled explicitly: consumer45 focused cases and installed two-VM receipt/cleanup proof pass. Full consumer3480/86.18% gate debt as reported above.
+
+Task2: Ruling: Only integer nonboolean -1 is a connection-death sentinel — existing int coercion raises TypeError before shared status validation and retries string -1; leave malformed statuses to the operation boundary — cost if wrong: providers returning string or float sentinel must return integer -1 for retries. RED3 retry cases plus4 staging regressions verified.
+Task1 follow-up Ruling: Reject expected_digest in Git-export mode — silently ignoring an explicitly supplied integrity condition is ambiguous; its evidence belongs to frozen archive mode — cost if wrong: mixed-mode callers must supply archive or omit expected_digest. RED test_export_mode_rejects_unused_expected_digest observed.
+Task2 Ruling: Leave existing standalone NanoLab branch coverage debt unchanged — functional3480 cases pass at the original config/gate, unrelated coverage repair would expand this slice — cost if wrong: the standalone90% gate remains unsatisfied at86.18%.
