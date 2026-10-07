@@ -5,7 +5,6 @@ import stat
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import mkdtemp
 from typing import Any
 
 import pytest
@@ -275,7 +274,11 @@ def test_validate_secret_file_requires_current_user_ownership(
     secret.write_text("fixture-token", encoding="utf-8")
     secret.chmod(0o600)
     module = importlib.import_module("nanolab.release.secrets")
-    monkeypatch.setattr(module.os, "getuid", lambda: secret.stat().st_uid + 1)
+    monkeypatch.setattr(
+        importlib.import_module("sonata_tasks.credentials").os,
+        "getuid",
+        lambda: secret.stat().st_uid + 1,
+    )
 
     with pytest.raises(PermissionError, match="owned"):
         validate_secret_file(secret)
@@ -587,14 +590,6 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
     password.chmod(0o600)
     provider = _Provider()
     module = importlib.import_module("nanolab.release.secrets")
-    local_directories: list[Path] = []
-
-    def create_private_directory(*, prefix: str) -> str:
-        directory = Path(mkdtemp(prefix=prefix))
-        local_directories.append(directory)
-        return str(directory)
-
-    monkeypatch.setattr(module, "mkdtemp", create_private_directory, raising=False)
     monkeypatch.setattr(
         Path, "read_text", lambda *args, **kwargs: pytest.fail("read_text")
     )
@@ -616,8 +611,8 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
         )
         staged_sources = [source for source, _ in provider.transfer_calls]
         assert all(source.exists() for source in staged_sources)
-        assert local_directories == [staged_sources[0].parent]
-        assert stat.S_IMODE(local_directories[0].stat().st_mode) == 0o700
+        assert len({source.parent for source in staged_sources}) == 1
+        assert stat.S_IMODE(staged_sources[0].parent.stat().st_mode) == 0o700
         assert all(
             stat.S_IMODE(source.stat().st_mode) == 0o600 for source in staged_sources
         )
@@ -667,3 +662,55 @@ def test_stage_cosign_credentials_cleans_when_context_body_fails(
         "--",
         "/tmp/nanofaas-release-credentials.ABC123",
     )
+
+
+@pytest.mark.parametrize("status", [None, False, 0.0])
+def test_product_command_rejects_missing_or_noninteger_status(status: object) -> None:
+    from types import SimpleNamespace
+
+    class MalformedProvider:
+        def exec_argv(self, *args: object, **kwargs: object) -> object:
+            if status is None:
+                return SimpleNamespace()
+            return SimpleNamespace(return_code=status)
+
+    with pytest.raises(RuntimeError, match="integer"):
+        _run(MalformedProvider(), object(), ("docker", "login"))
+
+
+def test_local_cleanup_failure_uses_safe_product_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = importlib.import_module("nanolab.release.secrets")
+    token = tmp_path / "token"
+    token.write_bytes(b"synthetic-private")
+    token.chmod(0o600)
+    provider = _Provider()
+    shared = importlib.import_module("sonata_tasks.credentials")
+    original = shared.shutil.rmtree
+
+    def fail_cleanup(path: Path) -> None:
+        raise OSError("synthetic-private local cleanup detail")
+
+    monkeypatch.setattr(shared.shutil, "rmtree", fail_cleanup)
+    try:
+        with (
+            pytest.raises(module.ReleaseCredentialCleanupError) as caught,
+            module.stage_ghcr_credentials(
+                provider,
+                object(),
+                token_file=token,
+                username="user",
+                registry="ghcr.io",
+            ),
+        ):
+            raise ValueError("synthetic-private body detail")
+        assert caught.value.operation_type == "ValueError"
+        assert "synthetic-private" not in "".join(
+            traceback.format_exception(caught.value)
+        )
+        assert any(argv[0] == "rm" and "-rf" in argv for argv, _ in provider.exec_calls)
+    finally:
+        for source, _ in provider.transfer_calls:
+            if source.parent.exists():
+                original(source.parent)
