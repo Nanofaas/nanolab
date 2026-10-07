@@ -89,9 +89,8 @@ installed CLI/assets and focused consumer60 passed.
 Sonata commit `93844d1898dc2496cec00fe10022aa5984ffa95f` is pushed in
 [PR #20](https://github.com/Nanofaas/sonata/pull/20). The consumer implementation
 is local on `feat/61-compose-project-mapping` (`3c65264` plus evidence updates),
-with all public dependency declarations/lock still on 0.6.9. Publishing0.6.10
-requires separate user authorization after merge; public-index pin/lock adoption
-and its NanoLab PR follow publication. The current task does not publish or merge.
+with public dependency declarations/lock on 0.6.9 during the trial. That temporary
+state is superseded by the authorized publication and public-index adoption below.
 
 CI for Sonata PR #20 at `93844d1`: all 18 checks succeeded (push and PR runs),
 including isolated engine, catalogue, hooks and six wheel configurations.
@@ -100,3 +99,39 @@ Execution ledger completion records:
 
 Task 1: complete (commits 7aed4c3..7aed4c3, tests: bash /tmp/verify-compose-mapping-shared.sh → 227 passed in 1.33s)
 Task 2: complete (commits 7aed4c3..3c65264, tests: bash /tmp/verify-compose-mapping-consumer.sh → Trial verified: 60 focused + 3451 full functional passes; original coverage gate remains unmet at 86.19%/90%; toolkit51 and hooks pass)
+
+
+## Authorized publication and public-index adoption
+
+The user authorized publication after Sonata PR #20 merged at
+`ccdae295c93cc23e70f6e35eb847a0c5a560cd9c`. Local Sonata main was fast-forwarded
+and the merge repeated 561 catalogue/227 engine passing cases, with unchanged
+coverage gates. Built wheel members matched the original tested trial exactly.
+
+Tag `v0.6.10` points to that merge. The
+[release workflow](https://github.com/Nanofaas/sonata/actions/runs/37593798211)
+succeeded, publishing engine before tasks. Both wheel/sdist hashes were checked
+against PyPI and every packaged Python/py.typed byte matched the tested merge.
+Engine has no runtime dependencies; tasks requires exactly engine0.6.10.
+
+
+NanoLab's three exact pins now resolve 0.6.10 from `https://pypi.org/simple`.
+The lock changes only the two Sonata registry entries and the corresponding
+workspace requirements; other registry packages are byte-for-byte unchanged.
+`uv sync --locked --all-packages --all-groups` reinstalls from the public index,
+with no Sonata `direct_url.json`; `uv lock --check` and `uv pip check` pass.
+The lock's artifact hashes match the independently downloaded PyPI files, and
+installed module bytes match the release merge. SDK pins/Python support and
+coverage thresholds remain unchanged.
+
+An independent fresh PyPI-only installation repeated the real disposable
+Compose pre-clean/readiness/teardown and concrete cwd-mapping checks. Full
+hooks, toolkit51/93.71%, package build and normal fresh installed NanoLab
+CLI/assets smoke passed, with no explicit Sonata wheel replacement.
+
+Final public-index full consumer verification: **3451 passed in 296.09 s**.
+The full command exits1 solely at **86.19% branch coverage versus the original
+90% gate**, identical to the built-wheel trial. Toolkit51/93.71%, required
+hooks, lock/dependency checks, package build, fresh normal installed CLI/assets
+and the independent public Compose/mapping probe passed. No threshold was
+weakened; the operator NanoFaaS checkout and unrelated worktrees are untouched.
