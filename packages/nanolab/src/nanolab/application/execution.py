@@ -14,14 +14,12 @@ import subprocess
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 from multipass_vm_sdk import MultipassClient
-from sonata_tasks.execution.bindings import CommandTaskExecutor, RoleBindings
-from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.shell import ShellBackend, SubprocessShell
 from sonata_tasks.tasks.executors import (
     HostCommandRunner,
@@ -43,68 +41,6 @@ from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.paths import default_tool_paths
 
 StackHostResolver = Callable[[RoleTarget], str]
-
-
-class _RemoteProjectExecutor:
-    """Translate a local project cwd into the corresponding VM directory."""
-
-    def __init__(
-        self,
-        delegate: CommandTaskExecutor,
-        *,
-        local_root: Path,
-        remote_root: str,
-    ) -> None:
-        self._delegate = delegate
-        self._local_root = local_root.resolve()
-        self._remote_root = PurePosixPath(remote_root)
-
-    def binding_key(self, role: str) -> str:
-        return self._delegate.binding_key(role)
-
-    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
-        options = task.options
-        if options.cwd is None:
-            return self._delegate.run(task, dry_run=dry_run)
-        if options.remote_dir is not None:
-            raise ValueError("a remote command cannot declare both cwd and remote_dir")
-        local = options.cwd
-        if not local.is_absolute():
-            local = self._local_root / local
-        try:
-            relative = local.resolve().relative_to(self._local_root)
-        except ValueError as error:
-            raise ValueError(
-                f"remote command cwd {options.cwd} is outside project root "
-                f"{self._local_root}"
-            ) from error
-        remote = self._remote_root.joinpath(*relative.parts).as_posix()
-        translated = replace(
-            task,
-            options=replace(options, cwd=None, remote_dir=remote),
-        )
-        return self._delegate.run(translated, dry_run=dry_run)
-
-
-def _remote_project_executor(
-    executor: CommandTaskExecutor,
-    *,
-    local_root: Path,
-    remote_home: str,
-    remote_project_root: str | None = None,
-) -> CommandTaskExecutor:
-    """Point the checkout at the directory the run actually keeps it in.
-
-    `remote_project_root` is for the releases that stage the repository
-    somewhere of their own choosing rather than syncing it to the project
-    directory. Left unset, the project directory is the answer, which is where
-    every other workflow's sync puts it.
-    """
-    return _RemoteProjectExecutor(
-        executor,
-        local_root=local_root,
-        remote_root=remote_project_root or f"{remote_home.rstrip('/')}/nanofaas",
-    )
 
 
 def _container_urls(
@@ -564,16 +500,11 @@ def _provider_bindings(
                 f"{environment.provider}:{role}:{request.name or request.host}:"
                 f"{request.user}"
             ),
+            local_root=local_root,
+            remote_root=remote_project_root
+            or f"{vm_remote_home(request).rstrip('/')}/nanofaas",
         )
-        return (
-            _remote_project_executor(
-                executor,
-                local_root=local_root,
-                remote_home=vm_remote_home(request),
-                remote_project_root=remote_project_root,
-            ),
-            request,
-        )
+        return executor, request
 
     stack, stack_request = make("stack")
     loadgen_result = make("loadgen") if "loadgen" in environment.roles else None
@@ -614,18 +545,15 @@ def _ssh_bindings(
             if role in ("stack", "cloud")
             else None
         )
-        executor = VmCommandTaskExecutor(
+        return VmCommandTaskExecutor(
             _RemoteRunner(command_runner, target, environment.provider, default_env),
             target_key=(
                 f"{environment.provider}:{role}:{target.host}:"
                 f"{target.user}:{target.remote_home}"
             ),
-        )
-        return _remote_project_executor(
-            executor,
             local_root=local_root,
-            remote_home=target.remote_home,
-            remote_project_root=remote_project_root,
+            remote_root=remote_project_root
+            or f"{target.remote_home.rstrip('/')}/nanofaas",
         )
 
     stack = remote("stack")
