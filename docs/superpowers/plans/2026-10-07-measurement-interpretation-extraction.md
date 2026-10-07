@@ -51,7 +51,7 @@
 - [x] Explicitly install built0.6.11 wheels only into the isolated consumer venv; replace duplicate mechanics with reexports. Run focused metrics/loadtest/release groups. Expected: GREEN without changing product policies.
 - [x] Run full NanoLab with original coverage config and isolated CI pin, toolkit, all hooks, build and fresh installed CLI/assets smoke. Expected: functional pass, known coverage debt separately reported.
 - [x] Commit consumer trial and obtain one fresh whole-slice review. Regrade findings; fix Critical/Important in one RED→GREEN pass plus affected full suites; record every ruling/deferred minor. Expected: reviewable shared diff and bounded trial.
-- [ ] Push shared Sonata branch and open PR; preserve consumer trial locally pending merge and separate publication authorization. Expected: no unpublished consumer pins or package publication.
+- [x] Push shared Sonata branch and open PR; preserve consumer trial locally pending merge and separate publication authorization. Expected: no unpublished consumer pins or package publication.
 
 ## Decisions
 
@@ -75,3 +75,9 @@
 - Consumer:254 focused,51 toolkit/93.71%, hooks, build and fresh installed CLI/assets passed. Final full original command:3469 passed in296.03s, exit1 solely at86.19% branch coverage versus90%, identical to the prior slice. No coverage gate changed.
 - One fresh whole-slice review; three Important findings fixed in one RED→GREEN pass and covered through the consumer facade; no Critical/Minor findings and no deferred minors. All review rulings are recorded above.
 - Consumer trial remains local with public pins/lock0.6.10. Publication requires separate authorization after the shared merge.
+
+Shared PR: https://github.com/Nanofaas/sonata/pull/21 (head a0078a7). Consumer local trial commits ccbe1a3..0ddd6fb; operator main remains clean and unchanged.
+
+GitHub verification: all nine Sonata jobs passed on both push and PR events
+([PR CI](https://github.com/Nanofaas/sonata/actions/runs/37603287517),
+[push CI](https://github.com/Nanofaas/sonata/actions/runs/37603279326)).

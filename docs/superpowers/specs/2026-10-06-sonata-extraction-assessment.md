@@ -415,3 +415,11 @@ prior trial and public slice; no threshold changed. Shared final commit
 a0078a7 contains all three verified review fixes. Public NanoLab pins/lock remain
 0.6.10; the local consumer branch is retained for adoption after shared merge
 and separately authorized publication.
+
+Shared delivery: [Sonata PR21](https://github.com/Nanofaas/sonata/pull/21),
+head a0078a7. Consumer local trial commits ccbe1a3..0ddd6fb; public adoption
+awaits shared merge and separately authorized publication.
+
+GitHub verification: all nine Sonata jobs passed on both push and PR events
+([PR CI](https://github.com/Nanofaas/sonata/actions/runs/37603287517),
+[push CI](https://github.com/Nanofaas/sonata/actions/runs/37603279326)).
