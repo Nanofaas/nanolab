@@ -28,8 +28,8 @@ class RecordingShell:
         if argv[0] == "rsync" and "nanolab-containerd-maven-" in argv[-1]:
             source = Path(argv[-2].removesuffix("/"))
             self.maven_receipt_seen = (source / "nanolab-receipt.json").is_file()
-            artifact = source / "io/nanofaas/containerd-java/0.23.0"
-            assert (artifact / "containerd-java-0.23.0.jar").is_file()
+            artifact = source / "io/nanofaas/containerd-java/0.24.0"
+            assert (artifact / "containerd-java-0.24.0.jar").is_file()
             assert not (source / "com").exists()
         if self.fail_playbook and argv[-1].endswith(self.fail_playbook):
             return _Result(return_code=1, stderr=f"{self.fail_playbook} failed")
@@ -86,8 +86,8 @@ def _commands(orchestrator: RecordingOrchestrator) -> list[tuple[str, ...]]:
 
 def _snapshot_repository(root: Path) -> Path:
     for group, artifact, version in (
-        ("io/nanofaas", "containerd-java", "0.23.0"),
-        ("io/nanofaas", "containerd-java-cni", "0.23.0"),
+        ("io/nanofaas", "containerd-java", "0.24.0"),
+        ("io/nanofaas", "containerd-java-cni", "0.24.0"),
         ("io/libcni", "libcni-java", "0.23.0"),
     ):
         folder = root / group / artifact / version
