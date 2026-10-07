@@ -52,7 +52,7 @@
 - [x] Explicitly install built0.6.13 pair in consumer venv, delegate remote staging/strict cleanup and shared extraction script; remove duplicate mechanics. Update assertions only where ownership moves or acquisition compensation changes. Run release tests. Expected: GREEN, three public pins/lock still0.6.12.
 - [x] Run full NanoLab with original branch config/source pin, toolkit, hooks, builds and fresh installed CLI/assets smoke. Expected: functional pass; coverage debt reported unchanged.
 - [x] Commit consumer trial; one fresh whole-slice review of both branches and rulings. Regrade, fix Critical/Important in one RED→GREEN pass with affected suites; ledger deferred minors and declined judgments. Expected: no unresolved Critical/Important findings.
-- [ ] Push Sonata feature branch and open shared PR. Keep NanoLab trial local, publication and public adoption pending later user authorization.
+- [x] Push Sonata feature branch and open shared PR. Keep NanoLab trial local, publication and public adoption pending later user authorization.
 
 ## Decisions and evidence
 
@@ -90,3 +90,19 @@ Final: Ruling: Keep publication, cloud operations and other extraction candidate
 Final: fixed Important outer compensation after preflight rejection — test_source_resource_preflight_failure_preserves_remote_contents[changed/missing] RED2→GREEN2; affected full NanoLab3482/3482 functional cases in297.30s, original branch coverage86.18%/90% (known gate debt). Final hooks and rebuilt installed preflight/receipt/cleanup plus assets smoke pass.
 
 No unresolved Critical/Important findings. Shared code unchanged by the consumer fix; final shared gates/distributions remain verified. Minor checksum escaping remains deferred.
+
+
+## Delivery
+
+[Sonata PR23](https://github.com/Nanofaas/sonata/pull/23) is open against main,
+branch feat/immutable-source-archive at f3fd605. Both push and PR CI runs complete
+successfully (9/9 each,18/18 checks). The shared pair0.6.13 is prepared and not
+published by this slice. NanoLab trial branch feat/61-immutable-source-archive
+keeps its public pins/registry lock0.6.12 unchanged. Main remains clean at92a5230.
+
+Final consumer fix691ef9b is verified by3482 functional cases/297.30s, the original
+branch gate still86.18%/90%, all hooks, built source-byte match, fresh installed
+preflight-preservation/retained-receipt/two-VM cleanup and CLI/assets proofs.
+No Critical/Important remains after the single TDD fix pass. All16 rulings and
+the one deferred Minor are preserved above; only this plan's scratch workspace
+is removed. Worktrees and both branches remain available for merge/publication.
