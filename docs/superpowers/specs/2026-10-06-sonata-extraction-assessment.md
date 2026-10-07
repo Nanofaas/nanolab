@@ -353,7 +353,7 @@ passed, as did all hooks, toolkit51/93.71%, package build and dependency checks.
 
 Final public-index full consumer verification: **3451 passed in 296.09 s**.
 The full command exits1 solely at **86.19% branch coverage versus the original
-90% gate**, identical to the built-wheel trial. Toolkit51/93.71%, required
+90% gate**, identical to the built-wheel trial. Toolkit 51/93.71%, required
 hooks, lock/dependency checks, package build, fresh normal installed CLI/assets
 and the independent public Compose/mapping probe passed. No threshold was
 weakened; the operator NanoFaaS checkout and unrelated worktrees are untouched.
@@ -454,3 +454,95 @@ the original90% gate**, identical to the built-wheel trial and prior slice.
 Toolkit **51 /93.71%**, all hooks, locked dependency checks, build, fresh
 normal installed CLI/assets and the public base-only application passed.
 Operator NanoFaaS source and unrelated worktrees remain untouched.
+
+## Seventh slice: private file staging
+
+The [seventh-slice plan](../plans/2026-10-07-private-file-staging-extraction.md)
+selects private file lifetime independently from immutable archive reuse. The
+shared contract is useful for ordinary application keys and tokens through the
+existing `RemoteProvider`; GHCR login, cosign models, release error adaptation
+and always-release workflow policy remain in NanoLab.
+
+Sonata `sonata_tasks.credentials` adds `validate_private_file`,
+`stage_private_files` and `CredentialCleanupError` without dependencies or a new
+provider protocol. Validation requires POSIX ownership, owner-readable nonempty
+regular files and no group/world permissions. No-follow/nonblocking descriptor
+opens reject symlink/FIFO/inode replacement; binary copies are exclusively
+created with 0600 permissions under 0700 directories. Safe public basenames and
+prefixes are checked before remote operations, integer non-boolean statuses are
+required, and only the verified six-character mktemp suffix authorizes cleanup.
+Both private temporary locations are released after partial acquisition, body
+errors and interrupts. Cleanup failures expose a type name without private
+exception messages or traceback context; programming errors survive successful
+cleanup. Providers and filesystem parent namespaces are caller-controlled.
+
+The old product command guard accepted absent, boolean and float statuses as
+success. Four failing consumer regressions reproduce those cases and unsafe
+local cleanup error propagation. The product adapter fixes the status guard,
+reexports shared validation, retains its remote directory prefix and forwards
+its richer SDK arguments to the existing shared port. File implementation
+patches in old tests now target the shared owner; product behavior assertions
+and private binary-copy checks remain.
+
+Sonata verification: 687 catalogue cases pass with 91.93% coverage, 227 engine
+cases with 96.17%, both original 90% gates, all hooks, distributions and six wheel
+configurations. A fresh base-only installed pair stages an ordinary application
+key against a real local POSIX target: private local/remote modes, unchanged
+source, usable remote paths and cleanup after success/body/transfer failure,
+without optional SDKs. Version 0.6.12 was unused on both PyPI endpoints before
+preparation. During the trial, NanoLab public pins and lock stayed at 0.6.11;
+0.6.12 was an explicit built-wheel overlay in isolated environments. The later
+publication/adoption step required shared merge and separate authorization.
+
+Immutable archive staging stays deferred: frozen reuse, verified extraction and
+cleanup reporting form a separate archive contract and need their own tests.
+
+Consumer trial verification: **3473 passed** in 295.07s, branch coverage **86.18%**
+versus the original **90%** gate (prior baseline 86.19%). No functional failure;
+the coverage debt remains explicit. Toolkit 51 passed/93.71%, release 466 passed,
+release CLI 34 passed, all hooks/builds and fresh installed CLI/assets plus
+synthetic GHCR/cosign adapter smokes pass. The complete suite ran outside the
+restricted sandbox after an isolated unchanged inert soak test demonstrated an
+asyncio.to_thread sandbox hang and passed in 0.25s on the normal host.
+
+Independent whole-slice review found no Critical/Important issues. One deferred
+minor: simultaneous body/remote/local cleanup failure loses the original body
+type in operation_type, while both cleanup attempts and sanitization remain
+correct. The plan records every retained contract boundary and its cost.
+
+Shared delivery: [Sonata PR22](https://github.com/Nanofaas/sonata/pull/22),
+tested commit 0a13b68. At trial delivery, branch feat/61-private-file-staging
+was local with public 0.6.11 metadata/lock; publication and public adoption
+remained pending. Both isolated worktrees were retained for those steps.
+
+## Seventh-slice publication and adoption
+
+After explicit authorization, annotated tag `v0.6.12` targets the tested PR22
+merge `3471f82f624a175a28cafb6e866ea8c7d3e81ae5`. The merge tree matches the
+reviewed commit exactly, and [merge CI](https://github.com/Nanofaas/sonata/actions/runs/37636200943)
+passed all nine jobs. [Release](https://github.com/Nanofaas/sonata/actions/runs/37636776093)
+succeeded in engine-first/tasks-second order.
+
+Both public wheels and sdists were downloaded from PyPI and verified against
+index SHA256/size and every Python/py.typed file in the tested merge. Engine
+runtime dependencies remain empty; tasks pin engine exactly 0.6.12. The accepted
+minor diagnostic limitation for simultaneous body/remote/local cleanup failure
+remains unchanged in the published code.
+
+All three NanoLab pins and the registry lock now use public 0.6.12. Only Sonata
+package versions and those requirement fields changed; unrelated dependencies
+and SDK pins remain identical. Lock hashes match the verified PyPI files. The
+normal workspace install and a fresh consumer contain public Sonata packages
+with no direct_url override; every installed shared source byte matches the
+published wheels.
+
+Public-pair verification: **3473 passed** in 294.63s, branch coverage **86.18%**
+versus the unchanged **90%** gate (same as the isolated trial, prior 86.19%
+baseline). Toolkit 51 passed/93.71%, all 15 hooks, uv lock check, dependency check,
+both distributions and fresh installed CLI/assets pass. Synthetic installed
+GHCR/cosign adapters preserve their paths, login environment and cleanup. A
+fresh base-only normal PyPI application stages an ordinary private key against
+a real POSIX target, checking private modes, unchanged source and both-location
+cleanup after success/body/transfer failure, without optional SDKs. Full tests
+use isolated CI source e7914be and run outside the previously diagnosed sandbox
+asyncio.to_thread restriction; original coverage policy remains explicit.

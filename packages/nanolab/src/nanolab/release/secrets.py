@@ -1,27 +1,16 @@
-"""Secure file-based credentials for the Azure release workflow."""
+"""Product authentication adapters for private file-based release credentials."""
 
 from __future__ import annotations
 
-import os
-import re
-import shutil
-import stat
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import mkdtemp
+from typing import cast
 
-# The remote shell atomically creates this directory with `mktemp -d`, so the
-# /tmp paths below are the remote host's, not local temp files: B108's premise
-# does not hold. The nosecs are for bandit, the NOSONARs for Sonar.
-_REMOTE_TEMPLATE = "/tmp/nanofaas-release-credentials.XXXXXX"  # nosec B108  # NOSONAR (S5443)
-# This accepts only the private directory returned by that `mktemp -d` invocation.
-_REMOTE_DIRECTORY = re.compile(
-    r"/tmp/nanofaas-release-credentials\.[A-Za-z0-9]+"  # nosec B108
-)  # NOSONAR (S5443)
-# Bandit reads the name as a credential; the value is an error message.
-_SECRET_REGULAR_FILE = "release secret must be a regular file"  # nosec B105
+from sonata_tasks.credentials import CredentialCleanupError, stage_private_files
+from sonata_tasks.credentials import validate_private_file as validate_secret_file
+from sonata_tasks.transfer import RemoteOperationResult
 
 
 @dataclass(frozen=True)
@@ -48,64 +37,10 @@ class ReleaseCredentialCleanupError(RuntimeError):
         super().__init__(f"release credential cleanup failed after {operation_type}")
 
 
-def validate_secret_file(path: Path) -> Path:
-    """Return `path` once it is confirmed to be a private, non-empty regular file.
-
-    Rejects anything that is not owned by the current user, is readable by
-    group or world, or is empty.
-    """
-    if not isinstance(path, Path):
-        raise TypeError("release secret must be provided as a file path")
-    try:
-        metadata = path.lstat()
-    except OSError:
-        raise ValueError(_SECRET_REGULAR_FILE) from None
-    _validate_secret_metadata(metadata)
-    return path
-
-
-def _validate_secret_metadata(metadata: os.stat_result) -> None:
-    if not stat.S_ISREG(metadata.st_mode):
-        raise ValueError(_SECRET_REGULAR_FILE)
-    if metadata.st_uid != os.getuid():
-        raise PermissionError("release secret must be owned by the current user")
-    if metadata.st_mode & 0o077:
-        raise PermissionError(
-            "release secret permissions must deny group and world access"
-        )
-    if not metadata.st_mode & stat.S_IRUSR:
-        raise PermissionError("release secret must be owner-readable")
-    if metadata.st_size == 0:
-        raise ValueError("release secret file must not be empty")
-
-
-def _copy_secret_file(source: Path, destination: Path) -> None:
-    try:
-        before = source.lstat()
-    except OSError:
-        raise ValueError(_SECRET_REGULAR_FILE) from None
-    _validate_secret_metadata(before)
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        source_fd = os.open(source, flags)
-    except OSError:
-        raise ValueError(_SECRET_REGULAR_FILE) from None
-
-    with os.fdopen(source_fd, "rb") as source_stream:
-        opened = os.fstat(source_stream.fileno())
-        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-            raise ValueError("release secret changed while being staged")
-        _validate_secret_metadata(opened)
-        destination_fd = os.open(
-            destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
-        )
-        with os.fdopen(destination_fd, "wb") as destination_stream:
-            shutil.copyfileobj(source_stream, destination_stream)
-    destination.chmod(0o600)
-
-
 def _require_success(result: object, action: str) -> object:
-    return_code = getattr(result, "return_code", 0)
+    return_code = getattr(result, "return_code", None)
+    if not isinstance(return_code, int) or isinstance(return_code, bool):
+        raise RuntimeError(f"{action} returned no integer return_code")
     if return_code != 0:
         raise RuntimeError(f"{action} failed (exit {return_code})")
     return result
@@ -131,31 +66,33 @@ def _run(
     return _require_success(result, "remote credential command")
 
 
-def _transfer(
-    provider: object,
-    request: object,
-    source: Path,
-    destination: str,
-) -> None:
-    try:
-        result = provider.transfer_to(  # type: ignore[attr-defined]
-            request,
-            source=source,
-            destination=destination,
+@dataclass(frozen=True)
+class _CredentialProvider:
+    """Supply the shared port from the release provider's richer invocation."""
+
+    provider: object
+
+    def exec_argv(
+        self, request: object, argv: tuple[str, ...]
+    ) -> RemoteOperationResult:
+        """Run a staging command without a product login environment."""
+        return cast(
+            RemoteOperationResult,
+            self.provider.exec_argv(  # type: ignore[attr-defined]
+                request, argv, env=None, remote_dir=None, dry_run=False
+            ),
         )
-    except (OSError, RuntimeError):
-        raise RuntimeError("release credential transfer failed") from None
-    _require_success(result, "release credential transfer")
 
-
-@contextmanager
-def _private_staging_directory() -> Iterator[Path]:
-    directory = Path(mkdtemp(prefix="nanofaas-release-credentials-"))
-    directory.chmod(0o700)
-    try:
-        yield directory
-    finally:
-        shutil.rmtree(directory)
+    def transfer_to(
+        self, request: object, *, source: Path, destination: str
+    ) -> RemoteOperationResult:
+        """Forward a private file transfer to the release provider."""
+        return cast(
+            RemoteOperationResult,
+            self.provider.transfer_to(  # type: ignore[attr-defined]
+                request, source=source, destination=destination
+            ),
+        )
 
 
 @contextmanager
@@ -165,48 +102,16 @@ def _stage_remote_files(
     files: Mapping[str, Path],
 ) -> Iterator[tuple[str, dict[str, str]]]:
     validated = {name: validate_secret_file(path) for name, path in files.items()}
-    with _private_staging_directory() as local_dir:
-        staged: dict[str, Path] = {}
-        for name, source in validated.items():
-            destination = local_dir / name
-            _copy_secret_file(source, destination)
-            staged[name] = destination
-
-        result = _run(provider, request, ("mktemp", "-d", _REMOTE_TEMPLATE))
-        remote_dir = str(getattr(result, "stdout", "")).strip()
-        if _REMOTE_DIRECTORY.fullmatch(remote_dir) is None:
-            raise RuntimeError(
-                "remote credential directory creation returned an invalid path"
-            )
-
-        operation_error: BaseException | None = None
-        cleanup_failed = False
-        try:
-            _run(provider, request, ("chmod", "700", remote_dir))
-            remote_files: dict[str, str] = {}
-            for name, source in staged.items():
-                destination = f"{remote_dir}/{name}"
-                _transfer(provider, request, source, destination)
-                _run(provider, request, ("chmod", "600", destination))
-                remote_files[name] = destination
-            yield remote_dir, remote_files
-        except (
-            BaseException
-        ) as error:  # NOSONAR (S5754): cleanup must run across the yield boundary
-            operation_error = error
-            try:
-                _run(provider, request, ("rm", "-rf", "--", remote_dir))
-            except RuntimeError:
-                cleanup_failed = True
-        else:
-            _run(provider, request, ("rm", "-rf", "--", remote_dir))
-
-        if operation_error is not None:
-            operation_type = type(operation_error).__name__
-            if cleanup_failed:
-                operation_error = None
-                raise ReleaseCredentialCleanupError(operation_type) from None
-            raise operation_error
+    try:
+        with stage_private_files(
+            _CredentialProvider(provider),
+            request,
+            validated,
+            prefix="nanofaas-release-credentials",
+        ) as staged:
+            yield staged
+    except CredentialCleanupError as error:
+        raise ReleaseCredentialCleanupError(error.operation_type) from None
 
 
 @contextmanager
