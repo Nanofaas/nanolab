@@ -509,3 +509,9 @@ Independent whole-slice review found no Critical/Important issues. One deferred
 minor: simultaneous body/remote/local cleanup failure loses the original body
 type in operation_type, while both cleanup attempts and sanitization remain
 correct. The plan records every retained contract boundary and its cost.
+
+Shared delivery: [Sonata PR22](https://github.com/Nanofaas/sonata/pull/22),
+commit 0a13b68. NanoLab branch feat/61-private-file-staging remains local;
+public 0.6.11 metadata and lock are unchanged. No 0.6.12 publication or public
+adoption PR was performed. Both isolated worktrees are retained for the
+subsequent merge/publication/adoption steps.

@@ -51,7 +51,7 @@
 - [x] Explicitly install built0.6.12 pair only in isolated consumer; remove duplicate file/staging mechanics, update mechanical-test patch targets to shared owner and retain meaningful behavioral assertions. Run all release tests and focused credential-facing CLI cases. Expected: GREEN with unchanged public pins/lock0.6.11 and no secret content in arguments/results/errors.
 - [x] Run full NanoLab at the original coverage config/isolated pin, toolkit, hooks, build and fresh installed CLI/assets trial smoke. Expected: functional pass; existing coverage debt separately reported.
 - [x] Commit consumer trial; one fresh whole-slice review of both branches. Regrade all findings; one RED→GREEN fix pass for Critical/Important plus affected full suites, ledger every ruling/deferred minor. Expected: no unresolved Critical/Important findings.
-- [ ] Push Sonata branch and open shared PR; keep NanoLab trial local pending merge and separate publication authorization. Expected: reviewable shared change with no premature public pins or publication.
+- [x] Push Sonata branch and open shared PR; keep NanoLab trial local pending merge and separate publication authorization. Expected: reviewable shared change with no premature public pins or publication.
 
 ## Decisions
 
@@ -73,3 +73,7 @@ Independent gpt-6-astra/high whole-slice review: no Critical or Important findin
 - Final: Ruling: Do not promise cleanup after forced process termination or permanent remote unavailability — normal exceptions/interrupts attempt cleanup and failures are explicit, but a synchronous context cannot guarantee recovery after death or a lost target — cost if wrong: residual copies require operator recovery.
 - Final: Ruling: Keep live cloud authentication and publication outside this slice's synthetic trial — product contracts are retained and exercised without operational credentials; merge and explicit publication authorization remain the next release step — cost if wrong: this slice supplies no new live cloud integration result.
 - Final: Ruling: Leave the existing NanoLab coverage deficit unchanged — extraction is verified functionally with the original branch config and90% gate; unrelated coverage repairs would enlarge this slice — cost if wrong: the existing gate remains unsatisfied at86.18%.
+
+Shared delivery: [Sonata PR22](https://github.com/Nanofaas/sonata/pull/22),
+branch feat/private-file-staging at 0a13b68. NanoLab remains a local trial with
+public 0.6.11 pins and no publication tag or public adoption PR.
