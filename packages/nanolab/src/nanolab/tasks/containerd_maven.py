@@ -11,8 +11,8 @@ from typing import Any
 from nanolab.config.environment import EnvironmentConfig
 
 _COORDINATES = (
-    ("io/nanofaas", "containerd-java", "0.23.0"),
-    ("io/nanofaas", "containerd-java-cni", "0.23.0"),
+    ("io/nanofaas", "containerd-java", "0.24.0"),
+    ("io/nanofaas", "containerd-java-cni", "0.24.0"),
     ("io/libcni", "libcni-java", "0.23.0"),
 )
 _MAX_STAGED_BYTES = 64 * 1024 * 1024
