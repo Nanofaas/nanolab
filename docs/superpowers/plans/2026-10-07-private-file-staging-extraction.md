@@ -50,7 +50,7 @@
 - [x] Add RED consumer regressions for observed missing/bool status acceptance and safe cleanup adaptation; retain product policy characterization. Expected: invalid status fails against the old code; existing policy remains valid.
 - [x] Explicitly install built0.6.12 pair only in isolated consumer; remove duplicate file/staging mechanics, update mechanical-test patch targets to shared owner and retain meaningful behavioral assertions. Run all release tests and focused credential-facing CLI cases. Expected: GREEN with unchanged public pins/lock0.6.11 and no secret content in arguments/results/errors.
 - [x] Run full NanoLab at the original coverage config/isolated pin, toolkit, hooks, build and fresh installed CLI/assets trial smoke. Expected: functional pass; existing coverage debt separately reported.
-- [ ] Commit consumer trial; one fresh whole-slice review of both branches. Regrade all findings; one RED→GREEN fix pass for Critical/Important plus affected full suites, ledger every ruling/deferred minor. Expected: no unresolved Critical/Important findings.
+- [x] Commit consumer trial; one fresh whole-slice review of both branches. Regrade all findings; one RED→GREEN fix pass for Critical/Important plus affected full suites, ledger every ruling/deferred minor. Expected: no unresolved Critical/Important findings.
 - [ ] Push Sonata branch and open shared PR; keep NanoLab trial local pending merge and separate publication authorization. Expected: reviewable shared change with no premature public pins or publication.
 
 ## Decisions
@@ -62,3 +62,14 @@
 - Pre-flight: Task1 yields the same directory/path tuple consumed by Task2; the product supplies its existing prefix, existing port adapter and cleanup-error translation. Public0.6.11 pins remain intact during the trial.
 
 - Task 2 Ruling: Run the complete consumer suite outside the restricted sandbox — the same inert soak projection hangs in asyncio.to_thread inside sandbox but passes unchanged in 0.25s outside; rerun without changing product code or gates — cost if wrong: the full-suite result covers the normal host runtime, not restricted sandbox scheduling.
+
+## Final review
+
+Independent gpt-6-astra/high whole-slice review: no Critical or Important findings.
+
+- Final: minor (deferred): Body plus remote plus local cleanup failure reports operation_type=CredentialCleanupError rather than the original body type; both cleanup attempts and sanitized tracebacks remain correct, only diagnostics lose information.
+- Final: Ruling: Preserve the trusted-provider and caller-controlled parent namespace boundary, including nonmalicious result objects — malformed ordinary statuses still fail closed; hostile providers/descriptors/namespaces require a separate threat model — cost if wrong: this API does not defend against deliberately malicious providers or namespace owners.
+- Final: Ruling: Do not promise an immutable snapshot while another writer changes the same source inode — staging checks metadata and descriptor identity, while callers coordinate source content updates and immutable archive/snapshot semantics remain distinct — cost if wrong: concurrent in-place writes can change the copied contents and require caller coordination.
+- Final: Ruling: Do not promise cleanup after forced process termination or permanent remote unavailability — normal exceptions/interrupts attempt cleanup and failures are explicit, but a synchronous context cannot guarantee recovery after death or a lost target — cost if wrong: residual copies require operator recovery.
+- Final: Ruling: Keep live cloud authentication and publication outside this slice's synthetic trial — product contracts are retained and exercised without operational credentials; merge and explicit publication authorization remain the next release step — cost if wrong: this slice supplies no new live cloud integration result.
+- Final: Ruling: Leave the existing NanoLab coverage deficit unchanged — extraction is verified functionally with the original branch config and90% gate; unrelated coverage repairs would enlarge this slice — cost if wrong: the existing gate remains unsatisfied at86.18%.

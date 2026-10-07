@@ -504,3 +504,8 @@ release CLI 34 passed, all hooks/builds and fresh installed CLI/assets plus
 synthetic GHCR/cosign adapter smokes pass. The complete suite ran outside the
 restricted sandbox after an isolated unchanged inert soak test demonstrated an
 asyncio.to_thread sandbox hang and passed in 0.25s on the normal host.
+
+Independent whole-slice review found no Critical/Important issues. One deferred
+minor: simultaneous body/remote/local cleanup failure loses the original body
+type in operation_type, while both cleanup attempts and sanitization remain
+correct. The plan records every retained contract boundary and its cost.
