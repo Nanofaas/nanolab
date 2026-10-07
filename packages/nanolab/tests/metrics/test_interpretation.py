@@ -11,6 +11,44 @@ from nanolab.tasks.loadtest.report import _cards
 from nanolab.tasks.loadtest.tasks import _point_stats
 
 
+def test_overflowed_point_sums_are_unavailable_instead_of_nonfinite_evidence():
+    stats = _point_stats([{"timestamp": 1, "value": 1e308}] * 2)
+    assert "max" not in stats
+    assert stats["invalid_points"] == 1
+
+
+def test_overflowed_gauge_delta_does_not_hide_valid_observed_bounds():
+    stats = _point_stats([{"value": -1e308}, {"value": 1e308}])
+    assert stats["min"] == -1e308 and stats["max"] == 1e308
+    assert "delta" not in stats
+
+
+def test_malformed_counter_publisher_metadata_does_not_crash_reports():
+    assert (
+        counter_delta([{"value": 1, "labels": None}, {"value": 2, "labels": None}])
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "kind", "expected"),
+    [
+        ("function_dispatch", None, True),
+        ('function_dispatch{function="ordinary"}', None, True),
+        ("function_dispatch@worker", None, True),
+        ("function_dispatch", "gauge", False),
+        ("ordinary_count", "gauge", False),
+        ("ordinary_gauge", "counter", True),
+        ("ordinary_total", None, True),
+        ("ordinary", None, False),
+    ],
+)
+def test_counter_classification_stays_a_product_policy(name, kind, expected):
+    from nanolab.metrics.interpretation import is_counter
+
+    assert is_counter(name, kind) is expected
+
+
 @pytest.mark.parametrize("nested", [False, True])
 def test_detailed_report_reads_k6_rate_in_both_export_formats(nested):
     metrics = {
@@ -82,3 +120,31 @@ def test_real_k6_exports_agree_across_reports_and_release(tmp_path, filename):
         {"rejected": [1], "queue_depth": [0], "mean_queue_wait_ms": [0]}
     )
     assert "25.000%" in _cards(frame, summary, 20)
+
+
+@pytest.mark.parametrize(
+    "timestamp", [float("nan"), float("inf"), -float("inf"), True, None]
+)
+def test_malformed_timestamps_remain_unavailable_through_consumer_facades(timestamp):
+    points = [
+        {"timestamp": 2, "value": 5},
+        {"timestamp": timestamp, "value": 110},
+        {"timestamp": 1, "value": 100},
+    ]
+    assert counter_delta(points) is None
+    assert _point_stats(points) == {"points": 2, "invalid_points": 1}
+
+
+def test_missing_timestamps_do_not_manufacture_zero_change_in_summary():
+    points = [{"timestamp": "1", "value": 100}, {"value": 110}]
+    assert _point_stats(points)["points"] == 2
+    assert _point_stats(points)["delta"] == 10
+
+
+def test_malformed_publisher_labels_do_not_conflate_singleton_evidence():
+    points = [
+        {"labels": {"worker": True}, "value": 100},
+        {"labels": {"worker": 1}, "value": 110},
+    ]
+    assert counter_delta(points) is None
+    assert "delta" not in _point_stats(points, counter=True)
