@@ -55,9 +55,9 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `tasks/loadtest/prometheus.py`: HTTP transport | Already shared | It delegates HTTP/time/range acquisition to Sonata. Retain NanoLab retry defaults and representation adapters; do not move another HTTP client. |
 | `tasks/loadtest/tasks.py`: `CapturePrometheusSnapshot` and window alignment | Later candidate, with explicit policies | Acquisition over an explicit query set can be reusable. Required-query decisions, leading/trailing margins, skew tolerance, diagnostic hints and JSON layout need separation. Preserve collecting all queries and retaining partial results before failing. |
 | `tasks/loadtest/models.py`: `K6Config`, `TimeWindow`, `PrometheusQuery` | Keep until a consuming shared API needs them | Sonata already owns `K6Stage`, `K6RunResult` and generic `K6Config`. NanoLab adds target resources and payload selection. Avoid duplicating those shared models or moving isolated dataclasses with no shared consumer. |
-| `metrics/interpretation.py`: k6 normalization, per-label counter delta, point statistics | Later extraction of pure calculations | Used by detailed reports and release evidence; not provided by Sonata's scrape checks. Preserve missing/invalid versus zero and resets per publisher. `is_counter` includes NanoFaaS's `function_dispatch` exception, which must remain a local rule. |
-| `release/metrics.py`: aggregation, regression, baseline selection and record rendering | Keep local | Uses `statistics.median` already. Metrics, comparable-profile fields, autoscaling/k6 gates, thresholds and release records form a product contract. A generic benchmark framework would add API without removing that contract. Reuse the shared k6 interpretation when available. |
-| `release/secrets.py`: private-file validation/copy and temporary remote staging | Later candidate | Private regular files, no-follow/identity-checked copying, temporary directories and cleanup are reusable. Use Sonata execution/transfer ports rather than copying the loosely typed provider access. Preserve sanitization of errors and no secret values in command/journal metadata. |
+| `metrics/interpretation.py`: k6 normalization, per-label counter delta, point statistics | Sixth slice implemented; local wheel trial | Used by detailed reports and release evidence; not provided by Sonata's scrape checks. Preserve missing/invalid versus zero and resets per publisher. `is_counter` includes NanoFaaS's `function_dispatch` exception, which must remain a local rule. |
+| `release/metrics.py`: aggregation, regression, baseline selection and record rendering | Keep local | Uses `statistics.median` already. Metrics, comparable-profile fields, autoscaling/k6 gates, thresholds and release records form a product contract. A generic benchmark framework would add API without removing that contract. Use the shared k6 interpretation through the local facade. |
+| `release/secrets.py`: private-file validation/copy and temporary remote staging | Separately assessed later slice | Private regular files, no-follow/identity-checked copying, temporary directories and cleanup are reusable. Use Sonata execution/transfer ports rather than copying the loosely typed provider access. Preserve sanitization of errors and no secret values in command/journal metadata. |
 | `release/secrets.py`: GHCR login, cosign credentials and release error names | Keep adapters local | Registry/login/signing decisions and release-facing results belong to the release workflow; feed them shared private-file lifetimes when available. |
 | `soak/collector.py`: bounded Linux procfs/Docker/HTTP collection | Optional later capability | Raw collection and before/after identity checks can support other container diagnostics. Preserve the killable helper boundary, byte/deadline bounds and local-container constraints. It must not become mandatory for portable Sonata tasks. |
 | `soak/adapters.py`: `RoleBoundProbe`, sample/target/phase conversion | Keep local | Requires NanoLab domain models, required-metric units and source classification. A new role abstraction would duplicate existing execution bindings. |
@@ -357,3 +357,41 @@ The full command exits1 solely at **86.19% branch coverage versus the original
 hooks, lock/dependency checks, package build, fresh normal installed CLI/assets
 and the independent public Compose/mapping probe passed. No threshold was
 weakened; the operator NanoFaaS checkout and unrelated worktrees are untouched.
+
+
+## Sixth slice: pure measurement interpretation
+
+The [sixth-slice plan](../plans/2026-10-07-measurement-interpretation-extraction.md)
+selects five pure functions after inspecting their actual report/release consumers:
+`finite_number`, `counter_delta` and `point_stats` extend Sonata's existing metrics
+module; `k6_values` and `k6_value` extend its existing k6 module. No new models,
+framework, runtime dependencies or engine APIs are added. NanoLab reexports them
+and retains the entire `is_counter` classifier, including explicit publisher
+type priority and `function_dispatch`. Metric selection, window/skew/retry
+settings, report layouts, release aggregation/regression and qualification
+thresholds remain local.
+
+The readers preserve valid flat/nested k6 formats, first-present aliases and
+errors, numeric-string observations, per-publisher reset detection and genuine
+zero versus unavailable evidence. RED probes also reproduced malformed label
+crashes, nonfinite timestamp sums and gauge delta overflow in the old reducer.
+Shared validation now retains unavailable evidence without emitting Inf/NaN.
+
+Credential lifetime extraction was evaluated separately and deferred: owned
+0600 file identity/copy, remote staging and sanitized cleanup require their own
+typed transfer/lifetime contract. GHCR and cosign policy remain product adapters.
+This slice does not close #61.
+
+Sonata commit0c6d3b7 prepares coherent0.6.11 (both PyPI version endpoints returned
+404 before preparation). Catalogue **606 passed /91.62%**, engine
+**227 passed /96.17%**, all hooks, build and all six installed wheel configurations
+passed at the unchanged shared gates. A base-only installed wheel application
+with ordinary job/worker labels and two real k6 exports passed, including
+standard JSON serialization with allow_nan=False and no HTTP/provider extras.
+
+NanoLab's isolated local trial passed **247** focused metrics/loadtest/release
+cases, toolkit **51 /93.71%**, hooks, build and fresh installed CLI/assets smoke.
+The normal consumer install resolved public0.6.10 first; explicit built0.6.11
+wheel replacement is limited to this trial. All public pins and lock stay0.6.10.
+The full original consumer gate and whole-slice review are recorded below when
+complete; package publication requires separate authorization after merge.
