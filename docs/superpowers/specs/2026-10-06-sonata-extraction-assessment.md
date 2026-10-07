@@ -51,7 +51,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `soak/retention.py`: `CleanupState`, generated Compose validation and release journal | Keep local | Cleanup records, release-only replay, dependent cleanup gates, ownership labels, allowed mounts and artifact retention are soak contracts. This is not interchangeable with a generic workflow journal. No generic journaling framework is justified by this module. |
 | `soak/sources.py`: capture/verify/materialize snapshot and entry identity | Fourth slice implemented and published; public-index adoption | Shared `sonata_tasks.sources` captures tracked/nonignored working-tree inputs, deletions, modes and safe/dangling relative links, with byte/file bounds and independently verified workspaces. Caller-owned artifact storage keeps receipts, quotas, markers and source selection local. Snapshot identity and manifest bytes remain compatible; the coherent 0.6.9 pair is published and NanoLab uses exact public-index pins. |
 | `workspace/provenance.py`: provenance helpers and `source_fingerprint` | Keep for now | Git observation is generic, but current return shape and fallback behavior support NanoLab run metadata and image rollout tags. Its hash identifies commit/status/diff/untracked bytes, unlike the snapshot's file inventory. Do not unify those identities merely because both use SHA-256. |
-| `release/build.py` and `release/resources.py`: immutable archive transfer | Eighth slice: shared extension under local trial | Existing Sonata archive exports a commit anew for each acquisition. Release shares one frozen archive across VMs, checks it again and reports cleanup failures. Support those behaviors before adopting it; retain clean-source guards, remote-path policy and recipe staging locally. |
+| `release/build.py` and `release/resources.py`: immutable archive transfer | Eighth slice: published0.6.13; public consumer adoption | Existing Sonata archive exports a commit anew for each acquisition. Release shares one frozen archive across VMs, checks it again and reports cleanup failures. Support those behaviors before adopting it; retain clean-source guards, remote-path policy and recipe staging locally. |
 | `tasks/loadtest/prometheus.py`: HTTP transport | Already shared | It delegates HTTP/time/range acquisition to Sonata. Retain NanoLab retry defaults and representation adapters; do not move another HTTP client. |
 | `tasks/loadtest/tasks.py`: `CapturePrometheusSnapshot` and window alignment | Later candidate, with explicit policies | Acquisition over an explicit query set can be reusable. Required-query decisions, leading/trailing margins, skew tolerance, diagnostic hints and JSON layout need separation. Preserve collecting all queries and retaining partial results before failing. |
 | `tasks/loadtest/models.py`: `K6Config`, `TimeWindow`, `PrometheusQuery` | Keep until a consuming shared API needs them | Sonata already owns `K6Stage`, `K6RunResult` and generic `K6Config`. NanoLab adds target resources and payload selection. Avoid duplicating those shared models or moving isolated dataclasses with no shared consumer. |
@@ -572,3 +572,25 @@ lock remain0.6.12; public adoption awaits tested shared merge and separate user
 publication authorization. No cloud target, operational credential or release
 publication is exercised by this trial. Independently validate shared gates,
 base-only ordinary installed usage and the consumer's full original checks.
+
+
+## Eighth slice: authorized publication and public adoption
+
+User authorization follows Sonata PR23's tested merge1ad57f2, whose tree equals
+reviewed headf3fd605 and whose merge CI passes9/9. Annotated v0.6.13 targets that
+merge. Release37649312085 succeeds engine-first/tasks-second; both public wheels
+and sdists match PyPI hashes/sizes and every tested module/py.typed byte.
+
+NanoLab's three pins and registry lock move to0.6.13 only after that verification.
+A normal locked sync replaces the explicit local trial wheels with PyPI packages;
+installed distributions have no direct_url record and their module bytes match
+the verified public wheels. Other dependency entries remain unchanged (only the
+two shared distributions and their workspace requirement metadata change).
+The base-only public Python3.12 consumer passes actual target-command frozen
+reuse and failed transfer cleanup without optional SDKs. NanoLab adoption is
+prepared for its own PR. Public consumer checks pass all 3482 functional cases;
+the original branch coverage gate still fails at 86.18% against 90%. Toolkit
+passes 51 cases at 93.71%, and hooks, package builds and fresh installed
+CLI/assets, receipt, two-VM reuse, cleanup and preflight preservation checks pass.
+The eighth-slice plan records the evidence. Prior review decisions and the
+GNU checksum-escaping Minor remain unchanged; this phase adds no behavior.

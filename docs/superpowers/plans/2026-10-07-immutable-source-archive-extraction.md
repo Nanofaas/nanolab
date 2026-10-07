@@ -106,3 +106,29 @@ preflight-preservation/retained-receipt/two-VM cleanup and CLI/assets proofs.
 No Critical/Important remains after the single TDD fix pass. All16 rulings and
 the one deferred Minor are preserved above; only this plan's scratch workspace
 is removed. Worktrees and both branches remain available for merge/publication.
+
+
+## Authorized publication and public adoption
+
+After explicit user authorization, annotated v0.6.13 targets tested merge1ad57f2
+(Sonata PR23, merge CI9/9; tree identical to f3fd605). Release37649312085 succeeds
+engine-first/tasks-second. All four PyPI artifacts match index hashes/sizes and
+all runtime source bytes from the tested merge. Ordinary base-only public
+installation on Python3.12 passes two-target frozen reuse and partial-transfer
+cleanup without optional SDKs.
+
+The three consumer pins and normal registry lock now use0.6.13. Locked sync
+removes local wheel provenance; both installed shared distributions have no
+direct_url record and all installed module bytes match the verified PyPI wheels.
+Unrelated dependencies remain unchanged. Public consumer verification completes
+before commit/push/PR delivery: all 3482 NanoLab cases pass in 297.33s with the
+original branch coverage configuration and isolated NanoFaaS source pin
+e7914be065e844776af57fe9e449bce7f12e03c5. Coverage remains 86.18% against the
+unchanged 90% gate, so that command exits 1 solely for the existing coverage debt.
+Toolkit passes 51 cases with 93.71% coverage against its original 80% gate.
+All 16 hooks, normal locked sync, dependency compatibility, wheel/sdist builds,
+fresh installed CLI/assets, two-VM frozen reuse, retained receipts, strict
+cleanup and preservation of existing remote contents at preflight pass using
+the published dependencies. The16 review
+rulings and deferred GNU checksum-escaping Minor remain as previously reported;
+publication/adoption requires no new behavior or additional review decision.
