@@ -563,8 +563,9 @@ NanoLab retains before/after clean-source export guards, receipt retention and
 copies, product remote path reservation, recipe staging and two-VM resource
 requires/always_release. A thin provider adapter retains connection retries;
 only integer nonboolean -1 triggers connection-death retry, while malformed
-statuses reach explicit shared operation checks. The source resource's outer
-compensation remains a product resource safeguard and delegates actual removal.
+statuses reach explicit shared operation checks. Sonata owns failed-staging compensation; the source Resource keeps strict normal
+release but leaves existing remote contents untouched after a local preflight
+failure. The duplicate outer compensation was removed after final review.
 
 This trial prepares coherent Sonata0.6.13 wheels. NanoLab public pins and registry
 lock remain0.6.12; public adoption awaits tested shared merge and separate user

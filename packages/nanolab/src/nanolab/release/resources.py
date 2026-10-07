@@ -400,18 +400,14 @@ def build_release_source_resources(
 
         def acquire(inputs: TaskInputs) -> str:
             evidence = inputs.resource(local)
-            try:
-                stage_source_archive(
-                    provider,
-                    request,
-                    archive=archive,
-                    remote_archive=remote_archive,
-                    remote_source_dir=remote_source_dir,
-                    expected_digest=evidence.digest,
-                )
-            except BaseException as error:
-                best_effort(error, cleanup, what="release source failed acquire")
-                raise
+            stage_source_archive(
+                provider,
+                request,
+                archive=archive,
+                remote_archive=remote_archive,
+                remote_source_dir=remote_source_dir,
+                expected_digest=evidence.digest,
+            )
             return remote_source_dir
 
         name = getattr(request, "name", "release VM")

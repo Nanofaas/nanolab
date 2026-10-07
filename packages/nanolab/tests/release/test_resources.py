@@ -432,3 +432,69 @@ def test_source_resource_normal_release_propagates_remote_cleanup_failure(
 
     with pytest.raises(RuntimeError, match="cleanup failed"):
         resources.stack.release(inputs, state)
+
+
+@pytest.mark.parametrize("alteration", ["changed", "missing"])
+def test_source_resource_preflight_failure_preserves_remote_contents(
+    monkeypatch, tmp_path, alteration
+):
+    import hashlib
+    import subprocess
+
+    remote_prefix = "/home/user/nanofaas-release/v1"
+    remote = tmp_path / "remote"
+    (remote / "source").mkdir(parents=True)
+    (remote / "source" / "previous").write_bytes(b"previous application")
+    (remote / "source.tar").write_bytes(b"previous archive")
+    calls = []
+
+    class Provider:
+        def exec_argv(self, request, argv, **kwargs):
+            calls.append(argv)
+            result = subprocess.run(
+                tuple(value.replace(remote_prefix, str(remote)) for value in argv),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return SimpleNamespace(
+                return_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+
+        def transfer_to(self, request, *, source, destination):
+            raise AssertionError("preflight failure must not transfer")
+
+    def create(_root, _commit, destination):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"source")
+        return ArtifactEvidence(
+            "local", str(destination), "sha256:" + hashlib.sha256(b"source").hexdigest()
+        )
+
+    monkeypatch.setattr(release_resources, "create_source_archive", create)
+    resources = release_resources.build_release_source_resources(
+        repo_root=tmp_path,
+        commit="a" * 40,
+        run_dir=tmp_path / "run",
+        remote_source_dir=remote_prefix + "/source",
+        remote_archive=remote_prefix + "/source.tar",
+        provider=Provider(),
+        stack_request=object(),
+        arm_request=object(),
+    )
+    evidence = resources.local.acquire(TaskInputs.empty())
+    archive = Path(evidence.reference)
+    if alteration == "changed":
+        archive.write_bytes(b"changed after local acquisition")
+        error, message = RuntimeError, "changed"
+    else:
+        archive.unlink()
+        error, message = FileNotFoundError, "source.tar"
+    inputs = TaskInputs._for_resources({resources.local: evidence}, {resources.local})
+    with pytest.raises(error, match=message):
+        resources.stack.acquire(inputs)
+    assert not calls
+    assert (remote / "source" / "previous").read_bytes() == b"previous application"
+    assert (remote / "source.tar").read_bytes() == b"previous archive"
