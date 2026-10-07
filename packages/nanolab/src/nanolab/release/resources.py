@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol, TypeVar
 
 from sonata_engine import Resource, TaskInputs
+from sonata_tasks.archive import remove_source_archive
 from sonata_tasks.compensation import best_effort
 from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
@@ -18,6 +19,7 @@ from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import (
+    _ArchiveProvider,
     _provider_exec,
     _provider_transfer_to,
     create_source_archive,
@@ -389,10 +391,12 @@ def build_release_source_resources(
 
     def remote(request: object, requires: tuple[Resource[Any], ...]) -> Resource[str]:
         def cleanup() -> None:
-            result = provider.exec_argv(  # type: ignore[attr-defined]
-                request, ("rm", "-rf", "--", remote_source_dir, remote_archive)
+            remove_source_archive(
+                _ArchiveProvider(provider),
+                request,
+                remote_source_dir=remote_source_dir,
+                remote_archive=remote_archive,
             )
-            _require_remote_success(result, "release source cleanup")
 
         def acquire(inputs: TaskInputs) -> str:
             evidence = inputs.resource(local)

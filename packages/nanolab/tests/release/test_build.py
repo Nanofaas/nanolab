@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import tarfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -212,7 +213,7 @@ def test_arm64_smoke_cleanup_does_not_hide_a_provider_programming_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class BrokenCleanupProvider(_ArmFailureProvider):
-        def exec_argv(self, request, argv, **kwargs):
+        def exec_argv(self, request, argv, **kwargs) -> Any:
             if argv[:3] == ("docker", "rm", "--force"):
                 raise ValueError("bad cleanup contract")
             return super().exec_argv(request, argv, **kwargs)
@@ -329,7 +330,9 @@ def test_source_transfer_rejects_checksum_mismatch_before_extracting(
         )
 
     assert not any(
-        action[0] == "exec" and isinstance(action[2], tuple) and action[2][0] == "tar"
+        action[0] == "exec"
+        and isinstance(action[2], tuple)
+        and action[2][0] in {"tar", "python3"}
         for action in provider.actions
     )
 
@@ -481,3 +484,54 @@ def test_python_source_tests_isolate_editable_build_metadata(tmp_path: Path):
         / "source-test-output/python-source/sdks/python/src"
         / "nanofaas_sdk.egg-info/PKG-INFO"
     ).is_file()
+
+
+@pytest.mark.parametrize("status", [None, False, 0.0])
+def test_source_transfer_rejects_malformed_status_before_extraction(tmp_path, status):
+    from types import SimpleNamespace
+
+    archive = tmp_path / "source.tar"
+    archive.write_bytes(b"source")
+
+    class InvalidTransfer(_ArchiveProvider):
+        def transfer_to(self, request, *, source, destination) -> Any:
+            super().transfer_to(request, source=source, destination=destination)
+            return SimpleNamespace(return_code=status, stdout="", stderr="")
+
+    provider = InvalidTransfer(digest_path(archive))
+    with pytest.raises(RuntimeError, match="integer return_code"):
+        release_build.stage_source_archive(
+            provider,
+            object(),
+            archive=archive,
+            remote_archive="/srv/release/source.tar",
+            remote_source_dir="/srv/release/source",
+        )
+    assert not any(
+        action[0] == "exec"
+        and isinstance(action[2], tuple)
+        and action[2][0] == "python3"
+        for action in provider.actions
+    )
+
+
+def test_source_transfer_empty_checksum_reports_integrity_failure(tmp_path):
+    archive = tmp_path / "source.tar"
+    archive.write_bytes(b"source")
+    from types import SimpleNamespace
+
+    class EmptyChecksum(_ArchiveProvider):
+        def exec_argv(self, request, argv, **kwargs) -> Any:
+            if argv[0] == "sha256sum":
+                return SimpleNamespace(return_code=0, stdout="", stderr="")
+            return super().exec_argv(request, argv, **kwargs)
+
+    provider = EmptyChecksum("")
+    with pytest.raises(RuntimeError, match="checksum"):
+        release_build.stage_source_archive(
+            provider,
+            object(),
+            archive=archive,
+            remote_archive="/srv/release/source.tar",
+            remote_source_dir="/srv/release/source",
+        )

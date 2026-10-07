@@ -413,8 +413,8 @@ def test_source_resource_normal_release_propagates_remote_cleanup_failure(
     )
 
     class Provider:
-        def exec_argv(self, _request, _argv):
-            return SimpleNamespace(return_code=1, stderr="cleanup failed")
+        def exec_argv(self, _request, _argv, **_kwargs):
+            return SimpleNamespace(return_code=1, stdout="", stderr="cleanup failed")
 
     resources = release_resources.build_release_source_resources(
         repo_root=tmp_path,

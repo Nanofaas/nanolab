@@ -46,7 +46,13 @@ def retry_on_connection_death[T](
             )
             sleep(min(5 * attempt, 30))
             continue
-        if int(getattr(result, "return_code", 0)) == CONNECTION_DEAD and not last:
+        return_code = getattr(result, "return_code", None)
+        if (
+            isinstance(return_code, int)
+            and not isinstance(return_code, bool)
+            and return_code == CONNECTION_DEAD
+            and not last
+        ):
             _log(f"  ⟳ {describe} connection dropped; retry {attempt}/{attempts - 1}")
             sleep(min(5 * attempt, 30))
             continue

@@ -60,3 +60,21 @@ def test_reraises_a_persistent_connect_exception() -> None:
     run, _ = _op([ConnectionResetError("reset")] * 4)
     with pytest.raises(ConnectionResetError):
         retry_on_connection_death(run, describe="probe", sleep=lambda _s: None)
+
+
+@pytest.mark.parametrize("status", [None, "invalid", "-1"])
+def test_retry_leaves_malformed_status_for_operation_boundary(status):
+    from types import SimpleNamespace
+
+    result = SimpleNamespace(return_code=status)
+    calls = []
+
+    def operation():
+        calls.append(True)
+        return result
+
+    actual = retry_on_connection_death(
+        operation, describe="archive", sleep=lambda _: None
+    )
+    assert actual is result
+    assert len(calls) == 1
