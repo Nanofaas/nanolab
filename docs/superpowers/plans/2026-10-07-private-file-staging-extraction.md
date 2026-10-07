@@ -75,5 +75,18 @@ Independent gpt-6-astra/high whole-slice review: no Critical or Important findin
 - Final: Ruling: Leave the existing NanoLab coverage deficit unchanged — extraction is verified functionally with the original branch config and90% gate; unrelated coverage repairs would enlarge this slice — cost if wrong: the existing gate remains unsatisfied at86.18%.
 
 Shared delivery: [Sonata PR22](https://github.com/Nanofaas/sonata/pull/22),
-branch feat/private-file-staging at 0a13b68. NanoLab remains a local trial with
-public 0.6.11 pins and no publication tag or public adoption PR.
+branch feat/private-file-staging at 0a13b68. At shared-PR delivery, NanoLab was a
+local trial with public 0.6.11 pins, pending publication and public adoption.
+
+## Authorized publication
+
+After user authorization, `v0.6.12` targets tested merge 3471f82 (merge CI 9/9).
+Release 37636776093 succeeded engine-first/tasks-second; public wheels/sdists
+match index hashes/sizes and all tested source bytes. Adoption updates the three
+NanoLab pins and registry lock to 0.6.12 without local source/wheel overrides.
+
+Public adoption verified: 3473 cases pass in 294.63s with the original branch gate
+still 86.18%/90%; toolkit 51/93.71%, all hooks, locked normal registry install,
+verified source bytes, dependency check, builds and fresh public consumers pass.
+The three pins/registry lock now use 0.6.12 with no local override. No additional
+behavior change or new ruling was required for publication/adoption.

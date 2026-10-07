@@ -490,9 +490,9 @@ configurations. A fresh base-only installed pair stages an ordinary application
 key against a real local POSIX target: private local/remote modes, unchanged
 source, usable remote paths and cleanup after success/body/transfer failure,
 without optional SDKs. Version 0.6.12 was unused on both PyPI endpoints before
-preparation. NanoLab public pins and lock remain 0.6.11; 0.6.12 is an explicit
-built-wheel overlay only in this isolated trial. Publication/adoption requires
-shared merge and the separate authorization used for earlier slices.
+preparation. During the trial, NanoLab public pins and lock stayed at 0.6.11;
+0.6.12 was an explicit built-wheel overlay in isolated environments. The later
+publication/adoption step required shared merge and separate authorization.
 
 Immutable archive staging stays deferred: frozen reuse, verified extraction and
 cleanup reporting form a separate archive contract and need their own tests.
@@ -511,7 +511,38 @@ type in operation_type, while both cleanup attempts and sanitization remain
 correct. The plan records every retained contract boundary and its cost.
 
 Shared delivery: [Sonata PR22](https://github.com/Nanofaas/sonata/pull/22),
-commit 0a13b68. NanoLab branch feat/61-private-file-staging remains local;
-public 0.6.11 metadata and lock are unchanged. No 0.6.12 publication or public
-adoption PR was performed. Both isolated worktrees are retained for the
-subsequent merge/publication/adoption steps.
+tested commit 0a13b68. At trial delivery, branch feat/61-private-file-staging
+was local with public 0.6.11 metadata/lock; publication and public adoption
+remained pending. Both isolated worktrees were retained for those steps.
+
+## Seventh-slice publication and adoption
+
+After explicit authorization, annotated tag `v0.6.12` targets the tested PR22
+merge `3471f82f624a175a28cafb6e866ea8c7d3e81ae5`. The merge tree matches the
+reviewed commit exactly, and [merge CI](https://github.com/Nanofaas/sonata/actions/runs/37636200943)
+passed all nine jobs. [Release](https://github.com/Nanofaas/sonata/actions/runs/37636776093)
+succeeded in engine-first/tasks-second order.
+
+Both public wheels and sdists were downloaded from PyPI and verified against
+index SHA256/size and every Python/py.typed file in the tested merge. Engine
+runtime dependencies remain empty; tasks pin engine exactly 0.6.12. The accepted
+minor diagnostic limitation for simultaneous body/remote/local cleanup failure
+remains unchanged in the published code.
+
+All three NanoLab pins and the registry lock now use public 0.6.12. Only Sonata
+package versions and those requirement fields changed; unrelated dependencies
+and SDK pins remain identical. Lock hashes match the verified PyPI files. The
+normal workspace install and a fresh consumer contain public Sonata packages
+with no direct_url override; every installed shared source byte matches the
+published wheels.
+
+Public-pair verification: **3473 passed** in 294.63s, branch coverage **86.18%**
+versus the unchanged **90%** gate (same as the isolated trial, prior 86.19%
+baseline). Toolkit 51 passed/93.71%, all 15 hooks, uv lock check, dependency check,
+both distributions and fresh installed CLI/assets pass. Synthetic installed
+GHCR/cosign adapters preserve their paths, login environment and cleanup. A
+fresh base-only normal PyPI application stages an ordinary private key against
+a real POSIX target, checking private modes, unchanged source and both-location
+cleanup after success/body/transfer failure, without optional SDKs. Full tests
+use isolated CI source e7914be and run outside the previously diagnosed sandbox
+asyncio.to_thread restriction; original coverage policy remains explicit.
