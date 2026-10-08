@@ -394,7 +394,7 @@ def test_native_gate_reads_the_distribution_at_execution_time(tmp_path, mode):
             task.run(inputs)
 
 
-@pytest.mark.parametrize("fault", ["api", "quota", "probe"])
+@pytest.mark.parametrize("fault", ["api", "quota", "probe", "api-log"])
 def test_native_failure_releases_only_the_resources_acquired_by_the_run(
     tmp_path, monkeypatch, fault
 ):
@@ -471,9 +471,10 @@ def test_native_failure_releases_only_the_resources_acquired_by_the_run(
         "_snapshot",
         lambda *_args: (deployment, pod),
     )
-    monkeypatch.setattr(
-        native.NativeKubernetesLifecycleTask, "_logs", lambda *_args: "Started"
-    )
+    if fault != "api-log":
+        monkeypatch.setattr(
+            native.NativeKubernetesLifecycleTask, "_logs", lambda *_args: "Started"
+        )
     monkeypatch.setattr(
         native.RecipeMetadataCheckTask, "run", lambda *_args: TaskOutcome()
     )
@@ -481,6 +482,22 @@ def test_native_failure_releases_only_the_resources_acquired_by_the_run(
         native.RecipeKubernetesImageCheckTask, "run", lambda *_args: TaskOutcome()
     )
     calls = []
+
+    class LogExecutor:
+        def binding_key(self, role):
+            return role
+
+        def run(self, task, *, dry_run=False):
+            assert "logs" in task.argv
+            # API responses succeeded, but native reflection failed in the old pod.
+            # Its replacement has clean logs, so inspecting only that pod misses it.
+            old_pod_error = "api" in calls and "capacity" not in calls
+            stdout = (
+                "Started\nMissingReflectionRegistrationError\n"
+                if old_pod_error
+                else "Started\n"
+            )
+            return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
     def gate(stage):
         def invoke(*_args, **kwargs):
@@ -502,18 +519,25 @@ def test_native_failure_releases_only_the_resources_acquired_by_the_run(
         namespace="owned",
         function=PlatformFunction("fn", "mutable-default:tag", "{}", ("true",)),
         endpoint="http://unused",
-        executor=LocalCommandTaskExecutor(),
+        executor=LogExecutor() if fault == "api-log" else LocalCommandTaskExecutor(),
         role="host",
         run_dir=tmp_path,
         function_component=("word-stats", "java"),
     )
     workflow = Workflow(workflow_id="native-failure")
     workflow.add(task, requires=(distribution, namespace, function_resource))
-    with pytest.raises(RuntimeError, match="injected"):
+    expected_error = "native registration errors" if fault == "api-log" else "injected"
+    with pytest.raises(RuntimeError, match=expected_error):
         workflow.run()
     assert set(released) == {"function", "namespace", "distribution"}
     assert not (tmp_path / "native/qualified.json").exists()
-    if fault != "api":
+    if fault == "api-log":
+        assert "capacity" not in calls
+        assert (
+            "MissingReflectionRegistrationError"
+            in (tmp_path / "native/logs-before-quota.txt").read_text()
+        )
+    elif fault != "api":
         assert calls.index("api") < calls.index("capacity") < calls.index("quota")
 
 

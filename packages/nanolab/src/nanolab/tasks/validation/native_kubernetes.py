@@ -575,7 +575,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
     def _quota(self, inputs: TaskInputs, endpoint: Endpoint) -> None:
         local = self.run_dir / "native/quota.json"
         output = (
-            Path(str(self.remote_root / "native-quota.json"))
+            Path(str(self.remote_root / f"native-quota-{uuid4().hex}.json"))
             if self.remote_root
             else local
         )
@@ -637,7 +637,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
         native_dir = _native_attempt_directory(self.run_dir)
         deployment, before_pod = self._snapshot(inputs, uid)
         self._identity(before_pod)
-        logs_before = self._logs(inputs, before_pod, "before-quota")
+        self._logs(inputs, before_pod, "before-api")
         check_native_api(
             inputs,
             function=function,
@@ -647,6 +647,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
             cwd=None,
             evidence_file=native_dir / "api.jsonl",
         )
+        logs_before = self._logs(inputs, before_pod, "before-quota")
         configure_native_quota(
             inputs,
             deployment=deployment,

@@ -125,3 +125,61 @@ def test_quota_task_uses_an_acquired_endpoint(quota_server, tmp_path):
     assert (
         len(json.loads((tmp_path / "native/quota.json").read_text())["responses"]) == 30
     )
+
+
+def test_remote_quota_retry_retains_the_current_burst(quota_server, tmp_path):
+    from pathlib import PurePosixPath
+
+    from sonata_engine import Resource, TaskInputs
+    from sonata_tasks.execution.local import LocalCommandTaskExecutor
+
+    from nanolab.tasks.platform import PlatformFunction
+    from nanolab.tasks.recipes.workflow import RecipeDistribution
+    from nanolab.tasks.validation.native_kubernetes import (
+        NativeKubernetesLifecycleTask,
+        _native_attempt_directory,
+    )
+
+    url, state = quota_server
+    host = tmp_path / "host"
+    remote = tmp_path / "owned-remote-root"
+    remote.mkdir()
+
+    def unused_distribution(_inputs) -> RecipeDistribution:
+        raise AssertionError("Quota subtask does not read the distribution")
+
+    distribution = Resource(
+        title="Distribution", acquire=unused_distribution, release=lambda *_args: None
+    )
+    # Execute the shipped remote command and receipt-copy boundary in a separate
+    # owned directory, with real HTTP responses and exclusive receipt creation.
+    task = NativeKubernetesLifecycleTask(
+        distribution,
+        namespace="owned",
+        function=PlatformFunction("owned-fn", "fixed:tag", "{}", ("true",)),
+        endpoint=url,
+        executor=LocalCommandTaskExecutor(),
+        role="host",
+        run_dir=host,
+        function_component=("word-stats", "java"),
+        remote_root=PurePosixPath(str(remote)),
+    )
+    inputs = TaskInputs.empty()
+    _native_attempt_directory(host)
+    state["mode"] = "queue"
+    with pytest.raises(RuntimeError):
+        task._quota(inputs, url)
+    previous = json.loads((host / "native/quota.json").read_text())
+    assert any("queue_full" in row["body"] for row in previous["responses"])
+
+    _native_attempt_directory(host)
+    state["mode"] = "quota"
+    task._quota(inputs, url)
+    current = json.loads((host / "native/quota.json").read_text())
+    assert len(current["responses"]) == 30
+    assert any(
+        "invocation_quota_exceeded" in row["body"] for row in current["responses"]
+    )
+    assert not any("queue_full" in row["body"] for row in current["responses"])
+    archived = list((host / "native-attempts").glob("*/quota.json"))
+    assert len(archived) == 1 and json.loads(archived[0].read_text()) == previous
