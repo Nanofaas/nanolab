@@ -30,7 +30,7 @@ callback bytes within an invocation. They do not decode the QR text.
 
 The workflow freezes tracked source and the selected scenario, builds one image
 at a time with the existing Bake planner, and uses a private Buildx builder,
-network and callback helper. It preserves each packaged entrypoint, verifies
+network and callback helper. It preserves each packaged entrypoint and command, verifies
 actual image/container IDs, and verifies ELF architecture and SHA-256 for Java
 native executables. No ports are published and no images are pushed. Its
 16 GiB/four-CPU builder limits are inspected on the actual builder container.

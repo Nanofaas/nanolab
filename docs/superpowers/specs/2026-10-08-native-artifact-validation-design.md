@@ -5,8 +5,10 @@ delivery (#53) is implemented, independently reviewed and qualified locally
 through installed native artifacts; its existing coverage gate remains failing.
 The CLI delivery is implemented and reviewed; its installed candidate passes,
 but shipped-source qualification awaits NanoFaaS Context reflection integration.
-The function/watchdog design is approved; its operational plan requires review
-before implementation.
+The function/watchdog delivery is implemented and reviewed. Installed ARM64
+WordStats smoke passes; full qualification is blocked by missing AWT libraries
+in the NanoFaaS Java QR native image. Original NanoLab coverage also remains
+below its unchanged gate. See the packaged-function execution evidence.
 
 ## Approved subdivision: three independent deliveries
 
