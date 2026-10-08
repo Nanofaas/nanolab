@@ -169,3 +169,21 @@ def test_late_delivery_is_in_final_snapshot():
         assert len(snapshot(base)["records"]) == 1
         request(base, "/v1/executions/one:complete", {"success": True})
         assert "duplicate callback: one" in snapshot(base)["violations"]
+
+
+def test_pending_body_visible_for_final_audit():
+    with capture(request_seconds=1) as base:
+        register(base)
+        with socket.create_connection(
+            ("127.0.0.1", int(base.rsplit(":", 1)[1]))
+        ) as sock:
+            sock.sendall(
+                b"POST /v1/executions/one:complete HTTP/1.1\r\n"
+                b"Host: capture\r\nContent-Length: 20\r\n\r\n{"
+            )
+            deadline = time.monotonic() + 0.5
+            while True:
+                observed = snapshot(base)
+                if observed["activeCallbacks"] or time.monotonic() >= deadline:
+                    break
+            assert observed["activeCallbacks"] == 1

@@ -42,6 +42,7 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
     lock = threading.Lock()
     expected, records, bodies, violations = {}, [], {}, []
     total = 0
+    active_callbacks = 0
     limit = int(settings["message_bytes"])
 
     def violation(message):
@@ -64,14 +65,18 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
                 with lock:
                     violation("inspection response byte bound reached")
                 status, body = 413, b'{"error":"response bound"}'
-            self.send_response(status)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header(
-                "Content-Type",
-                "application/octet-stream" if raw else "application/json",
-            )
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header(
+                    "Content-Type",
+                    "application/octet-stream" if raw else "application/json",
+                )
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                with lock:
+                    violation("capture response transport failure")
 
         def do_GET(self):
             if self.path == "/health":
@@ -82,6 +87,7 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
                         "records": list(records),
                         "violations": list(violations),
                         "bytes": total,
+                        "activeCallbacks": active_callbacks,
                     }
                 self.reply(200, value)
             elif re.fullmatch(r"/_nanolab/body/[1-9][0-9]*", self.path):
@@ -156,6 +162,11 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
             return error is None and execution_id is not None
 
         def do_POST(self):
+            nonlocal active_callbacks
+            callback_request = self.path != "/_nanolab/register"
+            if callback_request:
+                with lock:
+                    active_callbacks += 1
             try:
                 raw, oversized = self.read_body()
                 if self.path == "/_nanolab/register":
@@ -203,6 +214,10 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
                     408 if isinstance(failure, (TimeoutError, socket.timeout)) else 400,
                     {"error": "invalid request"},
                 )
+            finally:
+                if callback_request:
+                    with lock:
+                        active_callbacks -= 1
 
     server = http.server.ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
