@@ -13,11 +13,17 @@ import tarfile
 import tempfile
 import textwrap
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from sonata_tasks.archive import (
+    SOURCE_ARCHIVE_EXTRACT_SCRIPT as _EXTRACT_ARCHIVE_SCRIPT,
+)
+from sonata_tasks.archive import stage_source_archive as _stage_source_archive
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.transfer import RemoteOperationResult
 
 from nanolab.images.plan import ImagePlan
 from nanolab.release import arm
@@ -41,18 +47,6 @@ _RUST_TOOLCHAIN = (
     "rust:1.97.1-alpine3.21@"
     "sha256:e5c73e7a712b368eb90b1190c6e1c4a01a3ebb0fe0abfff68c3bcd2df26ecc41"
 )
-
-# Use the same safe extraction and directory modes on the planning host and VM.
-_EXTRACT_ARCHIVE_SCRIPT = """
-import sys, tarfile
-from pathlib import Path
-archive, output = Path(sys.argv[1]), Path(sys.argv[2])
-with tarfile.open(archive) as bundle:
-    bundle.extractall(output, filter="data")
-for path in output.rglob("*"):
-    if path.is_dir() and not path.is_symlink():
-        path.chmod(0o755)
-"""
 
 _SHA256_PREFIX = "sha256:"
 
@@ -484,6 +478,39 @@ def create_source_archive(
     return ArtifactEvidence("local", str(output), digest_path(output))
 
 
+@dataclass(frozen=True)
+class _ArchiveProvider:
+    """Keep release connection retries while supplying Sonata's existing port."""
+
+    provider: object
+
+    def exec_argv(
+        self, request: object, argv: tuple[str, ...]
+    ) -> RemoteOperationResult:
+        return cast(
+            RemoteOperationResult,
+            retry_on_connection_death(
+                lambda: self.provider.exec_argv(  # type: ignore[attr-defined]
+                    request, argv, env=None, remote_dir=None, dry_run=False
+                ),
+                describe="remote command",
+            ),
+        )
+
+    def transfer_to(
+        self, request: object, *, source: Path, destination: str
+    ) -> RemoteOperationResult:
+        return cast(
+            RemoteOperationResult,
+            retry_on_connection_death(
+                lambda: self.provider.transfer_to(  # type: ignore[attr-defined]
+                    request, source=source, destination=destination
+                ),
+                describe=f"transfer {source.name}",
+            ),
+        )
+
+
 def stage_source_archive(
     provider: object,
     request: object,
@@ -493,32 +520,14 @@ def stage_source_archive(
     remote_source_dir: str,
     expected_digest: str | None = None,
 ) -> None:
-    """Upload the source archive to a VM and unpack it at `remote_source_dir`.
-
-    The remote file's checksum must match the local digest before it is
-    unpacked, so a truncated transfer or a stale archive is never staged.
-    """
-    local_digest = digest_path(archive)
-    if expected_digest is not None and local_digest != expected_digest:
-        raise RuntimeError("source-tests evidence changed before consumption")
-    _provider_exec(provider, request, ("rm", "-rf", "--", remote_source_dir))
-    _provider_exec(provider, request, ("mkdir", "-p", remote_source_dir))
-    _provider_transfer_to(
-        provider,
+    """Stage the guarded release archive through Sonata's verified transfer."""
+    _stage_source_archive(
+        _ArchiveProvider(provider),
         request,
-        source=archive,
-        destination=remote_archive,
-        action="source archive transfer",
-    )
-    checksum = _provider_exec(provider, request, ("sha256sum", remote_archive))
-    actual = str(getattr(checksum, "stdout", "")).split(maxsplit=1)[0]
-    expected = (expected_digest or local_digest).removeprefix(_SHA256_PREFIX)
-    if actual != expected:
-        raise RuntimeError("source archive checksum mismatch")
-    _provider_exec(
-        provider,
-        request,
-        ("python3", "-c", _EXTRACT_ARCHIVE_SCRIPT, remote_archive, remote_source_dir),
+        archive=archive,
+        remote_archive=remote_archive,
+        remote_source_dir=remote_source_dir,
+        expected_digest=expected_digest,
     )
 
 

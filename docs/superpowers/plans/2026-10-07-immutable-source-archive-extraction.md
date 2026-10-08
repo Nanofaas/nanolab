@@ -1,0 +1,134 @@
+# Immutable source archive extraction implementation plan (#61, eighth slice)
+
+> **For agentic workers:** Use superpowers:executing-plans inline; one fresh whole-slice reviewer, no per-task agents. Steps use checkbox syntax.
+
+**Goal:** Reuse a frozen source archive with its expected digest across targets, safely extract it and report cleanup failures, through Sonata's existing archive module.
+
+**Architecture:** Add ordinary `stage_source_archive` and `remove_source_archive` helpers using unchanged RemoteProvider. Extend `source_archive_resource` with frozen-archive and strict-cleanup opt-ins; preserve existing commit-export/default cleanup behavior. NanoLab keeps its guarded Git export, receipts, remote path policy and resource dependencies; a thin adapter retains release connection retries.
+
+**Tech Stack:** Python >=3.12, stdlib hashlib/tarfile, existing Resource/RemoteProvider/best_effort, uv/pytest/type/import/wheel checks. No new dependency or engine API.
+
+**Spec:** ../specs/2026-10-06-sonata-extraction-assessment.md, individually assessed immutable-archive candidate.
+
+## Global Constraints
+
+- Bases: Sonata 3471f82, NanoLab 92a5230; coherent public pair 0.6.12. Isolated worktrees under /tmp; untouched source contract pin /tmp/nanolab-61-pinned at e7914be. No operator/cloud actions.
+- Public `stage_source_archive[RequestT](provider: RemoteProvider[RequestT], request: RequestT, *, archive: Path, remote_archive: str, remote_source_dir: str, expected_digest: str | None = None) -> None` validates bytes against expected SHA-256 before remote changes, replaces the owned destination, transfers, checks remote SHA-256 and extracts using Python's data filter. Direct helper callers own normal release; failed remote acquisition compensates both paths.
+- Public `remove_source_archive[RequestT](provider: RemoteProvider[RequestT], request: RequestT, *, remote_archive: str, remote_source_dir: str) -> None` strictly checks rm's status. Both helpers require caller-owned, canonical absolute nonroot paths, disjoint archive/source; validate before deletion. Target Python >=3.12, mkdir/rm/sha256sum required; directory modes normalized to0755 after safe extraction, file executable bits retained.
+- Extended `source_archive_resource`: optional repo_root/commit defaultNone, `archive: Path | None = None`, `expected_digest: str | None = None`, `strict_cleanup: bool = False`. Export mode still requires repo_root+commit, exports per acquire, tar extraction, old best-effort release. Frozen mode requires expected_digest, never exports/mutates local archive, uses safe staging; strict_cleanup removes both remote paths and propagates failures; frozen resources always_release.
+- SHA-256 accepts exactly64 hex characters or sha256: prefix, normalizes case; invalid expected values fail before remote operations. All new shared command/transfer boundaries reject missing/bool/noninteger status; empty/malformed checksum fails explicitly before extraction.
+- Failure compensation preserves original operational error/interrupt and notes operational cleanup failure through existing best_effort. Programming errors retain the existing best_effort behavior. Trusted providers and caller-owned remote parent namespaces; no protection against malicious providers, concurrent writers/hostile target namespaces or forced death.
+- NanoLab keeps create_source_archive's before/after clean commit guards, retained receipt copying and digest checks, source path policy, recipe staging, retries and Resource requires/always_release. Local extraction reuses the shared data-filter script; no generic Git guard or receipt model.
+- Check0.6.13 unused, prepare coherent shared versions, build and trial explicit local wheels only. Keep consumer public pins and registry lock0.6.12 until later postmerge authorization. Deliver shared PR and local NanoLab trial.
+- Preserve coverage gates. Run full NanoLab suite outside sandbox (known sandbox asyncio thread hang), explicit branch config and isolated source pin; report existing86.18%/90% debt separately. Use direct venv commands/UV_NO_SYNC=1 during wheel trial.
+
+## Review Focus
+
+- Changed local bytes or malformed expected checksums must fail before destructive remote operations; shared frozen reuse must not silently re-export or replace expected evidence.
+- Unsafe/overlapping remote paths and option-like operands must never authorize removal of an unowned ancestor or cause archive deletion before consumption.
+- Partial transfer, malformed/empty remote checksum, failed extraction and interrupts must compensate both owned remote paths, preserving primary failures and reporting operational cleanup failures.
+- Tar traversal, symlink escape and executable/directory modes must respect the data filter on both local planning extraction and remote staging; caller-owned parent namespaces remain explicit.
+- Base-only wheel consumers must stage/reuse ordinary application archives without optional SDKs; NanoLab must retain clean-source guards, connection retries, two-VM frozen reuse and strict resource cleanup.
+
+## Task 1: Shared frozen archive staging
+
+**Files:** Sonata packages/sonata-tasks/src/sonata_tasks/archive.py, tests/test_archive_frozen.py, existing tests/test_archive.py, README, root/tasks pyproject.toml and uv.lock.
+
+**Interfaces:** Produce the two ordinary helpers and resource opt-ins above with unchanged RemoteProvider. Export the safe extraction script for callers requiring identical local extraction behavior.
+
+- [x] Baseline Sonata archive/transfer tests and NanoLab release build/resources at pinned source. Expected: functional pass.
+- [x] Write failing real-target shared tests for frozen two-target reuse/local mutation; preflight path/digest rejection; safe extraction traversal/symlinks/modes; partial acquisition, malformed results, checksum failure, interrupts and cleanup notes; strict/default resource release. Expected: missing APIs/opt-ins fail.
+- [x] Implement minimal helpers with shared existing command/transfer checks; retain old export/default path. Run focused old/new tests. Expected: GREEN, unchanged default behavior.
+- [x] Check unused0.6.13, coordinate version/lock, document ordinary usage/ownership/target requirements. Run full catalogue and engine at original gates, hooks, builds and six wheel configurations. Expected: all original shared gates pass.
+- [x] Run a base-only installed ordinary archive consumer against actual local target commands for success, two-target reuse and failed transfer cleanup. Commit shared change. Expected: no optional integration or NanoLab import required.
+
+## Task 2: NanoLab source adapter and trial
+
+**Files:** NanoLab release/build.py, release/resources.py, tests/release/test_build.py, tests/release/test_resources.py, assessment and this plan.
+
+**Interfaces:** Consume shared helpers through `_ArchiveProvider`, preserving existing retry_on_connection_death and richer execution options; product wrappers keep existing names and expected digest/error adaptation as necessary.
+
+- [x] Add RED regressions for observed malformed transfer/command status acceptance and empty checksum handling; keep frozen/resource policy tests. Expected: old code incorrectly accepts statuses or raises IndexError.
+- [x] Explicitly install built0.6.13 pair in consumer venv, delegate remote staging/strict cleanup and shared extraction script; remove duplicate mechanics. Update assertions only where ownership moves or acquisition compensation changes. Run release tests. Expected: GREEN, three public pins/lock still0.6.12.
+- [x] Run full NanoLab with original branch config/source pin, toolkit, hooks, builds and fresh installed CLI/assets smoke. Expected: functional pass; coverage debt reported unchanged.
+- [x] Commit consumer trial; one fresh whole-slice review of both branches and rulings. Regrade, fix Critical/Important in one RED→GREEN pass with affected suites; ledger deferred minors and declined judgments. Expected: no unresolved Critical/Important findings.
+- [x] Push Sonata feature branch and open shared PR. Keep NanoLab trial local, publication and public adoption pending later user authorization.
+
+## Decisions and evidence
+
+- Ruling: Extend the existing archive module with ordinary staging/removal and opt-in frozen Resource reuse — these are independently useful archive integrity/lifetime contracts — cost if wrong: two helpers and three resource options become public API to maintain.
+- Ruling: Keep guarded export, receipts, retry policy and release resource graph in NanoLab — these encode product planning/evidence and target behavior — cost if wrong: small product wrappers and adapters remain.
+- Ruling: Use Python data-filter extraction for frozen archives and preserve existing tar/default resource behavior — retain safety and directory-mode semantics without changing existing consumers — cost if wrong: frozen targets require Python >=3.12 and two extraction modes remain supported.
+- Ruling: Treat remote destinations and parent namespaces as caller-owned and validate canonical nonoverlapping absolute paths — no generic API can infer remote ownership, but accidental ancestor/option deletion must fail closed — cost if wrong: callers must reserve exclusive remote paths and coordinate writers.
+- Pre-flight: Task1's stage/remove signatures match Task2's wrapper inputs; optional prefixed digest matches ArtifactEvidence.digest. Product resource dependency/always_release remains unchanged. Trial uses built wheels without public pin edits.
+
+Verification before final review: NanoLab3480 functional cases/302.31s, original branch coverage86.18%/90% (exit1 solely coverage debt); toolkit51/93.71%, hooks, build and fresh installed CLI/assets plus guarded two-VM receipt/cleanup smoke pass. Public pins/lock remain0.6.12.
+
+## Execution record before review
+
+Shared range3471f82..f3fd605 (two commits); NanoLab trial53b2722. Final catalogue726/92.11%, engine227/96.17%; six wheel modes, hooks, verified distributions and base-only ordinary Python3.12 target proof pass. Final local wheels reinstalled explicitly: consumer45 focused cases and installed two-VM receipt/cleanup proof pass. Full consumer3480/86.18% gate debt as reported above.
+
+Task2: Ruling: Only integer nonboolean -1 is a connection-death sentinel — existing int coercion raises TypeError before shared status validation and retries string -1; leave malformed statuses to the operation boundary — cost if wrong: providers returning string or float sentinel must return integer -1 for retries. RED3 retry cases plus4 staging regressions verified.
+Task1 follow-up Ruling: Reject expected_digest in Git-export mode — silently ignoring an explicitly supplied integrity condition is ambiguous; its evidence belongs to frozen archive mode — cost if wrong: mixed-mode callers must supply archive or omit expected_digest. RED test_export_mode_rejects_unused_expected_digest observed.
+Task2 Ruling: Leave existing standalone NanoLab branch coverage debt unchanged — functional3480 cases pass at the original config/gate, unrelated coverage repair would expand this slice — cost if wrong: the standalone90% gate remains unsatisfied at86.18%.
+
+## Independent final review and decisions
+
+One fresh gpt-6-astra/high whole-slice review: no Critical, one Important in the consumer outer compensation, one Minor. The Important is reproduced by changed/missing retained archives (both RED), corrected by delegating failed acquisition to Sonata, and both GREEN; final affected suite3482 functional cases passes in297.30s with the original86.18%/90% coverage debt. Final hooks/build/fresh installed preflight-preservation and assets proof pass. No second reviewer. The Minor is deferred.
+
+Final: Ruling: Revise the product outer-compensation decision and remove that wrapper — Sonata owns the acquisition boundary and local preflight must leave prior remote contents untouched — cost if wrong: pre-existing remote remnants survive a rejected preflight until an explicit release/recovery.
+Final: minor (deferred): Canonical remote paths containing backslash/newline may cause a false checksum mismatch because GNU sha256sum's escape marker is not parsed; staging compensates safely, and NanoLab's reserved source.tar paths are unaffected.
+Final: Ruling: Preserve existing Git-export tar extraction/checksum/partial-failure semantics — default compatibility was explicit and the frozen path is separately safe — cost if wrong: existing export-mode limitations persist and require trusted Git sources.
+Final: Ruling: Preserve trusted-provider, reserved parent namespace and caller-coordinated writer assumptions — this slice validates ordinary results and paths, not malicious actors or uncoordinated mutations — cost if wrong: hostile providers/namespaces and concurrent writers need a separate ownership/threat model.
+Final: Ruling: Do not promise recovery after forced termination or permanent target loss — normal failures attempt cleanup and expose unsuccessful cleanup, while lost targets need external recovery — cost if wrong: residual remote files require operator recovery.
+Final: Ruling: Preserve existing best_effort programming-error semantics — cleanup OSError/RuntimeError is noted, but programming errors propagate rather than being hidden — cost if wrong: a cleanup programming error can replace the primary exception type.
+Final: Ruling: Do not add extraction quotas — caller-owned trusted archives and integrity/lifetime are this slice's contract — cost if wrong: unusually large archives can exhaust target storage or other resources.
+Final: Ruling: Leave documented consumer coverage debt outside this extraction — original gate remains unchanged and complete functional cases pass — cost if wrong: standalone90% gate remains unmet at the measured baseline.
+Final: Ruling: Keep ordinary public0.6.12 consumer installation outside this local0.6.13 trial — public pins cannot move before a coherent authorized publication — cost if wrong: the current trial cannot be shipped with its existing public pins.
+Final: Ruling: Keep publication, cloud operations and other extraction candidates outside this review — the authorized deliverable is a shared PR and local consumer trial — cost if wrong: those operations/candidates still need their separate validated step.
+
+Final: fixed Important outer compensation after preflight rejection — test_source_resource_preflight_failure_preserves_remote_contents[changed/missing] RED2→GREEN2; affected full NanoLab3482/3482 functional cases in297.30s, original branch coverage86.18%/90% (known gate debt). Final hooks and rebuilt installed preflight/receipt/cleanup plus assets smoke pass.
+
+No unresolved Critical/Important findings. Shared code unchanged by the consumer fix; final shared gates/distributions remain verified. Minor checksum escaping remains deferred.
+
+
+## Delivery
+
+[Sonata PR23](https://github.com/Nanofaas/sonata/pull/23) is open against main,
+branch feat/immutable-source-archive at f3fd605. Both push and PR CI runs complete
+successfully (9/9 each,18/18 checks). The shared pair0.6.13 is prepared and not
+published by this slice. NanoLab trial branch feat/61-immutable-source-archive
+keeps its public pins/registry lock0.6.12 unchanged. Main remains clean at92a5230.
+
+Final consumer fix691ef9b is verified by3482 functional cases/297.30s, the original
+branch gate still86.18%/90%, all hooks, built source-byte match, fresh installed
+preflight-preservation/retained-receipt/two-VM cleanup and CLI/assets proofs.
+No Critical/Important remains after the single TDD fix pass. All16 rulings and
+the one deferred Minor are preserved above; only this plan's scratch workspace
+is removed. Worktrees and both branches remain available for merge/publication.
+
+
+## Authorized publication and public adoption
+
+After explicit user authorization, annotated v0.6.13 targets tested merge1ad57f2
+(Sonata PR23, merge CI9/9; tree identical to f3fd605). Release37649312085 succeeds
+engine-first/tasks-second. All four PyPI artifacts match index hashes/sizes and
+all runtime source bytes from the tested merge. Ordinary base-only public
+installation on Python3.12 passes two-target frozen reuse and partial-transfer
+cleanup without optional SDKs.
+
+The three consumer pins and normal registry lock now use0.6.13. Locked sync
+removes local wheel provenance; both installed shared distributions have no
+direct_url record and all installed module bytes match the verified PyPI wheels.
+Unrelated dependencies remain unchanged. Public consumer verification completes
+before commit/push/PR delivery: all 3482 NanoLab cases pass in 297.33s with the
+original branch coverage configuration and isolated NanoFaaS source pin
+e7914be065e844776af57fe9e449bce7f12e03c5. Coverage remains 86.18% against the
+unchanged 90% gate, so that command exits 1 solely for the existing coverage debt.
+Toolkit passes 51 cases with 93.71% coverage against its original 80% gate.
+All 16 hooks, normal locked sync, dependency compatibility, wheel/sdist builds,
+fresh installed CLI/assets, two-VM frozen reuse, retained receipts, strict
+cleanup and preservation of existing remote contents at preflight pass using
+the published dependencies. The16 review
+rulings and deferred GNU checksum-escaping Minor remain as previously reported;
+publication/adoption requires no new behavior or additional review decision.
