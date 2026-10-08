@@ -52,7 +52,7 @@ MODULES = ("k8s-deployment-provider", "build-metadata", "runtime-config")
 
 
 def test_cli_deadline_works_through_the_product_host_adapter(tmp_path):
-    from types import SimpleNamespace
+    from dataclasses import dataclass
 
     from sonata_tasks.command import CommandTask
     from sonata_tasks.execution.adapters import HostCommandTaskExecutor
@@ -60,13 +60,19 @@ def test_cli_deadline_works_through_the_product_host_adapter(tmp_path):
 
     from nanolab.tasks.validation.cli_parity import _EvidenceExecutor
 
+    @dataclass(frozen=True)
+    class HostResult:
+        return_code: int
+        stdout: str
+        stderr: str
+
     class HostRunner:
-        def run(self, argv, *, cwd, env, dry_run):
+        def run(self, argv, /, *, cwd, env, dry_run):
             assert argv[:3] == ["timeout", "--kill-after=5s", "45s"]
             result = subprocess.run(
                 argv, cwd=cwd, capture_output=True, text=True, check=True
             )
-            return SimpleNamespace(
+            return HostResult(
                 return_code=result.returncode,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -79,7 +85,8 @@ def test_cli_deadline_works_through_the_product_host_adapter(tmp_path):
             executor=_EvidenceExecutor(HostCommandTaskExecutor(HostRunner()), stream),
             options=CommandOptions(timeout_seconds=45),
         )
-        assert task.run(TaskInputs({}, frozenset())).value.stdout == "ready"
+        result = task.run(TaskInputs({}, frozenset())).value
+        assert result is not None and result.stdout == "ready"
 
 
 class PlatformBoundary:
