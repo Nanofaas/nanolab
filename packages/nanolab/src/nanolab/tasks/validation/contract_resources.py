@@ -431,6 +431,10 @@ def contract_images_resource(
                 or _owned_labels(observed, "image").get(OWNER_LABEL) != tag
             ):
                 raise RuntimeError("built contract image identity disagrees")
+            write_receipt(
+                run_dir / "identity-bindings" / receipt.name,
+                {"identity": observed["Id"]},
+            )
             entrypoint = tuple(observed.get("Config", {}).get("Entrypoint") or ())
             if not entrypoint:
                 raise RuntimeError("contract image has no entrypoint")

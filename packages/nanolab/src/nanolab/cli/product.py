@@ -15,7 +15,7 @@ from contextlib import ExitStack, nullcontext, suppress
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 from uuid import uuid4
 
 import typer
@@ -139,6 +139,14 @@ def _print_offload_summary(run_dir: Path) -> None:
         )
 
 
+class _WorkflowArguments(TypedDict, total=False):
+    scenario_path: Path | None
+
+
+class _ComparisonArguments(TypedDict, total=False):
+    prepared_comparison: PreparedComparison
+
+
 def _workflow(
     scenario: ScenarioConfig,
     environment: EnvironmentConfig,
@@ -148,6 +156,7 @@ def _workflow(
     run_dir: Path | None = None,
     dry_run: bool = False,
     prepared_comparison: PreparedComparison | None = None,
+    scenario_path: Path | None = None,
 ):
     paths = default_tool_paths()
     if (
@@ -189,6 +198,19 @@ def _workflow(
             environment,
             repo_root=paths.nanofaas_root,
             remote_project_root=remote_project_root,
+        )
+    if scenario.workflow == "contract":
+        from nanolab.plans.contract import build_contract_plan
+
+        if scenario_path is None:
+            raise ValueError("contract requires the resolved scenario path")
+        return build_contract_plan(
+            scenario,
+            bindings,
+            repo_root=paths.nanofaas_root,
+            environment=environment,
+            run_dir=run_dir or paths.runs_dir / "contract-preview",
+            scenario_path=scenario_path,
         )
     if scenario.workflow == "soak":
         from nanolab.plans.soak import build_soak_plan
@@ -411,6 +433,46 @@ def _require_cli_endpoint(
         )
 
 
+def _validate_contract_options(
+    scenario: ScenarioConfig,
+    environment: EnvironmentConfig,
+    *,
+    keep: bool = False,
+    resume: bool = False,
+    teardown: bool = False,
+    only: str | None = None,
+    start: str | None = None,
+    until: str | None = None,
+    control_plane_url: str | None = None,
+    prometheus_url: str | None = None,
+    release_config: Path | None = None,
+) -> None:
+    if scenario.workflow != "contract":
+        return
+    if environment.provider != "local":
+        raise typer.BadParameter("contract requires a local environment")
+    if (
+        keep
+        or resume
+        or teardown
+        or any(
+            value is not None
+            for value in (
+                only,
+                start,
+                until,
+                control_plane_url,
+                prometheus_url,
+                release_config,
+            )
+        )
+    ):
+        raise typer.BadParameter(
+            "contract requires its complete owned lifecycle; keep, resume, teardown, "
+            "partial selection, external endpoints and release settings are unsupported"
+        )
+
+
 def _validate_cli_container_options(
     scenario: ScenarioConfig,
     environment: EnvironmentConfig,
@@ -480,6 +542,8 @@ def _write_run_metadata(
 def _default_run_dir(
     run_dir: Path | None, workflow: str, runs_dir: Path, *, recipe: bool = False
 ) -> Path | None:
+    if run_dir is None and workflow == "contract":
+        return runs_dir / f"contract-{uuid4().hex}"
     if run_dir is None and workflow == "soak":
         return unique_soak_run_dir(runs_dir)
     if run_dir is None and workflow == "heap-analysis":
@@ -643,6 +707,7 @@ def _build_run_workflow(
     prometheus_url: str | None,
     effective_run_dir: Path | None,
     prepared_comparison: PreparedComparison | None = None,
+    scenario_path: Path | None = None,
 ) -> SonataWorkflow:
     if release_request is not None:
         return build_release_workflow(release_request, provider=release_provider)
@@ -666,6 +731,14 @@ def _build_run_workflow(
             control_plane_url=control_plane_url,
             prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
             run_dir=effective_run_dir,
+            **cast(
+                _WorkflowArguments,
+                (
+                    {"scenario_path": scenario_path}
+                    if scenario_config.workflow == "contract"
+                    else {}
+                ),
+            ),
         ),
     )
 
@@ -736,7 +809,7 @@ def _execute_workflow(
         require_recipe_environment(scenario_config, environment_config)
         provisioning = (
             _provisioning_context(scenario_config, environment_config, paths, keep)
-            if provision
+            if provision and scenario_config.workflow != "contract"
             else nullcontext()
         )
         with provisioning, ExitStack() as forwarding:
@@ -756,10 +829,21 @@ def _execute_workflow(
                 control_plane_url=control_plane_url,
                 prometheus_url=prometheus_url,
                 effective_run_dir=effective_run_dir,
-                **(
-                    {"prepared_comparison": prepared_comparison}
-                    if prepared_comparison is not None
-                    else {}
+                **cast(
+                    _WorkflowArguments,
+                    (
+                        {"scenario_path": scenario}
+                        if scenario_config.workflow == "contract"
+                        else {}
+                    ),
+                ),
+                **cast(
+                    _ComparisonArguments,
+                    (
+                        {"prepared_comparison": prepared_comparison}
+                        if prepared_comparison is not None
+                        else {}
+                    ),
                 ),
             )
             sonata_workflow.keep = keep
@@ -775,6 +859,21 @@ def _execute_workflow(
                     selection=selection,
                     observers=observers,
                 )
+                if scenario_config.workflow == "contract":
+                    from sonata_tasks.execution.bindings import (
+                        RoleBoundCommandTaskExecutor,
+                    )
+
+                    from nanolab.plans.contract import finalize_contract_run
+
+                    if effective_run_dir is None:
+                        raise ValueError("contract requires a fresh run directory")
+                    bindings, _ = build_role_bindings(environment_config)
+                    marker = finalize_contract_run(
+                        effective_run_dir,
+                        executor=RoleBoundCommandTaskExecutor(bindings),
+                    )
+                    typer.echo(f"qualified contracts: {marker}")
                 if (
                     scenario_config.workflow == "validate"
                     and scenario_config.backend in {"k8s", "containerd"}
@@ -952,6 +1051,19 @@ def install_product_commands(
                     )
         except ValueError as error:
             raise typer.BadParameter(str(error)) from None
+        _validate_contract_options(
+            scenario_config,
+            environment_config,
+            keep=keep,
+            resume=resume,
+            teardown=teardown,
+            only=only,
+            start=start,
+            until=until,
+            control_plane_url=control_plane_url,
+            prometheus_url=prometheus_url,
+            release_config=release_config,
+        )
         release = scenario_config.workflow == "release"
         if scenario_config.workflow == "soak":
             try:
@@ -1070,7 +1182,7 @@ def install_product_commands(
             recipe=scenario_config.recipe_profile is not None,
         )
         if (
-            scenario_config.workflow in ("soak", "heap-analysis")
+            scenario_config.workflow in ("soak", "heap-analysis", "contract")
             and effective_run_dir is not None
         ):
             try:
@@ -1239,6 +1351,16 @@ def install_product_commands(
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        _validate_contract_options(
+            scenario_config,
+            environment_config,
+            only=only,
+            start=start,
+            until=until,
+            control_plane_url=control_plane_url,
+            prometheus_url=prometheus_url,
+            release_config=release_config,
+        )
         _validate_cli_container_options(scenario_config, environment_config)
         if scenario_config.workflow == "soak":
             try:
@@ -1314,6 +1436,14 @@ def install_product_commands(
                 prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
                 run_dir=run_dir,
                 dry_run=True,
+                **cast(
+                    _WorkflowArguments,
+                    (
+                        {"scenario_path": scenario}
+                        if scenario_config.workflow == "contract"
+                        else {}
+                    ),
+                ),
             ),
         )
         try:

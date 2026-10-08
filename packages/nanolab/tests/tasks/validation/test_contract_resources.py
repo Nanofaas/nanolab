@@ -435,3 +435,18 @@ def test_real_owned_executor_bounds(tmp_path, command, bound, failure_key):
     receipt = json.loads(next((tmp_path / "commands").glob("*.json")).read_text())
     assert receipt["result"][failure_key] is True
     assert receipt["result"]["reaped"] is True
+
+
+def test_built_image_identity_bound_before_release(frozen_fixture, tmp_path):
+    boundary = DockerBoundary()
+    resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
+    images = resource.acquire(inputs)
+    leases = list((tmp_path / "attempt" / "ownership").glob("image-*.json"))
+    assert len(leases) == 1
+    assert (
+        json.loads(
+            (tmp_path / "attempt" / "identity-bindings" / leases[0].name).read_text()
+        )["identity"]
+        == images[0].image_id
+    )
+    resource.release(inputs, images)

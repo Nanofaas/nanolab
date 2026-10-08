@@ -1,0 +1,20 @@
+workflow: contract
+backend: container
+build: docker
+functions:
+  - word-stats
+  - json-transform
+  - roman-numeral
+  - qr-code
+contract:
+  readiness_seconds: 60
+  request_seconds: 30
+  callback_seconds: 15
+  quiet_seconds: 2
+  message_bytes: 2097152
+  log_bytes: 8388608
+  capture_records: 1000
+  capture_bytes: 33554432
+  build_seconds: 2700
+  builder_memory_bytes: 17179869184
+  builder_cpu_quota: 400000
