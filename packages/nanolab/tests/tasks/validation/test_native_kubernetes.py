@@ -44,7 +44,7 @@ def native_api_server():
                     {"function": "fn", "replicas": 1}
                     if self.command == "PUT"
                     else {
-                        "function": "fn",
+                        "name": "fn",
                         "desiredReplicas": 1,
                         "readyReplicas": 1,
                         "pods": [],
@@ -424,3 +424,129 @@ def test_native_failure_releases_only_the_resources_acquired_by_the_run(
     assert not (tmp_path / "native/qualified.json").exists()
     if fault != "api":
         assert calls.index("api") < calls.index("capacity") < calls.index("quota")
+
+
+@pytest.mark.parametrize(
+    "fault", [None, "pid", "pod", "cri", "node", "missing-threads"]
+)
+def test_runtime_probe_links_node_commands_to_the_owned_container(
+    tmp_path, monkeypatch, fault
+):
+    import base64
+    from copy import deepcopy
+
+    from sonata_engine import Resource
+    from sonata_tasks.minikube import MinikubeTarget
+
+    from nanolab.tasks.recipes.workflow import RecipeDistribution
+    from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
+
+    def unavailable(_inputs) -> RecipeDistribution:
+        raise AssertionError("Probe does not build a distribution")
+
+    distribution = Resource(
+        title="Distribution", acquire=unavailable, release=lambda *_args: None
+    )
+    selected = MinikubeTarget(
+        profile="owned-profile", context="owned-context", nodes=("owned-node",)
+    )
+    target = Resource(
+        title="Owned target",
+        acquire=lambda _inputs: selected,
+        release=lambda *_args: None,
+    )
+    pod = {
+        "metadata": {"uid": "owned-pod", "name": "cp"},
+        "spec": {
+            "nodeName": "owned-node",
+            "containers": [
+                {"name": "control-plane", "resources": {"limits": {"cpu": "1"}}}
+            ],
+        },
+        "status": {
+            "containerStatuses": [
+                {
+                    "name": "control-plane",
+                    "ready": True,
+                    "containerID": "containerd://" + "a" * 64,
+                }
+            ]
+        },
+    }
+    after = deepcopy(pod)
+    if fault == "pod":
+        after["metadata"]["uid"] = "replacement"
+    if fault == "node":
+        pod["spec"]["nodeName"] = "foreign-node"
+    seen = []
+
+    class Executor:
+        def binding_key(self, role):
+            return role
+
+        def run(self, task, *, dry_run=False):
+            seen.append(task)
+            if "CRI process" in task.summary:
+                pid = (
+                    403
+                    if fault == "pid" and task.summary.startswith("Recheck")
+                    else 402
+                )
+                data = {
+                    "status": {
+                        "id": "b" * 64 if fault == "cri" else "a" * 64,
+                        "state": "CONTAINER_RUNNING",
+                        "labels": {"io.kubernetes.pod.uid": "owned-pod"},
+                    },
+                    "info": {"pid": pid},
+                }
+                stdout = json.dumps(data)
+            elif "procfs" in task.summary:
+                command = base64.b64encode(
+                    b"/app/application\0-Dreactor.netty.ioWorkerCount=1\0"
+                ).decode()
+                stdout = (
+                    f"before\t10412\ncommand\t{command}\n"
+                    "thread\t403\treactor-http-ep\nafter\t10412\n"
+                )
+                if fault == "missing-threads":
+                    stdout = f"before\t10412\ncommand\t{command}\nafter\t10412\n"
+            elif "architecture" in task.summary:
+                stdout = '{"status":{"nodeInfo":{"architecture":"arm64"}}}'
+            else:
+                raise AssertionError(task.summary)
+            return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
+
+    task = NativeKubernetesLifecycleTask(
+        distribution,
+        namespace="owned-ns",
+        function=PlatformFunction("fn", "fixed:tag", "{}", ("true",)),
+        endpoint="http://unused",
+        executor=Executor(),
+        role="host",
+        run_dir=tmp_path,
+        function_component=("word-stats", "java"),
+        target=target,
+    )
+    monkeypatch.setattr(task, "_snapshot", lambda *_args: ({}, after))
+    (tmp_path / "native").mkdir()
+    inputs = TaskInputs._for_resources({target: selected}, {target})
+
+    def run():
+        task._probe(inputs, pod, "owned", logs_before="Started", logs_after="Started")
+
+    if fault:
+        with pytest.raises(RuntimeError):
+            run()
+    else:
+        run()
+        receipt = json.loads((tmp_path / "native/runtime.json").read_text())
+        assert receipt["before"]["pid"] == receipt["after"]["pid"] == 402
+        assert receipt["before"]["containerId"] == "containerd://" + "a" * 64
+        assert receipt["commandLine"][1] == "-Dreactor.netty.ioWorkerCount=1"
+        assert all(
+            spec.argv[:3] == ("timeout", "--kill-after=5s", "60s") for spec in seen
+        )
+        assert any(
+            "owned-profile" in spec.argv and "owned-node" in spec.argv for spec in seen
+        )

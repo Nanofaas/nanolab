@@ -201,7 +201,7 @@ def check_native_api(
         ).run(inputs)
         status = request("GET", f"functions/{name}/replicas", 200)
         if (
-            status.get("function") != name
+            status.get("name") != name
             or status.get("desiredReplicas") != 1
             or status.get("readyReplicas") != 1
         ):
