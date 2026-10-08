@@ -202,4 +202,7 @@ are not compared. CLI and SDK/watchdog contracts remain later deliveries.
 Recommended execution: I implement the tasks in this session, followed by one
 independent whole-branch review. The tasks share one lifecycle and execution
 interfaces; separate implementers would add handoffs without independent modules.
-Written plan review and execution-method selection are pending.
+The user approved execution on `fix/operational-validation`. Tasks 1–4 and the
+installed native lifecycle are implemented and verified. Final independent review
+and package verification are tracked in
+`2026-10-08-native-k8s-lifecycle-evidence.md`.

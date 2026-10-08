@@ -179,6 +179,7 @@ def test_retry_preserves_failed_native_evidence(tmp_path):
 
 def test_function_cleanup_uses_the_endpoint_reopened_after_rollout(native_api_server):
     from sonata_engine import Resource
+
     from nanolab.tasks.platform import PlatformRequest, _function_resource
 
     url, state = native_api_server
@@ -203,6 +204,7 @@ def test_function_cleanup_uses_the_endpoint_reopened_after_rollout(native_api_se
 
 def test_refresh_reuses_the_workflows_forward_resource_and_release(tmp_path):
     from sonata_engine import Resource
+
     from nanolab.tasks.recipes.workflow import RecipeDistribution
     from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
 

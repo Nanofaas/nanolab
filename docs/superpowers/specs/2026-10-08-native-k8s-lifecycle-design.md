@@ -2,7 +2,9 @@
 
 Status: the user approved splitting native validation into Kubernetes lifecycle,
 CLI parity, and packaged function/watchdog contracts. This first delivery's
-written design is approved; native implementation has not started.
+written design is approved. Implementation and local native qualification are
+complete; final independent review is in progress. See the execution evidence in
+`../plans/2026-10-08-native-k8s-lifecycle-evidence.md`.
 
 ## Outcome
 
