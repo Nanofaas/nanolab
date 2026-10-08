@@ -51,6 +51,37 @@ FN_IMAGE = RecipeImage(
 MODULES = ("k8s-deployment-provider", "build-metadata", "runtime-config")
 
 
+def test_cli_deadline_works_through_the_product_host_adapter(tmp_path):
+    from types import SimpleNamespace
+
+    from sonata_tasks.command import CommandTask
+    from sonata_tasks.execution.adapters import HostCommandTaskExecutor
+    from sonata_tasks.execution.models import CommandOptions
+
+    from nanolab.tasks.validation.cli_parity import _EvidenceExecutor
+
+    class HostRunner:
+        def run(self, argv, *, cwd, env, dry_run):
+            assert argv[:3] == ["timeout", "--kill-after=5s", "45s"]
+            result = subprocess.run(
+                argv, cwd=cwd, capture_output=True, text=True, check=True
+            )
+            return SimpleNamespace(
+                return_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+
+    with (tmp_path / "commands.jsonl").open("w") as stream:
+        task = CommandTask(
+            title="Bounded host command",
+            argv=("printf", "ready"),
+            executor=_EvidenceExecutor(HostCommandTaskExecutor(HostRunner()), stream),
+            options=CommandOptions(timeout_seconds=45),
+        )
+        assert task.run(TaskInputs({}, frozenset())).value.stdout == "ready"
+
+
 class PlatformBoundary:
     def __init__(self, fault=None, baseline=1000000):
         self.fault, self.rate, self.revision = fault, baseline, 0

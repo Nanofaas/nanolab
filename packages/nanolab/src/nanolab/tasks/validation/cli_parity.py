@@ -64,8 +64,13 @@ class _EvidenceExecutor:
         return self.executor.binding_key(role)
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        deadline = min(task.options.timeout_seconds or 60, 60)
         result = self.executor.run(
-            replace(task, argv=("timeout", "--kill-after=5s", "60s", *task.argv)),
+            replace(
+                task,
+                argv=("timeout", "--kill-after=5s", f"{deadline:g}s", *task.argv),
+                options=replace(task.options, timeout_seconds=None),
+            ),
             dry_run=dry_run,
         )
         limit = (
