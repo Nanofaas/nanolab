@@ -75,3 +75,34 @@ def test_invalid_procfs_values(text):
 
     with pytest.raises(ValueError, match="invalid procfs VmRSS"):
         parse_procfs_memory(text, None)
+
+
+@pytest.mark.parametrize("field", ["VmRSS", "Pss"])
+def test_procfs_duplicate_selected_value_never_becomes_a_sample(field):
+    from nanolab.tasks.soak.probes import parse_procfs_memory
+
+    text = f"{field}: 0 kB\n{field}: 0 kB\n"
+    with pytest.raises(ValueError, match=f"invalid procfs {field}"):
+        parse_procfs_memory(
+            text if field == "VmRSS" else None, text if field == "Pss" else None
+        )
+
+
+def test_procfs_zero_is_present_and_other_source_can_stay_missing():
+    from nanolab.tasks.soak.probes import parse_procfs_memory
+
+    assert parse_procfs_memory("VmRSS: 0 kB\n", None) == {
+        "process_rss_bytes": 0,
+        "process_pss_bytes": None,
+    }
+
+
+@pytest.mark.parametrize("source", ["status", "rollup"])
+def test_procfs_field_adapter_preserves_character_bound(source):
+    from nanolab.tasks.soak.probes import parse_procfs_memory
+
+    text = "#" * (1048576 + 1)
+    with pytest.raises(ValueError, match="measurement text limit exceeded"):
+        parse_procfs_memory(
+            text if source == "status" else None, text if source == "rollup" else None
+        )

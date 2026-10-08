@@ -248,3 +248,41 @@ def test_large_mapping_boundary(size_kb, qualifies):
     end = 0x10000000 + size_kb * 1024
     raw = f"10000000-{end:x} ---p 0 00:00 0\nSize: {size_kb} kB\nRss: 0 kB\nPss: 0 kB\n"
     assert parse_smaps(raw)["large_anonymous_mappings"]["count"] == int(qualifies)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        SMAPS.replace("Size:              65536 kB", "Size: 65536 kB\nSize: 65536 kB"),
+        SMAPS.replace("7f0000000000-7f0004000000", "7f0004000000-7f0000000000"),
+        SMAPS + "7f0030000000-invalid rw-p 0 00:00 0\n",
+    ],
+)
+def test_invalid_smaps_keeps_the_source_unavailable_without_summary(text):
+    block = summarize({"smaps": text, "errors": {}})["smaps"]
+    assert block["available"] is False
+    assert "error" in block
+    assert "mapping_details" not in block
+    assert "large_anonymous_mappings" not in block
+
+
+_COMPLETE_SMAPS = "1000-2000 rw-p 0 00:00 0\nSize: 4 kB\nRss: 2 kB\nPss: 1 kB\n"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _COMPLETE_SMAPS + "Size: 4 MB\n",
+        _COMPLETE_SMAPS + "Rss: -1 kB\n",
+        _COMPLETE_SMAPS.replace("rw-p", "pppp"),
+        _COMPLETE_SMAPS + "g000-3000 rw-p 0 00:00 0\n",
+        _COMPLETE_SMAPS + _COMPLETE_SMAPS,
+    ],
+)
+def test_corrupt_smaps_is_unavailable_instead_of_publishing_credible_totals(text):
+    block = summarize({"smaps": text, "errors": {}})["smaps"]
+    assert block["available"] is False
+    assert "error" in block
+    assert "anonymous" not in block
+    assert "mapping_details" not in block
+    assert "large_anonymous_mappings" not in block
