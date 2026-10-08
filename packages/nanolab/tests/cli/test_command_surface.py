@@ -111,6 +111,7 @@ def test_recipe_workflows_get_unique_default_run_directory(
     )
 
 
+@pytest.mark.nanofaas
 @pytest.mark.parametrize("command", ["plan", "run"])
 def test_recipe_cli_uses_its_owned_endpoint_at_product_entry(
     command, tmp_path, monkeypatch

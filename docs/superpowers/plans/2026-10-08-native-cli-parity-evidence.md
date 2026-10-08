@@ -98,6 +98,16 @@ remain pending, as does the separate function/watchdog delivery under #54.
 
 ## Verification
 
+- PR #76 CI subsequently found both owned-endpoint entrypoint regressions in the
+  pure-test phase: they require NanoFaaS source but lacked the existing `nanofaas`
+  marker. The failure was reproduced with empty `NANOFAAS_ROOT`; adding that
+  marker keeps the tests in the checkout-contract phase rather than skipping
+  their actual verification. The complete CI-shaped phases now pass: 3113 pure
+  tests / 17 skips and 635 checkout contracts. Targeted checks also passed both
+  commands with the pinned checkout and all 26 neighboring pure tests without it.
+  Logs: `/tmp/nanolab-functions54-design/ci-pure.log`, `ci-contracts.log` and
+  `hooks.log`. The combined CI report shows statement coverage; it does not
+  replace the original package branch-coverage result below.
 - Original CI-pinned NanoLab suite: 3748 passed, 3 intentional artifact-parser
   skips in 320.22s. Coverage 86.62%; exit 1 solely for the unchanged 90% gate.
   Coverage debt predates this lot (previous #53 result: 86.31%). The full CI
