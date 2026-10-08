@@ -1,7 +1,7 @@
 # Native CLI parity — second native delivery, issue #54
 
 Status: the user approved this written design. The implementation plan is
-`../plans/2026-10-08-native-cli-parity.md`, awaiting its review before execution
+`../plans/2026-10-08-native-cli-parity.md`, approved and executing
 on `fix/operational-validation`. This document is not live qualification.
 Kubernetes native lifecycle (#53) is already qualified separately; packaged
 function/watchdog contracts remain the third delivery.

@@ -28,7 +28,7 @@ qualification. The CLI delivery alone does not close #54. This subdivision is a
 scope decision, not qualification or approval of an unwritten implementation.
 The first delivery's design is [native Kubernetes lifecycle](2026-10-08-native-k8s-lifecycle-design.md).
 The second delivery's approved design is [native CLI parity](2026-10-08-native-cli-parity-design.md);
-its implementation plan is awaiting review before execution.
+its implementation plan is approved and executing on `fix/operational-validation`.
 
 ## Outcome and scope
 

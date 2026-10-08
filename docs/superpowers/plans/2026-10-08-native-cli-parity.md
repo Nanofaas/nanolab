@@ -267,24 +267,24 @@ Change `minikube_images_resource`'s `probe_image` to `Resource[str] | None = Non
 excluding absent probe references/dependencies. All existing #53 calls keep their
 probe argument. Use Task 1's resources and Task 3's gate without another engine.
 
-- [ ] Write `test_cli_runtime_and_recipe_guards_fail_before_commands` for invalid
+- [x] Write `test_cli_runtime_and_recipe_guards_fail_before_commands` for invalid
   runtime, non-CLI native/parity, no recipe with native/parity, non-k8s recipe,
   remote environment or supplied endpoint. Construct direct builders too; assert
   the executor saw no calls. Default legacy CLI graphs remain unchanged.
-- [ ] Write `test_recipe_cli_compiles_frozen_artifacts_and_owned_platform`:
+- [x] Write `test_recipe_cli_compiles_frozen_artifacts_and_owned_platform`:
   the plan has the exact selected artifact resources, validated recipe, selected
   target/pinned context, image import, unique namespace, Helm and forward, then
   the gate. It has no HTTP function registration, queue-probe or registry/push
   task. A build-only slice acquires the source/artifact, never cluster resources.
   Run RED for missing configuration/integration.
-- [ ] Implement validation and the dedicated recipe with modules
+- [x] Implement validation and the dedicated recipe with modules
   `k8s-deployment-provider`, `build-metadata`, `runtime-config`, JVM control-plane
   variant `recipe-v2-cli-k8s-jvm` and one Java JVM word-stats function.
   The bundled scenario selects `cliRuntime: parity`. Other runtime selections
   use the same path; validate the acquired distribution's modes/modules too.
   Pass `config.cli_runtime` explicitly to Task 3's gate, which independently
   checks its expected artifact modes.
-- [ ] At planning choose a fresh attempt token, without filesystem writes.
+- [x] At planning choose a fresh attempt token, without filesystem writes.
   Put frozen inputs and receipts under `run_dir/cli-attempts/<token>/`; use the
   token for unique image tags and namespace. Separate attempts therefore cannot
   share qualification receipts or import ownership. Build resources depend only
@@ -293,15 +293,15 @@ probe argument. Use Task 1's resources and Task 3's gate without another engine.
   endpoint/Helm factories directly. Call only their platform half, leaving
   function acquisition to the CLI. Set admin runtime-config enabled and use the
   frozen chart. All API resources remain alive through both passes and cleanup.
-- [ ] Record contract/parity proof inside the current attempt only after all
+- [x] Record contract/parity proof inside the current attempt only after all
   cases and continuity checks. Use the existing final run metadata to distinguish
   proof from overall success: cleanup failure leaves status failed. A slice that
   never ran the full gate has no qualification proof. Test duplicate/foreign
   namespace/image refusal, Resource-backed URL routing, normal cleanup and failure
   during acquisition/each pass/release. Preserve the optional-probe #53 path.
-- [ ] Run `.venv/bin/pytest packages/nanolab/tests/plans/test_cli.py packages/nanolab/tests/config/test_scenario.py packages/nanolab/tests/tasks/recipes/test_kubernetes.py packages/nanolab/tests/tasks/validation/test_cli_parity.py packages/nanolab/tests/cli/test_command_surface.py --no-cov`.
+- [x] Run `.venv/bin/pytest packages/nanolab/tests/plans/test_cli.py packages/nanolab/tests/config/test_scenario.py packages/nanolab/tests/tasks/recipes/test_kubernetes.py packages/nanolab/tests/tasks/validation/test_cli_parity.py packages/nanolab/tests/cli/test_command_surface.py --no-cov`.
   Expected: GREEN; `build_cli_plan` compilation has no external side effects.
-- [ ] Commit `feat: integrate recipe-backed CLI parity scenario`.
+- [x] Commit `feat: integrate recipe-backed CLI parity scenario`.
 
 ### Task 5: Installed qualification and final whole-branch review
 
