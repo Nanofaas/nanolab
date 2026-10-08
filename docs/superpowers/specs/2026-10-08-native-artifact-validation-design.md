@@ -1,7 +1,9 @@
 # Native artifact validation — issues #53 and #54
 
-Status: the user approved the three-delivery subdivision below. Each delivery
-has its own written design review; native implementation has not started.
+Status: the user approved the three-delivery subdivision below. The first
+delivery (#53) is implemented, independently reviewed and qualified locally
+through installed native artifacts; its existing coverage gate remains failing.
+The two #54 deliveries still require their own design and implementation.
 
 ## Approved subdivision: three independent deliveries
 
@@ -39,7 +41,7 @@ It introduces a callback-capture lifetime and an artifact contract workflow;
 those interfaces require design review before implementation. The first two
 fixes are independent and can be delivered without this workflow.
 
-## Existing behavior and evidence
+## Baseline behavior before the first delivery
 
 - `build_validate_plan` currently ignores `controlPlaneRuntime`; a native
   Kubernetes request compiles a `:control-plane:bootJar` build.

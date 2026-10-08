@@ -85,8 +85,9 @@ for outstanding functions against stopped, absent and restarted control planes.
 
 Explicit review exclusions and their disposition:
 
-- Native documents and implementation: remain pending user design review and
-  subsequent implementation, not qualified by this review.
+- Native documents and implementation: were pending at this earlier review,
+  not qualified by the first two fixes. The subsequent #53 delivery is recorded
+  in the separate native execution evidence below.
 - Real Docker, cloud and VM resources: not exercised. Live destructive operator
   cleanup is unnecessary for the bounded CLI fix; transport tests verify the
   failure and ownership behavior.
@@ -102,8 +103,8 @@ The separate [native artifact specification](../specs/2026-10-08-native-artifact
 was presented for user review; the user requested revision and approved a split
 into Kubernetes lifecycle, CLI parity and packaged function/watchdog deliveries
 now recorded in that document. The [first delivery's Kubernetes design](../specs/2026-10-08-native-k8s-lifecycle-design.md)
-is approved; its [implementation plan](2026-10-08-native-k8s-lifecycle.md) is ready
-for user review and execution-method selection. The callback-capture and
-contract workflow are not
-implemented or qualified by the first two fixes or their tests. Issues #53/#54
-remain pending that design and subsequent implementation/live evidence.
+and its [implementation plan](2026-10-08-native-k8s-lifecycle.md) were approved
+and executed on `fix/operational-validation`. The [native execution evidence](2026-10-08-native-k8s-lifecycle-evidence.md)
+records the installed #53 lifecycle, independent review and corrected findings.
+The callback-capture and contract workflow remain the two separate #54 deliveries;
+they are not qualified by the first two fixes or the #53 lifecycle.
