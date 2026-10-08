@@ -222,3 +222,196 @@ def test_quota_patch_is_conditional_on_the_acquired_deployment(replaced):
             },
         ]
         assert any("rollout" in argv for argv in executor.seen)
+
+
+@pytest.mark.parametrize("mode", ["jvm", "native"])
+def test_native_gate_reads_the_distribution_at_execution_time(tmp_path, mode):
+    from sonata_engine import Resource
+
+    from nanolab.tasks.recipes.workflow import (
+        RecipeComponent,
+        RecipeDistribution,
+        RecipeImage,
+    )
+    from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
+
+    report = RecipeDistribution(
+        tmp_path / "distribution.json",
+        "sha",
+        "tag",
+        None,
+        (),
+        (
+            RecipeComponent(
+                "control-plane",
+                "control-plane",
+                "java",
+                mode,
+                RecipeImage("cp:tag", "id", "built", None),
+                "variant",
+                None,
+            ),
+            RecipeComponent(
+                "function",
+                "word-stats",
+                "java",
+                "jvm",
+                RecipeImage("fn:qualified", "id", "built", None),
+                None,
+                None,
+            ),
+        ),
+    )
+    distribution = Resource(
+        title="Resolved at run time",
+        acquire=lambda _inputs: report,
+        release=lambda *_args: None,
+    )
+
+    class RejectCommands:
+        def binding_key(self, role):
+            return role
+
+        def run(self, task, *, dry_run=False):
+            raise AssertionError("JVM must not execute native diagnostics")
+
+    task = NativeKubernetesLifecycleTask(
+        distribution,
+        namespace="owned",
+        function=PlatformFunction("fn", "wrong-default:tag", "{}", ("true",)),
+        endpoint="http://unused",
+        executor=RejectCommands(),
+        role="host",
+        run_dir=tmp_path,
+        function_component=("word-stats", "java"),
+    )
+    inputs = TaskInputs._for_resources({distribution: report}, {distribution})
+    if mode == "jvm":
+        task.run(inputs)
+        assert not (tmp_path / "native").exists()
+    else:
+        with pytest.raises(RuntimeError, match=r"initial.*evidence"):
+            task.run(inputs)
+
+
+@pytest.mark.parametrize("fault", ["api", "quota", "probe"])
+def test_native_failure_releases_only_the_resources_acquired_by_the_run(
+    tmp_path, monkeypatch, fault
+):
+    from sonata_engine import Resource, TaskOutcome, Workflow
+
+    import nanolab.tasks.validation.native_kubernetes as native
+    from nanolab.tasks.recipes.workflow import (
+        RecipeComponent,
+        RecipeDistribution,
+        RecipeImage,
+    )
+
+    released = []
+    image = RecipeImage("qualified:tag", "id", "built", None)
+    report = RecipeDistribution(
+        tmp_path / "distribution.json",
+        "sha",
+        "tag",
+        None,
+        (),
+        (
+            RecipeComponent(
+                "control-plane",
+                "control-plane",
+                "java",
+                "native",
+                image,
+                "variant",
+                None,
+            ),
+            RecipeComponent("function", "word-stats", "java", "jvm", image, None, None),
+        ),
+    )
+    distribution = Resource(
+        title="Owned distribution",
+        acquire=lambda _inputs: report,
+        release=lambda *_args: released.append("distribution"),
+    )
+    namespace = Resource(
+        title="Owned namespace",
+        acquire=lambda _inputs: "owned",
+        release=lambda *_args: released.append("namespace"),
+    )
+    function_resource = Resource(
+        title="Owned function",
+        acquire=lambda _inputs: "fn",
+        release=lambda *_args: released.append("function"),
+    )
+    # Unacquired foreign resources never participate in compensation.
+    Resource(
+        title="Foreign namespace",
+        acquire=lambda _inputs: "foreign",
+        release=lambda *_args: released.append("foreign"),
+    )
+    (tmp_path / "k8s-image-control-plane-control-plane.json").write_text(
+        json.dumps({"deployment": {"metadata": {"uid": "owned"}}})
+    )
+    pod = {
+        "metadata": {"uid": "pod", "name": "owned-pod"},
+        "spec": {"nodeName": "node"},
+        "status": {
+            "containerStatuses": [
+                {
+                    "name": "control-plane",
+                    "ready": True,
+                    "containerID": "containerd://" + "a" * 64,
+                }
+            ]
+        },
+    }
+    deployment = {"metadata": {"uid": "owned", "name": "nanofaas-control-plane"}}
+    monkeypatch.setattr(
+        native.NativeKubernetesLifecycleTask,
+        "_snapshot",
+        lambda *_args: (deployment, pod),
+    )
+    monkeypatch.setattr(
+        native.NativeKubernetesLifecycleTask, "_logs", lambda *_args: "Started"
+    )
+    monkeypatch.setattr(
+        native.RecipeMetadataCheckTask, "run", lambda *_args: TaskOutcome()
+    )
+    monkeypatch.setattr(
+        native.RecipeKubernetesImageCheckTask, "run", lambda *_args: TaskOutcome()
+    )
+    calls = []
+
+    def gate(stage):
+        def invoke(*_args, **kwargs):
+            calls.append(stage)
+            if stage == "api":
+                assert kwargs["function"].image == "qualified:tag"
+            if stage == fault:
+                raise RuntimeError(f"injected {fault} failure")
+            return deployment
+
+        return invoke
+
+    monkeypatch.setattr(native, "check_native_api", gate("api"))
+    monkeypatch.setattr(native, "configure_native_quota", gate("capacity"))
+    monkeypatch.setattr(native.NativeKubernetesLifecycleTask, "_quota", gate("quota"))
+    monkeypatch.setattr(native.NativeKubernetesLifecycleTask, "_probe", gate("probe"))
+    task = native.NativeKubernetesLifecycleTask(
+        distribution,
+        namespace="owned",
+        function=PlatformFunction("fn", "mutable-default:tag", "{}", ("true",)),
+        endpoint="http://unused",
+        executor=LocalCommandTaskExecutor(),
+        role="host",
+        run_dir=tmp_path,
+        function_component=("word-stats", "java"),
+    )
+    workflow = Workflow(workflow_id="native-failure")
+    workflow.add(task, requires=(distribution, namespace, function_resource))
+    with pytest.raises(RuntimeError, match="injected"):
+        workflow.run()
+    assert set(released) == {"function", "namespace", "distribution"}
+    assert not (tmp_path / "native/qualified.json").exists()
+    if fault != "api":
+        assert calls.index("api") < calls.index("capacity") < calls.index("quota")

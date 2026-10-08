@@ -629,6 +629,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
             retry_backoff_assets=queue_burst_script.parent.parent / "diagnostics"
             if config.retry_backoff_burst
             else None,
+            native_assets=queue_burst_script.parent.parent / "diagnostics",
         )
         # Both settings are what this workflow exists to exercise: the JUnit queue
         # contracts need admission on, and the metric assertions need the advanced
