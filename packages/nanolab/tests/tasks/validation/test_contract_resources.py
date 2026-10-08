@@ -575,4 +575,21 @@ def test_native_bake_supplies_empty_maven_context(frozen_fixture, tmp_path):
     context = Path(targets[0]["contexts"]["containerd_maven_repo"])
     assert context.is_dir()
     assert not list(context.iterdir())
+    native_commands = [
+        command
+        for command in boundary.commands
+        if command["argv"][:3] == ["docker", "buildx", "bake"]
+        and "contexts"
+        in next(
+            iter(
+                json.loads(
+                    Path(
+                        command["argv"][command["argv"].index("--file") + 1]
+                    ).read_text()
+                )["target"].values()
+            )
+        )
+    ]
+    assert len(native_commands) == 1
+    assert f"--allow=fs.read={context}" in native_commands[0]["argv"]
     resource.release(inputs, images)

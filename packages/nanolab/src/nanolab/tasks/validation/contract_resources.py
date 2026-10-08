@@ -402,8 +402,8 @@ def contract_images_resource(
             bake = render_bake(single)
             target = next(iter(bake["target"].values()))
             target["labels"] = {OWNER_LABEL: tag}
+            empty_maven = run_dir / "empty-maven-context"
             if cell.native_build is not None:
-                empty_maven = run_dir / "empty-maven-context"
                 empty_maven.mkdir(exist_ok=True)
                 target["contexts"] = {"containerd_maven_repo": str(empty_maven)}
                 args = target["args"]
@@ -426,6 +426,11 @@ def contract_images_resource(
                     "--file",
                     str(bake_path),
                     "--load",
+                    *(
+                        (f"--allow=fs.read={empty_maven}",)
+                        if cell.native_build is not None
+                        else ()
+                    ),
                 ),
                 cwd=staged.source_dir,
                 deadline=settings.build_seconds,
