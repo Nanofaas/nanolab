@@ -1,8 +1,8 @@
 # Packaged function and watchdog contracts — issue #54
 
 Status: written specification approved by the user on 2026-10-08. Work stays on
-`fix/operational-validation`. The operational plan and its execution method
-require review before implementation.
+`fix/operational-validation`. The operational plan is also approved with Native
+execution; implementation is in progress.
 
 ## Purpose and observed inputs
 

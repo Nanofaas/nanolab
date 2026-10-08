@@ -258,15 +258,26 @@ def _probe(instruction, settings):
 
 
 def main():
-    instruction = decode(sys.stdin.buffer.read(4 * 1024 * 1024))
+    raw = (
+        sys.argv[2].encode()
+        if len(sys.argv) == 3
+        else sys.stdin.buffer.read(4 * 1024 * 1024)
+    )
+    if len(raw) >= 4 * 1024 * 1024:
+        raise ValueError("instruction byte bound reached")
+    instruction = decode(raw)
     settings = instruction["settings"]
-    if sys.argv[1:] == ["serve"]:
+    if sys.argv[1] == "serve":
         create_server(settings).serve_forever()
-    elif sys.argv[1:] == ["probe"]:
+    elif sys.argv[1] == "probe":
         print(json.dumps(probe(instruction, settings)))
     else:
         raise ValueError("expected serve or probe")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        print(json.dumps({"error": str(error)[:512]}))
+        raise SystemExit(1) from None

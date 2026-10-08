@@ -10,7 +10,7 @@
 
 **Spec:** [Approved packaged functions/watchdog design](../specs/2026-10-08-packaged-functions-watchdog-design.md).
 
-Status: ready for written-plan review and execution-method selection; implementation has not started. Worktree `/tmp/nanolab-operational-validation`, branch `fix/operational-validation`, existing NanoLab PR #76.
+Status: written plan approved on 2026-10-08 with Native execution; implementation is in progress. Worktree `/tmp/nanolab-operational-validation`, branch `fix/operational-validation`, existing NanoLab PR #76.
 
 ## Global Constraints
 
