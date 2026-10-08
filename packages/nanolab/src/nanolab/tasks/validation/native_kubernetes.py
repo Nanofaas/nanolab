@@ -215,9 +215,7 @@ def check_native_api(
                 executor=bounded,
                 role=role,
                 cwd=cwd,
-                expectation=HttpFunctionExpectation(
-                    status=200, api_status="success", error=None
-                ),
+                expectation=HttpFunctionExpectation(status=200, api_status="success"),
             )
             .run(inputs)
             .value
@@ -225,6 +223,8 @@ def check_native_api(
         if invocation is None:
             raise RuntimeError("native invocation returned no response")
         _, _, body = _parse_contract_response(name, invocation.stdout)
+        if body.get("error") is not None:
+            raise RuntimeError("native invocation returned an error envelope")
         status_code = body.get("statusCode")
         if status_code is not None and (
             type(status_code) is not int or status_code != 200
