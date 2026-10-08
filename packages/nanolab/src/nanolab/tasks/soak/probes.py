@@ -7,6 +7,8 @@ These parsers deliberately do not infer registry population from exposition.
 import math
 import re
 
+from sonata_tasks.procfs import parse_kib_field
+
 _MAX_TEXT = 1024 * 1024
 _MAX_ROWS = 10000
 _ROW = re.compile(
@@ -76,17 +78,9 @@ def parse_exposition(
 
 
 def _proc_value(text: str | None, field: str) -> int | None:
-    if text is None:
-        return None
-    _bounded(text)
-    found = None
-    for line in text.splitlines():
-        if line.startswith(field + ":"):
-            match = re.fullmatch(re.escape(field) + r":\s+(\d+)\s+kB\s*", line)
-            if match is None or found is not None:
-                raise ValueError(f"invalid procfs {field}")
-            found = int(match[1]) * 1024
-    return found
+    if text is not None:
+        _bounded(text)
+    return parse_kib_field(text, field)
 
 
 def parse_procfs_memory(

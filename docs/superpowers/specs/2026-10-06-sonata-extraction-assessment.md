@@ -61,7 +61,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `release/secrets.py`: GHCR login, cosign credentials and release error names | Keep adapters local | Registry/login/signing decisions and release-facing results belong to the release workflow; feed them shared private-file lifetimes when available. |
 | `soak/collector.py`: bounded Linux procfs/Docker/HTTP collection | Optional later capability | Raw collection and before/after identity checks can support other container diagnostics. Preserve the killable helper boundary, byte/deadline bounds and local-container constraints. It must not become mandatory for portable Sonata tasks. |
 | `soak/adapters.py`: `RoleBoundProbe`, sample/target/phase conversion | Keep local | Requires NanoLab domain models, required-metric units and source classification. A new role abstraction would duplicate existing execution bindings. |
-| `heap_analysis/native.py`: procfs and JVM parsers | Consider pure parsers separately, later | Byte/unit normalization and collector-specific heap parsing are plausible reusable APIs. Keep the response-envelope interpretation and diagnostic criteria local. No current external consumer was established. |
+| `heap_analysis/native.py` and `soak/probes.py`: procfs parsers | Ninth slice: pure procfs decoding selected; JVM parsing deferred | Share strict smaps decoding and single KiB-field normalization through ordinary dependency-free APIs. Preserve mapping backing versus page residency, unavailable versus zero and complete-record rejection. Keep large-mapping threshold, selected residency fields, bounds, response schema and JVM collector interpretation local. An independent installed Python process reading its own procfs supplies the acceptance example. |
 | `heap_analysis/mat.py`: `MatAnalyzer` | Keep current workflow; defer generic runner | It fixes eight reports for a baseline/final pair, bundled locks/workers, helper image policy and evidence layout. Moving the entire module would export NanoLab's experiment. A future optional MAT task needs independently useful report/tool inputs first. |
 
 Paths in the issue predate the previous refactors: `cli/execution.py` is now a
@@ -594,3 +594,41 @@ passes 51 cases at 93.71%, and hooks, package builds and fresh installed
 CLI/assets, receipt, two-VM reuse, cleanup and preflight preservation checks pass.
 The eighth-slice plan records the evidence. Prior review decisions and the
 GNU checksum-escaping Minor remain unchanged; this phase adds no behavior.
+
+
+## Ninth slice: pure procfs decoding
+
+Current code independently supports a useful non-NanoFaaS contract: decode Linux
+smaps mappings, summarize Size/Rss/Pss by mapping backing, and normalize a
+single requested KiB field to bytes. Add ordinary APIs in sonata_tasks.procfs;
+no task, collector, Linux import prerequisite, SDK or runtime dependency.
+The parser accepts captured text on any platform. It does not open /proc.
+
+parse_smaps(text) returns mappings, mapping_details and anonymous/file/
+shared_memory/unknown totals. Each mapping preserves address, permissions,
+backing, path and byte Size/Rss/Pss. Missing/duplicate required fields, malformed
+headers and reversed/empty address ranges invalidate the whole result. A file
+VMA containing anonymous COW pages remains a file-backed VMA; its aggregate is
+not a process page-residency estimate. Other kernel fields are ignored.
+
+parse_kib_field(text, field) returns an integer byte count, including zero, or
+None for unavailable text/missing field. Malformed/duplicate selected fields
+raise ValueError; unrelated fields do not invalidate the selected reading.
+This retains soak's strict field parser, with no implicit output schema.
+
+NanoLab's native adapter adds the existing 33554432-byte large-anonymous mapping
+threshold and summary, retains lenient selected residency interpretation and
+JVM heap parsing, and retains source availability/errors and evidence trimming.
+The soak adapter keeps its 1048576-character bound and process_rss_bytes/
+process_pss_bytes schema while delegating the strict selected field decoding.
+Collection, process/container identity, cancellation, helper packaging and MAT
+remain unchanged. Prometheus snapshot acquisition remains a separate candidate:
+its current query/error loops are small and intermixed with product clock,
+required-query, representation and persistence policy, so they are not bundled
+into this diagnostic extraction.
+
+Bases: NanoLab8313e6e, Sonata1ad57f2, public pair0.6.13. Prepare coherent0.6.14
+only after checking it is unused. Keep consumer public pins/registry lock0.6.13
+for the explicit local-wheel trial; publication and public adoption follow
+shared merge and separate user authorization, as in previous slices. Preserve
+original coverage gates and report the existing86.18%/90% consumer debt.

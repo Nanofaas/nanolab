@@ -248,3 +248,19 @@ def test_large_mapping_boundary(size_kb, qualifies):
     end = 0x10000000 + size_kb * 1024
     raw = f"10000000-{end:x} ---p 0 00:00 0\nSize: {size_kb} kB\nRss: 0 kB\nPss: 0 kB\n"
     assert parse_smaps(raw)["large_anonymous_mappings"]["count"] == int(qualifies)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        SMAPS.replace("Size:              65536 kB", "Size: 65536 kB\nSize: 65536 kB"),
+        SMAPS.replace("7f0000000000-7f0004000000", "7f0004000000-7f0000000000"),
+        SMAPS + "7f0030000000-invalid rw-p 0 00:00 0\n",
+    ],
+)
+def test_invalid_smaps_keeps_the_source_unavailable_without_summary(text):
+    block = summarize({"smaps": text, "errors": {}})["smaps"]
+    assert block["available"] is False
+    assert "error" in block
+    assert "mapping_details" not in block
+    assert "large_anonymous_mappings" not in block
