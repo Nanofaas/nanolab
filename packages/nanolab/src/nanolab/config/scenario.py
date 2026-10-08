@@ -13,10 +13,12 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from nanolab.config.contract import ContractConfig
 from nanolab.config.heap_analysis import HeapAnalysisConfig
 from nanolab.config.soak import SoakConfig
 
 WorkflowName = Literal[
+    "contract",
     "validate",
     "cli",
     "loadtest",
@@ -143,6 +145,7 @@ class ScenarioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow: WorkflowName
+    contract: ContractConfig | None = None
     backend: BackendName | None = None
     build: BuildStrategy = "docker"
     recipe_profile: Path | None = Field(default=None, alias="recipeProfile")
@@ -257,6 +260,23 @@ class ScenarioConfig(BaseModel):
         concurrency governor and the load profile against what each supports,
         and returns the instance unchanged once every rule holds.
         """
+        if self.workflow == "contract":
+            if self.backend != "container" or self.contract is None:
+                raise ValueError(
+                    "contract requires container backend and contract settings"
+                )
+            unexpected = self.model_fields_set - {
+                "workflow",
+                "backend",
+                "functions",
+                "contract",
+                "build",
+            }
+            if unexpected or self.build != "docker":
+                raise ValueError("contract does not consume these scenario options")
+            return self
+        if self.contract is not None:
+            raise ValueError("contract settings require workflow contract")
         if self.cli_runtime != "jvm" and self.workflow != "cli":
             raise ValueError("cliRuntime native/parity requires workflow cli")
         if self.cli_runtime != "jvm" and (
