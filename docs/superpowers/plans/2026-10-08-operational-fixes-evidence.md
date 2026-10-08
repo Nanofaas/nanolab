@@ -102,7 +102,8 @@ The separate [native artifact specification](../specs/2026-10-08-native-artifact
 was presented for user review; the user requested revision and approved a split
 into Kubernetes lifecycle, CLI parity and packaged function/watchdog deliveries
 now recorded in that document. The [first delivery's Kubernetes design](../specs/2026-10-08-native-k8s-lifecycle-design.md)
-is approved; its implementation plan is being prepared. The callback-capture and
+is approved; its [implementation plan](2026-10-08-native-k8s-lifecycle.md) is ready
+for user review and execution-method selection. The callback-capture and
 contract workflow are not
 implemented or qualified by the first two fixes or their tests. Issues #53/#54
 remain pending that design and subsequent implementation/live evidence.
