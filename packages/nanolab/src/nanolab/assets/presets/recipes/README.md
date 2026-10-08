@@ -6,6 +6,7 @@ this directory.
 
 | Profile | Control plane | Function | Purpose |
 | --- | --- | --- | --- |
+| `cli-contract-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, runtime config | Java JVM word-stats | Local JVM/native CLI contract and parity qualification |
 | `validate-container-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats | JVM container lifecycle validation |
 | `validate-container-bash.yaml` | JVM, container provider, build metadata | Bash word-stats | Bash container lifecycle validation |
 | `validate-container-services-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats and warm-echo service | Managed Java service lifecycle validation |
@@ -62,6 +63,25 @@ is only a convenient default for manual use. NanoLab must keep `NANOFAAS_ROOT`
 read-only, including Gradle build/cache files, hence the disposable working copy.
 
 ## NanoLab integration
+
+`cli-contract-k8s-native-parity.yaml` uses the same frozen source to build the JVM
+and native CLI, then qualifies both against one owned JVM Kubernetes deployment.
+It requires a running local Docker-driver Minikube profile and a host GraalVM
+toolchain for `nativeCompile`. `cliRuntime` also accepts `jvm` and `native` for
+independent contract qualification. Each attempt retains artifact hashes, raw
+command receipts, parsed observations and the contract/parity proof under
+`--run-dir/cli-attempts/<id>/`. Final run metadata must also show successful cleanup.
+
+```bash
+./nanolab.sh run cli-contract-k8s-native-parity.yaml --run-dir /tmp/nanolab-cli-parity
+./nanolab.sh run cli-contract-k8s-native-parity.yaml --only build-and-verify-jvm-cli \
+  --run-dir /tmp/nanolab-cli-build
+```
+
+Build-only selection needs no cluster and produces no qualification proof.
+The full workflow imports images without publication, owns its namespace and
+restores runtime configuration before releasing the platform. Function and
+watchdog runtime contracts remain a separate qualification lot.
 
 `deployment-lifecycle-container.yaml` and
 `deployment-lifecycle-container-native.yaml` select the JVM and native profiles.

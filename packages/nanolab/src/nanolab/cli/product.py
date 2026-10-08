@@ -250,6 +250,7 @@ def _workflow(
             endpoint=control_plane_url,
             repo_root=paths.nanofaas_root,
             environment=environment,
+            run_dir=run_dir,
         )
     # The comparison is a load test in every respect the platform cares about, so
     # it shares the workflow name and the provisioning that goes with it, and only
@@ -484,7 +485,7 @@ def _default_run_dir(
         from nanolab.plans.heap_analysis import unique_heap_analysis_run_dir
 
         return unique_heap_analysis_run_dir(runs_dir)
-    if run_dir is None and recipe and workflow in ("validate", "loadtest"):
+    if run_dir is None and recipe and workflow in ("validate", "loadtest", "cli"):
         return runs_dir / f"recipe-{uuid4().hex}"
     if run_dir is None and workflow in ("loadtest", "offload-loadtest"):
         return runs_dir / "latest"

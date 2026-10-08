@@ -62,6 +62,33 @@ class ReplyExecutor:
         )
 
 
+@pytest.mark.parametrize("cpu", [0.1, 0.2])
+def test_get_checks_requested_resource_fields_with_full_server_dto(cpu):
+    from nanolab.tasks.cli_function import CliFunctionGetTask
+
+    details = {
+        **DETAILS,
+        "resources": {
+            "requests": {"cpu": cpu, "memoryMiB": None},
+            "limits": None,
+            "requestWithinLimit": True,
+        },
+    }
+    task = CliFunctionGetTask(
+        FunctionManifest(
+            name="fn", image="image:test", resources={"requests": {"cpu": 0.1}}
+        ),
+        cli_argv=("cli",),
+        executor=ReplyExecutor(json.dumps(details)),
+        role="host",
+    )
+    if cpu == 0.1:
+        task.run(TaskInputs({}, frozenset()))
+    else:
+        with pytest.raises(RuntimeError, match="resources"):
+            task.run(TaskInputs({}, frozenset()))
+
+
 @pytest.mark.parametrize(
     "fault",
     [

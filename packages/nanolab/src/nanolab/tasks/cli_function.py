@@ -74,7 +74,18 @@ def _json_stdout(result: TaskResult) -> dict[str, Any]:
 
 def _expect(payload: dict[str, Any], field: str, expected: object) -> None:
     actual = payload.get(field)
-    if actual != expected or (type(expected) is int and type(actual) is not int):
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        try:
+            for key, value in expected.items():
+                _expect(actual, key, value)
+        except RuntimeError as error:
+            raise RuntimeError(f"{field}: {error}") from error
+        return
+    if (
+        actual != expected
+        or (type(expected) is int and type(actual) is not int)
+        or (isinstance(expected, float) and isinstance(actual, bool))
+    ):
         raise RuntimeError(f"{field} is {payload.get(field)!r}, expected {expected!r}")
 
 
@@ -159,7 +170,7 @@ class CliFunctionGetTask(CommandTask):
             role=role,
             options=CommandOptions(cwd=cwd),
             semantic_key=_semantic_key(
-                "nanolab.cli-function.get:v1", expected=expected
+                "nanolab.cli-function.get:v2", expected=expected
             ),
             verify=verify,
         )

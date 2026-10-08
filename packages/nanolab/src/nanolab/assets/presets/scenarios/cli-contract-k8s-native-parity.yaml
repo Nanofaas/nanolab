@@ -1,0 +1,6 @@
+workflow: cli
+backend: k8s
+cliRuntime: parity
+recipeProfile: ../recipes/cli-contract-k8s-jvm.yaml
+functions:
+  - word-stats-java

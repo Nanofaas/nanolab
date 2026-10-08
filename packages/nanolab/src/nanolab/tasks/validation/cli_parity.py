@@ -242,6 +242,7 @@ class CliParityTask(Task[None]):
         function: str,
         executor: CommandTaskExecutor,
         evidence_dir: Path,
+        function_resources: dict[str, Any] | None = None,
     ) -> None:
         """Bind the current attempt; artifact receipts live in sibling `artifacts`."""
         self.title = "Qualify CLI artifact contracts"
@@ -251,6 +252,7 @@ class CliParityTask(Task[None]):
             artifacts,
         )
         self.runtime, self.endpoint, self.target = runtime, endpoint, target
+        self.function_resources = function_resources
         self.namespace, self.function, self.executor, self.evidence_dir = (
             namespace,
             function,
@@ -517,6 +519,7 @@ class CliParityTask(Task[None]):
                                 self.function,
                                 report.function("word-stats", "java").image.reference,
                                 json.dumps(case["input"]),
+                                resources=self.function_resources,
                                 expected_output=case["expected"],
                             ),
                         ),

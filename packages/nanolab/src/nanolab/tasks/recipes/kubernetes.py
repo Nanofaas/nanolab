@@ -160,7 +160,7 @@ def minikube_images_resource(
     *,
     target: Resource[MinikubeTarget],
     distribution: Resource[RecipeDistribution],
-    probe_image: Resource[str],
+    probe_image: Resource[str] | None = None,
     executor: CommandTaskExecutor,
     run_dir: Path,
 ) -> Resource[tuple[str, ...]]:
@@ -183,7 +183,7 @@ def minikube_images_resource(
         images = [component.image for component in report.components]
         references = [
             *(image.reference for image in images),
-            inputs.resource(probe_image),
+            *((inputs.resource(probe_image),) if probe_image is not None else ()),
         ]
         try:
             for reference in references:
@@ -258,7 +258,11 @@ def minikube_images_resource(
         title="Load recipe images into selected Minikube",
         acquire=acquire,
         release=release,
-        requires=(target, distribution, probe_image),
+        requires=(
+            target,
+            distribution,
+            *((probe_image,) if probe_image is not None else ()),
+        ),
     )
 
 

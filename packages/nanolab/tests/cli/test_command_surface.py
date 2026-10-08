@@ -95,7 +95,7 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
     }
 
 
-@pytest.mark.parametrize("workflow", ["validate", "loadtest"])
+@pytest.mark.parametrize("workflow", ["validate", "loadtest", "cli"])
 def test_recipe_workflows_get_unique_default_run_directory(
     tmp_path: Path, workflow: str
 ) -> None:

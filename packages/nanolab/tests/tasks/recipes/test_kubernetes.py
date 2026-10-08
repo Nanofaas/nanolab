@@ -201,3 +201,105 @@ def test_pod_selection_follows_deployment_ownership() -> None:
 
     selected = _owned_pods(deployment, replica_sets, pods)
     assert [pod["metadata"]["name"] for pod in selected] == ["owned"]
+
+
+@pytest.mark.parametrize("fault", [None, "foreign", "load", "release"])
+def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(tmp_path, fault):
+    from pathlib import Path
+
+    from sonata_engine import Resource
+
+    from nanolab.tasks.recipes.kubernetes import minikube_images_resource
+    from nanolab.tasks.recipes.workflow import RecipeComponent, RecipeDistribution
+
+    reference = "127.0.0.1:5000/nanofaas/control-plane:unique-cli"
+    image = RecipeImage(reference, "sha256:" + "a" * 64, "built", None)
+    value = RecipeDistribution(
+        Path("report.json"),
+        "recipe-sha",
+        "unique-cli",
+        None,
+        ("build-metadata",),
+        (
+            RecipeComponent(
+                "control-plane", "control-plane", "java", "jvm", image, "cli", "c2"
+            ),
+        ),
+    )
+    target_value = MinikubeTarget("owned", "owned", ("node",))
+    target = Resource(
+        title="target",
+        acquire=lambda _inputs: target_value,
+        release=lambda *_args: None,
+    )
+    distribution = Resource(
+        title="distribution", acquire=lambda _inputs: value, release=lambda *_args: None
+    )
+
+    class ImageBoundary:
+        def __init__(self):
+            self.loaded = fault == "foreign"
+            self.calls = []
+
+        def binding_key(self, role):
+            return role
+
+        def run(self, task, *, dry_run=False):
+            import json
+
+            self.calls.append(task.argv)
+            code = 0
+            if task.argv[:3] == ("docker", "image", "inspect"):
+                body = [{"Id": image.id}]
+            elif "ssh" in task.argv:
+                body = {
+                    "images": [{"id": image.id, "repoTags": [reference]}]
+                    if self.loaded
+                    else []
+                }
+            elif "load" in task.argv:
+                assert task.argv[-1] == reference
+                self.loaded = True
+                code = 1 if fault == "load" else 0
+                body = {}
+            elif "rm" in task.argv:
+                assert task.argv[-1] == reference
+                self.loaded = False
+                code = 1 if fault == "release" else 0
+                body = {}
+            else:
+                raise AssertionError(task.argv)
+            return TaskResult(
+                task_id=task.task_id,
+                status="failed" if code else "passed",
+                return_code=code,
+                stdout=json.dumps(body),
+                stderr="image command failed" if code else "",
+            )
+
+    executor = ImageBoundary()
+    resource = minikube_images_resource(
+        target=target,
+        distribution=distribution,
+        executor=executor,
+        run_dir=tmp_path / "evidence",
+    )
+    assert resource.requires == (target, distribution)
+    inputs = TaskInputs._for_resources(
+        {target: target_value, distribution: value}, {target, distribution}
+    )
+    if fault in ("foreign", "load"):
+        with pytest.raises(RuntimeError):
+            resource.acquire(inputs)
+        if fault == "foreign":
+            assert not any("rm" in argv for argv in executor.calls)
+        else:
+            assert any("rm" in argv for argv in executor.calls)
+    else:
+        assert resource.acquire(inputs) == (reference,)
+        if fault == "release":
+            with pytest.raises(RuntimeError, match="image command failed"):
+                resource.release(inputs, (reference,))
+        else:
+            resource.release(inputs, (reference,))
+            assert executor.loaded is False

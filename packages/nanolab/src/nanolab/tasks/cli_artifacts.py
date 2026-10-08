@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
@@ -57,6 +57,22 @@ class CliArtifact:
     architecture: str
     version: str
     files: tuple[tuple[str, str], ...]
+
+
+class CliArtifactCheckTask(Task[None]):
+    """Expose artifact-only selection without acquiring the API platform."""
+
+    def __init__(self, source: Resource[RecipeRun], artifact: Resource[CliArtifact]):
+        """Bind only the frozen source and selected launcher."""
+        self.source, self.artifact = source, artifact
+        self.title = artifact.title
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Require the acquired artifact identity to remain unchanged."""
+        verify_cli_artifact(
+            inputs.resource(self.source).source_dir, inputs.resource(self.artifact)
+        )
+        return TaskOutcome(value=None)
 
 
 def _host_architecture() -> str:

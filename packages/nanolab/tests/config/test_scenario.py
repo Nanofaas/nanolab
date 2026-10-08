@@ -293,3 +293,52 @@ def test_resources_still_reject_a_name_that_is_neither() -> None:
                 "resources": {"word-stats-python": {"limits": {"cpu": 1}}},
             }
         )
+
+
+@pytest.mark.parametrize("runtime", ["jvm", "native", "parity"])
+def test_cli_runtime_accepts_local_recipe_selection(tmp_path, runtime):
+    recipe = tmp_path / "recipe.yaml"
+    recipe.write_text("name: cli\n")
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "cli",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "recipeProfile": recipe,
+            "cliRuntime": runtime,
+        }
+    )
+    assert config.cli_runtime == runtime
+    assert (
+        ScenarioConfig(
+            workflow="cli", backend="container", functions=["word-stats-java"]
+        ).cli_runtime
+        == "jvm"
+    )
+
+
+@pytest.mark.parametrize(
+    ("workflow", "backend", "runtime", "recipe"),
+    [
+        ("validate", "k8s", "native", True),
+        ("loadtest", "container", "parity", True),
+        ("cli", "k8s", "native", False),
+        ("cli", "container", "parity", True),
+        ("cli", "k8s", "unknown", True),
+    ],
+)
+def test_cli_runtime_rejects_unsupported_scenarios(
+    tmp_path, workflow, backend, runtime, recipe
+):
+    profile = tmp_path / "recipe.yaml"
+    profile.write_text("name: cli\n")
+    data = {
+        "workflow": workflow,
+        "backend": backend,
+        "functions": ["word-stats-java"],
+        "cliRuntime": runtime,
+    }
+    if recipe:
+        data["recipeProfile"] = profile
+    with pytest.raises(ValidationError):
+        ScenarioConfig.model_validate(data)

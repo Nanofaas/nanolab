@@ -146,6 +146,9 @@ class ScenarioConfig(BaseModel):
     backend: BackendName | None = None
     build: BuildStrategy = "docker"
     recipe_profile: Path | None = Field(default=None, alias="recipeProfile")
+    cli_runtime: Literal["jvm", "native", "parity"] = Field(
+        default="jvm", alias="cliRuntime"
+    )
     functions: list[str] = Field(min_length=1)
     resources: dict[str, ResourceSpec] = Field(default_factory=dict)
     payload_profile: PayloadProfile | None = Field(
@@ -254,6 +257,14 @@ class ScenarioConfig(BaseModel):
         concurrency governor and the load profile against what each supports,
         and returns the instance unchanged once every rule holds.
         """
+        if self.cli_runtime != "jvm" and self.workflow != "cli":
+            raise ValueError("cliRuntime native/parity requires workflow cli")
+        if self.cli_runtime != "jvm" and (
+            self.recipe_profile is None or self.backend != "k8s"
+        ):
+            raise ValueError(
+                "cliRuntime native/parity requires a local k8s recipeProfile"
+            )
         if self.workflow == "validate" and self.control_plane_runtime == "native":
             raise ValueError(
                 "validate native requires the recipe scenario "
@@ -267,6 +278,7 @@ class ScenarioConfig(BaseModel):
                         and self.backend in {"container", "containerd", "k8s"}
                     )
                     or (self.workflow == "loadtest" and self.backend == "container")
+                    or (self.workflow == "cli" and self.backend == "k8s")
                     or (
                         self.workflow == "soak"
                         and self.backend == "container"

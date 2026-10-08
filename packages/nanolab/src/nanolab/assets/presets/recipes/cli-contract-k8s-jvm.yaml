@@ -1,0 +1,30 @@
+schemaVersion: 2
+name: cli-contract-k8s-jvm
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: recipe-v2-cli-k8s-jvm
+controlPlane:
+  modules: [k8s-deployment-provider, build-metadata, runtime-config]
+  build:
+    mode: jvm
+    variant: recipe-v2-cli-k8s-jvm
+  jvm:
+    args: ["-XX:+UseSerialGC", "-Xmx256m"]
+  container:
+    image: control-plane
+  config:
+    nanofaas:
+      deployment:
+        default-backend: k8s
+      k8s:
+        image-pull-policy: IfNotPresent
+      admin:
+        runtime-config:
+          enabled: true
+functions:
+  - name: word-stats
+    sdk: java
+    build:
+      mode: jvm
+    container:
+      image: word-stats-java
