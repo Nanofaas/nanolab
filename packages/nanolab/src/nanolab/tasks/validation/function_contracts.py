@@ -451,9 +451,11 @@ class FunctionContractsTask(Task[ContractEvidence]):
             or current.get("Architecture") != image.architecture
             or tuple(current.get("Config", {}).get("Entrypoint") or ())
             != image.entrypoint
+            or tuple(current.get("Config", {}).get("Cmd") or ()) != image.cmd
             or container.get("Image") != image.image_id
             or tuple(container.get("Config", {}).get("Entrypoint") or ())
             != image.entrypoint
+            or tuple(container.get("Config", {}).get("Cmd") or ()) != image.cmd
         ):
             raise ValueError("artifact image/container identity changed")
         if image.cell.flavor == "native":

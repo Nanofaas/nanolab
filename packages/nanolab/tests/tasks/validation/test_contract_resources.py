@@ -275,6 +275,73 @@ def test_bake_uses_frozen_source_and_load(frozen_fixture, tmp_path):
     assert not boundary.objects
 
 
+def test_cmd_only_artifact_is_accepted(frozen_fixture, tmp_path):
+    class CmdBoundary(DockerBoundary):
+        def dispatch(self, argv, config):
+            result = super().dispatch(argv, config)
+            if argv[:3] == ("docker", "buildx", "bake"):
+                for value in self.objects.values():
+                    if "Architecture" in value:
+                        value["Config"]["Entrypoint"] = None
+                        value["Config"]["Cmd"] = ["python", "-m", "uvicorn"]
+            return result
+
+    boundary = CmdBoundary()
+    resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
+    images = resource.acquire(inputs)
+    assert len(images) == 1
+    resource.release(inputs, images)
+    assert not boundary.objects
+
+
+def test_changed_artifact_cmd_is_rejected(frozen_fixture, tmp_path):
+    from nanolab.tasks.validation.contract_resources import ContractRuntime
+    from nanolab.tasks.validation.function_contracts import FunctionContractsTask
+
+    class CmdBoundary(DockerBoundary):
+        def dispatch(self, argv, config):
+            result = super().dispatch(argv, config)
+            if argv[:3] == ("docker", "buildx", "bake"):
+                for value in self.objects.values():
+                    if "Architecture" in value:
+                        value["Config"]["Cmd"] = ["serve"]
+            return result
+
+    boundary = CmdBoundary()
+    resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
+    images = resource.acquire(inputs)
+    boundary.objects["running"] = {
+        "Id": "running",
+        "Image": images[0].image_id,
+        "Config": {"Entrypoint": ["/app/function"], "Cmd": ["other"]},
+    }
+    source = Resource(
+        title="source",
+        acquire=lambda _: RecipeRun(
+            frozen_fixture, tmp_path / "scenario.yaml", tmp_path / "dist", "test"
+        ),
+        release=lambda *_: None,
+    )
+    runtime = Resource(
+        title="runtime",
+        acquire=lambda _: ContractRuntime("network", "capture", "helper", "test"),
+        release=lambda *_: None,
+    )
+    task = FunctionContractsTask(
+        source,
+        resource,
+        runtime,
+        selectors=("word-stats",),
+        settings=ContractConfig(),
+        executor=boundary,
+        run_dir=tmp_path / "attempt",
+    )
+    with pytest.raises(ValueError, match="identity"):
+        task._identity(inputs, images[0], "running")
+    boundary.objects.pop("running")
+    resource.release(inputs, images)
+
+
 def test_changed_source_fails(frozen_fixture, tmp_path):
     boundary = DockerBoundary("source-change")
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)

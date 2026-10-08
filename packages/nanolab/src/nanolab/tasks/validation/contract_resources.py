@@ -265,6 +265,7 @@ class ContractImage:
     architecture: str
     entrypoint: tuple[str, ...]
     native_sha256: str | None
+    cmd: tuple[str, ...] = ()
 
 
 def validate_native_binary(raw: bytes, architecture: str) -> str:
@@ -449,8 +450,9 @@ def contract_images_resource(
                 {"identity": observed["Id"]},
             )
             entrypoint = tuple(observed.get("Config", {}).get("Entrypoint") or ())
-            if not entrypoint:
-                raise RuntimeError("contract image has no entrypoint")
+            cmd = tuple(observed.get("Config", {}).get("Cmd") or ())
+            if not entrypoint and not cmd:
+                raise RuntimeError("contract image has no startup command")
             native_hash = None
             if cell.flavor == "native":
                 name = f"contract-extract-{uuid4().hex}"
@@ -476,7 +478,7 @@ def contract_images_resource(
                 binary = run_dir / "native" / f"{index:03d}.elf"
                 binary.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    if not entrypoint[0].startswith("/"):
+                    if not entrypoint or not entrypoint[0].startswith("/"):
                         raise RuntimeError("native entrypoint must name its executable")
                     contract_command(
                         bounded,
@@ -489,7 +491,7 @@ def contract_images_resource(
                 finally:
                     _release_owned(bounded, inputs, extract_receipt, run_dir)
             image = ContractImage(
-                cell, observed["Id"], cell.architecture, entrypoint, native_hash
+                cell, observed["Id"], cell.architecture, entrypoint, native_hash, cmd
             )
             images.append(image)
             write_receipt(
