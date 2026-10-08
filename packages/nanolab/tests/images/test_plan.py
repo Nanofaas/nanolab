@@ -255,7 +255,11 @@ def test_java_native_cells_build_from_the_shared_native_dockerfile() -> None:
     ]
     assert native, "expected Java native cells in the matrix"
     for cell in native:
-        assert cell.dockerfile == NATIVE_JAVA_DOCKERFILE
+        assert cell.dockerfile == (
+            Path("tools/native-java/Dockerfile")
+            if (NANOFAAS_ROOT / "tools/native-java/Dockerfile").is_file()
+            else NATIVE_JAVA_DOCKERFILE
+        )
         assert cell.context == Path()
         assert set(cell.build_args) == {
             "NATIVE_TASK",
@@ -352,4 +356,84 @@ def test_jvm_and_default_cells_keep_their_own_dockerfile_and_context() -> None:
         assert cell.context == cell.target.context
         assert cell.build_args == (
             {"JVM_TUNING": "-XX:+UseG1GC"} if cell.flavor == "jvm" else {}
+        )
+
+
+@pytest.mark.parametrize(
+    ("present", "expected"),
+    [
+        (["deploy/native-java/Dockerfile"], "deploy/native-java/Dockerfile"),
+        (["tools/native-java/Dockerfile"], "tools/native-java/Dockerfile"),
+        (
+            ["deploy/native-java/Dockerfile", "tools/native-java/Dockerfile"],
+            "tools/native-java/Dockerfile",
+        ),
+    ],
+)
+def test_native_dockerfile_layout_selection(tmp_path, present, expected):
+    from nanolab.images import plan as module
+
+    for relative in present:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    assert module._native_java_dockerfile(tmp_path) == Path(expected)
+
+
+def test_missing_native_dockerfile_names_both_layouts(tmp_path):
+    from nanolab.images import plan as module
+
+    with pytest.raises(FileNotFoundError) as error:
+        module._native_java_dockerfile(tmp_path)
+    assert "tools/native-java/Dockerfile" in str(error.value)
+    assert "deploy/native-java/Dockerfile" in str(error.value)
+
+
+def test_native_dockerfile_directory_does_not_shadow_legacy_file(tmp_path):
+    from nanolab.images import plan as module
+
+    (tmp_path / "tools/native-java/Dockerfile").mkdir(parents=True)
+    legacy = tmp_path / "deploy/native-java/Dockerfile"
+    legacy.parent.mkdir(parents=True)
+    legacy.touch()
+    assert module._native_java_dockerfile(tmp_path) == Path(
+        "deploy/native-java/Dockerfile"
+    )
+
+
+def test_each_plan_keeps_its_native_path_after_another_root_is_planned(tmp_path):
+    from nanolab.images.bake import render_bake
+
+    plans = []
+    for layout, native_path in [
+        ("legacy", "deploy/native-java/Dockerfile"),
+        ("current", "tools/native-java/Dockerfile"),
+    ]:
+        root = tmp_path / layout
+        for relative in [
+            "platform/control-plane/Dockerfile",
+            "services/java/warm-echo/Dockerfile",
+            "runtimes/watchdog/Dockerfile",
+            native_path,
+        ]:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        plans.append(build_image_plan(root, "v0.0.1", registry=REGISTRY))
+
+    for plan, expected in zip(
+        plans,
+        ["deploy/native-java/Dockerfile", "tools/native-java/Dockerfile"],
+        strict=True,
+    ):
+        rendered = render_bake(plan)["target"]
+        for cell in plan.cells:
+            if cell.native_build is not None:
+                assert cell.dockerfile == Path(expected)
+                assert cell.context == Path()
+        assert rendered["control-plane-amd64-native"]["dockerfile"] == expected
+        assert rendered["control-plane-amd64-native"]["context"] == "."
+        assert rendered["control-plane-amd64-jvm"]["dockerfile"] == "Dockerfile"
+        assert (
+            rendered["control-plane-amd64-jvm"]["context"] == "platform/control-plane"
         )
