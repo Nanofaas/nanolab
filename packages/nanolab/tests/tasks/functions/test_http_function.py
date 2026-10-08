@@ -50,7 +50,8 @@ def test_set_replicas_accepts_the_actual_put_record():
     task = HttpFunctionSetReplicasTask(
         "fn", replicas=1, endpoint="http://cp", executor=executor, role="stack"
     )
-    assert task.run(TaskInputs.empty()).value.return_code == 0
+    outcome = task.run(TaskInputs.empty())
+    assert outcome.value is not None and outcome.value.return_code == 0
 
 
 def _result(code: int, *, stdout: str = "", stderr: str = "") -> TaskResult:

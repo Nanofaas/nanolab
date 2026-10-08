@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from sonata_engine import TaskInputs
 from sonata_tasks.command import CommandTask
@@ -24,6 +24,9 @@ from nanolab.tasks.http_function import (
     _split_final_response,
 )
 from nanolab.tasks.platform import PlatformFunction
+from nanolab.tasks.recipes.kubernetes import _command, _json_command
+
+QUOTA_ENV = "NANOFAAS_INVOCATION_CAPACITY_EXECUTIONS_PER_FUNCTION"
 
 
 class _ApiCommands:
@@ -189,3 +192,77 @@ def check_native_api(
     finally:
         if stream is not None:
             stream.close()
+
+
+def configure_native_quota(
+    inputs: TaskInputs,
+    *,
+    deployment: dict[str, Any],
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    prefix: tuple[str, ...],
+) -> dict[str, Any]:
+    """Change only the owned control plane's quota, with an atomic UID guard."""
+    name = deployment["metadata"]["name"]
+    current = _json_command(
+        executor,
+        inputs,
+        "Verify native quota Deployment owner",
+        (*prefix, "get", "deployment", name, "-o", "json"),
+        role=role,
+    )
+    uid = deployment["metadata"].get("uid")
+    if not uid or current.get("metadata", {}).get("uid") != uid:
+        raise RuntimeError("native quota Deployment was replaced")
+    version = current["metadata"].get("resourceVersion")
+    if not isinstance(version, str) or not version:
+        raise RuntimeError("native quota Deployment has no resource version")
+    containers = current["spec"]["template"]["spec"]["containers"]
+    indices = [
+        index
+        for index, row in enumerate(containers)
+        if row.get("name") == "control-plane"
+    ]
+    if len(indices) != 1:
+        raise RuntimeError("native quota control-plane container is ambiguous")
+    index = indices[0]
+    env = [
+        row for row in containers[index].get("env", []) if row.get("name") != QUOTA_ENV
+    ]
+    env.append({"name": QUOTA_ENV, "value": "1"})
+    patch = [
+        {"op": "test", "path": "/metadata/uid", "value": uid},
+        {"op": "test", "path": "/metadata/resourceVersion", "value": version},
+        {
+            "op": "add",
+            "path": f"/spec/template/spec/containers/{index}/env",
+            "value": env,
+        },
+    ]
+    updated = _json_command(
+        executor,
+        inputs,
+        "Set owned native invocation quota",
+        (
+            *prefix,
+            "patch",
+            "deployment",
+            name,
+            "--type=json",
+            "-p",
+            json.dumps(patch),
+            "-o",
+            "json",
+        ),
+        role=role,
+    )
+    if updated.get("metadata", {}).get("uid") != uid:
+        raise RuntimeError("native quota Deployment was replaced during patch")
+    _command(
+        executor,
+        inputs,
+        "Await owned native quota rollout",
+        (*prefix, "rollout", "status", f"deployment/{name}", "--timeout=50s"),
+        role=role,
+    )
+    return updated

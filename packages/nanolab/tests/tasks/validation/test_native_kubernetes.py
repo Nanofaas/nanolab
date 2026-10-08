@@ -1,12 +1,14 @@
 """Exercise native API checks through curl against an independent HTTP server."""
 
 import json
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.execution.local import LocalCommandTaskExecutor
+from sonata_tasks.execution.models import TaskResult
 
 from nanolab.tasks.platform import PlatformFunction
 
@@ -71,7 +73,7 @@ def native_api_server():
             self.end_headers()
             self.wfile.write(raw)
 
-        def log_message(self, *args):
+        def log_message(self, format, *args):
             pass
 
     for method in ("GET", "POST", "PATCH", "PUT", "DELETE"):
@@ -144,3 +146,79 @@ def test_native_api_validates_bodies_and_strict_delete(
             for method, _, data in state["calls"]
         )
         assert (tmp_path / "api.jsonl").read_text()
+
+
+@pytest.mark.parametrize("replaced", [False, True])
+def test_quota_patch_is_conditional_on_the_acquired_deployment(replaced):
+    from nanolab.tasks.validation.native_kubernetes import configure_native_quota
+
+    deployment = {
+        "metadata": {
+            "name": "nanofaas-control-plane",
+            "uid": "owned",
+            "resourceVersion": "7",
+        },
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "control-plane",
+                            "env": [{"name": "KEEP_ME", "value": "unchanged"}],
+                        }
+                    ]
+                }
+            }
+        },
+    }
+
+    @dataclass
+    class Executor:
+        seen: list = field(default_factory=list)
+
+        def binding_key(self, role):
+            return role
+
+        def run(self, task, *, dry_run=False):
+            self.seen.append(task.argv)
+            response = dict(deployment)
+            if replaced:
+                response["metadata"] = {"uid": "foreign"}
+            return TaskResult(
+                task_id="", status="passed", return_code=0, stdout=json.dumps(response)
+            )
+
+    executor = Executor()
+
+    def run():
+        return configure_native_quota(
+            TaskInputs.empty(),
+            deployment=deployment,
+            executor=executor,
+            role="host",
+            prefix=("kubectl", "-n", "owned-ns"),
+        )
+
+    if replaced:
+        with pytest.raises(RuntimeError, match="replaced"):
+            run()
+        assert not any("patch" in argv for argv in executor.seen)
+    else:
+        run()
+        argv = next(argv for argv in executor.seen if "patch" in argv)
+        patch = json.loads(argv[argv.index("-p") + 1])
+        assert {"op": "test", "path": "/metadata/uid", "value": "owned"} in patch
+        assert {
+            "op": "test",
+            "path": "/metadata/resourceVersion",
+            "value": "7",
+        } in patch
+        env = patch[-1]["value"]
+        assert env == [
+            {"name": "KEEP_ME", "value": "unchanged"},
+            {
+                "name": "NANOFAAS_INVOCATION_CAPACITY_EXECUTIONS_PER_FUNCTION",
+                "value": "1",
+            },
+        ]
+        assert any("rollout" in argv for argv in executor.seen)
