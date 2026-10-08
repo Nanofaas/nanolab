@@ -45,7 +45,8 @@ integrated and qualified. Issue #54 also retains the separate function/watchdog 
   and after baseline restore contain no prohibited diagnostic markers.
   Function, forward, Helm, namespace, imported images and pinned credentials
   all released. Independent inspection found only the four system/default
-  namespaces, no recipe images and no Helm releases.
+  namespaces, no recipe images and no Helm releases. The dedicated Minikube
+  profile was subsequently deleted; the operator profile stayed stopped.
 - The installed JVM build-only slice also exited 0 with a nonexistent kubeconfig,
   acquired no platform resources and wrote no qualification marker.
 
@@ -81,8 +82,10 @@ does not equate candidate success with shipped-source qualification.
   adapter deadline, the unchanged P24 baseline with the new default CLI selector,
   and generated runtime patch UUID/timestamp normalization. Invalid IDs/times
   remain failures; application values and meaningful array order are preserved.
-- Final independent whole-branch review is in progress. Review findings and any
-  fixes will be recorded here before handoff.
+- One fresh gpt-6-astra review covered the whole branch `55668dd..0dd322f`.
+  It independently ran 124 tests with 3 intentional skips, found no Critical or
+  Important NanoLab defects, and judged the implementation ready to merge.
+  Shipped-source qualification remains incomplete. No fix pass was required.
 
 ## Execution decisions
 
@@ -94,3 +97,18 @@ does not equate candidate success with shipped-source qualification.
 6. translate timeout_seconds to GNU timeout in the evidence executor and clear the adapter option — the product HostCommandTaskExecutor explicitly rejects this option; retain the stricter of the requested and 60-second deadlines — cost if wrong: deadline/process-group behavior follows GNU timeout rather than the local executor.
 7. exclude validated UUID changeId and zoned appliedAt only at the runtime-patch response root — actual source generates them for each accepted write, so comparing them rejects correct independent passes; application fields and raw receipts stay intact — cost if wrong: differences confined to valid change identifiers/timestamps do not invalidate semantic parity.
 8. retain the shipped-source native configuration failure and verify a Context reflection candidate only in a temporary clone — the missing registration is outside NanoLab; no operator checkout edits or unmerged-source qualification claims — cost if wrong: the installed success applies only to the explicitly patched candidate until the NanoFaaS fix is integrated.
+
+## Deferred minors
+
+1. Unify the version formats accepted during artifact acquisition and qualification.
+2. Retain bounded raw failure receipts when help/version exits successfully but fails validation.
+
+## Final review decisions
+
+1. NanoFaaS Context integration/release remains external — retain the failed shipped-source proof and temporary candidate success; no source checkout or publication authorization is inferred — cost if wrong: shipped-source qualification remains incomplete until integration.
+2. function/watchdog contracts remain separate — the user approved three deliveries, and CLI evidence cannot close issue #54 — cost if wrong: their runtime defects remain independently unqualified.
+3. remote and other-backend CLI parity remain rejected — the approved scope is local Kubernetes and the guards run before side effects — cost if wrong: those environments have no native parity qualification.
+4. live qualification is ARM64 only — ELF architecture checks do not substitute for an amd64 run — cost if wrong: amd64-specific runtime defects remain unqualified.
+5. the original 90% coverage gate remains failing — report the preexisting debt and 86.62% result without changing threshold or lock files — cost if wrong: full CI remains red for coverage.
+6. stream bounds are acceptance/retained-evidence bounds after capture — reuse the existing host executor and GNU deadlines, and make no claim of a hard streaming memory ceiling — cost if wrong: a noisy command can consume memory during the bounded capture.
+7. generated patch IDs/times and unspecified resource defaults use the existing rulings — individual contracts validate requested fields and generated metadata; complete meaningful semantic responses still compare — cost if wrong: valid ID/time differences or unspecified defaults are not rejected individually.

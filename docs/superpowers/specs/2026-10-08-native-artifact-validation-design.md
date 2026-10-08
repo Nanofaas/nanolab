@@ -3,7 +3,9 @@
 Status: the user approved the three-delivery subdivision below. The first
 delivery (#53) is implemented, independently reviewed and qualified locally
 through installed native artifacts; its existing coverage gate remains failing.
-The two #54 deliveries still require their own design and implementation.
+The CLI delivery is implemented and reviewed; its installed candidate passes,
+but shipped-source qualification awaits NanoFaaS Context reflection integration.
+The function/watchdog delivery still requires its own design and implementation.
 
 ## Approved subdivision: three independent deliveries
 
@@ -28,7 +30,9 @@ qualification. The CLI delivery alone does not close #54. This subdivision is a
 scope decision, not qualification or approval of an unwritten implementation.
 The first delivery's design is [native Kubernetes lifecycle](2026-10-08-native-k8s-lifecycle-design.md).
 The second delivery's approved design is [native CLI parity](2026-10-08-native-cli-parity-design.md);
-its implementation plan is approved and executing on `fix/operational-validation`.
+its implementation is reviewed on `fix/operational-validation`;
+[CLI execution evidence](../plans/2026-10-08-native-cli-parity-evidence.md) distinguishes
+the successful patched candidate from the failed shipped source.
 
 ## Outcome and scope
 

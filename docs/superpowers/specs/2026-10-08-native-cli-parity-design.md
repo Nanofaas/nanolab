@@ -1,10 +1,11 @@
 # Native CLI parity — second native delivery, issue #54
 
-Status: the user approved this written design. The implementation plan is
-`../plans/2026-10-08-native-cli-parity.md`, approved and executing
-on `fix/operational-validation`. This document is not live qualification.
-Kubernetes native lifecycle (#53) is already qualified separately; packaged
-function/watchdog contracts remain the third delivery.
+Status: approved and implemented on `fix/operational-validation`, independently
+reviewed with no material NanoLab findings. Installed ARM64 parity passed only
+against an explicitly patched NanoFaaS candidate. Shipped-source qualification
+remains incomplete: the native CLI lacks `Context` reflection registration.
+See [execution evidence](../plans/2026-10-08-native-cli-parity-evidence.md).
+Function/watchdog contracts remain the third delivery; issue #54 stays open.
 
 ## Outcome and source of requirements
 

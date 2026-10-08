@@ -308,7 +308,7 @@ probe argument. Use Task 1's resources and Task 3's gate without another engine.
 **Files:** Create `docs/superpowers/plans/2026-10-08-native-cli-parity-evidence.md`;
 update this plan and its approved spec status with actual results.
 
-- [ ] Build/install isolated NanoLab/toolkit wheels with unchanged public Sonata
+- [x] Build/install isolated NanoLab/toolkit wheels with unchanged public Sonata
   dependencies. Resolve both new bundled presets through the installed CLI.
   Expected: valid compilation and compatible installed dependencies.
 - [ ] Run the installed parity scenario against an exclusively owned local
@@ -319,7 +319,7 @@ update this plan and its approved spec status with actual results.
   Expected: exit 0, native and JVM independently pass and compare, cleanup passes.
   Inspect namespace/import removal, then remove only this verification profile.
   Failed/missing live evidence keeps this task explicitly incomplete.
-- [ ] Run NanoLab and toolkit suites with their original package coverage
+- [x] Run NanoLab and toolkit suites with their original package coverage
   configurations and the CI-pinned source for checkout-contract tests. Use the
   unrestricted test environment where local HTTP/async tests need it.
   Expected: functional tests pass; report the actual original coverage gate
@@ -332,7 +332,7 @@ update this plan and its approved spec status with actual results.
   and `uv pip check --python .venv/bin/python` plus the same check using the
   isolated installed environment's Python. First verify the pinned checkout is
   still at `e7914be065e844776af57fe9e449bce7f12e03c5`.
-- [ ] Obtain one fresh final whole-branch review according to the execution skill,
+- [x] Obtain one fresh final whole-branch review according to the execution skill,
   including this plan's Review Focus and every ledger ruling. Fix material
   findings in the prescribed single RED-to-GREEN pass and rerun the whole suite;
   repeat affected live qualification if runtime behavior changed. Record exclusions
@@ -340,6 +340,17 @@ update this plan and its approved spec status with actual results.
 - [ ] Commit the evidence, preserve decisions and actual coverage limitations,
   remove only this plan's scratch workspace, and keep the requested branch and
   worktree. Do not push, publish, merge or close #54 as part of this plan.
+
+### Task 5 execution status
+
+The candidate installed parity cycle passed, the original functional suites,
+quality hooks and dependencies passed, and one final whole-branch review found
+no material NanoLab defect. The unchanged 90% coverage gate remains failing.
+Clean NanoFaaS source fails the required native YAML context contract. A minimal
+Context reflection patch passes in a temporary clone, but is not integrated.
+Task 5 and shipped-source qualification remain incomplete; keep the plan scratch
+workspace to resume after the upstream fix. No push, PR or publication occurred.
+See [actual evidence](2026-10-08-native-cli-parity-evidence.md).
 
 ## Self-review and execution handoff
 
