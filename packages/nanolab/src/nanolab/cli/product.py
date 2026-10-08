@@ -402,6 +402,7 @@ def _require_cli_endpoint(
     if (
         scenario.workflow == "cli"
         and scenario.backend == "k8s"
+        and scenario.recipe_profile is None
         and environment.provider == "local"
         and control_plane_url is None
     ):
