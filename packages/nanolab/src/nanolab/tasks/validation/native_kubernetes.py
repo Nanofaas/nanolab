@@ -15,7 +15,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.models import CommandOptions, CommandTaskSpec, TaskResult
 from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.http import endpoint_argv
-from sonata_tasks.kubectl import kubectl_port_forward_resource, owned_deployment_pods
+from sonata_tasks.kubectl import owned_deployment_pods
 from sonata_tasks.minikube import MinikubeTarget
 
 from nanolab.assets.diagnostics.native_k8s_runtime import (
@@ -347,6 +347,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
         target: Resource[MinikubeTarget] | None = None,
         assets: Path | None = None,
         remote_root: PurePosixPath | None = None,
+        endpoint_overrides: dict[str, str] | None = None,
     ) -> None:
         """Bind gates to the run's distribution and Kubernetes resources."""
         self.title = "Qualify native Kubernetes lifecycle"
@@ -361,6 +362,18 @@ class NativeKubernetesLifecycleTask(Task[None]):
         self.target = target
         self.assets = assets or bundled_assets_root() / "diagnostics"
         self.remote_root = remote_root
+        self.endpoint_overrides = (
+            endpoint_overrides if endpoint_overrides is not None else {}
+        )
+
+    def _refresh_endpoint(self, inputs: TaskInputs) -> str:
+        if not isinstance(self.endpoint, Resource):
+            raise RuntimeError("native local lifecycle requires an owned API forward")
+        previous = inputs.resource(self.endpoint)
+        self.endpoint.release(inputs, previous)
+        current = self.endpoint.acquire(inputs)
+        self.endpoint_overrides[previous] = current
+        return current
 
     def _prefix(self, inputs: TaskInputs) -> tuple[str, ...]:
         context = (
@@ -599,7 +612,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
                 local.write_text(text)
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
-        """Execute native gates and release the replacement API forward on failure."""
+        """Execute gates while keeping the owned API forward alive for cleanup."""
         report = inputs.resource(self.distribution)
         if report.control_plane().mode != "native":
             return TaskOutcome()
@@ -654,58 +667,41 @@ class NativeKubernetesLifecycleTask(Task[None]):
             )
             + "\n"
         )
-        target = self.target
-        forward = (
-            kubectl_port_forward_resource(
-                namespace=self.namespace,
-                resource="service/control-plane",
-                remote_port=8080,
-                log_path=native_dir / "api-port-forward.log",
-                context=lambda current: current.resource(target).context,
-            )
-            if target
-            else None
+        endpoint = self._refresh_endpoint(inputs) if self.target else self.endpoint
+        bounded = _ApiCommands(self.executor, None)
+        RecipeMetadataCheckTask(
+            self.distribution,
+            executor=bounded,
+            run_dir=native_dir,
+            endpoint=endpoint,
+            role=self.role,
+        ).run(inputs)
+        RecipeKubernetesImageCheckTask(
+            self.distribution,
+            namespace=self.namespace,
+            deployment="nanofaas-control-plane",
+            component=("control-plane", "control-plane", "java"),
+            executor=bounded,
+            role=self.role,
+            run_dir=native_dir,
+            target=self.target,
+        ).run(inputs)
+        self._quota(inputs, endpoint)
+        logs_after = self._logs(inputs, after_pod, "after-quota")
+        self._probe(
+            inputs, after_pod, uid, logs_before=logs_before, logs_after=logs_after
         )
-        forward_endpoint = forward.acquire(inputs) if forward else None
-        endpoint = forward_endpoint if forward_endpoint is not None else self.endpoint
-        try:
-            bounded = _ApiCommands(self.executor, None)
-            RecipeMetadataCheckTask(
-                self.distribution,
-                executor=bounded,
-                run_dir=native_dir,
-                endpoint=endpoint,
-                role=self.role,
-            ).run(inputs)
-            RecipeKubernetesImageCheckTask(
-                self.distribution,
-                namespace=self.namespace,
-                deployment="nanofaas-control-plane",
-                component=("control-plane", "control-plane", "java"),
-                executor=bounded,
-                role=self.role,
-                run_dir=native_dir,
-                target=self.target,
-            ).run(inputs)
-            self._quota(inputs, endpoint)
-            logs_after = self._logs(inputs, after_pod, "after-quota")
-            self._probe(
-                inputs, after_pod, uid, logs_before=logs_before, logs_after=logs_after
+        (native_dir / "qualified.json").write_text(
+            json.dumps(
+                {
+                    "mode": "native",
+                    "deploymentUid": uid,
+                    "functionImage": function.image,
+                    "source": report.source,
+                }
             )
-            (native_dir / "qualified.json").write_text(
-                json.dumps(
-                    {
-                        "mode": "native",
-                        "deploymentUid": uid,
-                        "functionImage": function.image,
-                        "source": report.source,
-                    }
-                )
-                + "\n"
-            )
-        finally:
-            if forward and forward_endpoint is not None:
-                forward.release(inputs, forward_endpoint)
+            + "\n"
+        )
         return TaskOutcome()
 
     def _fingerprint_payload(self) -> object:

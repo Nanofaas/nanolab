@@ -177,6 +177,75 @@ def test_retry_preserves_failed_native_evidence(tmp_path):
     assert len(archived) == 1 and archived[0].read_text() == "failed response\n"
 
 
+def test_function_cleanup_uses_the_endpoint_reopened_after_rollout(native_api_server):
+    from sonata_engine import Resource
+    from nanolab.tasks.platform import PlatformRequest, _function_resource
+
+    url, state = native_api_server
+    old_url = "http://127.0.0.1:1"
+    endpoint = Resource(
+        title="Owned API", acquire=lambda _inputs: old_url, release=lambda *_args: None
+    )
+    function = PlatformFunction("fn", "image:qualified", "{}", ("true",))
+    resource = _function_resource(
+        PlatformRequest(backend="k8s", functions=(function,)),
+        function,
+        endpoint,
+        (),
+        (endpoint,),
+        LocalCommandTaskExecutor(),
+        None,
+        endpoint_overrides={old_url: url},
+    )
+    resource.release(TaskInputs._for_resources({endpoint: old_url}, {endpoint}), None)
+    assert state["registered"] is False
+
+
+def test_refresh_reuses_the_workflows_forward_resource_and_release(tmp_path):
+    from sonata_engine import Resource
+    from nanolab.tasks.recipes.workflow import RecipeDistribution
+    from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
+
+    events = []
+    state = {"url": "old"}
+
+    def acquire(_inputs):
+        state["url"] = "new"
+        events.append("start-new")
+        return "new"
+
+    def release(_inputs, _value):
+        events.append("stop-" + state["url"])
+
+    endpoint = Resource(
+        title="Existing owned forward", acquire=acquire, release=release
+    )
+
+    def unused(_inputs) -> RecipeDistribution:
+        raise AssertionError("No build during refresh")
+
+    distribution = Resource(
+        title="Distribution", acquire=unused, release=lambda *_args: None
+    )
+    updates = {}
+    task = NativeKubernetesLifecycleTask(
+        distribution,
+        namespace="owned",
+        function=PlatformFunction("fn", "fixed:tag", "{}", ("true",)),
+        endpoint=endpoint,
+        executor=LocalCommandTaskExecutor(),
+        role="host",
+        run_dir=tmp_path,
+        function_component=("word-stats", "java"),
+        endpoint_overrides=updates,
+    )
+    inputs = TaskInputs._for_resources({endpoint: "old"}, {endpoint})
+    assert task._refresh_endpoint(inputs) == "new"
+    assert updates == {"old": "new"}
+    endpoint.release(inputs, "old")
+    assert events == ["stop-old", "start-new", "stop-new"]
+
+
 @pytest.mark.parametrize("replaced", [False, True])
 def test_quota_patch_is_conditional_on_the_acquired_deployment(replaced):
     from nanolab.tasks.validation.native_kubernetes import configure_native_quota

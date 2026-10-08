@@ -156,3 +156,20 @@ def test_procfs_receipt_rejects_missing_or_truncated_data(text):
 
     with pytest.raises(RuntimeError):
         parse_procfs(text)
+
+
+@pytest.mark.parametrize("name", ["or-http-epoll-1", "actor-http-nio-1"])
+def test_graalvm_suffix_names_still_distinguish_workers_and_transport(name):
+    from nanolab.assets.diagnostics.native_k8s_runtime import verify_native_runtime
+
+    data = observation()
+    data["threads"] = [
+        {"id": 403, "name": name},
+        {"id": 404, "name": "-select-epoll-1"},
+        {"id": 405, "name": "as-mgmt-epoll-2"},
+    ]
+    if "nio" in name:
+        with pytest.raises(RuntimeError, match="epoll"):
+            verify_native_runtime(data, expected_workers=1, require_epoll=True)
+    else:
+        verify_native_runtime(data, expected_workers=1, require_epoll=True)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from typing import Any
 
 LOG_LIMIT = 8 * 1024 * 1024
@@ -137,9 +138,12 @@ def verify_native_runtime(
         ids.add(row["id"])
         name = row["name"]
         if name.startswith(("reactor-http-ep", "reactor-http-ni")):
-            workers.append(name)
+            workers.append("epoll" if name.startswith("reactor-http-ep") else "nio")
+        else:
+            suffix = re.fullmatch(r".+-(epoll|nio)-(\d+)", name)
+            if suffix and name == f"reactor-http-{suffix[1]}-{suffix[2]}"[-15:]:
+                workers.append(suffix[1])
     if len(workers) != expected_workers or (
-        require_epoll
-        and any(not name.startswith("reactor-http-ep") for name in workers)
+        require_epoll and any(transport != "epoll" for transport in workers)
     ):
         raise RuntimeError("native Reactor worker count or epoll transport differs")

@@ -181,6 +181,7 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
     run_id = uuid4().hex
+    endpoint_overrides: dict[str, str] = {}
     platform_request = (
         replace(request, functions=(*request.functions, request.queue_probe))
         if request.queue_probe is not None
@@ -194,6 +195,9 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
         control_plane_process=control_plane_process,
         local_endpoint=local_endpoint,
         requires=requires,
+        endpoint_overrides=endpoint_overrides
+        if request.recipe is not None and request.backend == "k8s"
+        else None,
     )
 
     if request.recipe is not None:
@@ -577,6 +581,7 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                 target=cast(Resource[MinikubeTarget] | None, binding.target),
                 assets=request.native_assets,
                 remote_root=binding.remote_root,
+                endpoint_overrides=endpoint_overrides,
             ),
             requires=(
                 *requires,
