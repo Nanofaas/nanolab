@@ -72,7 +72,7 @@ executor: CommandTaskExecutor, evidence_dir: Path) -> Resource[CliArtifact]`.
 The resource depends only on `run`, builds on `host`, and retains receipts;
 its release does not remove build artifacts.
 
-- [ ] Write `test_cli_modes_selects_exact_artifacts` with the tuples above and
+- [x] Write `test_cli_modes_selects_exact_artifacts` with the tuples above and
   rejection of an unknown runtime:
 
   ```python
@@ -91,9 +91,9 @@ its release does not remove build artifacts.
   host architecture to `arm64`/`amd64`, retain it in the artifact and check the
   native ELF machine against it; reject an incompatible execution host. Temporary ELF
   headers in these unit tests are parser fixtures, not executable qualification.
-- [ ] Run `.venv/bin/pytest packages/nanolab/tests/tasks/validation/test_cli_artifacts.py --no-cov`.
+- [x] Run `.venv/bin/pytest packages/nanolab/tests/tasks/validation/test_cli_artifacts.py --no-cov`.
   Expected: RED for missing selection/identity/resource functions.
-- [ ] Implement the interfaces. Paths are
+- [x] Implement the interfaces. Paths are
   `clients/cli/build/install/nanofaas-cli/bin/nanofaas-cli` and
   `clients/cli/build/native/nativeCompile/nanofaas-cli`. Resolve every artifact
   inside `source`; read only a bounded ELF header. Use `read_project_version`
@@ -101,12 +101,12 @@ its release does not remove build artifacts.
   controls; record bounded help/version output and reject unexpected version
   or native error markers. Write `<evidence_dir>/<mode>.json` exclusively with
   artifact/source identity. Verify frozen tracked inputs have not changed.
-- [ ] Add `test_artifact_build_depends_only_on_frozen_source`: inspect and run
+- [x] Add `test_artifact_build_depends_only_on_frozen_source`: inspect and run
   each resource with a command-boundary executor; assert the correct Gradle
   target, frozen cwd, artifact path and no Kubernetes/API commands. A failed
   build/help/version command must not produce a successful artifact receipt.
   Expected: GREEN for the whole module, including library mutation.
-- [ ] Commit `feat: build and verify isolated CLI artifacts`.
+- [x] Commit `feat: build and verify isolated CLI artifacts`.
 
 ### Task 2: Shared CLI proofs and reusable contract assembly
 
@@ -356,5 +356,5 @@ the complete case ledger; no uncovered spec requirement remains.
 
 Recommended execution preserves the previous lot's method: I implement the tasks
 in this session, with one fresh final reviewer on the most capable available
-model. The user has approved the written spec; review of this implementation
-plan is pending before execution.
+model. The user approved the written spec and this implementation plan. Inline execution
+started on 2026-10-08; progress is recorded per task.
