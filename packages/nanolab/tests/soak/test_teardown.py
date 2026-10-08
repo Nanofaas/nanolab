@@ -82,10 +82,14 @@ class Commands:
         self.port = "18080"
         self.container_id = "c" * 64
         self.started_at = "2026-09-13T10:00:00.000000000Z"
+        self.running = True
+        self.absent = False
 
     def __call__(self, argv, cwd, env):
         self.calls.append(argv)
-        if argv[-3:] == ("ps", "-q", "control-plane"):
+        if "ps" in argv and argv[-2:] == ("-q", "control-plane"):
+            if self.absent:
+                return b""
             return (self.container_id + "\n").encode()
         if argv[1] == "inspect":
             return json.dumps(
@@ -99,13 +103,25 @@ class Commands:
                                 "com.docker.compose.service": "control-plane",
                             },
                         },
-                        "State": {"Running": True, "StartedAt": self.started_at},
+                        "State": {
+                            "Running": self.running,
+                            "StartedAt": self.started_at,
+                        },
+                        "HostConfig": {
+                            "PortBindings": {
+                                "8080/tcp": [
+                                    {"HostIp": "127.0.0.1", "HostPort": self.port}
+                                ]
+                            }
+                        },
                         "NetworkSettings": {
                             "Ports": {
                                 "8080/tcp": [
                                     {"HostIp": "127.0.0.1", "HostPort": self.port},
                                 ]
                             }
+                            if self.running
+                            else {"8080/tcp": None}
                         },
                     }
                 ]
@@ -206,6 +222,21 @@ def test_cleanup_failure_keeps_platform_and_allows_retry(tmp_path):
     assert sum("down" in call for call in command.calls) == 1
 
 
+def test_platform_replacement_during_function_cleanup_is_preserved(tmp_path):
+    owner = retained(tmp_path)
+    command = Commands()
+    deleted = []
+
+    def delete_and_replace(identity):
+        deleted.append(identity)
+        command.container_id = "d" * 64
+
+    with pytest.raises(ValueError, match="different control-plane container"):
+        execute(tmp_path, command, delete_and_replace)
+    assert deleted == [owner]
+    assert not any("down" in call for call in command.calls)
+
+
 def test_constructor_does_not_read_journal_or_create_run_dir(tmp_path):
     root = tmp_path / "not-created"
     config = SimpleNamespace(
@@ -304,3 +335,130 @@ def test_cleanup_waits_past_the_container_stop_grace(tmp_path):
     assert cleanup_timeout_s(30) > 30
     # Monotonic in the declared grace, so a longer grace never gets less room.
     assert cleanup_timeout_s(30) > cleanup_timeout_s(5)
+
+
+@pytest.mark.parametrize("foreign_platform", [False, True])
+def test_cli_teardown_executes_owned_cleanup_and_reports_conflicts(
+    tmp_path, monkeypatch, foreign_platform
+):
+    from typer.testing import CliRunner
+
+    import nanolab.cli.product as product
+    import nanolab.tasks.soak.teardown as teardown
+    from nanolab.app.main import app
+    from nanolab.workspace.paths import ToolPaths, discover_tool_root
+
+    owner = retained(tmp_path)
+    command = Commands()
+    if foreign_platform:
+        command.image = "foreign@sha256:" + "d" * 64
+    deleted = []
+    monkeypatch.setattr(teardown, "LocalCleanupCommands", lambda *a, **k: command)
+    monkeypatch.setattr(
+        teardown,
+        "delete_owned_function",
+        lambda identity, **k: deleted.append(identity),
+    )
+    monkeypatch.setattr(
+        product,
+        "default_tool_paths",
+        lambda: ToolPaths.from_roots(tmp_path, discover_tool_root()),
+    )
+    args = [
+        "run",
+        "memory-soak-smoke-container.yaml",
+        "--teardown",
+        "--run-dir",
+        str(tmp_path),
+    ]
+    result = CliRunner().invoke(app, args)
+    if foreign_platform:
+        assert result.exit_code != 0
+        assert deleted == []
+        assert not any("down" in call for call in command.calls)
+        assert teardown.read_cleanup_records(tmp_path / "cleanup.jsonl")
+    else:
+        assert result.exit_code == 0, result.output
+        assert deleted == [owner]
+        assert sum("down" in call for call in command.calls) == 1
+        assert teardown.read_cleanup_records(tmp_path / "cleanup.jsonl") == []
+        calls = list(command.calls)
+        assert CliRunner().invoke(app, args).exit_code == 0
+        assert command.calls == calls
+
+
+@pytest.mark.parametrize("legacy_journal", [False, True])
+@pytest.mark.parametrize("stopped_retry", [False, True])
+@pytest.mark.parametrize(
+    ("attribute", "replacement"),
+    [
+        (None, None),
+        ("running", False),
+        ("absent", True),
+        ("image", "foreign@sha256:" + "d" * 64),
+        ("project", "foreign"),
+        ("port", "18082"),
+        ("container_id", "d" * 64),
+        ("started_at", "2026-09-13T11:00:00.000000000Z"),
+    ],
+)
+def test_partial_cli_teardown_retry_preserves_platform_ownership(
+    tmp_path, monkeypatch, legacy_journal, stopped_retry, attribute, replacement
+):
+    from typer.testing import CliRunner
+
+    import nanolab.cli.product as product
+    import nanolab.tasks.soak.teardown as teardown
+    from nanolab.app.main import app
+    from nanolab.workspace.paths import ToolPaths, discover_tool_root
+
+    owner = retained(tmp_path)
+    journal = tmp_path / ("journal.jsonl" if legacy_journal else "cleanup.jsonl")
+    if legacy_journal:
+        (tmp_path / "cleanup.jsonl").unlink()
+    command = Commands()
+    fail_compose = True
+
+    def cleanup(argv, cwd, env):
+        if "down" in argv and fail_compose:
+            raise RuntimeError("Compose cleanup failed")
+        return command(argv, cwd, env)
+
+    deleted = []
+    monkeypatch.setattr(teardown, "LocalCleanupCommands", lambda *a, **k: cleanup)
+    monkeypatch.setattr(
+        teardown,
+        "delete_owned_function",
+        lambda identity, **k: deleted.append(identity),
+    )
+    monkeypatch.setattr(
+        product,
+        "default_tool_paths",
+        lambda: ToolPaths.from_roots(tmp_path, discover_tool_root()),
+    )
+    args = [
+        "run",
+        "memory-soak-smoke-container.yaml",
+        "--teardown",
+        "--run-dir",
+        str(tmp_path),
+    ]
+    assert CliRunner().invoke(app, args).exit_code != 0
+    assert deleted == [owner]
+    records = teardown.read_cleanup_records(journal)
+    assert len(records) == 1
+    assert records[0]["value"]["schema"] == "nanolab-soak-owned-compose-v1"
+    fail_compose = False
+    command.running = not stopped_retry
+    if attribute is not None:
+        setattr(command, attribute, replacement)
+    result = CliRunner().invoke(app, args)
+    assert deleted == [owner]
+    if attribute not in {None, "running", "absent", "started_at"}:
+        assert result.exit_code != 0
+        assert not any("down" in call for call in command.calls)
+        assert teardown.read_cleanup_records(journal) == records
+    else:
+        assert result.exit_code == 0, result.output
+        assert sum("down" in call for call in command.calls) == 1
+        assert teardown.read_cleanup_records(journal) == []

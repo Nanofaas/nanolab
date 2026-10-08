@@ -982,7 +982,7 @@ def install_product_commands(
 
                     paths = default_tool_paths()
                     bindings, _fetcher = build_role_bindings(environment_config)
-                    teardown_soak_run(
+                    cleanup = teardown_soak_run(
                         scenario_config,
                         environment_config,
                         bindings,
@@ -990,6 +990,7 @@ def install_product_commands(
                         repo_root=paths.nanofaas_root,
                         tool_root=paths.tool_root,
                     )
+                    cleanup.run()
                     return
                 if run_dir is not None:
                     require_unused_run_dir(run_dir)

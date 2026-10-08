@@ -13,9 +13,9 @@ from nanolab.tasks.containerd_maven import (
 )
 
 COORDINATES = (
-    ("io/nanofaas", "containerd-java", "0.24.0"),
-    ("io/nanofaas", "containerd-java-cni", "0.24.0"),
-    ("io/libcni", "libcni-java", "0.23.0"),
+    ("io/github/nanofaas", "containerd-java", "0.25.0"),
+    ("io/github/nanofaas", "containerd-java-cni", "0.25.0"),
+    ("io/github/nanofaas", "libcni-java", "0.24.0"),
 )
 
 
@@ -28,7 +28,7 @@ def _repository(root: Path) -> None:
                 f"{artifact}-{suffix}"
             )
         (folder / "maven-metadata-local.xml").write_text("metadata")
-    (root / "io/nanofaas/containerd-java/0.24.0/secret.txt").write_text(
+    (root / "io/github/nanofaas/containerd-java/0.25.0/secret.txt").write_text(
         "should not transfer"
     )
     (root / "com/private").mkdir(parents=True)
@@ -41,18 +41,20 @@ def test_stage_snapshot_repository_filters_and_receipts(tmp_path: Path) -> None:
     _repository(source)
     receipt = stage_snapshot_repository(source, target)
     assert not (target / "com").exists()
-    assert not (target / "io/nanofaas/containerd-java/0.24.0/secret.txt").exists()
+    assert not (
+        target / "io/github/nanofaas/containerd-java/0.25.0/secret.txt"
+    ).exists()
     files = json.loads((target / "nanolab-receipt.json").read_text())["files"]
     assert len(files) == 9
     assert receipt["files"] == files
-    jar = "io/nanofaas/containerd-java/0.24.0/containerd-java-0.24.0.jar"
+    jar = "io/github/nanofaas/containerd-java/0.25.0/containerd-java-0.25.0.jar"
     assert files[jar] == hashlib.sha256(b"containerd-java-jar").hexdigest()
 
 
 def test_stage_snapshot_repository_requires_complete_coordinate(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _repository(source)
-    (source / "io/libcni/libcni-java/0.23.0/libcni-java-0.23.0.pom").unlink()
+    (source / "io/github/nanofaas/libcni-java/0.24.0/libcni-java-0.24.0.pom").unlink()
     with pytest.raises(ValueError, match="missing Maven artifact"):
         stage_snapshot_repository(source, tmp_path / "staged")
 
