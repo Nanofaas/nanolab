@@ -133,6 +133,7 @@ def check_native_api(
         result = (
             CommandTask(
                 title=f"Native API {method} {path}",
+                semantic_key=f"native-api:v1:{method}:{path}:{expected_status}",
                 argv=endpoint_argv(
                     endpoint,
                     lambda base: (
@@ -538,6 +539,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
         )
         task = CommandTask(
             title="Burst native invocation quota",
+            semantic_key=f"native-invocation-quota:v1:{self.function.name}",
             argv=endpoint_argv(
                 endpoint,
                 lambda url: (

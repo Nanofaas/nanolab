@@ -144,7 +144,7 @@ def test_http_register_posts_the_same_manifest() -> None:
 
 
 def test_http_set_replicas_sends_the_requested_target() -> None:
-    executor = RecordingExecutor()
+    executor = RespondingExecutor(stdout='{"function":"word-stats","replicas":2}')
 
     _ = http_function.HttpFunctionSetReplicasTask(
         "word-stats",

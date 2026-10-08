@@ -83,3 +83,40 @@ def test_quota_gate_requires_a_real_quota_response(quota_server, tmp_path, mode)
         with pytest.raises(RuntimeError):
             run_burst(url, "owned-fn", {"input": {"text": "alpha beta"}}, output)
         assert output.exists(), "failed qualifications must retain their observations"
+
+
+def test_quota_task_uses_an_acquired_endpoint(quota_server, tmp_path):
+    from sonata_engine import Resource, TaskInputs
+    from sonata_tasks.execution.local import LocalCommandTaskExecutor
+
+    from nanolab.tasks.platform import PlatformFunction
+    from nanolab.tasks.recipes.workflow import RecipeDistribution
+    from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
+
+    url, _ = quota_server
+    endpoint = Resource(
+        title="Acquired endpoint",
+        acquire=lambda _inputs: url,
+        release=lambda *_args: None,
+    )
+
+    def unused_distribution(_inputs) -> RecipeDistribution:
+        raise AssertionError("Quota subtask does not read the distribution")
+
+    unused = Resource(
+        title="Distribution", acquire=unused_distribution, release=lambda *_args: None
+    )
+    task = NativeKubernetesLifecycleTask(
+        unused,
+        namespace="owned",
+        function=PlatformFunction("owned-fn", "fixed:tag", "{}", ("true",)),
+        endpoint=endpoint,
+        executor=LocalCommandTaskExecutor(),
+        role="host",
+        run_dir=tmp_path,
+        function_component=("word-stats", "java"),
+    )
+    task._quota(TaskInputs._for_resources({endpoint: url}, {endpoint}), endpoint)
+    assert (
+        len(json.loads((tmp_path / "native/quota.json").read_text())["responses"]) == 30
+    )

@@ -103,13 +103,22 @@ def native_api_server():
         "DELETE /v1/functions/fn",
     ],
 )
+@pytest.mark.parametrize("resource_endpoint", [False, True])
 def test_native_api_validates_bodies_and_strict_delete(
-    native_api_server, tmp_path, fault
+    native_api_server, tmp_path, fault, resource_endpoint
 ):
+    from sonata_engine import Resource
+
     from nanolab.tasks.validation.native_kubernetes import check_native_api
 
     url, state = native_api_server
     state["fault"] = fault
+    endpoint = Resource(
+        title="Acquired HTTP endpoint",
+        acquire=lambda _inputs: url,
+        release=lambda *_args: None,
+    )
+    inputs = TaskInputs._for_resources({endpoint: url}, {endpoint})
     fn = PlatformFunction(
         name="fn",
         image="image:qualified",
@@ -119,9 +128,9 @@ def test_native_api_validates_bodies_and_strict_delete(
 
     def run():
         check_native_api(
-            TaskInputs.empty(),
+            inputs,
             function=fn,
-            endpoint=url,
+            endpoint=endpoint if resource_endpoint else url,
             executor=LocalCommandTaskExecutor(),
             role="host",
             cwd=tmp_path,
