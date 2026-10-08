@@ -64,12 +64,21 @@ def artifact_server(capture_base, *, wrong=False):
 
 
 class HttpBoundary(DockerBoundary):
-    def __init__(self, capture_base, artifact_base, *, duplicate=False, pending=False):
+    def __init__(
+        self,
+        capture_base,
+        artifact_base,
+        *,
+        duplicate=False,
+        pending=False,
+        pending_headers=False,
+    ):
         super().__init__()
         self.capture_base, self.artifact_base = capture_base, artifact_base
         self.duplicate = duplicate
         self.execution_id = None
         self.pending = pending
+        self.pending_headers = pending_headers
         self.pending_socket = None
 
     def dispatch(self, argv, config):
@@ -101,13 +110,17 @@ class HttpBoundary(DockerBoundary):
             self.pending_socket.sendall(
                 (
                     f"POST /v1/executions/{self.execution_id}:complete HTTP/1.1\r\n"
-                    "Host: capture\r\nContent-Length: 200\r\n\r\n{"
+                    + (
+                        "Host: "
+                        if self.pending_headers
+                        else "Host: capture\r\nContent-Length: 200\r\n\r\n{"
+                    )
                 ).encode()
             )
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
                 if json.loads(request(self.capture_base, "/_nanolab/records")[1])[
-                    "activeCallbacks"
+                    "activeRequests" if self.pending_headers else "activeCallbacks"
                 ]:
                     break
         result = super().dispatch(argv, config)
@@ -173,7 +186,9 @@ def execute(source_root, run_dir, boundary):
     return task.run(inputs).value
 
 
-@pytest.mark.parametrize("fault", ["none", "body", "late-duplicate", "pending"])
+@pytest.mark.parametrize(
+    "fault", ["none", "body", "late-duplicate", "pending", "pending-headers"]
+)
 def test_runtime_exchange_and_final_audit(frozen_fixture, tmp_path, fault):
     run_dir = tmp_path / "run"
     with (
@@ -184,7 +199,8 @@ def test_runtime_exchange_and_final_audit(frozen_fixture, tmp_path, fault):
             callback_base,
             artifact_base,
             duplicate=fault == "late-duplicate",
-            pending=fault == "pending",
+            pending=fault in {"pending", "pending-headers"},
+            pending_headers=fault == "pending-headers",
         )
         if fault == "none":
             result = execute(frozen_fixture, run_dir, boundary)

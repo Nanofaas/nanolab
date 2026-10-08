@@ -145,6 +145,77 @@ def finished_attempt(tmp_path):
         }
         (root / "ownership" / f"{kind}.json").write_text(json.dumps(owned))
         (root / "cleanup" / f"{kind}.json").write_text(json.dumps({"absent": True}))
+    (root / "containers").mkdir()
+    (root / "containers/container.json").write_text(
+        json.dumps(
+            {
+                "Id": "container",
+                "Image": "sha256:image",
+            }
+        )
+    )
+    (root / "container-logs").mkdir()
+    (root / "container-logs/container.log").write_bytes(b"ready")
+    (root / "capture.log").write_bytes(b"ready")
+    (root / "capture").mkdir()
+    (root / "contract-settings.json").write_text(json.dumps({"log_bytes": 8388608}))
+    (root / "capture-image.json").write_text(json.dumps({"Id": "helper-image"}))
+    for kind, identity in (("image", "helper-image"), ("container", "capture")):
+        owned = {
+            "kind": kind,
+            "reference": identity,
+            "identity": identity,
+            "owner": "test",
+        }
+        name = f"{kind}-helper.json"
+        (root / "ownership" / name).write_text(json.dumps(owned))
+        (root / "cleanup" / name).write_text(json.dumps({"absent": True}))
+    cb = dict(
+        receipt["callbacks"][0],
+        sequence=1,
+        bodySha256=hashlib.sha256(callback_raw).hexdigest(),
+        bodyBytes=len(callback_raw),
+    )
+    receipt["callbacks"] = [cb]
+    path.write_text(json.dumps(receipt))
+    (root / "capture/0001.raw").write_bytes(callback_raw)
+    (root / "capture/0001.json").write_text(
+        json.dumps({k: v for k, v in cb.items() if k != "bodyBase64"})
+    )
+    audit = root / "capture/final.json"
+    startup_raw = b'{"success":true,"output":{"probe":true}}'
+    startup = {
+        "executionId": "probe-test",
+        "sequence": 2,
+        "method": "POST",
+        "path": "/v1/executions/probe-test:complete",
+        "bodyBytes": len(startup_raw),
+        "bodySha256": hashlib.sha256(startup_raw).hexdigest(),
+        "bodyBase64": base64.b64encode(startup_raw).decode(),
+    }
+    (root / "capture/0002.raw").write_bytes(startup_raw)
+    (root / "capture/0002.json").write_text(
+        json.dumps({k: v for k, v in startup.items() if k != "bodyBase64"})
+    )
+    audit.write_text(
+        json.dumps(
+            {
+                "violations": [],
+                "activeCallbacks": 0,
+                "activeRequests": 0,
+                "records": [cb, startup],
+            }
+        )
+    )
+    index = json.loads((root / "case-index.json").read_text())
+    index["cases"][0]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    index["finalAudit"] = {
+        "path": "capture/final.json",
+        "sha256": hashlib.sha256(audit.read_bytes()).hexdigest(),
+    }
+    index["startupExecutionId"] = "probe-test"
+    index["runtime"] = {"capture_container": "capture", "network": "network"}
+    (root / "case-index.json").write_text(json.dumps(index))
     return root, path, DockerBoundary()
 
 
@@ -257,3 +328,43 @@ def test_unknown_selector_rejected_before_acquisition(frozen_fixture, tmp_path):
             scenario_path=tmp_path / "scenario.yaml",
         )
     assert not (tmp_path / "attempt").exists()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "artifact-lease",
+        "container",
+        "runtime-log",
+        "audit",
+        "capture-body",
+        "capture-log",
+    ],
+)
+def test_required_artifact_and_audit_evidence_missing_prevents_marker(
+    finished_attempt, fault
+):
+    from nanolab.plans.contract import finalize_contract_run
+
+    root, _, executor = finished_attempt
+    if fault == "artifact-lease":
+        owned = {
+            "kind": "container",
+            "reference": "capture",
+            "identity": "capture",
+            "owner": "test",
+        }
+        (root / "ownership/container.json").write_text(json.dumps(owned))
+        executor.objects["container"] = {"Id": "container"}
+    else:
+        relative = {
+            "container": "containers/container.json",
+            "runtime-log": "container-logs/container.log",
+            "audit": "capture/final.json",
+            "capture-body": "capture/0001.raw",
+            "capture-log": "capture.log",
+        }[fault]
+        (root / relative).unlink()
+    with pytest.raises((ValueError, OSError)):
+        finalize_contract_run(root, executor=executor)
+    assert not (root / "qualification.json").exists()

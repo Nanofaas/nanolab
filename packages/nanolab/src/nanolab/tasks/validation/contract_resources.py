@@ -204,19 +204,23 @@ def _release_owned(
             raise RuntimeError("previous ownership cleanup failed")
         return
     try:
-        current = inspect_contract_object(executor, inputs, kind, reference)
+        current = inspect_contract_object(executor, inputs, kind, identity or reference)
         if current is not None:
             if _owned_labels(current, kind).get(OWNER_LABEL) != owner or (
                 identity is not None and current.get("Id") != identity
             ):
                 raise RuntimeError("contract resource ownership conflict")
+            verified_id = current["Id"]
             if kind == "container":
                 contract_command(
-                    executor, inputs, ("docker", "rm", "--force", reference)
+                    executor, inputs, ("docker", "rm", "--force", verified_id)
                 )
             else:
-                contract_command(executor, inputs, ("docker", kind, "rm", reference))
-        if inspect_contract_object(executor, inputs, kind, reference) is not None:
+                contract_command(executor, inputs, ("docker", kind, "rm", verified_id))
+        if inspect_contract_object(executor, inputs, kind, reference) is not None or (
+            identity is not None
+            and inspect_contract_object(executor, inputs, kind, identity) is not None
+        ):
             raise RuntimeError("contract resource absence unconfirmed")
         write_receipt(cleanup, {"absent": True, "owned": owned})
     except BaseException as error:
@@ -336,6 +340,7 @@ def contract_images_resource(
         matrix = resolve_contract_matrix(
             staged.source_dir, selectors, architecture=host_architecture(), tag=tag
         )
+        write_receipt(run_dir / "contract-settings.json", settings.model_dump())
         write_receipt(
             run_dir / "matrix.json",
             {
@@ -398,6 +403,9 @@ def contract_images_resource(
             target = next(iter(bake["target"].values()))
             target["labels"] = {OWNER_LABEL: tag}
             if cell.native_build is not None:
+                empty_maven = run_dir / "empty-maven-context"
+                empty_maven.mkdir(exist_ok=True)
+                target["contexts"] = {"containerd_maven_repo": str(empty_maven)}
                 args = target["args"]
                 parallelism = max(1, settings.builder_cpu_quota // 100000)
                 args["GRADLE_ARGS"] += (
@@ -597,7 +605,8 @@ def contract_runtime_resource(
         helper = f"nanolab-contract/{tag}/capture:probe"
         if inspect_contract_object(bounded, inputs, "image", helper) is not None:
             raise RuntimeError("contract helper tag already exists")
-        receipts.append(_register(run_dir, "image", helper, tag, None))
+        helper_receipt = _register(run_dir, "image", helper, tag, None)
+        receipts.append(helper_receipt)
         assets = run_dir / "helper"
         assets.mkdir(parents=True, exist_ok=True)
         helper_hashes = {}
@@ -630,6 +639,16 @@ def contract_runtime_resource(
                 str(assets),
             ),
             deadline=settings.build_seconds,
+        )
+        helper_identity = inspect_contract_object(bounded, inputs, "image", helper)
+        if (
+            helper_identity is None
+            or _owned_labels(helper_identity, "image").get(OWNER_LABEL) != tag
+        ):
+            raise RuntimeError("contract helper image identity disagrees")
+        write_receipt(
+            run_dir / "identity-bindings" / helper_receipt.name,
+            {"identity": helper_identity["Id"]},
         )
         name = f"contract-capture-{tag}"
         capture_receipt = _register(run_dir, "container", name, tag, None)
@@ -678,6 +697,9 @@ def verify_contract_cleanup(run_dir: Path, executor: CommandTaskExecutor) -> Non
     inventory = []
     for receipt in sorted((run_dir / "ownership").glob("*.json")):
         owned = json.loads(receipt.read_text())
+        binding = run_dir / "identity-bindings" / receipt.name
+        if owned["identity"] is None and binding.exists():
+            owned["identity"] = json.loads(binding.read_text())["identity"]
         cleanup = run_dir / "cleanup" / receipt.name
         if (
             not cleanup.exists()
@@ -686,6 +708,13 @@ def verify_contract_cleanup(run_dir: Path, executor: CommandTaskExecutor) -> Non
                 bounded, inputs, owned["kind"], owned["reference"]
             )
             is not None
+            or (
+                owned["identity"] is not None
+                and inspect_contract_object(
+                    bounded, inputs, owned["kind"], owned["identity"]
+                )
+                is not None
+            )
         ):
             raise RuntimeError("contract cleanup absence not proven")
         inventory.append(owned)

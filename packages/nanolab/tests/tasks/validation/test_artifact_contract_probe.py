@@ -61,12 +61,73 @@ def test_probe_slow_response_deadline():
     thread.start()
     try:
         started = time.monotonic()
-        with pytest.raises((TimeoutError, ValueError), match="deadline"):
-            probe(
-                {"url": f"http://127.0.0.1:{server.server_port}"},
-                {"request_seconds": 0.1, "message_bytes": 2048},
-            )
+        observed = probe(
+            {"url": f"http://127.0.0.1:{server.server_port}"},
+            {"request_seconds": 0.1, "message_bytes": 2048},
+        )
+        assert observed["status"] == 200
+        assert "deadline" in observed["error"]
+        assert base64.b64decode(observed["bodyBase64"]).startswith(b"x")
+        assert observed["truncated"] is True
         assert time.monotonic() - started < 0.25
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(1)
+
+
+def test_probe_does_not_follow_redirects():
+    from nanolab.assets.diagnostics.artifact_contract import probe
+
+    class Redirect(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header("Location", "/result")
+            self.send_header("Content-Length", "8")
+            self.end_headers()
+            self.wfile.write(b"redirect")
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}
+    )
+    thread.start()
+    try:
+        observed = probe(
+            {"url": f"http://127.0.0.1:{server.server_port}/invoke", "method": "POST"},
+            {"message_bytes": 2048, "request_seconds": 1},
+        )
+        assert observed["status"] == 302
+        assert base64.b64decode(observed["bodyBase64"]) == b"redirect"
+        from nanolab.functions.contracts import ContractCase
+        from nanolab.tasks.validation.function_contracts import (
+            validate_case_observation,
+        )
+
+        with pytest.raises(ValueError, match="status"):
+            validate_case_observation(
+                ContractCase("redirect", {}, {}, 200, None),
+                mode="sdk",
+                http=observed,
+                callbacks=(),
+                exit_code=None,
+            )
+        oversized = probe(
+            {"url": f"http://127.0.0.1:{server.server_port}/result"},
+            {"message_bytes": 2, "request_seconds": 1},
+        )
+        assert oversized["status"] == 200
+        assert base64.b64decode(oversized["bodyBase64"]) == b"{"
+        assert "bound" in oversized["error"]
+        assert oversized["truncated"] is True
     finally:
         server.shutdown()
         server.server_close()

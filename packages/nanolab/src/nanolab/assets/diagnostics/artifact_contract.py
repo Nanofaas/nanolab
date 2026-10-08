@@ -43,6 +43,7 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
     expected, records, bodies, violations = {}, [], {}, []
     total = 0
     active_callbacks = 0
+    active_requests = 0
     limit = int(settings["message_bytes"])
 
     def violation(message):
@@ -56,8 +57,44 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
             super().setup()
             self.connection.settimeout(float(settings["request_seconds"]))
 
-        def log_message(self, *_):
-            pass
+        def handle_one_request(self):
+            nonlocal active_requests
+            self.partial_body = bytearray()
+            self.deadline = time.monotonic() + float(settings["request_seconds"])
+            with lock:
+                active_requests += 1
+
+            def expire():
+                with lock:
+                    violation("request deadline")
+                try:
+                    self.connection.shutdown(socket.SHUT_RD)
+                except OSError:
+                    pass
+
+            timer = threading.Timer(float(settings["request_seconds"]), expire)
+            timer.daemon = True
+            timer.start()
+            try:
+                super().handle_one_request()
+            finally:
+                timer.cancel()
+                with lock:
+                    active_requests -= 1
+
+        def send_error(self, code, message=None, explain=None):
+            if code == 501:
+                try:
+                    self.read_body()
+                except (ValueError, OSError):
+                    pass
+            self.record(bytes(self.partial_body), f"HTTP request parser/method error: {code}")
+            super().send_error(code, message, explain)
+
+        def log_message(self, message, *_):
+            if message.startswith("Request timed out"):
+                with lock:
+                    violation("request deadline")
 
         def reply(self, status, value, *, raw=False):
             body = value if raw else json.dumps(value, separators=(",", ":")).encode()
@@ -88,6 +125,7 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
                         "violations": list(violations),
                         "bytes": total,
                         "activeCallbacks": active_callbacks,
+                        "activeRequests": max(0, active_requests - 1),
                     }
                 self.reply(200, value)
             elif re.fullmatch(r"/_nanolab/body/[1-9][0-9]*", self.path):
@@ -108,7 +146,7 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
             length = int(self.headers.get("Content-Length", "-1"))
             if length < 0:
                 raise ValueError("missing content length")
-            deadline = time.monotonic() + float(settings["request_seconds"])
+            deadline = self.deadline
             remaining = min(length, limit)
             parts = []
             while remaining:
@@ -118,16 +156,19 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
                 self.connection.settimeout(left)
                 part = self.rfile.read1(min(remaining, 65536))
                 if not part:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("request deadline")
                     raise ValueError("incomplete request body")
                 parts.append(part)
+                self.partial_body.extend(part[:max(0, limit - 1 - len(self.partial_body))])
                 remaining -= len(part)
             return b"".join(parts), length >= limit
 
         def record(self, raw, error=None):
             nonlocal total
-            path = self.path[:512]
+            path = getattr(self, "path", "")[:512]
             matched = re.fullmatch(
-                r"/v1/executions/([A-Za-z0-9_-]{1,128}):complete", self.path
+                r"/v1/executions/([A-Za-z0-9_-]{1,128}):complete", getattr(self, "path", "")
             )
             execution_id = matched.group(1) if matched else None
             with lock:
@@ -151,7 +192,7 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
                     {
                         "sequence": sequence,
                         "executionId": execution_id,
-                        "method": self.command,
+                        "method": getattr(self, "command", ""),
                         "path": path,
                         "bodyBytes": len(raw),
                         "bodySha256": hashlib.sha256(raw).hexdigest(),
@@ -205,7 +246,7 @@ def create_server(settings, *, host="0.0.0.0", port=8081):
                 self.reply(200 if accepted else 400, {"accepted": accepted})
             except (ValueError, OSError) as failure:
                 self.record(
-                    b"",
+                    bytes(self.partial_body),
                     "request deadline"
                     if isinstance(failure, (TimeoutError, socket.timeout))
                     else str(failure),
@@ -253,23 +294,39 @@ def _probe(instruction, settings):
         headers=instruction.get("headers", {}),
     )
     # An HTTP failure is an observation: preserve its status and body for the oracle.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_):
+            return None
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     started = time.monotonic()
     try:
         response = opener.open(request, timeout=float(settings["request_seconds"]))
     except urllib.error.HTTPError as failure:
         response = failure
     with response:
-        body = response.read(limit)
-        if len(body) >= limit or time.monotonic() - started >= float(
-            settings["request_seconds"]
-        ):
-            raise ValueError("response bound or deadline reached")
-        return {
+        body = bytearray()
+        error = None
+        try:
+            while len(body) < limit:
+                part = response.read1(min(65536, limit - len(body)))
+                if not part:
+                    break
+                body.extend(part)
+            if len(body) >= limit:
+                error = "response byte bound reached"
+            elif time.monotonic() - started >= float(settings["request_seconds"]):
+                error = "request deadline reached"
+        except (ValueError, OSError) as failure:
+            error = str(failure) or "request deadline reached"
+        observation = {
             "status": response.status,
             "headers": dict(response.headers),
-            "bodyBase64": base64.b64encode(body).decode(),
+            "bodyBase64": base64.b64encode(body[:max(0, limit - 1)]).decode(),
         }
+        if error:
+            observation.update(error=error, truncated=True)
+        return observation
 
 
 def main():

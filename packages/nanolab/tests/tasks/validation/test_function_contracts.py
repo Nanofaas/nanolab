@@ -237,3 +237,11 @@ def test_png_invalid_chunk_structure(fault):
         raw = raw[:33] + chunk(kind, b"") + raw[33:]
     with pytest.raises(ValueError, match="PNG"):
         validate_png(raw, size=256)
+
+
+def test_failed_transport_prefix_cannot_qualify():
+    case = ContractCase("normal", {}, {}, 200, None)
+    response = http({})
+    response.update(error="request deadline", truncated=True)
+    with pytest.raises(ValueError, match=r"probe|transport|truncated"):
+        validate(case, response=response, callbacks=(callback({}),))

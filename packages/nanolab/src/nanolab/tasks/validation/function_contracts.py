@@ -200,6 +200,8 @@ def validate_case_observation(
     """Compare independently specified output; transport success is insufficient."""
     if mode not in {"sdk", "warm", "one-shot"}:
         raise ValueError("unknown artifact mode")
+    if http is not None and (http.get("error") or http.get("truncated")):
+        raise ValueError("failed or truncated HTTP transport observation")
     http_png = None
     if mode == "one-shot":
         if http is not None or type(exit_code) is not int or exit_code != 0:
@@ -295,6 +297,8 @@ class FunctionContractsTask(Task[ContractEvidence]):
         self.case_paths: list[Path] = []
         self.expected_ids: dict[str, int] = {}
         self.capture_id = ""
+        self.final_snapshot: Path | None = None
+        self.startup_id: str | None = None
 
     def _probe(
         self,
@@ -346,7 +350,7 @@ class FunctionContractsTask(Task[ContractEvidence]):
             method="POST",
             body={"executionId": execution_id, "expectedCallbacks": expected},
         )
-        if response["status"] != 200:
+        if response["status"] != 200 or response.get("error"):
             raise ValueError("callback ID registration failed")
         self.expected_ids[execution_id] = expected
 
@@ -385,12 +389,17 @@ class FunctionContractsTask(Task[ContractEvidence]):
             if hashlib.sha256(raw).hexdigest() != record["bodySha256"]:
                 raise ValueError("callback retained evidence changed")
             record["bodyBase64"] = base64.b64encode(raw).decode()
-        write_receipt(self.run_dir / "capture" / f"snapshot-{uuid4().hex}.json", value)
+        snapshot_path = self.run_dir / "capture" / f"snapshot-{uuid4().hex}.json"
+        write_receipt(snapshot_path, value)
+        if final:
+            self.final_snapshot = snapshot_path
         if value["violations"]:
             raise ValueError("callback capture violation: " + str(value["violations"]))
         if final and (
             type(value.get("activeCallbacks")) is not int
             or value["activeCallbacks"] != 0
+            or type(value.get("activeRequests")) is not int
+            or value["activeRequests"] != 0
         ):
             raise ValueError("callback still pending during final audit")
         return value
@@ -399,12 +408,10 @@ class FunctionContractsTask(Task[ContractEvidence]):
         deadline = time.monotonic() + self.settings.readiness_seconds
         while time.monotonic() < deadline:
             try:
-                if (
-                    self._probe(inputs, url, budget=deadline - time.monotonic())[
-                        "status"
-                    ]
-                    == 200
-                ):
+                observation = self._probe(
+                    inputs, url, budget=deadline - time.monotonic()
+                )
+                if observation["status"] == 200 and not observation.get("error"):
                     return
             except RuntimeError:
                 pass
@@ -498,6 +505,8 @@ class FunctionContractsTask(Task[ContractEvidence]):
                     },
                 )
                 http["executionId"] = execution_id
+                if http.get("error") or http.get("truncated"):
+                    raise ValueError("failed HTTP transport observation")
             callbacks = self._callbacks(
                 inputs, execution_id, 0 if mode == "warm" else 1
             )
@@ -622,6 +631,7 @@ class FunctionContractsTask(Task[ContractEvidence]):
         try:
             self._ready(inputs, "http://capture:8081/health")
             probe_id = "probe-" + uuid4().hex
+            self.startup_id = probe_id
             self._register(inputs, probe_id, 1)
             probe = self._probe(
                 inputs,
@@ -678,6 +688,16 @@ class FunctionContractsTask(Task[ContractEvidence]):
                 {
                     "status": status,
                     "audited": audited,
+                    "startupExecutionId": self.startup_id,
+                    "runtime": asdict(runtime),
+                    "finalAudit": {
+                        "path": str(self.final_snapshot.relative_to(self.run_dir)),
+                        "sha256": hashlib.sha256(
+                            self.final_snapshot.read_bytes()
+                        ).hexdigest(),
+                    }
+                    if self.final_snapshot is not None
+                    else None,
                     "expectedHttp": expected_http,
                     "expectedOneShot": expected_one_shot,
                     "expectedCallbacks": expected_callbacks,

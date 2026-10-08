@@ -28,6 +28,7 @@ from nanolab.tasks.validation.contract_resources import (
 )
 from nanolab.tasks.validation.function_contracts import (
     FunctionContractsTask,
+    check_contract_logs,
     validate_case_observation,
 )
 
@@ -110,9 +111,60 @@ def finalize_contract_run(run_dir: Path, *, executor: CommandTaskExecutor) -> Pa
     index = _read(run_dir / "case-index.json")
     if index.get("status") != "passed" or index.get("audited") is not True:
         raise ValueError("contract final audit did not pass")
-    owned = [_read(path) for path in (run_dir / "ownership").glob("*.json")]
-    if {item["kind"] for item in owned} != {"image", "container", "network"}:
+    owned = []
+    for path in (run_dir / "ownership").glob("*.json"):
+        item = _read(path)
+        if item["identity"] is None:
+            item["identity"] = _read(run_dir / "identity-bindings" / path.name)[
+                "identity"
+            ]
+        if not item["identity"]:
+            raise ValueError("contract resource identity missing")
+        owned.append(item)
+    identities = {
+        kind: {item["identity"] for item in owned if item["kind"] == kind}
+        for kind in ("image", "container", "network")
+    }
+    if not all(identities.values()):
         raise ValueError("contract ownership inventory incomplete")
+    runtime = index["runtime"]
+    if runtime["capture_container"] not in identities["container"] or not any(
+        item["kind"] == "network" and item["reference"] == runtime["network"]
+        for item in owned
+    ):
+        raise ValueError("contract capture/network ownership missing")
+    helper = _read(run_dir / "capture-image.json")
+    if helper["Id"] not in identities["image"]:
+        raise ValueError("contract helper image ownership missing")
+    audit_entry = index["finalAudit"]
+    audit_path = run_dir / audit_entry["path"]
+    if not audit_path.resolve().is_relative_to(run_dir.resolve()) or (
+        hashlib.sha256(audit_path.read_bytes()).hexdigest() != audit_entry["sha256"]
+    ):
+        raise ValueError("contract final audit identity changed")
+    audit = _read(audit_path)
+    if audit["violations"] or any(
+        audit.get(key) != 0 for key in ("activeCallbacks", "activeRequests")
+    ):
+        raise ValueError("contract final audit has violations or pending requests")
+    capture_records = {}
+    for record in audit["records"]:
+        seq = record["sequence"]
+        raw_path = run_dir / "capture" / f"{seq:04d}.raw"
+        raw = raw_path.read_bytes()
+        metadata = _read(raw_path.with_suffix(".json"))
+        if (
+            hashlib.sha256(raw).hexdigest() != record["bodySha256"]
+            or raw != base64.b64decode(record["bodyBase64"], validate=True)
+            or metadata != {k: v for k, v in record.items() if k != "bodyBase64"}
+            or record["executionId"] in capture_records
+        ):
+            raise ValueError("contract capture evidence changed or duplicated")
+        capture_records[record["executionId"]] = record
+    settings = _read(run_dir / "contract-settings.json")
+    check_contract_logs(
+        (run_dir / "capture.log").read_bytes(), limit=settings["log_bytes"]
+    )
     expected: dict[str, tuple[ContractCase, Literal["sdk", "warm", "one-shot"]]] = {}
     image_ids: dict[str, str] = {}
     counts = {"http": 0, "oneShot": 0, "callbacks": 0}
@@ -121,17 +173,7 @@ def finalize_contract_run(run_dir: Path, *, executor: CommandTaskExecutor) -> Pa
         if image["cell"] != cell:
             raise ValueError("contract image matrix changed")
         image_id = image["image"]["Id"]
-        if not any(
-            item["kind"] == "image"
-            and (
-                item["identity"] == image_id
-                or _read(run_dir / "identity-bindings" / path.name).get("identity")
-                == image_id
-            )
-            for path, item in (
-                (path, _read(path)) for path in (run_dir / "ownership").glob("*.json")
-            )
-        ):
+        if image_id not in identities["image"]:
             raise ValueError("contract image ownership missing")
         name = cell["target"]["name"]
         family = next(f for f in matrix["cases"] if name.endswith("-" + f))
@@ -199,9 +241,31 @@ def finalize_contract_run(run_dir: Path, *, executor: CommandTaskExecutor) -> Pa
         )
         observed.add(identifier)
         executions.add(execution)
+        container_id = receipt["containerId"]
+        if container_id not in identities["container"]:
+            raise ValueError("contract artifact container ownership missing")
+        container = _read(run_dir / "containers" / f"{container_id}.json")
+        if container["Id"] != container_id or container["Image"] != receipt["imageId"]:
+            raise ValueError("contract artifact container evidence changed")
+        check_contract_logs(
+            (run_dir / "container-logs" / f"{container_id}.log").read_bytes(),
+            limit=settings["log_bytes"],
+        )
+        actual = capture_records.pop(execution, None)
+        if (mode == "warm" and actual is not None) or (
+            mode != "warm" and (actual is None or receipt["callbacks"] != [actual])
+        ):
+            raise ValueError("contract final callback audit disagrees with case")
         receipts.append(item)
     if observed != expected.keys():
         raise ValueError("contract case matrix incomplete")
+    startup = index["startupExecutionId"]
+    if (
+        not isinstance(startup, str)
+        or not startup.startswith("probe-")
+        or (set(capture_records) != {startup})
+    ):
+        raise ValueError("contract startup audit or unexpected callback")
     verify_contract_cleanup(run_dir, executor)
     inventory = json.loads((run_dir / "owned-resources.json").read_bytes())
     qualification = {
@@ -214,6 +278,7 @@ def finalize_contract_run(run_dir: Path, *, executor: CommandTaskExecutor) -> Pa
         "counts": counts,
         "receipts": receipts,
         "cleanupVerified": True,
+        "finalAudit": audit_entry,
         "ownedResources": inventory,
     }
     # Hard-link a complete same-filesystem file: atomic publication, no replacement.

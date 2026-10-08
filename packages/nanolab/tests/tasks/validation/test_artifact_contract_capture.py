@@ -187,3 +187,50 @@ def test_pending_body_visible_for_final_audit():
                 if observed["activeCallbacks"] or time.monotonic() >= deadline:
                     break
             assert observed["activeCallbacks"] == 1
+
+
+def test_unsupported_method_retains_violation():
+    with capture() as base:
+        register(base)
+        req = urllib.request.Request(
+            base + "/v1/executions/one:complete", data=b'{"success":true}', method="PUT"
+        )
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(req, timeout=1)
+        observed = snapshot(base)
+        assert observed["violations"]
+        assert observed["records"][0]["method"] == "PUT"
+        assert request(base, "/_nanolab/body/1")[1] == b'{"success":true}'
+
+
+def test_pending_headers_and_absolute_deadline_visible():
+    with capture(request_seconds=0.2) as base:
+        register(base)
+        with socket.create_connection(
+            ("127.0.0.1", int(base.rsplit(":", 1)[1]))
+        ) as sock:
+            sock.sendall(b"POST /v1/executions/one:complete HTTP/1.1\r\nHost: ")
+            deadline = time.monotonic() + 0.15
+            while True:
+                observed = snapshot(base)
+                if observed.get("activeRequests") or time.monotonic() >= deadline:
+                    break
+            assert observed.get("activeRequests") == 1
+            time.sleep(0.25)
+            assert snapshot(base)["violations"]
+
+
+def test_slow_body_preserves_received_prefix():
+    with capture() as base:
+        register(base)
+        with socket.create_connection(
+            ("127.0.0.1", int(base.rsplit(":", 1)[1]))
+        ) as sock:
+            sock.sendall(
+                b"POST /v1/executions/one:complete HTTP/1.1\r\n"
+                b'Host: capture\r\nContent-Length: 20\r\n\r\n{"x":'
+            )
+            sock.settimeout(1)
+            sock.recv(4096)
+        assert snapshot(base)["violations"]
+        assert request(base, "/_nanolab/body/1")[1] == b'{"x":'

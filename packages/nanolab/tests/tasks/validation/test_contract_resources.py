@@ -89,14 +89,18 @@ class DockerBoundary:
             self.objects.pop(f"buildx_buildkit_{self.node}", None)
             return "", 0
         if argv[:3] == ("docker", "image", "inspect"):
-            value = self.objects.get(argv[-1])
+            value = self.objects.get(argv[-1]) or next(
+                (v for v in self.objects.values() if v["Id"] == argv[-1]), None
+            )
             return (json.dumps([value]), 0) if value else ("No such image", 1)
         if argv[:2] == ("docker", "inspect") or argv[:3] == (
             "docker",
             "network",
             "inspect",
         ):
-            value = self.objects.get(argv[-1])
+            value = self.objects.get(argv[-1]) or next(
+                (v for v in self.objects.values() if v["Id"] == argv[-1]), None
+            )
             return (json.dumps([value]), 0) if value else ("No such object", 1)
         if argv[:3] == ("docker", "network", "create") or argv[:2] == (
             "docker",
@@ -136,7 +140,9 @@ class DockerBoundary:
         ):
             self.remove_calls.append(argv[-1])
             if self.failure != "remove-lies":
-                self.objects.pop(argv[-1], None)
+                for key in list(self.objects):
+                    if key == argv[-1] or self.objects[key]["Id"] == argv[-1]:
+                        self.objects.pop(key)
             return "", 0
         if argv[:3] == ("docker", "buildx", "bake"):
             bake = json.loads(Path(argv[argv.index("--file") + 1]).read_text())
@@ -449,4 +455,124 @@ def test_built_image_identity_bound_before_release(frozen_fixture, tmp_path):
         )["identity"]
         == images[0].image_id
     )
+    resource.release(inputs, images)
+
+
+@pytest.mark.parametrize("kind", ["container", "network", "image"])
+def test_replacement_after_inspection_is_preserved(tmp_path, kind):
+    from nanolab.tasks.validation.contract_resources import (
+        ContractExecutor,
+        _register,
+        _release_owned,
+    )
+
+    class Race(DockerBoundary):
+        def dispatch(self, argv, config):
+            inspecting = argv[:2] == ("docker", "inspect") or argv[:3] in (
+                ("docker", "network", "inspect"),
+                ("docker", "image", "inspect"),
+            )
+            if inspecting:
+                value = next(
+                    (
+                        v
+                        for key, v in self.objects.items()
+                        if key == argv[-1] or v["Id"] == argv[-1]
+                    ),
+                    None,
+                )
+                return (json.dumps([value]), 0) if value else ("No such object", 1)
+            removing = argv[:2] == ("docker", "rm") or argv[:3] in (
+                ("docker", "network", "rm"),
+                ("docker", "image", "rm"),
+            )
+            if removing:
+                self.objects["old-id"] = self.objects.pop("leased")
+                self.objects["leased"] = {
+                    "Id": "operator-id",
+                    "Labels": {},
+                    "Config": {"Labels": {}},
+                }
+                value = self.objects.pop(argv[-1], None)
+                if value:
+                    for key in list(self.objects):
+                        if self.objects[key]["Id"] == value["Id"]:
+                            self.objects.pop(key)
+                return "", 0
+            return super().dispatch(argv, config)
+
+    boundary = Race()
+    labels = {"nanolab.contract.owner": "test"}
+    boundary.objects["leased"] = {
+        "Id": "old-id",
+        "Labels": labels,
+        "Config": {"Labels": labels},
+    }
+    lease = _register(tmp_path, kind, "leased", "test", "old-id")
+    with pytest.raises(RuntimeError, match="absence"):
+        _release_owned(
+            ContractExecutor(boundary, tmp_path, ContractConfig()),
+            EMPTY,
+            lease,
+            tmp_path,
+        )
+    assert boundary.objects["leased"]["Id"] == "operator-id"
+    assert "old-id" not in boundary.objects
+
+
+def test_renamed_original_is_still_removed(tmp_path):
+    from nanolab.tasks.validation.contract_resources import (
+        ContractExecutor,
+        _register,
+        _release_owned,
+    )
+
+    class Renamed(DockerBoundary):
+        def dispatch(self, argv, config):
+            if argv[:2] == ("docker", "inspect"):
+                value = next(
+                    (
+                        v
+                        for key, v in self.objects.items()
+                        if key == argv[-1] or v["Id"] == argv[-1]
+                    ),
+                    None,
+                )
+                return (json.dumps([value]), 0) if value else ("No such object", 1)
+            if argv[:2] == ("docker", "rm"):
+                for key in list(self.objects):
+                    if self.objects[key]["Id"] == argv[-1]:
+                        self.objects.pop(key)
+                return "", 0
+            return super().dispatch(argv, config)
+
+    boundary = Renamed()
+    boundary.objects["renamed"] = {
+        "Id": "old-id",
+        "Config": {"Labels": {"nanolab.contract.owner": "test"}},
+    }
+    lease = _register(tmp_path, "container", "leased", "test", "old-id")
+    _release_owned(
+        ContractExecutor(boundary, tmp_path, ContractConfig()), EMPTY, lease, tmp_path
+    )
+    assert not boundary.objects
+
+
+def test_native_bake_supplies_empty_maven_context(frozen_fixture, tmp_path):
+    java = frozen_fixture / "functions/java/word-stats"
+    java.mkdir(parents=True)
+    (java / "Dockerfile").write_text("FROM scratch\n")
+    boundary = DockerBoundary()
+    resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
+    images = resource.acquire(inputs)
+    targets = [
+        target
+        for p in (tmp_path / "attempt/builds").glob("*.json")
+        for target in json.loads(p.read_text())["target"].values()
+        if target.get("args", {}).get("NATIVE_TASK")
+    ]
+    assert len(targets) == 1
+    context = Path(targets[0]["contexts"]["containerd_maven_repo"])
+    assert context.is_dir()
+    assert not list(context.iterdir())
     resource.release(inputs, images)
