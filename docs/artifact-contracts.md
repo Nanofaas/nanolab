@@ -62,3 +62,9 @@ qualification receipt, not a tamper-proof signature.
 Other families, fixtures, service images, Rust, cross-architecture execution and
 watchdog FILE/HTTP supervision remain outside this workflow. Control-plane,
 Kubernetes lifecycle and CLI parity are separate validation gates.
+
+On the recorded NanoFaaS candidate `a234ea1`, the installed ARM64 WordStats
+smoke qualifies. The full preset detects a Java QR native packaging defect:
+required AWT libraries are missing from the runtime image. Full qualification
+requires an upstream fix and a fresh complete run; see the
+[installed execution evidence](superpowers/plans/2026-10-08-packaged-functions-watchdog-evidence.md).
