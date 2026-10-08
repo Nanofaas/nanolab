@@ -53,7 +53,7 @@ def native_api_server():
             elif self.path.endswith(":invoke"):
                 body = {
                     "status": "success",
-                    "statusCode": 200,
+                    "statusCode": None,
                     "output": {"wordCount": 3},
                 }
             if state["fault"] == key:
@@ -66,6 +66,12 @@ def native_api_server():
                 }
                 if self.command == "DELETE":
                     status = 200
+            if state["fault"] == "success-error" and self.path.endswith(":invoke"):
+                body = {
+                    "status": "success",
+                    "statusCode": 200,
+                    "error": "upstream failure",
+                }
             raw = json.dumps(body).encode() if body is not None else b""
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -101,6 +107,7 @@ def native_api_server():
         "PUT /v1/functions/fn/replicas",
         "POST /v1/functions/fn:invoke",
         "DELETE /v1/functions/fn",
+        "success-error",
     ],
 )
 @pytest.mark.parametrize("resource_endpoint", [False, True])
@@ -155,6 +162,19 @@ def test_native_api_validates_bodies_and_strict_delete(
             for method, _, data in state["calls"]
         )
         assert (tmp_path / "api.jsonl").read_text()
+
+
+def test_retry_preserves_failed_native_evidence(tmp_path):
+    from nanolab.tasks.validation.native_kubernetes import _native_attempt_directory
+
+    old = tmp_path / "native"
+    old.mkdir()
+    (old / "api.jsonl").write_text("failed response\n")
+    fresh = _native_attempt_directory(tmp_path)
+    assert fresh == old and fresh.is_dir()
+    assert not (fresh / "api.jsonl").exists()
+    archived = list((tmp_path / "native-attempts").glob("*/api.jsonl"))
+    assert len(archived) == 1 and archived[0].read_text() == "failed response\n"
 
 
 @pytest.mark.parametrize("replaced", [False, True])

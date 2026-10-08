@@ -78,8 +78,13 @@ def run_burst(
         if row["status"] == 200:
             if (
                 body.get("status") != "success"
-                or body.get("statusCode") != 200
-                or body.get("error")
+                or (
+                    body.get("statusCode") is not None
+                    and (
+                        type(body["statusCode"]) is not int or body["statusCode"] != 200
+                    )
+                )
+                or body.get("error") is not None
             ):
                 raise RuntimeError("native quota accepted invocation did not succeed")
             accepted += 1

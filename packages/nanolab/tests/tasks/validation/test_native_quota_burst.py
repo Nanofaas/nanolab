@@ -21,7 +21,12 @@ def quota_server():
                 state["active"] += 1
             try:
                 status = 200
-                body = {"status": "success", "statusCode": 200, "output": {}}
+                body = {
+                    "status": "success",
+                    "statusCode": None,
+                    "error": None,
+                    "output": {},
+                }
                 if overlap and state["mode"] != "none":
                     status = 429
                     body = {"error": "invocation_quota_exceeded"}

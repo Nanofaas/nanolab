@@ -8,6 +8,7 @@ import shlex
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, TextIO
+from uuid import uuid4
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.command import CommandTask
@@ -206,17 +207,29 @@ def check_native_api(
             or status.get("readyReplicas") != 1
         ):
             raise RuntimeError("native GET replicas response differs from request")
-        HttpFunctionContractTask(
-            name,
-            payload=function.payload,
-            endpoint=endpoint,
-            executor=bounded,
-            role=role,
-            cwd=cwd,
-            expectation=HttpFunctionExpectation(
-                status=200, api_status="success", status_code=200
-            ),
-        ).run(inputs)
+        invocation = (
+            HttpFunctionContractTask(
+                name,
+                payload=function.payload,
+                endpoint=endpoint,
+                executor=bounded,
+                role=role,
+                cwd=cwd,
+                expectation=HttpFunctionExpectation(
+                    status=200, api_status="success", error=None
+                ),
+            )
+            .run(inputs)
+            .value
+        )
+        if invocation is None:
+            raise RuntimeError("native invocation returned no response")
+        _, _, body = _parse_contract_response(name, invocation.stdout)
+        status_code = body.get("statusCode")
+        if status_code is not None and (
+            type(status_code) is not int or status_code != 200
+        ):
+            raise RuntimeError("native invocation statusCode differs from HTTP success")
         request("DELETE", f"functions/{name}", 204)
         register()
         HttpFunctionReplicaStatusTask(
@@ -299,6 +312,22 @@ def configure_native_quota(
         role=role,
     )
     return updated
+
+
+def _native_attempt_directory(run_dir: Path) -> Path:
+    native = run_dir / "native"
+    if native.is_symlink():
+        raise RuntimeError("native evidence directory must not be a symlink")
+    if native.exists():
+        if not native.is_dir():
+            raise RuntimeError("native evidence path is not a directory")
+        attempts = run_dir / "native-attempts"
+        if attempts.is_symlink():
+            raise RuntimeError("native attempt archive must not be a symlink")
+        attempts.mkdir(parents=True, exist_ok=True)
+        native.rename(attempts / uuid4().hex)
+    native.mkdir(parents=True)
+    return native
 
 
 class NativeKubernetesLifecycleTask(Task[None]):
@@ -592,8 +621,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
                 "native qualification requires the ordinary JVM word-stats function"
             )
         function = replace(self.function, image=component.image.reference)
-        native_dir = self.run_dir / "native"
-        native_dir.mkdir(parents=True, exist_ok=True)
+        native_dir = _native_attempt_directory(self.run_dir)
         deployment, before_pod = self._snapshot(inputs, uid)
         self._identity(before_pod)
         logs_before = self._logs(inputs, before_pod, "before-quota")
