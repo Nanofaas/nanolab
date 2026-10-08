@@ -138,3 +138,27 @@ Consumer trial1586534 is local on feat/61-procfs-parsers; public pins/lock remai
 consumer cases pass; original86.17%/90% coverage debt is reported. Both
 worktrees are retained, main stays clean at8313e6e, and all11 decisions plus
 the absence of deferred Minors are recorded above before own scratch cleanup.
+
+
+## Authorized publication and public adoption
+
+After explicit user authorization, annotated v0.6.14 targets tested Sonata PR24
+merge584194b, identical to reviewedf056060. Merge CI37731783580 passes9/9;
+release37732848250 succeeds engine-first/tasks-second. All four public PyPI
+wheel/sdist hashes, sizes and every module/py.typed byte match the tested merge.
+Engine retains zero runtime dependencies; tasks pin engine exactly0.6.14.
+
+The three NanoLab pins move to0.6.14 for normal public-index adoption. Registry
+lock/install and fresh ordinary installed usage pass without local overlays or
+unrelated dependency changes. This phase adds no behavior or review ruling;
+the prior11 decisions remain recorded above.
+
+Public-dependency verification:3495 functional cases pass in299.36s against
+NanoFaaS pine7914be, with the original explicit package branch-coverage
+configuration. The command exits1 solely for existing86.17%/90% coverage debt;
+the threshold is retained. Toolkit51 cases pass at93.71%/80%; all15 hooks and
+dependency compatibility pass. All four consumer wheel/sdist distributions
+match source bytes (211 NanoLab and9 toolkit runtime files), with public0.6.14
+requirements. Fresh public installations pass CLI/assets, live procfs decoding,
+product threshold/bounds, missing-zero and corrupt-source availability proofs;
+base-only ordinary Python usage works without optional SDKs.

@@ -61,7 +61,7 @@ zero runtime dependencies; these capabilities belong in `sonata-tasks`.
 | `release/secrets.py`: GHCR login, cosign credentials and release error names | Keep adapters local | Registry/login/signing decisions and release-facing results belong to the release workflow; feed them shared private-file lifetimes when available. |
 | `soak/collector.py`: bounded Linux procfs/Docker/HTTP collection | Optional later capability | Raw collection and before/after identity checks can support other container diagnostics. Preserve the killable helper boundary, byte/deadline bounds and local-container constraints. It must not become mandatory for portable Sonata tasks. |
 | `soak/adapters.py`: `RoleBoundProbe`, sample/target/phase conversion | Keep local | Requires NanoLab domain models, required-metric units and source classification. A new role abstraction would duplicate existing execution bindings. |
-| `heap_analysis/native.py` and `soak/probes.py`: procfs parsers | Ninth slice: pure procfs decoding selected; JVM parsing deferred | Share strict smaps decoding and single KiB-field normalization through ordinary dependency-free APIs. Preserve mapping backing versus page residency, unavailable versus zero and complete-record rejection. Keep large-mapping threshold, selected residency fields, bounds, response schema and JVM collector interpretation local. An independent installed Python process reading its own procfs supplies the acceptance example. |
+| `heap_analysis/native.py` and `soak/probes.py`: procfs parsers | Ninth slice: published0.6.14; public adoption; JVM parsing deferred | Share strict smaps decoding and single KiB-field normalization through ordinary dependency-free APIs. Preserve mapping backing versus page residency, unavailable versus zero and complete-record rejection. Keep large-mapping threshold, selected residency fields, bounds, response schema and JVM collector interpretation local. An independent installed Python process reading its own procfs supplies the acceptance example. |
 | `heap_analysis/mat.py`: `MatAnalyzer` | Keep current workflow; defer generic runner | It fixes eight reports for a baseline/final pair, bundled locks/workers, helper image policy and evidence layout. Moving the entire module would export NanoLab's experiment. A future optional MAT task needs independently useful report/tool inputs first. |
 
 Paths in the issue predate the previous refactors: `cli/execution.py` is now a
@@ -646,3 +646,22 @@ installed CLI/assets/availability-policy proofs pass. Public pins/lock stay
 0.6.13, with explicit local0.6.14 trial overlays. No Critical/Important or
 deferred Minor remains. Publication/public adoption remains after shared merge
 and user authorization.
+
+
+## Ninth slice: authorized publication and public adoption
+
+The user authorizes publication after tested Sonata PR24 merge584194b, whose
+tree equals reviewedf056060. Merge CI37731783580 passes all9 jobs. Annotated
+v0.6.14 targets that merge; release37732848250 succeeds engine-first/tasks-second.
+All four public distributions match PyPI hashes/sizes and every tested
+Python/py.typed byte; engine remains dependency-free and tasks pin it0.6.14.
+
+NanoLab adopts the three0.6.14 pins and normal registry lock/install; complete
+public-dependency verification passes3495 functional cases in299.36s. The
+original branch-coverage command exits1 solely for86.17%/90% coverage debt,
+retaining the threshold and isolated NanoFaaS pine7914be. Toolkit51/93.71%/80%,
+all15 hooks, dependency compatibility and four consumer builds pass. Every
+consumer runtime source byte is verified in wheel/sdist. Fresh public installed
+CLI/assets, live procfs/product-policy proofs and base-only ordinary Python
+usage pass without local overlays or optional SDKs in the base environment.
+Unrelated dependencies and the prior11 review decisions remain unchanged.
