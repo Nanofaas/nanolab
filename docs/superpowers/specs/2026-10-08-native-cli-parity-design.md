@@ -1,10 +1,10 @@
 # Native CLI parity — second native delivery, issue #54
 
-Status: proposed written design for user review. The three-delivery scope and
-continuation on `fix/operational-validation` are authorized; this document is
-not implementation or live qualification. Kubernetes native lifecycle (#53) is
-already qualified separately. Packaged function/watchdog contracts remain the
-third delivery.
+Status: the user approved this written design. The implementation plan is
+`../plans/2026-10-08-native-cli-parity.md`, awaiting its review before execution
+on `fix/operational-validation`. This document is not live qualification.
+Kubernetes native lifecycle (#53) is already qualified separately; packaged
+function/watchdog contracts remain the third delivery.
 
 ## Outcome and source of requirements
 
