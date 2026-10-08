@@ -321,6 +321,20 @@ class HttpFunctionSetReplicasTask(CommandTask):
         cwd: Path | None = None,
     ) -> None:
         """Build the PUT that sets `name`'s desired replicas to `replicas`."""
+
+        def verify(result: TaskResult) -> None:
+            try:
+                response = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"{name}: invalid replicas response") from error
+            if (
+                not isinstance(response, dict)
+                or response.get("function") != name
+                or type(response.get("replicas")) is not int
+                or response["replicas"] != replicas
+            ):
+                raise RuntimeError(f"{name}: replicas response differs from request")
+
         super().__init__(
             title=f"Set {name} replicas to {replicas}",
             argv=_argv(
@@ -341,11 +355,12 @@ class HttpFunctionSetReplicasTask(CommandTask):
             role=role,
             options=CommandOptions(cwd=cwd),
             semantic_key=_semantic_key(
-                "nanolab.http-function.set-replicas:v2",
+                "nanolab.http-function.set-replicas:v3",
                 endpoint=_endpoint_identity(endpoint),
                 name=name,
                 replicas=replicas,
             ),
+            verify=verify,
         )
 
 

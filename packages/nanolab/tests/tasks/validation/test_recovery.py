@@ -79,7 +79,7 @@ def test_container_recovery_restarts_only_the_control_plane_and_keeps_ids() -> N
     module = _recovery_module()
     executor = SequencedExecutor(
         responses=[
-            "{}",
+            '{"function":"word-stats-java","replicas":2}',
             '{"desiredReplicas":2,"readyReplicas":2}',
             "first\nsecond\n",
             "",
@@ -127,7 +127,7 @@ def test_containerd_recovery_uses_owned_unit_and_preserves_instance_ids() -> Non
     module = _recovery_module()
     executor = SequencedExecutor(
         responses=[
-            "{}",
+            '{"function":"word-stats-java","replicas":2}',
             '{"desiredReplicas":2,"readyReplicas":2}',
             "first\nsecond\n",
             "",
@@ -177,7 +177,7 @@ def test_kubernetes_recovery_replaces_only_the_control_plane_pod() -> None:
     module = _recovery_module()
     executor = SequencedExecutor(
         responses=[
-            "{}",
+            '{"function":"word-stats-java","replicas":2}',
             '{"desiredReplicas":2,"readyReplicas":2}',
             "deployment-uid",
             "service-uid",
@@ -228,7 +228,7 @@ def test_kubernetes_recovery_rejects_recreated_function_resources() -> None:
     module = _recovery_module()
     executor = SequencedExecutor(
         responses=[
-            "{}",
+            '{"function":"word-stats-java","replicas":2}',
             '{"desiredReplicas":2,"readyReplicas":2}',
             "deployment-uid",
             "service-uid",
