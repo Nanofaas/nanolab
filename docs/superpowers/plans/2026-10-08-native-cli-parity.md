@@ -144,7 +144,7 @@ readiness_timeout_seconds: int | None = None, strict: bool = False,
 runtime_config_patch: dict[str, Any] | None = None) -> None` from the existing
 contract half of `build_cli_workflow`. Legacy callers use default arguments.
 
-- [ ] Write `test_strict_cli_proofs_reject_wrong_identity_and_equal_bad_results`:
+- [x] Write `test_strict_cli_proofs_reject_wrong_identity_and_equal_bad_results`:
   invalid list rows, duplicate names, missing expected name/image, another
   function's details/replicas and boolean counts fail. Valid apply/get matches
   manifest fields, resources and requested/effective deployment mode; patches
@@ -152,10 +152,10 @@ contract half of `build_cli_workflow`. Legacy callers use default arguments.
   Add `test_config_file_probe_does_not_use_endpoint_override`: its command uses
   an owned YAML file, no `--endpoint`, and child environment excludes
   `NANOFAAS_ENDPOINT` and `NANOFAAS_CONTEXT`; independent HTTP proves file selection.
-- [ ] Run the new tests RED. Expected: missing strict/config probes, or accepted
+- [x] Run the new tests RED. Expected: missing strict/config probes, or accepted
   invalid output. Also reproduce exit 0 with an expected negative diagnostic:
   unreplaced immutable apply and invalid runtime validation must both fail.
-- [ ] Implement the probes at `cli_function.py`, reusing `_script_with_file` and
+- [x] Implement the probes at `cli_function.py`, reusing `_script_with_file` and
   existing JSON parsing. Empty list output is valid only when expectations permit
   it; parse the actual tab-separated name/image format. Invoke uses the shared
   success check, rejects non-null error and, when provided, compares exact corpus
@@ -165,7 +165,7 @@ contract half of `build_cli_workflow`. Legacy callers use default arguments.
   with revision 7 and value 1000000, the file contains
   `{"expectedRevision": 7, "values": {"rateMaxPerSecond": 1000000}}`;
   matching effective values pass, stale revision or an ignored write fails.
-- [ ] Extract `add_cli_contract` without changing the default legacy topology.
+- [x] Extract `add_cli_contract` without changing the default legacy topology.
   In strict mode, acquire through CLI apply followed by manifest get/readiness;
   check list, get after update/replace, explicit config-file get, and delete
   absence. Reuse all existing update/replica/replace/info/OpenAPI/runtime-config
@@ -175,10 +175,10 @@ contract half of `build_cli_workflow`. Legacy callers use default arguments.
   Readiness commands get a 45-second budget, inside the 60-second outer limit.
   In strict mode, place replica set/get and readiness before workload invocation;
   retain the existing legacy ordering when `strict=False`.
-- [ ] Run `.venv/bin/pytest packages/nanolab/tests/tasks/validation/test_cli_contract.py packages/nanolab/tests/tasks/functions --no-cov`.
+- [x] Run `.venv/bin/pytest packages/nanolab/tests/tasks/validation/test_cli_contract.py packages/nanolab/tests/tasks/functions --no-cov`.
   Expected: GREEN for existing lifecycle/slicing/compensation tests and new
   strict proofs. Canned responses must reflect the pinned DTOs, not weaken gates.
-- [ ] Commit `feat: prove CLI lifecycle and configuration contracts`.
+- [x] Commit `feat: prove CLI lifecycle and configuration contracts`.
 
 ### Task 3: Paired execution, baseline restoration and bounded evidence
 

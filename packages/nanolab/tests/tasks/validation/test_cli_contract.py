@@ -952,3 +952,34 @@ def test_an_invalid_runtime_config_that_is_accepted_fails_the_run() -> None:
 
     with pytest.raises(RuntimeError, match="not reported as invalid"):
         workflow.run()
+
+
+def test_strict_contract_assembly_runs_replicas_before_invoke_without_build(tmp_path):
+    from sonata_engine import Workflow
+
+    from nanolab.tasks.cli import add_cli_contract
+
+    executor = ScriptedExecutor()
+    workflow = Workflow(workflow_id="contract-only")
+    add_cli_contract(
+        workflow,
+        CliWorkflowRequest(
+            functions=(FUNCTION,),
+            config_file=tmp_path / "owned.yaml",
+            runtime_config_namespace="control-plane",
+        ),
+        executor=executor,
+        strict=True,
+        readiness_timeout_seconds=45,
+    )
+    titles = [task.task.title for task in workflow.compile().tasks]
+    assert not any("Build" in title for title in titles)
+    assert titles.index("Scale word-stats-java") < titles.index(
+        "Invoke word-stats-java"
+    )
+    assert titles.index("Replicas of word-stats-java") < titles.index(
+        "Invoke word-stats-java"
+    )
+    assert "Get word-stats-java" in titles
+    assert "CLI config file for word-stats-java" in titles
+    assert "Runtime config readback" in titles

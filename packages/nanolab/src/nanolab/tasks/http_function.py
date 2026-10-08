@@ -1073,7 +1073,7 @@ class HttpFunctionInvokeTask(CommandTask):
             role=role,
             options=CommandOptions(cwd=cwd),
             semantic_key=_semantic_key(
-                "nanolab.http-function.invoke:v2",
+                "nanolab.http-function.invoke:v3",
                 endpoint=_endpoint_identity(endpoint),
                 name=name,
                 payload=payload,
