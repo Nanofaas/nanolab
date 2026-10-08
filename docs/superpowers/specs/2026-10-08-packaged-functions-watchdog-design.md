@@ -1,8 +1,8 @@
 # Packaged function and watchdog contracts — issue #54
 
-Status: proposed third delivery; awaiting written-spec review. Work stays on
-`fix/operational-validation`. The previously approved subdivision authorizes
-designing this delivery; it does not approve its implementation yet.
+Status: written specification approved by the user on 2026-10-08. Work stays on
+`fix/operational-validation`. The operational plan and its execution method
+require review before implementation.
 
 ## Purpose and observed inputs
 

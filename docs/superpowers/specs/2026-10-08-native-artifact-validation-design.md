@@ -5,7 +5,8 @@ delivery (#53) is implemented, independently reviewed and qualified locally
 through installed native artifacts; its existing coverage gate remains failing.
 The CLI delivery is implemented and reviewed; its installed candidate passes,
 but shipped-source qualification awaits NanoFaaS Context reflection integration.
-The function/watchdog delivery still requires its own design and implementation.
+The function/watchdog design is approved; its operational plan requires review
+before implementation.
 
 ## Approved subdivision: three independent deliveries
 
@@ -33,6 +34,8 @@ The second delivery's approved design is [native CLI parity](2026-10-08-native-c
 its implementation is reviewed on `fix/operational-validation`;
 [CLI execution evidence](../plans/2026-10-08-native-cli-parity-evidence.md) distinguishes
 the successful patched candidate from the failed shipped source.
+The third delivery's approved design is
+[packaged functions and watchdog](2026-10-08-packaged-functions-watchdog-design.md).
 
 ## Outcome and scope
 
