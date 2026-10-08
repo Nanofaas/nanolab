@@ -254,6 +254,11 @@ class ScenarioConfig(BaseModel):
         concurrency governor and the load profile against what each supports,
         and returns the instance unchanged once every rule holds.
         """
+        if self.workflow == "validate" and self.control_plane_runtime == "native":
+            raise ValueError(
+                "validate native requires the recipe scenario "
+                "deployment-lifecycle-k8s-native.yaml"
+            )
         if self.recipe_profile is not None:
             if (
                 not (

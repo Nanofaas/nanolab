@@ -14,6 +14,7 @@ this directory.
 | `validate-container-watchdog.yaml` | JVM, container provider, build metadata | Java JVM word-stats and Dockerfile watchdog | Published watchdog artifact validation |
 | `validate-container-native.yaml` | Native container builder, container provider, build metadata | Java native word-stats | Native container lifecycle validation |
 | `validate-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Kubernetes lifecycle validation on Minikube or Multipass |
+| `validate-k8s-native.yaml` | Native, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Native Kubernetes API, quota, log and thread validation |
 | `validate-containerd-jvm.yaml` | JVM, containerd provider, build metadata | Java JVM word-stats | Rootless containerd lifecycle validation on Multipass |
 | `loadtest-container-jvm.yaml` | JVM, container provider, autoscaler, async queue, build metadata | Java JVM word-stats | Container autoscaling load test |
 | `soak-container-p24-jvm.yaml` | JVM Serial GC/C1, container provider, async queue, build metadata | Java JVM and JavaScript word-stats | Canonical ARM64 P24 image preparation; qualification pending |
@@ -74,8 +75,11 @@ The recipe task stores the copied profile, staged source, Gradle log and
 metadata response and inspected image IDs are saved in `runs/recipe-<id>/`.
 `--run-dir` chooses that run directory directly.
 
-The single `deployment-lifecycle-k8s.yaml` scenario selects the Kubernetes
-profile. With the default local environment, NanoLab checks the active Docker
+`deployment-lifecycle-k8s.yaml` selects the JVM Kubernetes profile;
+`deployment-lifecycle-k8s-native.yaml` selects a native control plane with the
+same JVM function. Native selection belongs to the recipe; legacy validate
+`controlPlaneRuntime: native` requests are rejected before provisioning.
+With the default local environment, NanoLab checks the active Docker
 driver Minikube profile, runs `assembleRecipe` in a staged checkout, loads the
 recipe and queue-probe images, and forwards the control-plane API to host
 loopback. It creates a namespace for the run and removes it after validation;

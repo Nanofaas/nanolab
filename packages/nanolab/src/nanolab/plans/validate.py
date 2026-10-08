@@ -335,6 +335,11 @@ def build_validate_plan(  # NOSONAR (S3776): backend resource graph is co-locate
     """
     if config.workflow != "validate" or config.backend is None:
         raise ValueError("validate plan requires a validate scenario with a backend")
+    if config.control_plane_runtime == "native":
+        raise ValueError(
+            "validate native requires the recipe scenario "
+            "deployment-lifecycle-k8s-native.yaml"
+        )
     root = repo_root or Path.cwd()
     selected_environment = environment or EnvironmentConfig(provider="local")
     require_recipe_environment(config, selected_environment)

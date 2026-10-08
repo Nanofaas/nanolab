@@ -14,6 +14,56 @@ from nanolab.workspace.paths import discover_tool_root
 from tests.plans.test_validate import RecordingExecutor
 
 
+def test_bundled_native_k8s_recipe_plans_without_building(nanofaas_root, tmp_path):
+    from nanolab.cli.catalogue import _scenario
+
+    config = _scenario(Path("deployment-lifecycle-k8s-native.yaml"))
+    executor = RecordingExecutor()
+    workflow = build_validate_plan(
+        config,
+        RoleBindings({"host": executor, "stack": executor}),
+        repo_root=nanofaas_root,
+        run_dir=tmp_path / "run",
+    )
+    titles = [entry.task.title for entry in workflow.compile().tasks]
+    assert any("metadata" in title for title in titles)
+    assert any("recipe" in title for title in titles)
+    assert not any("Build control plane" in title for title in titles)
+    assert not executor.seen
+    assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize("backend", ["container", "containerd", "k8s"])
+@pytest.mark.parametrize("constructed", [False, True])
+def test_legacy_native_validate_is_rejected_before_planning(
+    backend, nanofaas_root, constructed
+):
+    data = {
+        "workflow": "validate",
+        "backend": backend,
+        "functions": ["word-stats-java"],
+        "controlPlaneRuntime": "native",
+    }
+    if not constructed:
+        with pytest.raises(ValueError, match="deployment-lifecycle-k8s-native"):
+            ScenarioConfig.model_validate(data)
+        return
+    config = ScenarioConfig.model_construct(
+        workflow="validate",
+        backend=backend,
+        functions=["word-stats-java"],
+        control_plane_runtime="native",
+    )
+    executor = RecordingExecutor()
+    with pytest.raises(ValueError, match="deployment-lifecycle-k8s-native"):
+        build_validate_plan(
+            config,
+            RoleBindings({"host": executor, "stack": executor}),
+            repo_root=nanofaas_root,
+        )
+    assert not executor.seen
+
+
 @pytest.mark.parametrize("backend", ["container", "containerd", "k8s"])
 @pytest.mark.parametrize("explicit", [False, True])
 def test_default_recipe_outputs_belong_to_operator_workspace(

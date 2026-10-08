@@ -244,7 +244,8 @@ def _helm_release_with_endpoint(
         distribution = request.recipe.distribution
 
         def resolved_spec(inputs: TaskInputs) -> HelmReleaseSpec:
-            image = inputs.resource(distribution).control_plane().image.reference
+            component = inputs.resource(distribution).control_plane()
+            image = component.image.reference
             repository, tag = image.rsplit(":", 1)
             values = list(request.helm_values)
             for index, value in enumerate(values):
@@ -252,6 +253,17 @@ def _helm_release_with_endpoint(
                     values[index] = f"controlPlane.image.repository={repository}"
                 elif value.startswith("controlPlane.image.tag="):
                     values[index] = f"controlPlane.image.tag={tag}"
+            if component.mode == "native":
+                for key, value in (
+                    ("controlPlane.resources.limits.cpu", "1"),
+                    ("controlPlane.jvm.ioWorkerCount", ""),
+                ):
+                    for index, item in enumerate(values):
+                        if item.startswith(key + "="):
+                            values[index] = f"{key}={value}"
+                            break
+                    else:
+                        values.extend(("--set", f"{key}={value}"))
             return HelmReleaseSpec(
                 release=request.helm_release,
                 chart=request.helm_chart,

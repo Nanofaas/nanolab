@@ -1,0 +1,5 @@
+workflow: validate
+backend: k8s
+recipeProfile: ../recipes/validate-k8s-native.yaml
+functions:
+  - word-stats-java
