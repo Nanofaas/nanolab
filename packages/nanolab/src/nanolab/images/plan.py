@@ -10,7 +10,7 @@ runners consume without restating any of this structure themselves.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +43,7 @@ class NativeBuild:
     task: str
     binary: Path
     gradle_args: tuple[str, ...] = ()
+    dockerfile: Path = NATIVE_JAVA_DOCKERFILE
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,7 @@ class ImageCell:
         carries a native build; every other cell uses its target's own.
         """
         native = self.native_build
-        return NATIVE_JAVA_DOCKERFILE if native is not None else self.target.dockerfile
+        return native.dockerfile if native is not None else self.target.dockerfile
 
     @property
     def context(self) -> Path:
@@ -219,6 +220,17 @@ def build_image_plan(
     )
 
 
+def _native_java_dockerfile(repo_root: Path) -> Path:
+    candidates = (Path("tools/native-java/Dockerfile"), NATIVE_JAVA_DOCKERFILE)
+    for candidate in candidates:
+        if (repo_root / candidate).is_file():
+            return candidate
+    raise FileNotFoundError(
+        "missing native image Dockerfile: "
+        + ", ".join(str(path) for path in candidates)
+    )
+
+
 def _all_targets(repo_root: Path) -> tuple[ImageTarget, ...]:
     targets = [
         ImageTarget(
@@ -262,6 +274,16 @@ def _all_targets(repo_root: Path) -> tuple[ImageTarget, ...]:
             for function in list_functions(repo_root)
             if function.example_dir is not None
         ),
+    ]
+    native_dockerfile = _native_java_dockerfile(repo_root)
+    targets = [
+        replace(
+            target,
+            native_build=replace(target.native_build, dockerfile=native_dockerfile),
+        )
+        if target.native_build is not None
+        else target
+        for target in targets
     ]
     targets.sort(key=lambda target: target.name)
     _validate_targets(repo_root, targets)
@@ -307,7 +329,9 @@ def _validate_targets(repo_root: Path, targets: Sequence[ImageTarget]) -> None:
         raise ValueError(f"duplicate image target: {', '.join(duplicates)}")
     required = {target.dockerfile for target in targets}
     required.update(
-        NATIVE_JAVA_DOCKERFILE for target in targets if target.native_build is not None
+        target.native_build.dockerfile
+        for target in targets
+        if target.native_build is not None
     )
     missing = sorted(
         path.as_posix() for path in required if not (repo_root / path).is_file()

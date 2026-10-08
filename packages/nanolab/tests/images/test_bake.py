@@ -145,7 +145,11 @@ def test_native_cells_render_with_root_context_and_build_args() -> None:
     rendered = render_bake(_plan())
     target = rendered["target"]["control-plane-amd64-native"]
     assert target["context"] == "."
-    assert target["dockerfile"] == "deploy/native-java/Dockerfile"
+    assert target["dockerfile"] == (
+        "tools/native-java/Dockerfile"
+        if (NANOFAAS_ROOT / "tools/native-java/Dockerfile").is_file()
+        else "deploy/native-java/Dockerfile"
+    )
     assert target["args"] == {
         "NATIVE_TASK": ":control-plane:nativeCompile",
         "NATIVE_BINARY": (
