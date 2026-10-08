@@ -6,9 +6,11 @@ import hashlib
 import json
 import re
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO, override
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import yaml
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
@@ -221,6 +223,15 @@ def _observations(
             if title in ("Runtime config snapshot", "Runtime config readback"):
                 payload.pop("revision", None)
             if title == "Patch runtime config":
+                try:
+                    UUID(payload.pop("changeId"))
+                    applied = datetime.fromisoformat(payload.pop("appliedAt"))
+                    if applied.tzinfo is None:
+                        raise ValueError("missing timezone")
+                except (KeyError, ValueError, TypeError, AttributeError) as error:
+                    raise RuntimeError(
+                        "CLI runtime patch metadata is invalid"
+                    ) from error
                 payload.pop("revision", None)
                 payload.get("effectiveConfig", {}).pop("revision", None)
             observations[title] = payload

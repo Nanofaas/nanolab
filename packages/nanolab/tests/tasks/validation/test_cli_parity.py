@@ -260,6 +260,12 @@ class PlatformBoundary:
                     ):
                         self.uid = "deployment-2"
                     data = {
+                        "changeId": "00000000-0000-4000-8000-000000000001"
+                        if self.mode == "jvm"
+                        else "00000000-0000-4000-8000-000000000002",
+                        "appliedAt": "2026-10-08T15:00:00Z"
+                        if self.mode == "jvm"
+                        else "2026-10-08T15:01:00Z",
                         "revision": self.revision,
                         "effectiveConfig": {
                             "revision": self.revision,
@@ -268,6 +274,10 @@ class PlatformBoundary:
                             },
                         },
                     }
+                    if self.fault == "invalid-patch-id":
+                        data["changeId"] = "invalid"
+                    if self.fault == "invalid-patch-time":
+                        data["appliedAt"] = "2026-10-08T15:00:00"
                 else:
                     data = {
                         "revision": self.revision,
@@ -537,6 +547,8 @@ def test_parity_checks_both_passes_and_restores_baselines(cli_gate):
         "oversize-log",
         "native-failure",
         "cleanup",
+        "invalid-patch-id",
+        "invalid-patch-time",
     ],
 )
 def test_parity_rejects_same_wrong_output_and_replaced_control_plane(cli_gate, fault):
