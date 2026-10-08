@@ -606,8 +606,10 @@ The parser accepts captured text on any platform. It does not open /proc.
 
 parse_smaps(text) returns mappings, mapping_details and anonymous/file/
 shared_memory/unknown totals. Each mapping preserves address, permissions,
-backing, path and byte Size/Rss/Pss. Missing/duplicate required fields, malformed
-headers and reversed/empty address ranges invalidate the whole result. A file
+backing, path and byte Size/Rss/Pss. Missing, malformed or duplicate required fields, malformed
+headers and reversed/empty or repeated numeric address ranges invalidate the
+whole result. Final review exposed inherited validation gaps; rejecting these
+corrupt records takes precedence over retaining the old regex acceptance. A file
 VMA containing anonymous COW pages remains a file-backed VMA; its aggregate is
 not a process page-residency estimate. Other kernel fields are ignored.
 
@@ -632,3 +634,15 @@ only after checking it is unused. Keep consumer public pins/registry lock0.6.13
 for the explicit local-wheel trial; publication and public adoption follow
 shared merge and separate user authorization, as in previous slices. Preserve
 original coverage gates and report the existing86.18%/90% consumer debt.
+
+Ninth-slice trial verification: shared770/92.30%, engine227/96.17%, original90%
+gates, all hooks/build/source-byte proofs, six wheel configurations and an
+ordinary installed Python3.12 process's actual procfs decoding pass. Final review
+found three inherited strictness gaps (malformed duplicate fields, corrupt
+headers, repeated numeric address ranges); all fixed once via RED→GREEN.
+Consumer3495 functional cases pass in322.63s with original branch coverage
+86.17%/90% debt (prior86.18%);166 focused, toolkit51/93.71%, hooks and fresh
+installed CLI/assets/availability-policy proofs pass. Public pins/lock stay
+0.6.13, with explicit local0.6.14 trial overlays. No Critical/Important or
+deferred Minor remains. Publication/public adoption remains after shared merge
+and user authorization.

@@ -264,3 +264,25 @@ def test_invalid_smaps_keeps_the_source_unavailable_without_summary(text):
     assert "error" in block
     assert "mapping_details" not in block
     assert "large_anonymous_mappings" not in block
+
+
+_COMPLETE_SMAPS = "1000-2000 rw-p 0 00:00 0\nSize: 4 kB\nRss: 2 kB\nPss: 1 kB\n"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _COMPLETE_SMAPS + "Size: 4 MB\n",
+        _COMPLETE_SMAPS + "Rss: -1 kB\n",
+        _COMPLETE_SMAPS.replace("rw-p", "pppp"),
+        _COMPLETE_SMAPS + "g000-3000 rw-p 0 00:00 0\n",
+        _COMPLETE_SMAPS + _COMPLETE_SMAPS,
+    ],
+)
+def test_corrupt_smaps_is_unavailable_instead_of_publishing_credible_totals(text):
+    block = summarize({"smaps": text, "errors": {}})["smaps"]
+    assert block["available"] is False
+    assert "error" in block
+    assert "anonymous" not in block
+    assert "mapping_details" not in block
+    assert "large_anonymous_mappings" not in block
