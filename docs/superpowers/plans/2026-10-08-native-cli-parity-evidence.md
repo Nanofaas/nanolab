@@ -67,8 +67,34 @@ no parity marker exists. See `/tmp/nanolab-cli54-u5t2pk5h/parity-deadline`.
 A six-line candidate patch is reviewable at
 `/tmp/nanolab-cli54-u5t2pk5h/nanofaas-context-reflection.patch`. Applying it only
 to a temporary clone enabled the native pass and the successful candidate cycle.
-It has not been committed, pushed or integrated into NanoFaaS. This document
-does not equate candidate success with shipped-source qualification.
+That initial prototype was not committed or integrated. The subsequently
+authorized upstream correction is recorded below. This document does not equate
+candidate success with shipped-source qualification.
+
+## Upstream correction and publication
+
+The user subsequently authorized the NanoFaaS correction on a dedicated branch,
+then push and pull requests for both repositories. NanoFaaS
+[PR #253](https://github.com/Nanofaas/nanofaas/pull/253) contains commit `a234ea17`
+on `fix/native-cli-context-reflection`, based on `a3722a47`. It adds the six-line
+`Context` reflection entry and extends the existing native smoke test with an
+actual YAML context lookup against a temporary localhost API, without an
+endpoint flag or inherited endpoint/context environment overrides.
+
+The regression fails on the original native binary with `Failed to read config`
+and passes on the newly compiled ARM64 GraalVM binary and JVM launcher, including
+with foreign endpoint/context environment variables. The rebuilt native binary
+SHA-256 is `0845a81fd86e1c48c677c3c46b02a37f98cd8af98c94e36ca7737ca562946937`.
+The full NanoFaaS Gradle suite passed: 2795 tests, 9 skips, no failures; all 196
+JVM CLI tests passed. It used the default Docker builder and checksummed Maven
+artifacts from the project's pinned containerd source revisions. GitNexus
+reported low impact for the two changed files. Verification logs and receipts
+remain under `/tmp/nanofaas-native-cli-context-evidence` and
+`/tmp/nanofaas-native-cli-context-*.log`.
+
+The installed paired Kubernetes evidence above remains the earlier candidate
+cycle. The upstream PR is open; integration and shipped-source qualification
+remain pending, as does the separate function/watchdog delivery under #54.
 
 ## Verification
 

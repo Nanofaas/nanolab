@@ -349,7 +349,10 @@ no material NanoLab defect. The unchanged 90% coverage gate remains failing.
 Clean NanoFaaS source fails the required native YAML context contract. A minimal
 Context reflection patch passes in a temporary clone, but is not integrated.
 Task 5 and shipped-source qualification remain incomplete; keep the plan scratch
-workspace to resume after the upstream fix. No push, PR or publication occurred.
+workspace to resume after the upstream fix. The user subsequently authorized
+push and pull requests for both repositories; the upstream correction is now
+in [NanoFaaS PR #253](https://github.com/Nanofaas/nanofaas/pull/253). This later
+authorization supersedes the plan's initial restriction on push and PR creation.
 See [actual evidence](2026-10-08-native-cli-parity-evidence.md).
 
 ## Self-review and execution handoff
