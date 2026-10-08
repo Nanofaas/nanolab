@@ -50,7 +50,7 @@
 - [x] Explicitly install built0.6.14 wheels, delegate smaps and field parsing, retain large-mapping and bounds policy. Run native/evidence/soak parser tests. Expected: GREEN and public pins/lock unchanged0.6.13.
 - [x] Full NanoLab original branch config/source pin, toolkit, hooks, package builds, fresh installed CLI/assets and native/soak proof. Expected: functional pass; original coverage debt reported.
 - [x] Commit trial; one fresh whole-slice review with plan/spec/ledger. Regrade and fix Critical/Important once with RED→GREEN and affected full suites; defer Minor explicitly. Expected: no unresolved Critical/Important.
-- [ ] Push shared Sonata feature branch and open PR; keep consumer trial local. Expected: shared PR reviewable, no publication/public adoption yet.
+- [x] Push shared Sonata feature branch and open PR; keep consumer trial local. Expected: shared PR reviewable, no publication/public adoption yet.
 
 ## Decisions and evidence
 
@@ -126,3 +126,15 @@ Important remains, no Minor deferred, and no second reviewer was dispatched.
 Shared push CI37730884894 succeeds9/9 atf056060. Consumer branch remains local
 for later public adoption; both worktrees remain available. Only this plan's
 scratch workspace is removed after its complete decisions/evidence are committed.
+
+
+## Delivery
+
+[Sonata PR24](https://github.com/Nanofaas/sonata/pull/24) is open against main
+from feat/procfs-parsers atf056060. Push CI37730884894 and PR CI37731252464
+pass all9 jobs each (18/18).
+Consumer trial1586534 is local on feat/61-procfs-parsers; public pins/lock remain
+0.6.13 and the prepared0.6.14 pair is not published. Final3495 functional
+consumer cases pass; original86.17%/90% coverage debt is reported. Both
+worktrees are retained, main stays clean at8313e6e, and all11 decisions plus
+the absence of deferred Minors are recorded above before own scratch cleanup.
