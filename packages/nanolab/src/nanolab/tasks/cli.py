@@ -141,6 +141,7 @@ def _function_resource(
             namespace=request.namespace,
             executor=executor,
             role=request.cli_role,
+            timeout_seconds=(readiness_timeout_seconds or 45) if strict else 120,
             options=CommandOptions(timeout_seconds=readiness_timeout_seconds, cwd=cwd),
         )
         if readiness_timeout_seconds is not None
@@ -264,7 +265,7 @@ def add_cli_contract(
     readiness_timeout_seconds: int | None = None,
     strict: bool = False,
     runtime_config_patch: dict[str, Any] | None = None,
-) -> None:
+) -> tuple[Resource[None], ...]:
     """Assemble only the shared API contract, without building or deploying it."""
     resources = tuple(
         _function_resource(
@@ -402,6 +403,7 @@ def add_cli_contract(
                 namespace=request.namespace,
                 executor=executor,
                 role=role,
+                timeout_seconds=readiness_timeout_seconds or 45,
                 options=CommandOptions(
                     cwd=cwd, timeout_seconds=readiness_timeout_seconds or 45
                 ),
@@ -432,3 +434,4 @@ def add_cli_contract(
             )
             replaced.title = f"Get replaced {function.name}"
             workflow.add(replaced, requires=function_requires_resource)
+    return resources

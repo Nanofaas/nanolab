@@ -575,3 +575,16 @@ def test_cli_invocation_compares_exact_expected_output():
             executor=executor,
             role="host",
         ).run(TaskInputs.empty())
+
+
+def test_exact_cli_output_does_not_treat_boolean_as_word_count():
+    executor = RecordingExecutor(stdout='{"status":"success","output":{"words":true}}')
+    with pytest.raises(RuntimeError, match="output"):
+        CliFunctionInvokeTask(
+            "fn",
+            payload="{}",
+            expected_output={"words": 1},
+            cli_argv=("cli",),
+            executor=executor,
+            role="host",
+        ).run(TaskInputs.empty())

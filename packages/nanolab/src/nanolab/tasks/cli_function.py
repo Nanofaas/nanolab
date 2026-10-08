@@ -316,7 +316,13 @@ class CliFunctionInvokeTask(CommandTask):
         def verify(result: TaskResult) -> None:
             verify_invocation(result)
             if expected_output is not None:
-                _expect(_json_stdout(result), "output", expected_output)
+                actual = _json_stdout(result)["output"]
+                if json.dumps(actual, sort_keys=True) != json.dumps(
+                    expected_output, sort_keys=True
+                ):
+                    raise RuntimeError(
+                        f"CLI output is {actual!r}, expected {expected_output!r}"
+                    )
 
         super().__init__(
             title=f"Invoke {name}",

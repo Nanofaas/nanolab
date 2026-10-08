@@ -141,7 +141,7 @@ executor: CommandTaskExecutor, cwd: Path | None = None,
 requires: tuple[Resource[Any], ...] = (),
 function_requires: tuple[Resource[Any], ...] = (),
 readiness_timeout_seconds: int | None = None, strict: bool = False,
-runtime_config_patch: dict[str, Any] | None = None) -> None` from the existing
+runtime_config_patch: dict[str, Any] | None = None) -> tuple[Resource[None], ...]` from the existing
 contract half of `build_cli_workflow`. Legacy callers use default arguments.
 
 - [x] Write `test_strict_cli_proofs_reject_wrong_identity_and_equal_bad_results`:
@@ -197,25 +197,25 @@ Require artifact modes to equal `cli_modes(runtime)` in order, with no missing
 or duplicate artifact. One requested mode qualifies that mode; requested
 `parity` requires exactly `("jvm", "native")`. Record the distinction explicitly.
 
-- [ ] Write `test_parity_checks_both_passes_and_restores_baselines`: a stateful
+- [x] Write `test_parity_checks_both_passes_and_restores_baselines`: a stateful
   independent API/command-boundary fixture starts with no function and rate
   ceiling 1000000; both passes observe fresh registration and the same patch.
   After JVM deletion, deployment/service absence and the original runtime value
   must be verified before native starts. Reuse actual shared contract factories.
-- [ ] Write `test_parity_rejects_same_wrong_output_and_replaced_control_plane`:
+- [x] Write `test_parity_rejects_same_wrong_output_and_replaced_control_plane`:
   matching incorrect corpus output fails, and identical-image replacement after
   successful requests fails on Deployment/pod/container identity. Parameterize
   missing mode/case, registration error in stdout/stderr or post-request logs,
   oversize output/logs, native failure, and inner function cleanup failure. No successful parity
   receipt is produced for these cases. Run RED; expected missing orchestration.
-- [ ] Implement a small executor wrapper in this module that delegates to the
+- [x] Implement a small executor wrapper in this module that delegates to the
   same executor, applies GNU `timeout --kill-after=5s 60s` only to CLI/API/probe
   commands, bounds streams and records each command before verification. Reuse
   the established bounded-command approach without applying it to builds.
   Detect `UnsupportedFeatureError`, `MissingReflectionRegistrationError`,
   `MissingResourceRegistrationError`, `No serializer found`, traceback and panic
   markers. Keep each pass below 16 MiB and each owned log below 8 MiB.
-- [ ] Resolve the fixed Java JVM word-stats image from the validated distribution.
+- [x] Resolve the fixed Java JVM word-stats image from the validated distribution.
   Load the first corpus case with expected HTTP status 200 and no expected error;
   fail for absent/ambiguous input/expected output. Construct one inner `Workflow`
   per artifact and call Task 2's assembly, with strict proofs and no build phase.
@@ -224,7 +224,7 @@ or duplicate artifact. One requested mode qualifies that mode; requested
   image/metadata evidence before and after each pass, including post-request logs.
   Require the function absent through list and deployment/service probes before
   its first acquisition; unexpected existing resources fail without deleting them.
-- [ ] Read the original `control-plane` runtime-config `rateMaxPerSecond` and revision.
+- [x] Read the original `control-plane` runtime-config `rateMaxPerSecond` and revision.
   Use patch 999999, or 999998
   if the baseline is already 999999, and invalid patch -1. Restore the original
   value with the current revision through Task 2's `runtime_config_patch_task` and
@@ -242,11 +242,11 @@ or duplicate artifact. One requested mode qualifies that mode; requested
   parsed observations keyed by case, independent of generated task identifiers.
   Restore and verify the controlled runtime baseline after the final successful
   pass too; on failure attempt owned compensation and retain every cleanup error.
-- [ ] Add `test_baseline_equal_to_default_patch_still_proves_native_write` and
+- [x] Add `test_baseline_equal_to_default_patch_still_proves_native_write` and
   `test_retry_never_reuses_qualified_receipts`. Both must pass alongside the
   state/identity tests. Run `.venv/bin/pytest packages/nanolab/tests/tasks/validation/test_cli_artifacts.py packages/nanolab/tests/tasks/validation/test_cli_contract.py packages/nanolab/tests/tasks/validation/test_cli_parity.py --no-cov`.
   Expected: GREEN, with owned function compensation on either pass's failure.
-- [ ] Commit `feat: qualify native and JVM CLI parity`.
+- [x] Commit `feat: qualify native and JVM CLI parity`.
 
 ### Task 4: Recipe-backed local Kubernetes CLI integration
 

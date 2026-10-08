@@ -961,7 +961,7 @@ def test_strict_contract_assembly_runs_replicas_before_invoke_without_build(tmp_
 
     executor = ScriptedExecutor()
     workflow = Workflow(workflow_id="contract-only")
-    add_cli_contract(
+    resources = add_cli_contract(
         workflow,
         CliWorkflowRequest(
             functions=(FUNCTION,),
@@ -972,7 +972,17 @@ def test_strict_contract_assembly_runs_replicas_before_invoke_without_build(tmp_
         strict=True,
         readiness_timeout_seconds=45,
     )
-    titles = [task.task.title for task in workflow.compile().tasks]
+    assert len(resources) == 1
+    compiled = workflow.compile()
+    titles = [task.task.title for task in compiled.tasks]
+    rollout = next(
+        task.task
+        for task in compiled.tasks
+        if task.task.title == "Scaled Roll out deployment/fn-word-stats-java"
+    )
+    assert isinstance(rollout, CommandTask)
+    assert isinstance(rollout.argv, tuple)
+    assert "--timeout=45s" in rollout.argv
     assert not any("Build" in title for title in titles)
     assert titles.index("Scale word-stats-java") < titles.index(
         "Invoke word-stats-java"
