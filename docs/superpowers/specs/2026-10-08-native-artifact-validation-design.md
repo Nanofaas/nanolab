@@ -1,5 +1,31 @@
 # Native artifact validation — issues #53 and #54
 
+Status: the user approved the three-delivery subdivision below. Each delivery
+has its own written design review; native implementation has not started.
+
+## Approved subdivision: three independent deliveries
+
+The previous design combined three separate runtime contracts. The approved
+revision preserves their acceptance criteria but delivers and reviews each
+independently, in this order:
+
+1. **#53 — Kubernetes native lifecycle.** Reuse recipe validation, add the
+   native Kubernetes preset, reject the ignored legacy runtime selector, and
+   verify native API response bodies, reflection logs and pod runtime shape.
+   This delivery needs no callback server or new artifact-contract workflow.
+2. **#54 — Native CLI parity.** Extend the existing CLI build/validation path
+   to select the native executable or JVM launcher. Build from the same frozen
+   source and compare the existing command contracts against the same owned
+   control plane. No SDK matrix is required to qualify these CLI commands.
+3. **#54 — Packaged functions and watchdog.** Introduce the local artifact
+   contract workflow only here, with owned callback capture and the matrix
+   derived from the currently supported catalog and independent corpus.
+
+Each delivery must retain its own evidence and run live artifact checks before
+qualification. The CLI delivery alone does not close #54. This subdivision is a
+scope decision, not qualification or approval of an unwritten implementation.
+The first delivery's design is [native Kubernetes lifecycle](2026-10-08-native-k8s-lifecycle-design.md).
+
 ## Outcome and scope
 
 An operator must know which executable was tested. Native control-plane
@@ -28,7 +54,7 @@ fixes are independent and can be delivered without this workflow.
 - The pinned Helm template already passes the derived event-loop count as a
   native `-D` argument as well as in `JAVA_TOOL_OPTIONS`.
 
-## Chosen approach
+## Proposed approach
 
 Keep normal validation and artifact contracts separate in purpose, reusing
 the existing recipe, image-plan, command, process and resource implementations.
@@ -51,6 +77,7 @@ arguments, actual event-loop count and Linux transport using a bounded probe
 against the owned pod; an unavailable probe is a failed qualification gate.
 Property-conditioned capabilities required by the scenario must be present in
 the recipe's AOT configuration, not enabled only after native compilation.
+Do not add an admin runtime-config exercise unless the lifecycle needs it.
 
 ### 2. Packaged function and watchdog contracts
 
@@ -111,3 +138,5 @@ Keep the existing 90% coverage threshold and report the known debt separately.
 A new live fixture must prove callback capture independently of the artifact
 under test; manufactured callback data cannot qualify a shipped runtime.
 No issue is considered complete solely because mocked commands or planning pass.
+For shipped function, watchdog and CLI logs, also reject `No serializer found`,
+Python tracebacks and Rust panics, as well as the reflection failures above.
