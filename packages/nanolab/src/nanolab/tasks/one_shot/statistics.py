@@ -38,7 +38,7 @@ def summarize_service(
     if not durations or minimum_samples < 1 or not 0 < confidence < 1:
         raise ValueError("invalid service statistics parameters")
     mean = statistics.mean(durations)
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # nosec B311: reproducible statistical bootstrap
     means = [
         statistics.mean(rng.choices(durations, k=len(durations)))
         for _ in range(bootstrap_repetitions)

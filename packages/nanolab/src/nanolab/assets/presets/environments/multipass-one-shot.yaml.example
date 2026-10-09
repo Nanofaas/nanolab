@@ -1,0 +1,5 @@
+# One-shot workflows acquire separate run-owned edge and cloud VMs.
+provider: multipass
+roles:
+  stack:
+    name: one-shot

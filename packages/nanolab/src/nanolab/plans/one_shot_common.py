@@ -107,6 +107,9 @@ def _control_plane(
     distribution: Resource[RecipeDistribution],
     archive: Resource[Path],
     run_dir: Path,
+    forecast_provider: str = "ORACLE",
+    terminal_queueing: bool = False,
+    baseline_depth: int | None = None,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
 
@@ -176,6 +179,8 @@ def _control_plane(
             "--server.port=8080",
             "--management.server.port=9090",
             "--logging.level.root=WARN",
+            "--nanofaas.admission.profile=SYNC_QUEUE",
+            "--nanofaas.metrics.profile=advanced",
             "--nanofaas.registry.path=/tmp/functions.json",
             "--nanofaas.container-local.runtime-adapter=docker-java",
             "--nanofaas.container-local.bind-host=0.0.0.0",
@@ -190,10 +195,28 @@ def _control_plane(
             "--nanofaas.p2p.ping-timeout=1s",
             f"--nanofaas.forecasting.enabled={boolean}",
             f"--nanofaas.forecasting.node-id={node.config.id}",
-            "--nanofaas.forecasting.provider=ORACLE",
+            f"--nanofaas.forecasting.provider={forecast_provider}",
+            "--nanofaas.forecasting.window=1s",
             f"--nanofaas.offload.one-shot.enabled={boolean}",
-            "--sync-queue.enabled=false",
+            "--sync-queue.enabled="
+            + str(
+                (not edge and terminal_queueing)
+                or (edge and baseline_depth is not None)
+            ).lower(),
         ]
+        if edge and baseline_depth is not None:
+            cloud = next(
+                other
+                for other in topology.nodes.values()
+                if other.config.kind == "cloud"
+            )
+            cloud_vm = inputs.resource(cloud.vm)
+            args.extend(
+                (
+                    f"--nanofaas.offload.target-url=http://{cloud_vm.host}:8080",
+                    f"--sync-queue.max-depth={baseline_depth}",
+                )
+            )
         if edge:
             peers = [
                 inputs.resource(other.vm).host
@@ -236,6 +259,9 @@ def add_one_shot_platforms(
     *,
     run_dir: Path,
     repo_root: Path,
+    forecast_provider: str = "ORACLE",
+    terminal_queueing: bool = False,
+    baseline: bool = False,
 ) -> OneShotTopology:
     """Compose existing staged recipes, bootstrap and function resources per VM."""
     settings = config.one_shot
@@ -278,6 +304,7 @@ def add_one_shot_platforms(
                     "forecasting",
                     "p2p-discovery",
                     "container-deployment-provider",
+                    "sync-queue",
                 }
             ),
         )
@@ -296,6 +323,7 @@ def add_one_shot_platforms(
                     "forecasting",
                     "p2p-discovery",
                     "container-deployment-provider",
+                    "sync-queue",
                 }
             ),
         )
@@ -355,6 +383,11 @@ def add_one_shot_platforms(
             distribution=distribution,
             archive=archive,
             run_dir=run_dir,
+            forecast_provider=forecast_provider,
+            terminal_queueing=terminal_queueing,
+            baseline_depth=max(fn.max_replicas for fn in settings.functions.values())
+            if baseline
+            else None,
         )
         for key, node in resources.nodes.items()
     }

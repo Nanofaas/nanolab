@@ -50,6 +50,20 @@ def main() -> None:
             "tool-metrics-echo",
         }
         assert Path(nanolab.__file__).is_relative_to(installed_root)
+        from importlib.resources import files
+
+        assets = files("nanolab").joinpath("assets")
+        for name in (
+            "k6/one-shot.js",
+            "one-shot/contracts/service-profile.schema.json",
+            "presets/environments/multipass-one-shot.yaml.example",
+        ):
+            assert assets.joinpath(name).is_file(), name
+        for mode in ("calibration", "qualification", "experiment"):
+            preset = Path(
+                str(assets.joinpath(f"presets/scenarios/one-shot-{mode}.yaml"))
+            )
+            assert _scenario(preset).workflow == f"one-shot-{mode}"
         assert (BUILD_CONTEXT / DOCKERFILE).is_file()
         assert MAT_LOCK.is_file() and BASES_LOCK.is_file()
         for probe in ("retry_hint_probe.py", "retry_backoff_burst.py"):

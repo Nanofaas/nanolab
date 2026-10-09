@@ -129,3 +129,86 @@ def test_clock_client_can_bound_its_request_during_teardown():
         client = NanoFaasOneShotClient("http://edge:8080", http=http, timeout_seconds=2)
         client.update_clock_health(offset_seconds=0.001, measured_at=datetime.now(UTC))
     assert requests[0].extensions["timeout"]["read"] == 2
+
+
+def test_configuration_trace_and_drain_use_versioned_public_contracts():
+    from datetime import UTC, datetime
+
+    requests = []
+    now = datetime.now(UTC).isoformat()
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path.endswith("/config"):
+            return httpx.Response(
+                200, json={"revision": 1, "settings": {"schemaVersion": 1}}
+            )
+        if request.url.path.endswith("/trace"):
+            return httpx.Response(
+                200,
+                json={
+                    "revision": 1,
+                    "entryCount": 0,
+                    "nodeId": "edge",
+                    "producedAt": now,
+                },
+            )
+        return httpx.Response(200, json=True)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        client = NanoFaasOneShotClient("http://edge", http=http)
+        assert client.configure({"schemaVersion": 1}, revision=0).revision == 1
+        assert (
+            client.load_trace(
+                {
+                    "schemaVersion": 1,
+                    "nodeId": "edge",
+                    "revision": 1,
+                    "provider": "oracle",
+                    "producedAt": now,
+                    "entries": [],
+                },
+                revision=0,
+            ).entry_count
+            == 0
+        )
+        assert client.drain_and_release()
+    assert len(requests) == 3
+    assert requests[0].headers["If-Match"] == "0"
+
+
+def test_invalid_requests_are_refused_before_transport():
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _: pytest.fail("invalid request reached transport")
+        )
+    ) as http:
+        client = NanoFaasOneShotClient("http://edge", http=http)
+        with pytest.raises(ValueError, match="configuration version"):
+            client.configure({"schemaVersion": 2}, revision=0)
+        with pytest.raises(ValueError, match="epoch window"):
+            client.prepare_epoch(-1, starts_at=now, ends_at=now)
+        with pytest.raises(ValueError, match="pagination"):
+            client.epoch_events(-1)
+        with pytest.raises(ValueError, match="finite"):
+            NanoFaasOneShotClient(
+                "http://edge", http=http, timeout_seconds=float("inf")
+            )
+
+
+def test_false_drain_and_invalid_receipt_are_distinct():
+    for receipt in [False, {"released": True}]:
+        with httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _, receipt=receipt: httpx.Response(200, json=receipt)
+            )
+        ) as http:
+            client = NanoFaasOneShotClient("http://edge", http=http)
+            if receipt is False:
+                assert not client.drain_and_release()
+            else:
+                with pytest.raises(ValueError, match="drain receipt"):
+                    client.drain_and_release()

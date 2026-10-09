@@ -29,11 +29,33 @@ from nanolab.tasks.one_shot.artifacts import (
 )
 from nanolab.tasks.one_shot.calibration import environment_identity
 from nanolab.tasks.one_shot.clock import ClockMonitor
+from nanolab.tasks.one_shot.preflight import runtime_endpoint
 from nanolab.tasks.one_shot.timing import WallTimingSample, select_timing
 
 AUCTION_SUM = "nanofaas_oneshot_auction_seconds_sum"
 AUCTION_COUNT = "nanofaas_oneshot_auction_seconds_count"
 SOLVER_SUM = "nanofaas_oneshot_solver_seconds_sum"
+
+
+def capture_replica_diagnostics(topology, inputs, output: Path, *, epoch: int) -> None:
+    """Retain scoped container state after a censored transition without retrying it."""
+    for node_id, node in topology.resources.nodes.items():
+        for name, function in topology.function_settings.items():
+            for replica in range(1, function.max_replicas + 1):
+                row: dict[str, Any] = {
+                    "epoch": epoch,
+                    "node": node_id,
+                    "function": name,
+                    "replica": replica,
+                }
+                try:
+                    url, container = runtime_endpoint(
+                        node, name, inputs=inputs, replica=replica
+                    )
+                    row.update(url=url, container=container)
+                except Exception as error:
+                    row["error"] = str(error)
+                append_observation(output, row)
 
 
 def duration(seconds: float) -> str:
@@ -439,6 +461,13 @@ class QualifyTimingTask(Task[TimingQualification]):
                         self.run_dir / "matrix.jsonl",
                         {"cell": cell.id, "number": number, **observation},
                     )
+                    if sample.censored:
+                        capture_replica_diagnostics(
+                            self.topology,
+                            inputs,
+                            self.run_dir / "replica-diagnostics.jsonl",
+                            epoch=epoch,
+                        )
                     samples.append(sample)
                     epoch += 1
                     wait_until(ends + timedelta(milliseconds=100), clock=monitor)

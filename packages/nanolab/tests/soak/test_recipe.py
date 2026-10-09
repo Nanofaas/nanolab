@@ -287,6 +287,7 @@ def test_p24_recipe_preset_preserves_experiment():
     actual = config.model_dump(mode="json")
     actual.pop("recipe_profile")
     assert actual.pop("contract") is None
+    assert actual.pop("one_shot") is None
     assert actual == baseline
     assert (
         config.recipe_profile

@@ -267,18 +267,32 @@ class ScenarioConfig(BaseModel):
         """
         if self.workflow.startswith("one-shot-"):
             if self.one_shot is None or self.backend != "container":
-                raise ValueError("one-shot requires container backend and oneShot settings")
+                raise ValueError(
+                    "one-shot requires container backend and oneShot settings"
+                )
             unexpected = self.model_fields_set - {
-                "workflow", "backend", "functions", "one_shot", "recipe_profile",
-                "control_plane_runtime", "control_plane_image", "function_images",
+                "workflow",
+                "backend",
+                "functions",
+                "one_shot",
+                "recipe_profile",
+                "control_plane_runtime",
+                "control_plane_image",
+                "function_images",
             }
             if unexpected:
                 raise ValueError("one-shot does not consume these scenario options")
             if set(self.functions) != set(self.one_shot.functions):
                 raise ValueError("oneShot functions must match the scenario")
-            if self.workflow != "one-shot-calibration" and self.one_shot.profile is None:
+            if (
+                self.workflow != "one-shot-calibration"
+                and self.one_shot.profile is None
+            ):
                 raise ValueError("one-shot qualification/experiment requires a profile")
-            if self.workflow == "one-shot-experiment" and self.one_shot.qualification is None:
+            if (
+                self.workflow == "one-shot-experiment"
+                and self.one_shot.qualification is None
+            ):
                 raise ValueError("one-shot experiment requires timing qualification")
             return self
         if self.one_shot is not None:

@@ -25,3 +25,15 @@ def test_app_package_contains_only_entrypoint_modules() -> None:
 
 def test_workspace_package_exposes_shared_tooling_primitives() -> None:
     from nanolab.workspace.paths import ToolPaths, default_tool_paths  # noqa: F401
+
+
+def test_one_shot_runtime_assets_and_environment_example_ship_inside_package():
+    from importlib.resources import files
+
+    assets = files("nanolab").joinpath("assets")
+    for name in [
+        "k6/one-shot.js",
+        "one-shot/contracts/service-profile.schema.json",
+        "presets/environments/multipass-one-shot.yaml.example",
+    ]:
+        assert assets.joinpath(name).is_file()

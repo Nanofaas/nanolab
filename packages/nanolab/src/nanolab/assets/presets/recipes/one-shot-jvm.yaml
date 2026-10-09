@@ -4,6 +4,7 @@ name: one-shot-multipass-jvm
 controlPlane:
   modules:
   - offload
+  - sync-queue
   - forecasting
   - p2p-discovery
   - container-deployment-provider

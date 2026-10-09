@@ -248,3 +248,37 @@ def test_environment_fingerprint_includes_vm_os_but_not_run_addresses():
     assert environment_identity(settings, topology, built)[0] == first
     node.os = "Ubuntu 26.04 kernel B"
     assert environment_identity(settings, topology, built)[0] != first
+
+
+def test_output_oracle_matches_the_measured_rust_workload_golden():
+    # SDK release receipts from the independent B3 Multipass run recorded this u64.
+    assert (
+        workload_checksum(
+            {"iterations": 20000000, "working_set_bytes": 4096, "seed": 7}
+        )
+        == 10654779122033555500
+    )
+
+
+@pytest.mark.parametrize(
+    "failure", ["handler-http", "proof-http", "dispatch", "occupancy"]
+)
+def test_invalid_runtime_transport_or_release_evidence_never_qualifies(failure):
+    def respond(request):
+        if request.url.path == "/invoke":
+            return httpx.Response(503 if failure == "handler-http" else 200, json=42)
+        if failure == "proof-http":
+            raise httpx.ConnectError("proof unavailable", request=request)
+        return httpx.Response(
+            200,
+            json=proof(
+                dispatchAttempt="2" if failure == "dispatch" else "1",
+                occupancySeconds=0 if failure == "occupancy" else 0.125,
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        sample = measure(http)
+    assert sample["state"] != "complete"
+    if failure == "proof-http":
+        assert "proofError" in sample

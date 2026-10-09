@@ -105,7 +105,9 @@ repos:
   # Generic file hygiene
   #
   # `tests/golden/` is excluded from the two hooks that rewrite whitespace: those
-  # files are expected output compared byte for byte (see
+  # The one-shot Multipass dossier also preserves hash-bound raw artifact bytes;
+  # whitespace normalization would invalidate profile/qualification references.
+  # Golden files are expected output compared byte for byte (see
   # test_to_questionary_style_matches_legacy_byte_for_byte), so normalizing them
   # does not tidy the repository, it breaks the tests. Golden files are data.
   # ---------------------------------------------------------------------------
@@ -118,9 +120,9 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=1024]
       - id: end-of-file-fixer
-        exclude: (^\.nanofaas-source/|/tests/golden/)
+        exclude: (^\.nanofaas-source/|/tests/golden/|^docs/testing/one-shot-multipass/)
       - id: trailing-whitespace
-        exclude: (\.md$|^\.nanofaas-source/|/tests/golden/)
+        exclude: (\.md$|^\.nanofaas-source/|/tests/golden/|^docs/testing/one-shot-multipass/)
       - id: mixed-line-ending
         args: [--fix=lf]
         exclude: ^\.nanofaas-source/

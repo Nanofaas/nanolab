@@ -160,7 +160,23 @@ def _workflow(
 ):
     paths = default_tool_paths()
     if scenario.workflow.startswith("one-shot-"):
-        raise ValueError("one-shot execution requires its dedicated plan builder")
+        from nanolab.plans.one_shot_calibration import build_one_shot_calibration_plan
+        from nanolab.plans.one_shot_experiment import build_one_shot_experiment_plan
+        from nanolab.plans.one_shot_qualification import (
+            build_one_shot_qualification_plan,
+        )
+
+        builders = {
+            "one-shot-calibration": build_one_shot_calibration_plan,
+            "one-shot-qualification": build_one_shot_qualification_plan,
+            "one-shot-experiment": build_one_shot_experiment_plan,
+        }
+        return builders[scenario.workflow](
+            scenario,
+            environment,
+            run_dir=run_dir or paths.runs_dir / f"one-shot-{uuid4().hex}",
+            repo_root=paths.nanofaas_root,
+        )
     if (
         scenario.workflow in {"validate", "loadtest"}
         and scenario.recipe_profile is not None
@@ -663,6 +679,7 @@ def _provisioning_context(
 ):
     if (
         scenario_config.workflow != "release"
+        and not scenario_config.workflow.startswith("one-shot-")
         and environment_config.provider != "local"
         and not (scenario_config.workflow == "cli" and scenario_config.backend == "k8s")
     ):
@@ -914,6 +931,18 @@ def _execute_workflow(
                     _print_offload_summary(effective_run_dir)
             except SelectionError as error:
                 raise typer.BadParameter(str(error)) from None
+            finally:
+                if (
+                    scenario_config.workflow == "one-shot-experiment"
+                    and effective_run_dir is not None
+                ):
+                    from nanolab.one_shot.report import render_campaign
+
+                    # Report failures must not mask the original workflow error.
+                    try:
+                        render_campaign(effective_run_dir)
+                    except Exception as error:
+                        typer.echo(f"one-shot report unavailable: {error}", err=True)
 
 
 def _write_failure_metadata(

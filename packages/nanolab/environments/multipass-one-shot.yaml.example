@@ -1,0 +1,5 @@
+# Copy this environment next to your pinned scenario artifacts.
+provider: multipass
+roles:
+  stack:
+    name: one-shot

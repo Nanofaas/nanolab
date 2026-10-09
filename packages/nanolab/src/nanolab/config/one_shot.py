@@ -148,6 +148,21 @@ class TimingSettings(BaseModel):
         return self
 
 
+class ExperimentSettings(BaseModel):
+    """Explicit comparison windows, repetitions and generator capacity."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    windows: list[TimingCell] = Field(min_length=1)
+    repetitions: int = Field(default=1, ge=1, le=20)
+    warmup_seconds: int = Field(default=5, alias="warmupSeconds", ge=2, le=60)
+    warmup_rate: float = Field(default=4, alias="warmupRate", gt=0)
+    generator_vus: int = Field(default=64, alias="generatorVus", ge=1, le=512)
+    max_arrival_lateness: float = Field(
+        default=0.25, alias="maxArrivalLatenessSeconds", gt=0
+    )
+    fail_load: bool = Field(default=False, alias="failLoad")
+
+
 class OneShotConfig(BaseModel):
     """Provider/purpose boundaries and prerequisites checked before provisioning."""
 
@@ -166,6 +181,7 @@ class OneShotConfig(BaseModel):
     seed: int = 7
     calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
     timing: TimingSettings | None = None
+    experiment: ExperimentSettings | None = None
 
     @model_validator(mode="after")
     def validate_topology(self) -> Self:

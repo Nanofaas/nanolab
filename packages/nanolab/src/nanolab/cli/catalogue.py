@@ -49,7 +49,16 @@ def _scenario(path: Path) -> ScenarioConfig:
         if receipt is not None:
             object.__setattr__(config, "_soak_policy_receipt", receipt)
         return config
-    return ScenarioConfig.model_validate(data)
+    config = ScenarioConfig.model_validate(data)
+    if config.one_shot is not None:
+        for artifact in (
+            config.one_shot.profile,
+            config.one_shot.qualification,
+            config.one_shot.runtime_distribution,
+        ):
+            if artifact is not None:
+                artifact.path = (path.resolve().parent / artifact.path).resolve()
+    return config
 
 
 def _environment(path: Path | None) -> EnvironmentConfig:
@@ -75,6 +84,8 @@ def _workflow_catalog(
         environments = (
             ("local",) if data.get("backend") == "container" else _ENVIRONMENT_PROVIDERS
         )
+        if workflow.startswith("one-shot-"):
+            environments = ("multipass",)
         if workflow == "release":
             environments = ("azure",)
         workflows.setdefault(workflow, set()).update(environments)

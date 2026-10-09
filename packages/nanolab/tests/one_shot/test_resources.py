@@ -273,7 +273,12 @@ def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypat
     assert saved[-2:] == ("cp:tag", "fn:tag")
 
 
-def test_nonroot_control_plane_joins_vm_docker_socket_group(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", [None, "transfer", "image", "socket"])
+@pytest.mark.parametrize("terminal_queueing", [False, True])
+@pytest.mark.parametrize("baseline", [False, True])
+def test_control_plane_namespace_and_compensated_cleanup(
+    tmp_path, monkeypatch, failure, terminal_queueing, baseline
+):
     from types import SimpleNamespace
 
     import httpx
@@ -288,16 +293,20 @@ def test_nonroot_control_plane_joins_vm_docker_socket_group(tmp_path, monkeypatc
     resources = build_one_shot_resources(
         config(), environment, run_id="socket", repo_root=tmp_path
     )
-    node = resources.nodes["edge-0"]
-    monkeypatch.setattr(node.provider, "transfer_to", lambda *args, **kwargs: Result())
+    node = resources.nodes["cloud" if terminal_queueing else "edge-0"]
+    monkeypatch.setattr(
+        node.provider,
+        "transfer_to",
+        lambda *args, **kwargs: Result(return_code=1 if failure == "transfer" else 0),
+    )
     calls = []
 
     def command(self, argv, **kwargs):
         calls.append(argv)
         stdout = (
-            "999"
+            ("bad" if failure == "socket" else "999")
             if argv[0] == "stat"
-            else "sha256:" + "a" * 64
+            else "sha256:" + ("b" if failure == "image" else "a") * 64
             if argv[:3] == ("docker", "image", "inspect")
             else ""
         )
@@ -345,11 +354,38 @@ def test_nonroot_control_plane_joins_vm_docker_socket_group(tmp_path, monkeypatc
         distribution=distribution,
         archive=archive,
         run_dir=tmp_path,
+        terminal_queueing=terminal_queueing,
+        baseline_depth=2 if baseline else None,
     )
-    resource.acquire(TaskInputs._for_resources(values, set(values)))
-    launch = next(argv for argv in calls if argv[:2] == ("docker", "run"))
-    assert "--group-add" in launch
-    assert launch[launch.index("--group-add") + 1] == "999"
+
+    def release_command(_request, argv, **_kwargs):
+        calls.append(argv)
+        return Result(stdout="retained control-plane log")
+
+    monkeypatch.setattr(node.provider, "exec_argv", release_command)
+    inputs = TaskInputs._for_resources(values, set(values))
+    if failure:
+        with pytest.raises((RuntimeError, ValueError), match=r"transfer|image|socket"):
+            resource.acquire(inputs)
+    else:
+        url = resource.acquire(inputs)
+        launch = next(argv for argv in calls if argv[:2] == ("docker", "run"))
+        assert "--group-add" in launch
+        assert launch[launch.index("--group-add") + 1] == "999"
+        assert (
+            f"--sync-queue.enabled={str(terminal_queueing or baseline).lower()}"
+            in launch
+        )
+        assert "--nanofaas.admission.profile=SYNC_QUEUE" in launch
+        assert "--nanofaas.metrics.profile=advanced" in launch
+        if baseline and not terminal_queueing:
+            assert "--nanofaas.offload.target-url=http://10.0.0.1:8080" in launch
+            assert "--sync-queue.max-depth=2" in launch
+        resource.release(inputs, url)
+    assert (
+        tmp_path / f"{node.config.id}-control-plane.log"
+    ).read_text() == "retained control-plane log"
+    assert any(argv[:2] == ("docker", "rm") for argv in calls)
 
 
 @pytest.mark.parametrize(
@@ -404,3 +440,44 @@ def test_runtime_lookup_uses_function_label_scoped_to_owned_vm(tmp_path, monkeyp
     endpoint, _ = runtime_endpoint(node, "f", inputs=inputs)
     assert endpoint == "http://10.0.0.9:18080"
     assert observed == [f"{node.request.name}/f"]
+
+
+def test_node_transport_errors_and_executor_results_remain_distinct(
+    tmp_path, monkeypatch
+):
+    from sonata_tasks.execution.models import CommandTaskSpec
+
+    from nanolab.one_shot.infrastructure import NodeExecutor
+
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
+    )
+    node = build_one_shot_resources(
+        config(), environment, run_id="transport", repo_root=tmp_path
+    ).nodes["edge-0"]
+    monkeypatch.setattr(
+        node.provider,
+        "exec_argv",
+        lambda *_args, **_kwargs: Result(return_code=1, stderr="VM transport failure"),
+    )
+    with pytest.raises(RuntimeError, match="edge-0: VM transport failure"):
+        node.command(("docker", "ps"))
+    executor = NodeExecutor(node)
+    assert executor.binding_key("host") == "multipass:" + str(node.request.name)
+    task = CommandTaskSpec(
+        task_id="inspect", summary="Inspect runtime", argv=("docker", "ps"), role="host"
+    )
+    assert executor.run(task).status == "failed"
+
+
+def test_bundled_comparison_recipe_contains_real_sync_queue_module():
+    from importlib.resources import files
+
+    import yaml
+
+    recipe = yaml.safe_load(
+        files("nanolab")
+        .joinpath("assets/presets/recipes/one-shot-jvm.yaml")
+        .read_text()
+    )
+    assert "sync-queue" in recipe["controlPlane"]["modules"]

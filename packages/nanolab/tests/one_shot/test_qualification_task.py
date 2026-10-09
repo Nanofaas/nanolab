@@ -61,6 +61,10 @@ def task_fixture(tmp_path, monkeypatch, *, censored=False, release=True):
         ), {"censored": censored}
 
     monkeypatch.setattr(target + "prepare_parallel_epoch", prepare)
+    monkeypatch.setattr(
+        target + "capture_replica_diagnostics",
+        lambda *args, **kwargs: calls.append((kwargs["epoch"], "diagnostics")),
+    )
     topology = SimpleNamespace(
         resources=SimpleNamespace(
             nodes={node.id: SimpleNamespace(config=node) for node in settings.nodes}
@@ -97,13 +101,14 @@ def test_complete_matrix_publishes_immutable_qualification(tmp_path, monkeypatch
 
 
 def test_censored_matrix_is_retained_and_never_qualified(tmp_path, monkeypatch):
-    task, inputs, _calls = task_fixture(tmp_path, monkeypatch, censored=True)
+    task, inputs, calls = task_fixture(tmp_path, monkeypatch, censored=True)
     with pytest.raises(ValueError, match="NOT_QUALIFIED"):
         task.run(inputs)
     result = TimingQualification.model_validate_json(
         (tmp_path / "timing.json").read_bytes()
     )
     assert not result.qualified and result.censored_count == 20
+    assert [row[0] for row in calls if row[1] == "diagnostics"] == list(range(20))
     assert result.samples_seconds == [None] * 20
     assert len((tmp_path / "matrix.jsonl").read_text().splitlines()) == 20
 
@@ -114,3 +119,26 @@ def test_unconfirmed_replica_release_does_not_publish_success(tmp_path, monkeypa
         task.run(inputs)
     assert not (tmp_path / "timing.json").exists()
     assert len((tmp_path / "matrix.jsonl").read_text().splitlines()) == 20
+
+
+def test_censored_transition_diagnostics_keep_container_identity_and_lookup_failure(
+    tmp_path, monkeypatch
+):
+    from nanolab.tasks.one_shot.qualification import capture_replica_diagnostics
+
+    def lookup(node, name, **kwargs):
+        if kwargs["replica"] == 2:
+            raise RuntimeError("replica missing")
+        return "http://runtime", {"State": {"StartedAt": "timestamp"}}
+
+    monkeypatch.setattr("nanolab.tasks.one_shot.qualification.runtime_endpoint", lookup)
+    topology = SimpleNamespace(
+        resources=SimpleNamespace(nodes={"edge-0": object()}),
+        function_settings={"work": SimpleNamespace(max_replicas=2)},
+    )
+    path = tmp_path / "replicas.jsonl"
+    capture_replica_diagnostics(topology, object(), path, epoch=10)
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert rows[0]["container"]["State"]["StartedAt"] == "timestamp"
+    assert rows[1]["error"] == "replica missing"
+    assert all(row["epoch"] == 10 for row in rows)
