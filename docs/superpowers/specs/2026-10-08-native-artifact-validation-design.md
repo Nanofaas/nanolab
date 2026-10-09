@@ -3,12 +3,13 @@
 Status: the user approved the three-delivery subdivision below. The first
 delivery (#53) is implemented, independently reviewed and qualified locally
 through installed native artifacts; its existing coverage gate remains failing.
-The CLI delivery is implemented and reviewed; its installed candidate passes,
-but shipped-source qualification awaits NanoFaaS Context reflection integration.
-The function/watchdog delivery is implemented and reviewed. Installed ARM64
-WordStats smoke passes; full qualification is blocked by missing AWT libraries
-in the NanoFaaS Java QR native image. Original NanoLab coverage also remains
-below its unchanged gate. See the packaged-function execution evidence.
+The CLI delivery is implemented and reviewed; installed ARM64 parity passed
+against integrated NanoFaaS main `b1aa7f65` on 2026-10-09 with no tracked patch.
+The function/watchdog delivery is implemented and reviewed; its full installed
+ARM64 run passed all 137 cases after the upstream Java QR native packaging fix.
+Both #54 deliveries now have their own complete local installed qualification.
+Original NanoLab coverage remains below its unchanged gate; runtime qualification
+does not resolve that debt. See each delivery's execution evidence.
 
 ## Approved subdivision: three independent deliveries
 
@@ -35,7 +36,7 @@ The first delivery's design is [native Kubernetes lifecycle](2026-10-08-native-k
 The second delivery's approved design is [native CLI parity](2026-10-08-native-cli-parity-design.md);
 its implementation is reviewed on `fix/operational-validation`;
 [CLI execution evidence](../plans/2026-10-08-native-cli-parity-evidence.md) distinguishes
-the successful patched candidate from the failed shipped source.
+the integrated-main qualification from the earlier candidate and source failure.
 The third delivery's approved design is
 [packaged functions and watchdog](2026-10-08-packaged-functions-watchdog-design.md).
 
