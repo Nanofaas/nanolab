@@ -63,8 +63,10 @@ Other families, fixtures, service images, Rust, cross-architecture execution and
 watchdog FILE/HTTP supervision remain outside this workflow. Control-plane,
 Kubernetes lifecycle and CLI parity are separate validation gates.
 
-On the recorded NanoFaaS candidate `a234ea1`, the installed ARM64 WordStats
-smoke qualifies. The full preset detects a Java QR native packaging defect:
-required AWT libraries are missing from the runtime image. Full qualification
-requires an upstream fix and a fresh complete run; see the
+The installed ARM64 full preset qualifies on NanoFaaS candidate `84a8f0ce`:
+all 27 cells and 137 cases pass, with 119 real artifact callbacks and verified
+cleanup. This candidate fixes the missing AWT libraries and JNI metadata that
+blocked Java QR native on `a234ea1`; its upstream fix is
+[NanoFaaS PR #255](https://github.com/Nanofaas/nanofaas/pull/255). The native CLI
+fix in PR #253 and the existing NanoLab coverage deficit remain separate; see the
 [installed execution evidence](superpowers/plans/2026-10-08-packaged-functions-watchdog-evidence.md).

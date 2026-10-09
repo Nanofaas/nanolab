@@ -112,7 +112,77 @@ All five attempts have independently verified owned-resource absence; failed
 attempts have no qualification marker. Final operator source status/patch and
 selected-builder inventory compare byte-for-byte with the initial snapshots.
 Operator NanoLab main remains clean. `attempts-summary.json` records exact
-attempt outcomes. Full qualification and #54 completion remain pending.
+attempt outcomes. Full qualification was pending after these original attempts;
+the corrected native qualification below resolves that gate. Overall #54
+completion still requires its separate shipped-source CLI qualification.
+
+## Corrected native full qualification — 2026-10-09
+
+The installed full preset now qualifies on NanoFaaS revision
+`84a8f0ce7200f3f0b0bd24979e55d0d89168c3ce`, with an empty tracked patch.
+[NanoFaaS PR #255](https://github.com/Nanofaas/nanofaas/pull/255) preserves the
+emitted native `.so` libraries in release, export and recipe packaging, and
+registers the QR module's required AWT/ImageIO JNI members, including
+`System.load(String)`. The metadata comes from a real GraalVM agent trace of
+headless PNG generation at 128, 256 and 1024 pixels.
+
+Evidence root: `/tmp/nanofaas-awt-evidence`; complete installed attempt: `full/`.
+The same NanoLab and toolkit wheels identified above ran from `/tmp`, outside
+the checkout, under Python 3.12.3. NanoLab production source matches merged
+`2de1f1a`; its differences from wheel source `15fb13c` are documentation only.
+The independent corpus hashes match the failed `full-cmd/` attempt exactly.
+No case, expected value or catalog flavor was removed or changed.
+
+All 27 image cells built successfully in 1669.4 seconds. The actual private
+builder inspection confirms 16 GiB, CPU quota 400000/100000 and `runc`.
+All 137 case receipts passed: 119 HTTP invocations and 18 fresh bash one-shot
+invocations. All 119 artifact callbacks passed; the final audit retains 120
+records including its startup self-check, with zero violations and zero active
+requests or callbacks. The 18 watchdog warm cases emitted zero callbacks;
+the 18 one-shot cases each emitted exactly one. All seven Java native image
+identities and live ELF architecture/hash checks passed. Every Java QR native
+corpus case passed, including `sdk/000`, which stopped the original full run.
+
+The contract task passed in 343.1 seconds. All release tasks and independent
+owned-resource absence checks passed; the installed command exited 0.
+`full/qualification.json` was issued after cleanup with `cleanupVerified: true`.
+Its SHA-256 is
+`bbf2d21513cd29e68d6113fd2f48bcb593bac1ee23485209146ecfabdef053a1`.
+An additional read-only check confirmed all 137 receipt hashes, the final audit
+hash, source revision, empty patch, corpus identities and derived counts against
+the retained marker and matrix. The selected operator builder remained
+`nanolab-heap-analysis`; the isolated regression builder and images were removed.
+
+Before the full run, the native packaging regressions demonstrated the missing
+libraries and JNI failures, then passed after correction. Real QR invocations
+returned HTTP 200 and a valid 256×256 PNG through all three container paths:
+the release image, exported-artifact recipe image and `recipe-native` image,
+using Oracle GraalVM with O3 and G1 on ARM64. NanoFaaS's full Java suite passed
+2800 tests with nine skips; the complete scripts, experiments and SDK runtime
+contract suite passed 275 tests with the real native QR regression enabled.
+The host recipe staging test also checks emitted libraries and unrelated-file
+exclusion. No important code-review findings remained.
+
+GitNexus change analysis returned `critical` because a Markdown Section's empty
+ID was shared by 7188 indexed nodes: all 858 reported processes were attributed
+to that Section, which has zero actual `STEP_IN_PROCESS` edges. The raw result,
+graph diagnosis and independent review are retained in the evidence root.
+This is a demonstrated tooling limitation, not a clean whole-index result;
+the concrete code impact and runtime checks were assessed separately.
+
+This qualifies the selected function/watchdog matrix on that candidate.
+NanoFaaS PR #253 was still open at the integration check, so shipped-source CLI
+qualification remains separate. The unchanged 90% NanoLab coverage gate's
+previous 86.49% result is also unresolved by this documentation-only follow-up.
+
+Executed from `/tmp` with a fresh evidence directory:
+
+```sh
+NANOFAAS_ROOT=/tmp/nanofaas-native-awt \
+NANOLAB_WORKSPACE=/tmp/nanofaas-awt-evidence/operator \
+  /tmp/nanolab-functions54-evidence/installed/bin/nanolab \
+  run artifact-contract-container.yaml --run-dir /tmp/nanofaas-awt-evidence/full
+```
 
 
 ## Reproducible installed commands
