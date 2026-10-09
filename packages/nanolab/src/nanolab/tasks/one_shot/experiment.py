@@ -44,6 +44,7 @@ from nanolab.tasks.one_shot.verification import (
     verify_epoch_flows,
     verify_observations,
     verify_runtime_inventory,
+    verify_warmup,
 )
 
 
@@ -91,6 +92,18 @@ def read_qualification(settings) -> TimingQualification:
         raise ValueError("timing qualification lacks valid period/resolution scope")
     edges = {node.id for node in settings.nodes if node.kind == "edge"}
     for cell in result.matrix:
+        load = cell.get("load")
+        if (
+            not isinstance(load, dict)
+            or load.get("method") != "owned-http-sdk-contention-v1"
+            or load.get("valid") is not True
+            or not load.get("physicalCompletions")
+            or not load.get("emitted")
+            or load.get("generatorDeficit") != 0
+        ):
+            raise ValueError(
+                "timing qualification lacks accounted actual handler contention"
+            )
         scope = TimingCell.model_validate(cell["cell"])
         if set(scope.rates) != edges or any(
             set(rates) != set(settings.functions) for rates in scope.rates.values()
@@ -231,7 +244,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
                 raise ValueError(
                     "terminal cloud lacks declared ten percent physical headroom"
                 )
-        anchor = datetime.now(UTC) + timedelta(seconds=25)
+        anchor = datetime.now(UTC) + timedelta(seconds=experiment.warmup_seconds + 20)
         run_id = f"{self.trace.sha256[:12]}:{self.mode}:{self.repetition}"
         parameters = {
             "nodes": [node.model_dump(by_alias=True) for node in self.settings.nodes],
@@ -257,6 +270,13 @@ class FreezeManifestTask(Task[CampaignManifest]):
             "network": "observed-local; shared physical host",
             "cloudMemoryCapacityMiB": cloud.memory_capacity_mib,
             "terminalCloudQueueing": True,
+            "serviceDriftToleranceByFunction": {
+                row["function"]: min(
+                    self.settings.calibration.capacity_error,
+                    row["validity"]["maxRelativeCapacityError"],
+                )
+                for row in self.profile.functions
+            },
             "admissionProfile": "SYNC_QUEUE",
             "metricsProfile": "advanced",
             "baselinePolicy": {
@@ -726,6 +746,7 @@ class RunOneShotLoadTask(Task[None]):
         process, clock = inputs.resource(self.generator), inputs.resource(run.clock)
         collector = inputs.resource(self.collector)
         failure = None
+        primary_error = None
         try:
             if run.settings.experiment.fail_load:
                 raise RuntimeError("injected load-task failure")
@@ -793,44 +814,58 @@ class RunOneShotLoadTask(Task[None]):
                 raise RuntimeError(f"load generator failed: exit {process.returncode}")
         except BaseException as error:
             failure = str(error)
+            primary_error = error
             raise
         finally:
-            cleanup_error = None
-            try:
-                collector.close()
-            except Exception as error:
-                cleanup_error = error
-                append_observation(
-                    run.run_dir / "collection-errors.jsonl", {"error": str(error)}
-                )
-            if process.poll() is None:
-                process.terminate()
+            secondary = []
+
+            def attempt(action):
                 try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-            append_observation(
-                run.run_dir / "load-status.jsonl",
-                {"failure": failure, "exitCode": process.returncode},
+                    action()
+                except Exception as error:
+                    secondary.append(error)
+
+            def stop_child():
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+
+            attempt(collector.close)
+            attempt(stop_child)
+            attempt(
+                lambda: append_observation(
+                    run.run_dir / "load-status.jsonl",
+                    {"failure": failure, "exitCode": process.returncode},
+                )
             )
-            try:
-                collect_runtime_evidence(
+            attempt(
+                lambda: collect_runtime_evidence(
                     run, inputs, generator_rows(run.run_dir / "generator.jsonl")
                 )
-            except Exception as error:
-                append_observation(
-                    run.run_dir / "collection-errors.jsonl", {"error": str(error)}
-                )
-            if failure is not None:
-                try:
-                    collect_original_evidence(run, inputs)
-                except Exception as error:
-                    append_observation(
+            )
+            if primary_error is not None:
+                attempt(lambda: collect_original_evidence(run, inputs))
+            for error in secondary[:]:
+                attempt(
+                    lambda error=error: append_observation(
                         run.run_dir / "collection-errors.jsonl", {"error": str(error)}
                     )
-            if cleanup_error is not None and failure is None:
-                raise cleanup_error
+                )
+            if primary_error is not None:
+                for error in secondary:
+                    primary_error.add_note(
+                        "Secondary cleanup/collection failure: " + str(error)
+                    )
+            elif secondary:
+                for error in secondary[1:]:
+                    secondary[0].add_note(
+                        "Secondary cleanup/collection failure: " + str(error)
+                    )
+                raise secondary[0]
         return TaskOutcome()
 
 
@@ -845,11 +880,17 @@ def classify_result(row: dict, *, expected: str, physical: list[dict]) -> dict:
         body = json.loads(row.get("responseBody") or "{}")
     except (ValueError, TypeError):
         body = {}
+    target = row.get("offloadedTarget")
+    message = body.get("message") if isinstance(body, dict) else None
+    refusal = f"remote {target} returned 429"
     explicit_refusal = (
         row["statusCode"] == 502
         and isinstance(body, dict)
         and body.get("error") == "OFFLOAD_FAILED"
-        and "returned 429" in str(body.get("message", ""))
+        and isinstance(target, str)
+        and bool(target)
+        and isinstance(message, str)
+        and (message == refusal or message.startswith(refusal + ":"))
     )
     proxy_refusal = (
         isinstance(body, dict)
@@ -915,6 +956,16 @@ def collect_original_evidence(run, inputs: TaskInputs) -> RunEvidence:
         if row["event"] == "result"
     ]
     evidence = evaluate_conservation(planned, emitted, attempts, results)
+    warmup = verify_warmup(
+        json.loads((run.run_dir / "schedule.json").read_bytes()),
+        generator_rows(run.run_dir / "generator.jsonl"),
+        max_lateness=run.settings.experiment.max_arrival_lateness,
+    )
+    if not warmup["valid"]:
+        evidence.valid = False
+        evidence.violations.append(
+            "warmup arrivals/outcomes do not match frozen schedule"
+        )
     for status in _observation_rows(run.run_dir / "load-status.jsonl"):
         if status.get("failure") or status.get("exitCode") not in (None, 0):
             evidence.valid = False
@@ -974,6 +1025,7 @@ def collect_original_evidence(run, inputs: TaskInputs) -> RunEvidence:
             "loadExecuted": bool(emitted),
             "plannedWindows": run.trace.windows,
             "physicalAttempts": attempts,
+            "warmup": warmup,
             "results": results,
             "epochs": _observation_rows(run.run_dir / "epochs.jsonl"),
             "metricSamples": _observation_rows(run.run_dir / "metrics.jsonl"),

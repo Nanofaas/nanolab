@@ -28,9 +28,23 @@ def settings(tmp_path, *, broken):
         max_trace_resolution=30,
     )
     cell = {"id": "balanced", "rates": {"edge-0": {"work": 4}, "edge-1": {"work": 4}}}
-    timing.matrix = [{"cell": cell, "result": timing.model_dump()}]
+    timing.matrix = [
+        {
+            "cell": cell,
+            "result": timing.model_dump(),
+            "load": {
+                "valid": True,
+                "method": "owned-http-sdk-contention-v1",
+                "emitted": 100,
+                "physicalCompletions": 100,
+                "generatorDeficit": 0,
+            },
+        }
+    ]
     timing.protocol = ProtocolSettings().model_dump(by_alias=True)
-    if broken == "protocol":
+    if broken == "load":
+        timing.matrix[0].pop("load")
+    elif broken == "protocol":
         timing.protocol.pop("maxPeers")
     elif broken == "scope":
         cell["rates"].pop("edge-1")
@@ -54,7 +68,7 @@ def settings(tmp_path, *, broken):
     )
 
 
-@pytest.mark.parametrize("broken", ["protocol", "scope", "nested"])
+@pytest.mark.parametrize("broken", ["protocol", "scope", "nested", "load"])
 def test_qualification_rejects_incomplete_or_mixed_scope_before_load(tmp_path, broken):
     with pytest.raises(ValueError, match="timing"):
         read_qualification(settings(tmp_path, broken=broken))

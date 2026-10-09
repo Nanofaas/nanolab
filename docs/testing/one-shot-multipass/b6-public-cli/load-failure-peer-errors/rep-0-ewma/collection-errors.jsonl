@@ -1,0 +1,2 @@
+{"error":"nl-os-237ae3f1b71b-edge-0/one-shot-workload replica 2: expected exactly one running managed container, got 0","function":"one-shot-workload","node":"edge-0","replica":2}
+{"error":"nl-os-237ae3f1b71b-edge-1/one-shot-workload replica 2: expected exactly one running managed container, got 0","function":"one-shot-workload","node":"edge-1","replica":2}

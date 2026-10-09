@@ -73,7 +73,7 @@ The dossier in `docs/testing/one-shot-multipass/` records actual local runs.
 Calibration measures warm physical handler occupancy independently of client
 latency and queues. Raw samples, per-node confidence intervals and measured
 capacity at one and two replicas accompany `profile.json`. Qualification triggers
-native prepare concurrently on both edges, without load injection, and retains
+native prepare concurrently on both edges under an owned paced workload, and retains
 native events and wall-clock observations. `timing.json` selects the smallest
 candidate period satisfying the measured quantile, sample count, censoring,
 readiness and declared time budget. A failed qualification cannot start a campaign.
@@ -116,6 +116,12 @@ generator timing are checked separately. A failed run cannot be made conforming
 by zero counters or missing evidence. `experiment.failLoad: true` injects a load
 task failure to verify collection and cleanup.
 
+For forwarded admission refusal, the runtime must preserve its `OFFLOAD_FAILED`
+502 body. NanoLab requires the exact declared gateway target and remote 429
+status in that message; a status mentioned inside another error's text is not
+proof of refusal. Updating this runtime prerequisite requires explicit new
+calibration and qualification rather than reclassifying old bodyless outcomes.
+
 Realized utility is labeled with the final solver's zero-price convention:
 `(alpha*local + delta*peer - gamma*(cloud+errors))/planned originals`. Native plans
 do not expose monetary bid transfers, so this quantity excludes those transfers
@@ -139,3 +145,11 @@ qualification attempts, raw request/SDK observations, cleanup journals and the
 local comparison results. Its scope remains workflow validation. Phase C needs
 target Azure provider/resource verification, fresh calibration and qualification,
 and an independently designed repeated scientific campaign.
+
+Final review hardening binds service drift to each immutable profile tolerance
+(an explicitly frozen stricter threshold is allowed), checks warmup arrivals and
+HTTP outcomes separately, and includes workflow failure in comparison validity.
+Stable CPU identity hashes model/features/topology; frequency/BogoMIPS/clock
+observations are recorded separately. Old hardware fingerprint formats require
+explicit recalibration. Forecast-only timing artifacts are rejected: each matrix
+cell must include accounted emissions and exact SDK occupancy under actual load.

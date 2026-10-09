@@ -1,0 +1,20 @@
+{
+  "valid": true,
+  "planned": 5127,
+  "emitted": 5127,
+  "returned": 5127,
+  "generatorDeficit": 0,
+  "httpErrors": 903,
+  "physicalCompletions": 4224,
+  "physicalOccupancySeconds": 487.377911507,
+  "physicalGroups": [
+    [
+      "edge-0",
+      "one-shot-workload"
+    ]
+  ],
+  "maxArrivalLatenessSeconds": 0.005336761474609375,
+  "measuredThrough": 1791581491.175211,
+  "method": "owned-http-sdk-contention-v1",
+  "outsideMeasuredPrefixOriginals": 5433
+}

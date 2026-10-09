@@ -1,3 +1,4 @@
+import json
 from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any, cast
@@ -141,6 +142,9 @@ def test_independent_calibration_preserves_raw_and_refuses_capacity_drift(
                 .run(inputs)
                 .value
             )
+            assert json.loads(
+                (tmp_path / "cpu-runtime-observations.json").read_bytes()
+            )["rawCpuInfo"]
             assert profile is not None
             assert profile.functions[0]["serviceSeconds"] == 0.1
             assert len(value["capacity"]) == 6

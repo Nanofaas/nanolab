@@ -244,6 +244,7 @@ def test_collected_evidence_counts_real_events_and_never_fills_missing_sdk_proof
             "dispatchAttempt": "1",
             "emittedAt": row["scheduledAt"],
             "latencySeconds": 0.1,
+            "finishedAt": row["scheduledAt"] + 0.1,
         }
         events += [{**result, "event": "emitted"}, result]
         if not missing_proof or index:
@@ -256,6 +257,15 @@ def test_collected_evidence_counts_real_events_and_never_fills_missing_sdk_proof
                     "occupancySeconds": 0.1,
                 }
             )
+    for warm in json.loads((tmp_path / "schedule.json").read_bytes()):
+        if warm["phase"] == "warmup":
+            outcome = {
+                **events[-1],
+                **warm,
+                "emittedAt": warm["scheduledAt"],
+                "finishedAt": warm["scheduledAt"] + 0.1,
+            }
+            events += [{**outcome, "event": "emitted"}, outcome]
     (tmp_path / "generator.jsonl").write_text(
         "".join(json.dumps({"msg": json.dumps(row)}) + "\n" for row in events)
     )
@@ -297,3 +307,20 @@ def test_collected_evidence_counts_real_events_and_never_fills_missing_sdk_proof
         assert EvaluateOneShotTask().run(evaluated).value is evidence
         assert evidence.observations["realizedUtility"] == 1
     assert (tmp_path / "evidence.json").exists()
+
+
+def test_long_warmup_is_fully_in_the_future(tmp_path, monkeypatch):
+    from datetime import UTC, datetime
+
+    run, inputs = frozen_run(tmp_path, monkeypatch)
+    assert run.settings.experiment is not None
+    run.settings.experiment.warmup_seconds = 60
+    before = datetime.now(UTC).timestamp()
+    run.run(inputs)
+    warm = [
+        row
+        for row in json.loads((tmp_path / "schedule.json").read_bytes())
+        if row["phase"] == "warmup"
+    ]
+    assert len(warm) == 480
+    assert min(row["scheduledAt"] for row in warm) > before + 10

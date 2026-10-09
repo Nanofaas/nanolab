@@ -1,0 +1,598 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+rootdir: /tmp/nanolab-one-shot/packages/nanolab
+configfile: pyproject.toml
+plugins: cov-7.1.0, anyio-4.14.2
+collected 4133 items
+
+packages/nanolab/tests/cli/test_command_surface.py ..................... [  0%]
+........................                                                 [  1%]
+packages/nanolab/tests/cli/test_comparison.py ...............            [  1%]
+packages/nanolab/tests/cli/test_contract.py .............                [  1%]
+packages/nanolab/tests/cli/test_diagnostics.py .                         [  1%]
+packages/nanolab/tests/cli/test_execution_bindings.py .................. [  2%]
+....                                                                     [  2%]
+packages/nanolab/tests/cli/test_prepare_heartbeat.py ....                [  2%]
+packages/nanolab/tests/cli/test_progress.py ..                           [  2%]
+packages/nanolab/tests/cli/test_prometheus_tunnel.py ........            [  2%]
+packages/nanolab/tests/cli/test_release_command.py ..................... [  3%]
+.............                                                            [  3%]
+packages/nanolab/tests/cli/test_source_compatibility.py .                [  3%]
+packages/nanolab/tests/cli/test_vm_provider.py ......                    [  3%]
+packages/nanolab/tests/comparison/test_cell_images.py .................. [  4%]
+....                                                                     [  4%]
+packages/nanolab/tests/comparison/test_evidence.py ..................... [  4%]
+....                                                                     [  4%]
+packages/nanolab/tests/comparison/test_manifest.py ..................... [  5%]
+............                                                             [  5%]
+packages/nanolab/tests/comparison/test_matrix.py .......                 [  5%]
+packages/nanolab/tests/comparison/test_prepare.py ...                    [  5%]
+packages/nanolab/tests/comparison/test_profiles.py ..................... [  6%]
+                                                                         [  6%]
+packages/nanolab/tests/comparison/test_target.py ........                [  6%]
+packages/nanolab/tests/config/test_azure_comparison_environment.py ...   [  6%]
+packages/nanolab/tests/config/test_contract.py ..........                [  6%]
+packages/nanolab/tests/config/test_environment.py ...........            [  7%]
+packages/nanolab/tests/config/test_heap_analysis.py ..................   [  7%]
+packages/nanolab/tests/config/test_prerequisite_coverage.py ..           [  7%]
+packages/nanolab/tests/config/test_recipe.py ..............              [  7%]
+packages/nanolab/tests/config/test_scenario.py ......................... [  8%]
+.............                                                            [  8%]
+packages/nanolab/tests/config/test_scenario_offload_loadtest.py ...      [  8%]
+packages/nanolab/tests/config/test_scenario_one_shot.py ........         [  9%]
+packages/nanolab/tests/config/test_soak.py ............................. [  9%]
+................................................................         [ 11%]
+packages/nanolab/tests/functions/test_contracts.py ...............       [ 11%]
+packages/nanolab/tests/functions/test_rust_support.py ......             [ 11%]
+packages/nanolab/tests/heap_analysis/test_mat.py ................        [ 12%]
+packages/nanolab/tests/heap_analysis/test_mat_worker.py ....             [ 12%]
+packages/nanolab/tests/heap_analysis/test_native.py .................... [ 12%]
+...............                                                          [ 13%]
+packages/nanolab/tests/heap_analysis/test_native_evidence.py ........... [ 13%]
+....                                                                     [ 13%]
+packages/nanolab/tests/heap_analysis/test_preset.py .....                [ 13%]
+packages/nanolab/tests/heap_analysis/test_runtime.py ................... [ 14%]
+............................                                             [ 14%]
+packages/nanolab/tests/images/test_bake.py .........                     [ 15%]
+packages/nanolab/tests/images/test_control_plane_variants.py ..          [ 15%]
+packages/nanolab/tests/images/test_plan.py ..........................    [ 15%]
+packages/nanolab/tests/metrics/test_catalogue_coverage.py .............  [ 16%]
+packages/nanolab/tests/metrics/test_interpretation.py .................. [ 16%]
+...........                                                              [ 16%]
+packages/nanolab/tests/metrics/test_prometheus_adapter.py ...            [ 16%]
+packages/nanolab/tests/one_shot/test_artifacts.py ..                     [ 16%]
+packages/nanolab/tests/one_shot/test_calibration.py .................... [ 17%]
+                                                                         [ 17%]
+packages/nanolab/tests/one_shot/test_calibration_pipeline.py ....        [ 17%]
+packages/nanolab/tests/one_shot/test_client.py .........                 [ 17%]
+packages/nanolab/tests/one_shot/test_conservation.py ........            [ 17%]
+packages/nanolab/tests/one_shot/test_contracts.py ......                 [ 18%]
+packages/nanolab/tests/one_shot/test_experiment_artifacts.py ..........  [ 18%]
+packages/nanolab/tests/one_shot/test_experiment_prerequisites.py .....   [ 18%]
+packages/nanolab/tests/one_shot/test_experiment_task.py .........        [ 18%]
+packages/nanolab/tests/one_shot/test_images.py ..                        [ 18%]
+packages/nanolab/tests/one_shot/test_live_evidence.py ..                 [ 18%]
+packages/nanolab/tests/one_shot/test_observed_assumptions.py .........   [ 18%]
+packages/nanolab/tests/one_shot/test_owned_load_resources.py ....        [ 18%]
+packages/nanolab/tests/one_shot/test_owned_probe.py ..                   [ 19%]
+packages/nanolab/tests/one_shot/test_preflight.py .....................  [ 19%]
+packages/nanolab/tests/one_shot/test_profile_scope.py ........           [ 19%]
+packages/nanolab/tests/one_shot/test_public_cli.py ........              [ 19%]
+packages/nanolab/tests/one_shot/test_qualification_load.py ......        [ 20%]
+packages/nanolab/tests/one_shot/test_qualification_task.py .....         [ 20%]
+packages/nanolab/tests/one_shot/test_registration.py ..                  [ 20%]
+packages/nanolab/tests/one_shot/test_report.py ............              [ 20%]
+packages/nanolab/tests/one_shot/test_resources.py ...................... [ 21%]
+.....                                                                    [ 21%]
+packages/nanolab/tests/one_shot/test_timing.py ............              [ 21%]
+packages/nanolab/tests/one_shot/test_trace.py ..                         [ 21%]
+packages/nanolab/tests/plans/test_cli.py ............................... [ 22%]
+..............                                                           [ 22%]
+packages/nanolab/tests/plans/test_containerd_matrix.py ............      [ 22%]
+packages/nanolab/tests/plans/test_contract.py ....................       [ 23%]
+packages/nanolab/tests/plans/test_functions.py ....                      [ 23%]
+packages/nanolab/tests/plans/test_heap_analysis.py ......                [ 23%]
+packages/nanolab/tests/plans/test_loadtest.py .......................... [ 24%]
+........                                                                 [ 24%]
+packages/nanolab/tests/plans/test_loadtest_budget.py ...                 [ 24%]
+packages/nanolab/tests/plans/test_loadtest_governor.py ................. [ 24%]
+.....................                                                    [ 25%]
+packages/nanolab/tests/plans/test_loadtest_payload.py ....               [ 25%]
+packages/nanolab/tests/plans/test_loadtest_resources.py ...              [ 25%]
+packages/nanolab/tests/plans/test_offload.py ....                        [ 25%]
+packages/nanolab/tests/plans/test_offload_loadtest.py ..............     [ 26%]
+packages/nanolab/tests/plans/test_one_shot_calibration.py ..             [ 26%]
+packages/nanolab/tests/plans/test_one_shot_experiment.py ..              [ 26%]
+packages/nanolab/tests/plans/test_one_shot_qualification.py ..           [ 26%]
+packages/nanolab/tests/plans/test_recipe_validate.py ................... [ 26%]
+..............                                                           [ 27%]
+packages/nanolab/tests/plans/test_release.py ........................... [ 27%]
+........................                                                 [ 28%]
+packages/nanolab/tests/plans/test_retry_backoff_probes.py ..             [ 28%]
+packages/nanolab/tests/plans/test_runtime_comparison.py ................ [ 28%]
+.......                                                                  [ 28%]
+packages/nanolab/tests/plans/test_soak.py ........................       [ 29%]
+packages/nanolab/tests/plans/test_soak_prebuilt_images.py ...            [ 29%]
+packages/nanolab/tests/plans/test_validate.py .......................... [ 30%]
+....                                                                     [ 30%]
+packages/nanolab/tests/release/test_arm.py ......                        [ 30%]
+packages/nanolab/tests/release/test_attest.py .....                      [ 30%]
+packages/nanolab/tests/release/test_benchmark.py ..........              [ 30%]
+packages/nanolab/tests/release/test_build.py .......................     [ 31%]
+packages/nanolab/tests/release/test_composites.py ....................   [ 31%]
+packages/nanolab/tests/release/test_environment.py ..................... [ 32%]
+.......                                                                  [ 32%]
+packages/nanolab/tests/release/test_evidence.py ...........              [ 32%]
+packages/nanolab/tests/release/test_metrics.py ......................... [ 33%]
+...........                                                              [ 33%]
+packages/nanolab/tests/release/test_publish.py ..............            [ 33%]
+packages/nanolab/tests/release/test_recipe.py .......................... [ 34%]
+.........................................................                [ 35%]
+packages/nanolab/tests/release/test_recipe_execution.py ................ [ 36%]
+........................................................................ [ 38%]
+.................                                                        [ 38%]
+packages/nanolab/tests/release/test_remote_retry.py ........             [ 38%]
+packages/nanolab/tests/release/test_resources.py ................        [ 39%]
+packages/nanolab/tests/release/test_rust_source.py ...                   [ 39%]
+packages/nanolab/tests/release/test_secrets.py ......................... [ 39%]
+....                                                                     [ 39%]
+packages/nanolab/tests/release/test_tasks.py ........................... [ 40%]
+..............................                                           [ 41%]
+packages/nanolab/tests/release/test_versioning.py ...................... [ 41%]
+..                                                                       [ 41%]
+packages/nanolab/tests/soak/test_acceptance.py ......................... [ 42%]
+..........................................                               [ 43%]
+packages/nanolab/tests/soak/test_adapters.py ........................    [ 43%]
+packages/nanolab/tests/soak/test_artifacts.py ...............            [ 44%]
+packages/nanolab/tests/soak/test_build_executor.py ..................... [ 44%]
+......                                                                   [ 45%]
+packages/nanolab/tests/soak/test_build_observation.py .................. [ 45%]
+..                                                                       [ 45%]
+packages/nanolab/tests/soak/test_build_provenance.py ................... [ 45%]
+..............                                                           [ 46%]
+packages/nanolab/tests/soak/test_build_resource_input.py .               [ 46%]
+packages/nanolab/tests/soak/test_builds.py ..........                    [ 46%]
+packages/nanolab/tests/soak/test_collector.py ....                       [ 46%]
+packages/nanolab/tests/soak/test_compose_retention.py ......             [ 46%]
+packages/nanolab/tests/soak/test_containerd.py ..                        [ 46%]
+packages/nanolab/tests/soak/test_containerd_acceptance.py ......         [ 46%]
+packages/nanolab/tests/soak/test_containerd_runtime.py ........          [ 47%]
+packages/nanolab/tests/soak/test_diagnostic_exec.py ..................   [ 47%]
+packages/nanolab/tests/soak/test_diagnostic_exec_failure.py ......       [ 47%]
+packages/nanolab/tests/soak/test_diagnostic_helper.py .................. [ 48%]
+............................................................             [ 49%]
+packages/nanolab/tests/soak/test_diagnostic_helper_heapdump.py .......   [ 49%]
+packages/nanolab/tests/soak/test_diagnostic_helper_jfr.py ....           [ 49%]
+packages/nanolab/tests/soak/test_diagnostic_helper_node.py ......        [ 50%]
+packages/nanolab/tests/soak/test_diagnostic_helper_volume.py ........... [ 50%]
+............                                                             [ 50%]
+packages/nanolab/tests/soak/test_diagnostic_operations.py .............. [ 50%]
+.............                                                            [ 51%]
+packages/nanolab/tests/soak/test_diagnostics.py ........................ [ 51%]
+..........                                                               [ 52%]
+packages/nanolab/tests/soak/test_evaluate.py ........................... [ 52%]
+...............                                                          [ 53%]
+packages/nanolab/tests/soak/test_helper_build.py ................        [ 53%]
+packages/nanolab/tests/soak/test_images.py ...........                   [ 53%]
+packages/nanolab/tests/soak/test_lifecycle.py .......................    [ 54%]
+packages/nanolab/tests/soak/test_observer.py .........                   [ 54%]
+packages/nanolab/tests/soak/test_observer_startup.py .......             [ 54%]
+packages/nanolab/tests/soak/test_owned_functions.py .................... [ 55%]
+....                                                                     [ 55%]
+packages/nanolab/tests/soak/test_preflight.py .......................... [ 55%]
+..........                                                               [ 56%]
+packages/nanolab/tests/soak/test_preparation.py .............            [ 56%]
+packages/nanolab/tests/soak/test_prerequisite_inputs_wiring.py ......... [ 56%]
+..                                                                       [ 56%]
+packages/nanolab/tests/soak/test_prerequisite_platform.py .............. [ 57%]
+.....                                                                    [ 57%]
+packages/nanolab/tests/soak/test_prerequisite_runtime.py ............... [ 57%]
+......................                                                   [ 58%]
+packages/nanolab/tests/soak/test_prerequisites.py ...................... [ 58%]
+.............................                                            [ 59%]
+packages/nanolab/tests/soak/test_presets.py ........................     [ 59%]
+packages/nanolab/tests/soak/test_probes.py ....................          [ 60%]
+packages/nanolab/tests/soak/test_recipe.py ............................. [ 61%]
+............................                                             [ 61%]
+packages/nanolab/tests/soak/test_recipe_observation.py ................. [ 62%]
+...................................................                      [ 63%]
+packages/nanolab/tests/soak/test_recipe_registry.py ...................  [ 63%]
+packages/nanolab/tests/soak/test_report.py ...                           [ 63%]
+packages/nanolab/tests/soak/test_retention_records.py .................. [ 64%]
+..............                                                           [ 64%]
+packages/nanolab/tests/soak/test_rootless_collector_asset.py ....        [ 64%]
+packages/nanolab/tests/soak/test_rootless_source_verify_asset.py .       [ 64%]
+packages/nanolab/tests/soak/test_runtime.py ............................ [ 65%]
+................................................................         [ 67%]
+packages/nanolab/tests/soak/test_scheduler_switch.py ..............      [ 67%]
+packages/nanolab/tests/soak/test_sources.py ...................          [ 67%]
+packages/nanolab/tests/soak/test_teardown.py ........................... [ 68%]
+.......................                                                  [ 69%]
+packages/nanolab/tests/soak/test_workload.py ........................... [ 69%]
+.................                                                        [ 70%]
+packages/nanolab/tests/soak/test_workload_bridge_policy.py .             [ 70%]
+packages/nanolab/tests/tasks/components/test_bootstrap.py ...........    [ 70%]
+packages/nanolab/tests/tasks/components/test_context.py ...              [ 70%]
+packages/nanolab/tests/tasks/components/test_helm.py .........           [ 70%]
+packages/nanolab/tests/tasks/components/test_images.py ..                [ 70%]
+packages/nanolab/tests/tasks/components/test_operations.py ...           [ 70%]
+packages/nanolab/tests/tasks/functions/test_cli_function.py ............ [ 71%]
+.................                                                        [ 71%]
+packages/nanolab/tests/tasks/functions/test_function.py ........         [ 71%]
+packages/nanolab/tests/tasks/functions/test_function_tasks.py .......... [ 71%]
+.................                                                        [ 72%]
+packages/nanolab/tests/tasks/functions/test_http_function.py ........... [ 72%]
+.....                                                                    [ 72%]
+packages/nanolab/tests/tasks/functions/test_invocation.py .............. [ 73%]
+......................................                                   [ 74%]
+packages/nanolab/tests/tasks/infra/test_ansible.py .....                 [ 74%]
+packages/nanolab/tests/tasks/infra/test_install_k6_playbook.py ..        [ 74%]
+packages/nanolab/tests/tasks/loadtest/test_adapters.py .                 [ 74%]
+packages/nanolab/tests/tasks/loadtest/test_autoscaling.py .............. [ 74%]
+.........                                                                [ 74%]
+packages/nanolab/tests/tasks/loadtest/test_comparison_report.py ........ [ 74%]
+........                                                                 [ 75%]
+packages/nanolab/tests/tasks/loadtest/test_concurrency.py .............. [ 75%]
+.................                                                        [ 75%]
+packages/nanolab/tests/tasks/loadtest/test_models.py ......              [ 76%]
+packages/nanolab/tests/tasks/loadtest/test_offload_conservation.py ..... [ 76%]
+.............                                                            [ 76%]
+packages/nanolab/tests/tasks/loadtest/test_offload_loadtest.py ......... [ 76%]
+.                                                                        [ 76%]
+packages/nanolab/tests/tasks/loadtest/test_prometheus_client.py ........ [ 76%]
+.                                                                        [ 76%]
+packages/nanolab/tests/tasks/loadtest/test_report.py ....                [ 77%]
+packages/nanolab/tests/tasks/loadtest/test_resources.py .....            [ 77%]
+packages/nanolab/tests/tasks/loadtest/test_snapshot_window.py ...        [ 77%]
+packages/nanolab/tests/tasks/loadtest/test_tasks.py .................... [ 77%]
+..                                                                       [ 77%]
+packages/nanolab/tests/tasks/loadtest/test_workflow.py ................. [ 78%]
+........                                                                 [ 78%]
+packages/nanolab/tests/tasks/provisioning/test_bootstrap.py .........    [ 78%]
+packages/nanolab/tests/tasks/provisioning/test_environment.py .........  [ 78%]
+packages/nanolab/tests/tasks/provisioning/test_providers.py ....         [ 78%]
+packages/nanolab/tests/tasks/provisioning/test_resources.py ..           [ 78%]
+packages/nanolab/tests/tasks/recipes/test_builder.py ................... [ 79%]
+.......                                                                  [ 79%]
+packages/nanolab/tests/tasks/recipes/test_containerd.py .                [ 79%]
+packages/nanolab/tests/tasks/recipes/test_kubernetes.py ................ [ 80%]
+....                                                                     [ 80%]
+packages/nanolab/tests/tasks/recipes/test_multiarch.py ................. [ 80%]
+...............                                                          [ 80%]
+packages/nanolab/tests/tasks/recipes/test_registry.py .................. [ 81%]
+.                                                                        [ 81%]
+packages/nanolab/tests/tasks/recipes/test_remote.py ...                  [ 81%]
+packages/nanolab/tests/tasks/recipes/test_validation.py ................ [ 81%]
+........                                                                 [ 81%]
+packages/nanolab/tests/tasks/recipes/test_watchdog.py .....              [ 82%]
+packages/nanolab/tests/tasks/recipes/test_workflow.py .................. [ 82%]
+.....                                                                    [ 82%]
+packages/nanolab/tests/tasks/test_compose.py ..                          [ 82%]
+packages/nanolab/tests/tasks/test_containerd_maven.py ...                [ 82%]
+packages/nanolab/tests/tasks/test_containerd_rootless.py ........        [ 82%]
+packages/nanolab/tests/tasks/test_containerd_session.py ..........       [ 83%]
+packages/nanolab/tests/tasks/test_deployment.py ..                       [ 83%]
+packages/nanolab/tests/tasks/test_kubectl_policy.py ........             [ 83%]
+packages/nanolab/tests/tasks/test_managed_container_inspection.py ...... [ 83%]
+.......................                                                  [ 84%]
+packages/nanolab/tests/tasks/test_offload_tasks.py ...................   [ 84%]
+packages/nanolab/tests/tasks/test_platform_image_tag.py ......           [ 84%]
+packages/nanolab/tests/tasks/test_resources.py ................          [ 85%]
+packages/nanolab/tests/tasks/test_telegram.py .....                      [ 85%]
+packages/nanolab/tests/tasks/validation/test_artifact_contract_capture.py . [ 85%]
+.............                                                            [ 85%]
+packages/nanolab/tests/tasks/validation/test_artifact_contract_cli.py .. [ 85%]
+                                                                         [ 85%]
+packages/nanolab/tests/tasks/validation/test_artifact_contract_probe.py . [ 85%]
+...                                                                      [ 85%]
+packages/nanolab/tests/tasks/validation/test_cli_artifacts.py ....s..... [ 86%]
+.s.s.............                                                        [ 86%]
+packages/nanolab/tests/tasks/validation/test_cli_contract.py ........... [ 86%]
+...................................                                      [ 87%]
+packages/nanolab/tests/tasks/validation/test_cli_parity.py ............. [ 87%]
+.............                                                            [ 88%]
+packages/nanolab/tests/tasks/validation/test_contract_resources.py ..... [ 88%]
+...................                                                      [ 88%]
+packages/nanolab/tests/tasks/validation/test_function_contract_execution.py . [ 88%]
+.....                                                                    [ 88%]
+packages/nanolab/tests/tasks/validation/test_function_contracts.py ..... [ 89%]
+.....................                                                    [ 89%]
+packages/nanolab/tests/tasks/validation/test_native_k8s_runtime.py ..... [ 89%]
+...........................                                              [ 90%]
+packages/nanolab/tests/tasks/validation/test_native_kubernetes.py ...... [ 90%]
+.............................                                            [ 91%]
+packages/nanolab/tests/tasks/validation/test_native_quota_burst.py ..... [ 91%]
+...                                                                      [ 91%]
+packages/nanolab/tests/tasks/validation/test_recovery.py .........       [ 91%]
+packages/nanolab/tests/tasks/validation/test_workflow.py ............... [ 91%]
+..................                                                       [ 92%]
+packages/nanolab/tests/tasks/vm/test_orchestrator.py ...                 [ 92%]
+packages/nanolab/tests/tasks/vm/test_repo_sync_excludes.py ...           [ 92%]
+packages/nanolab/tests/tasks/vm/test_resources.py ......                 [ 92%]
+packages/nanolab/tests/tasks/vm/test_runners.py ...                      [ 92%]
+packages/nanolab/tests/test_ansible_playbooks.py ...                     [ 92%]
+packages/nanolab/tests/test_autoscaling_asset.py .                       [ 92%]
+packages/nanolab/tests/test_fake_sink_fixture.py ...                     [ 92%]
+packages/nanolab/tests/test_function_catalog.py ....................     [ 93%]
+packages/nanolab/tests/test_gradle_repo_integrity.py .                   [ 93%]
+packages/nanolab/tests/test_import_contracts.py ..                       [ 93%]
+packages/nanolab/tests/test_installed_presets.py ..                      [ 93%]
+packages/nanolab/tests/test_javascript_example_packaging.py .            [ 93%]
+packages/nanolab/tests/test_k3s_e2e_commands.py ..                       [ 93%]
+packages/nanolab/tests/test_launcher_script.py ...                       [ 93%]
+packages/nanolab/tests/test_naming_contract.py ...                       [ 93%]
+packages/nanolab/tests/test_package_layout.py .....                      [ 93%]
+packages/nanolab/tests/test_package_report.py ..                         [ 93%]
+packages/nanolab/tests/test_product_docs.py ......                       [ 94%]
+packages/nanolab/tests/test_provisioning.py ...................          [ 94%]
+packages/nanolab/tests/test_quality.py ...                               [ 94%]
+packages/nanolab/tests/test_shell_backend.py ...................         [ 95%]
+packages/nanolab/tests/test_soak_cli.py ...............................  [ 95%]
+packages/nanolab/tests/test_soak_drain.py ..............                 [ 96%]
+packages/nanolab/tests/test_sonar_script.py .....                        [ 96%]
+packages/nanolab/tests/test_task_executors.py ...                        [ 96%]
+packages/nanolab/tests/test_task_models.py ......                        [ 96%]
+packages/nanolab/tests/test_tui_app.py ................................. [ 97%]
+............                                                             [ 97%]
+packages/nanolab/tests/test_tui_chrome.py .......                        [ 97%]
+packages/nanolab/tests/test_tui_event_aggregator.py ...............      [ 98%]
+packages/nanolab/tests/test_tui_navigation.py .........................  [ 98%]
+packages/nanolab/tests/test_tui_setup.py ...                             [ 98%]
+packages/nanolab/tests/test_tui_workflow.py ......                       [ 98%]
+packages/nanolab/tests/test_tui_workflow_controller.py ................. [ 99%]
+...                                                                      [ 99%]
+packages/nanolab/tests/test_workflow_events.py .....                     [ 99%]
+packages/nanolab/tests/test_workflow_sink_location.py .                  [ 99%]
+packages/nanolab/tests/workspace/test_paths.py .........                 [ 99%]
+packages/nanolab/tests/workspace/test_provenance.py .....                [ 99%]
+packages/nanolab/tests/workspace/test_recipe.py ......                   [100%]
+
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.3-final-0 ________________
+
+Name                                                                    Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------------------------------------------
+packages/nanolab/src/nanolab/__init__.py                                    0      0   100%
+packages/nanolab/src/nanolab/app/__init__.py                                0      0   100%
+packages/nanolab/src/nanolab/app/main.py                                   27      2    93%   44, 48
+packages/nanolab/src/nanolab/application/__init__.py                        0      0   100%
+packages/nanolab/src/nanolab/application/execution.py                     216     26    88%   52, 78, 96-101, 148, 190-192, 225-227, 294-295, 355-357, 368, 388-403
+packages/nanolab/src/nanolab/application/functions.py                     112      6    95%   63, 82, 129, 174, 186, 198
+packages/nanolab/src/nanolab/application/loadtest_policy.py               101      4    96%   103, 277, 313, 318
+packages/nanolab/src/nanolab/application/vm_provider.py                    37      1    97%   46
+packages/nanolab/src/nanolab/assets/diagnostics/artifact_contract.py      247     36    85%   31-34, 72-73, 89-90, 96-97, 102-104, 145, 155, 225, 230-231, 242, 289, 319, 333-347, 351-355
+packages/nanolab/src/nanolab/assets/diagnostics/native_k8s_runtime.py      77      4    95%   79, 93, 99, 137
+packages/nanolab/src/nanolab/assets/diagnostics/native_quota_burst.py      77     13    83%   24, 27, 58-59, 64, 69, 105-110, 114
+packages/nanolab/src/nanolab/cli/__init__.py                                0      0   100%
+packages/nanolab/src/nanolab/cli/catalogue.py                              56      1    98%   35
+packages/nanolab/src/nanolab/cli/comparison.py                            136      7    95%   117-126, 203, 340, 371, 423
+packages/nanolab/src/nanolab/cli/diagnostics.py                             4      0   100%
+packages/nanolab/src/nanolab/cli/execution.py                               4      4     0%   3-12
+packages/nanolab/src/nanolab/cli/product.py                               498     73    85%   129-135, 191, 204-206, 215, 221-225, 237, 274, 276, 304, 333, 397-398, 416, 430-431, 514, 564, 599-600, 734, 778, 890, 918, 932, 935, 1113, 1117, 1122, 1128, 1161, 1166, 1175, 1226-1227, 1285, 1292-1299, 1312-1318, 1326-1330, 1342-1345, 1402-1419, 1423, 1428, 1462-1463, 1528
+packages/nanolab/src/nanolab/cli/progress.py                               39      2    95%   70, 100
+packages/nanolab/src/nanolab/cli/provisioning.py                          106      5    95%   68, 142, 263, 277, 285
+packages/nanolab/src/nanolab/cli/release.py                                23      3    87%   18, 33-34
+packages/nanolab/src/nanolab/cli/soak.py                                   80      7    91%   64, 68, 72, 102, 105, 117, 132
+packages/nanolab/src/nanolab/cli/vm_provider.py                             2      2     0%   3-6
+packages/nanolab/src/nanolab/comparison/__init__.py                         0      0   100%
+packages/nanolab/src/nanolab/comparison/evidence.py                       197     11    94%   106, 145, 216, 235, 288, 328, 330, 349, 366, 400, 453
+packages/nanolab/src/nanolab/comparison/manifest.py                       155     11    93%   47, 53, 59, 64, 70, 91, 228, 230, 239, 249, 251
+packages/nanolab/src/nanolab/comparison/matrix.py                          24      0   100%
+packages/nanolab/src/nanolab/comparison/prepare.py                        144     13    91%   60, 131, 164, 184, 208, 214, 281, 293, 325-328, 370
+packages/nanolab/src/nanolab/comparison/profiles.py                        46      0   100%
+packages/nanolab/src/nanolab/comparison/target.py                          59      5    92%   30, 45, 92, 108, 114
+packages/nanolab/src/nanolab/config/__init__.py                             3      0   100%
+packages/nanolab/src/nanolab/config/contract.py                            14      0   100%
+packages/nanolab/src/nanolab/config/environment.py                         81      2    98%   127, 136
+packages/nanolab/src/nanolab/config/heap_analysis.py                       36      0   100%
+packages/nanolab/src/nanolab/config/one_shot.py                           143     10    93%   73, 75, 98, 117, 143, 145, 147, 192, 194, 196
+packages/nanolab/src/nanolab/config/scenario.py                           220     20    91%   270, 284, 286, 299, 364, 401, 403, 418-425, 446, 463, 476-483, 517, 523, 525, 542, 559
+packages/nanolab/src/nanolab/config/soak.py                               261     15    94%   104, 106, 202, 214, 217, 219, 267, 288, 293, 298, 374, 398, 429, 477, 481
+packages/nanolab/src/nanolab/core/__init__.py                               0      0   100%
+packages/nanolab/src/nanolab/core/models.py                                 2      0   100%
+packages/nanolab/src/nanolab/devtools/__init__.py                           1      0   100%
+packages/nanolab/src/nanolab/devtools/package_report.py                    61     13    79%   50, 73, 120-133, 138, 146-150, 154
+packages/nanolab/src/nanolab/devtools/quality.py                           18      3    83%   68, 71-72
+packages/nanolab/src/nanolab/functions/__init__.py                          0      0   100%
+packages/nanolab/src/nanolab/functions/catalog.py                         131      8    94%   52, 77, 98-99, 140, 235-236, 260
+packages/nanolab/src/nanolab/functions/contracts.py                       130      8    94%   101, 109, 119, 144, 170, 192, 205, 214
+packages/nanolab/src/nanolab/images/__init__.py                             2      0   100%
+packages/nanolab/src/nanolab/images/bake.py                                32      1    97%   30
+packages/nanolab/src/nanolab/images/control_plane_variants.py              25      0   100%
+packages/nanolab/src/nanolab/images/plan.py                               132      4    97%   207, 295, 329, 340
+packages/nanolab/src/nanolab/metrics/__init__.py                            0      0   100%
+packages/nanolab/src/nanolab/metrics/catalogue.py                          64      1    98%   776
+packages/nanolab/src/nanolab/metrics/interpretation.py                     10      0   100%
+packages/nanolab/src/nanolab/one_shot/__init__.py                           0      0   100%
+packages/nanolab/src/nanolab/one_shot/client.py                           122      5    96%   34, 166, 203, 238-239
+packages/nanolab/src/nanolab/one_shot/contracts.py                         20      1    95%   20
+packages/nanolab/src/nanolab/one_shot/infrastructure.py                    70      3    96%   37, 105, 113
+packages/nanolab/src/nanolab/one_shot/models.py                            97      6    94%   87, 89, 91, 98, 113, 118
+packages/nanolab/src/nanolab/one_shot/report.py                           113      1    99%   219
+packages/nanolab/src/nanolab/plans/__init__.py                              0      0   100%
+packages/nanolab/src/nanolab/plans/_local_control_plane.py                 19      5    74%   69-74
+packages/nanolab/src/nanolab/plans/cli.py                                 143      3    98%   204, 309, 323
+packages/nanolab/src/nanolab/plans/cli_recipe.py                           55      3    95%   71, 76, 93
+packages/nanolab/src/nanolab/plans/containerd_soak.py                      42      3    93%   56, 84, 114
+packages/nanolab/src/nanolab/plans/contract.py                            164     22    87%   54, 56, 100, 117, 121, 134, 137, 143, 148, 161, 173, 176, 187, 200, 206, 213, 222, 225, 233, 248, 257, 267
+packages/nanolab/src/nanolab/plans/diagnostics.py                          14      0   100%
+packages/nanolab/src/nanolab/plans/functions.py                             7      7     0%   3-21
+packages/nanolab/src/nanolab/plans/heap_analysis.py                        24      0   100%
+packages/nanolab/src/nanolab/plans/loadtest.py                            323      9    97%   232, 617, 640, 1061, 1087, 1302, 1361, 1464, 1552
+packages/nanolab/src/nanolab/plans/offload.py                              41      6    85%   42-49, 111
+packages/nanolab/src/nanolab/plans/offload_loadtest.py                    147      7    95%   69, 76, 82-88, 177
+packages/nanolab/src/nanolab/plans/one_shot_calibration.py                 18      0   100%
+packages/nanolab/src/nanolab/plans/one_shot_common.py                     149     23    85%   123, 242-244, 269, 286, 312-330, 356, 397-430, 443
+packages/nanolab/src/nanolab/plans/one_shot_experiment.py                  47      3    94%   44, 48, 81
+packages/nanolab/src/nanolab/plans/one_shot_qualification.py               19      7    63%   24, 26, 30-66
+packages/nanolab/src/nanolab/plans/release.py                             201     15    93%   70, 133, 186-187, 201, 220, 287, 291, 306, 308, 313, 318, 327, 330, 342
+packages/nanolab/src/nanolab/plans/release_phases.py                      166     28    83%   137-157, 221, 223, 300, 461, 591, 628, 634-649, 749-751, 779, 798, 898-915
+packages/nanolab/src/nanolab/plans/runtime_comparison.py                   77      4    95%   107, 109, 124, 187
+packages/nanolab/src/nanolab/plans/soak.py                                 63      3    95%   50, 63, 95
+packages/nanolab/src/nanolab/plans/validate.py                            190      4    98%   143, 337, 363, 765
+packages/nanolab/src/nanolab/release/__init__.py                            0      0   100%
+packages/nanolab/src/nanolab/release/arm.py                                43      2    95%   22, 114
+packages/nanolab/src/nanolab/release/attest.py                             36      2    94%   41, 59
+packages/nanolab/src/nanolab/release/benchmark.py                         127     10    92%   46, 90, 93, 113, 126, 165, 233, 264, 266, 292
+packages/nanolab/src/nanolab/release/build.py                             203     15    93%   71-72, 115, 117, 461, 465, 479, 551, 651, 728, 739, 744, 769, 787, 798
+packages/nanolab/src/nanolab/release/environment.py                       123      3    98%   160, 258, 264
+packages/nanolab/src/nanolab/release/evidence.py                           77      6    92%   55-56, 74, 91-92, 100
+packages/nanolab/src/nanolab/release/metrics.py                           152      8    95%   68, 218, 281, 290, 300, 336, 353-354
+packages/nanolab/src/nanolab/release/model.py                             120     11    91%   57, 112, 117-118, 122, 127, 153, 155, 157, 161, 225
+packages/nanolab/src/nanolab/release/publish.py                           119      5    96%   72, 123, 281, 318, 361
+packages/nanolab/src/nanolab/release/recipe.py                            214     14    93%   48, 64, 67, 90, 97, 147, 155, 161, 222, 241, 247, 266, 279, 388
+packages/nanolab/src/nanolab/release/recipe_execution.py                  158      6    96%   128, 220, 369, 379, 441, 465
+packages/nanolab/src/nanolab/release/remote_retry.py                       24      0   100%
+packages/nanolab/src/nanolab/release/request.py                            27      0   100%
+packages/nanolab/src/nanolab/release/resources.py                         213     19    91%   248-269, 369, 374, 380, 450, 466, 489, 529, 552-558
+packages/nanolab/src/nanolab/release/secrets.py                            64      1    98%   65
+packages/nanolab/src/nanolab/release/tasks.py                             178     10    94%   67, 235, 296-297, 299, 428, 459, 478-480
+packages/nanolab/src/nanolab/release/versioning.py                        106      4    96%   86, 205, 214, 226
+packages/nanolab/src/nanolab/tasks/__init__.py                              0      0   100%
+packages/nanolab/src/nanolab/tasks/cli.py                                 118      0   100%
+packages/nanolab/src/nanolab/tasks/cli_artifacts.py                       119      7    94%   103, 119, 123, 143, 209, 212, 227
+packages/nanolab/src/nanolab/tasks/cli_function.py                        178     10    94%   66-67, 71, 280, 372, 385, 481, 655, 695, 699
+packages/nanolab/src/nanolab/tasks/components/__init__.py                   0      0   100%
+packages/nanolab/src/nanolab/tasks/components/bootstrap.py                 98      6    94%   28, 59, 136, 184, 286, 295
+packages/nanolab/src/nanolab/tasks/components/context.py                   28      0   100%
+packages/nanolab/src/nanolab/tasks/components/helm.py                      53      2    96%   19, 123
+packages/nanolab/src/nanolab/tasks/components/images.py                     3      0   100%
+packages/nanolab/src/nanolab/tasks/components/operations.py                15      0   100%
+packages/nanolab/src/nanolab/tasks/compose.py                              19      0   100%
+packages/nanolab/src/nanolab/tasks/containerd_maven.py                     52      8    85%   30, 33-35, 42, 44, 65, 69
+packages/nanolab/src/nanolab/tasks/containerd_rootless.py                  38      2    95%   45, 136
+packages/nanolab/src/nanolab/tasks/deployment.py                            8      0   100%
+packages/nanolab/src/nanolab/tasks/execution.py                             2      0   100%
+packages/nanolab/src/nanolab/tasks/function.py                             12      0   100%
+packages/nanolab/src/nanolab/tasks/heap_analysis/__init__.py                3      0   100%
+packages/nanolab/src/nanolab/tasks/heap_analysis/evidence.py               62      3    95%   62, 80, 137
+packages/nanolab/src/nanolab/tasks/heap_analysis/mat.py                   166     21    87%   73-74, 117, 121, 123, 129, 131, 133, 137, 267, 270-271, 302, 320-323, 331-332, 346-348, 401
+packages/nanolab/src/nanolab/tasks/heap_analysis/native.py                 53      1    98%   150
+packages/nanolab/src/nanolab/tasks/heap_analysis/runtime.py               352     26    93%   188, 223, 226, 319-320, 373-374, 447, 503-504, 540, 565-570, 582, 586-590, 779-780, 790, 856
+packages/nanolab/src/nanolab/tasks/http_function.py                       326     24    93%   69, 86-87, 95, 103, 177, 385-386, 388, 573-574, 584, 588, 657, 688-689, 693, 715, 719, 735, 791-792, 794, 913
+packages/nanolab/src/nanolab/tasks/infra/ansible.py                         4      0   100%
+packages/nanolab/src/nanolab/tasks/invocation.py                           21      0   100%
+packages/nanolab/src/nanolab/tasks/k6.py                                   25      2    92%   21, 34
+packages/nanolab/src/nanolab/tasks/kubectl.py                              15      0   100%
+packages/nanolab/src/nanolab/tasks/loadtest/__init__.py                   211     20    91%   125, 187-195, 235-236, 264-266, 313-315, 426, 456-458, 517
+packages/nanolab/src/nanolab/tasks/loadtest/adapters.py                    10      1    90%   32
+packages/nanolab/src/nanolab/tasks/loadtest/autoscaling.py                212     11    95%   217-218, 242-243, 247-248, 257-258, 262, 310, 335
+packages/nanolab/src/nanolab/tasks/loadtest/comparison_report.py          146      5    97%   76, 131, 149, 276, 355
+packages/nanolab/src/nanolab/tasks/loadtest/concurrency.py                241     16    93%   408-429, 532, 539
+packages/nanolab/src/nanolab/tasks/loadtest/models.py                      29      0   100%
+packages/nanolab/src/nanolab/tasks/loadtest/offload_conservation.py        89      3    97%   39, 47, 50
+packages/nanolab/src/nanolab/tasks/loadtest/ports.py                        8      0   100%
+packages/nanolab/src/nanolab/tasks/loadtest/prometheus.py                  22      7    68%   20-24, 52-53
+packages/nanolab/src/nanolab/tasks/loadtest/report.py                     191     32    83%   256-261, 271-295, 299-306, 335, 359-371, 386, 391, 509, 523-528, 541
+packages/nanolab/src/nanolab/tasks/loadtest/resources.py                  121     18    85%   92, 123-126, 139-145, 157-158, 185, 190, 201, 209, 215-218
+packages/nanolab/src/nanolab/tasks/loadtest/soak.py                        75      8    89%   62, 64, 87-88, 165-168
+packages/nanolab/src/nanolab/tasks/loadtest/tasks.py                      144      4    97%   123-124, 126, 198
+packages/nanolab/src/nanolab/tasks/loadtest/two_vm.py                       2      0   100%
+packages/nanolab/src/nanolab/tasks/managed_containers.py                   34      1    97%   81
+packages/nanolab/src/nanolab/tasks/manifest.py                             33      0   100%
+packages/nanolab/src/nanolab/tasks/metrics.py                              23      4    83%   58, 76-80
+packages/nanolab/src/nanolab/tasks/offload.py                              64      0   100%
+packages/nanolab/src/nanolab/tasks/offload_loadtest.py                     33      0   100%
+packages/nanolab/src/nanolab/tasks/one_shot/__init__.py                     0      0   100%
+packages/nanolab/src/nanolab/tasks/one_shot/artifacts.py                   30      0   100%
+packages/nanolab/src/nanolab/tasks/one_shot/calibration.py                255     10    96%   181, 184, 270, 306, 358, 394, 456, 509, 526, 561
+packages/nanolab/src/nanolab/tasks/one_shot/clock.py                       63      5    92%   24, 61, 84, 97, 102
+packages/nanolab/src/nanolab/tasks/one_shot/conservation.py                56      2    96%   55, 74
+packages/nanolab/src/nanolab/tasks/one_shot/experiment.py                 395     35    91%   66, 71, 77, 79, 92, 171, 232, 594, 644-645, 658, 661, 670, 723-724, 767, 791, 808-812, 814, 833-835, 864-868, 959-960, 969-970, 995-996
+packages/nanolab/src/nanolab/tasks/one_shot/images.py                      39      6    85%   19, 28, 33, 39, 46, 49
+packages/nanolab/src/nanolab/tasks/one_shot/preflight.py                  187      8    96%   74, 160, 257, 259, 281-284
+packages/nanolab/src/nanolab/tasks/one_shot/qualification.py              193     28    85%   70, 74-80, 218-237, 242-249, 275-276, 297-306, 331-333, 358, 377, 420, 445, 456, 506
+packages/nanolab/src/nanolab/tasks/one_shot/qualification_load.py          75      5    93%   163-175, 183
+packages/nanolab/src/nanolab/tasks/one_shot/resources.py                   34      3    91%   62-64
+packages/nanolab/src/nanolab/tasks/one_shot/statistics.py                  28      2    93%   14, 39
+packages/nanolab/src/nanolab/tasks/one_shot/timing.py                      29      1    97%   40
+packages/nanolab/src/nanolab/tasks/one_shot/trace.py                       46      4    91%   31, 37, 43, 65
+packages/nanolab/src/nanolab/tasks/one_shot/verification.py               102     11    89%   35, 45, 54, 58, 80, 106, 108, 130, 137, 142, 152
+packages/nanolab/src/nanolab/tasks/platform.py                            189      3    98%   199, 270, 302
+packages/nanolab/src/nanolab/tasks/provisioning/__init__.py                 5      0   100%
+packages/nanolab/src/nanolab/tasks/provisioning/bootstrap.py               63      3    95%   118, 147, 182
+packages/nanolab/src/nanolab/tasks/provisioning/environment.py             93     11    88%   71, 95-106, 108
+packages/nanolab/src/nanolab/tasks/provisioning/providers.py               19      0   100%
+packages/nanolab/src/nanolab/tasks/provisioning/resources.py               24      0   100%
+packages/nanolab/src/nanolab/tasks/recipes/__init__.py                      0      0   100%
+packages/nanolab/src/nanolab/tasks/recipes/builder.py                     135      8    94%   71, 88, 115, 209, 234-235, 260, 287
+packages/nanolab/src/nanolab/tasks/recipes/containerd.py                   36      2    94%   77, 86
+packages/nanolab/src/nanolab/tasks/recipes/kubernetes.py                  190     25    87%   70, 97, 111, 206, 241, 291-319, 441, 445, 448, 455, 465, 480, 495, 507-508, 540, 549
+packages/nanolab/src/nanolab/tasks/recipes/multiarch.py                   157      9    94%   74, 162, 174, 176, 195, 198, 270, 277, 359
+packages/nanolab/src/nanolab/tasks/recipes/registry.py                     99     10    90%   84, 100, 106, 137-138, 143, 167, 178, 194, 199
+packages/nanolab/src/nanolab/tasks/recipes/remote.py                      113     36    68%   55, 71, 97, 128-180, 236-245, 259-261
+packages/nanolab/src/nanolab/tasks/recipes/validation.py                  150      9    94%   79, 182, 289, 308-311, 318, 430
+packages/nanolab/src/nanolab/tasks/recipes/workflow.py                    240     30    88%   78, 90, 108-109, 159, 176-177, 179, 188, 191, 202, 209, 219, 272-273, 322, 414, 423, 444-455, 493-500
+packages/nanolab/src/nanolab/tasks/release_composites.py                   53      0   100%
+packages/nanolab/src/nanolab/tasks/resources.py                           123     10    92%   69, 73, 79, 109-110, 114, 137, 220, 268-269
+packages/nanolab/src/nanolab/tasks/soak/__init__.py                         0      0   100%
+packages/nanolab/src/nanolab/tasks/soak/acceptance.py                     511     14    97%   340, 529-530, 831, 872, 879-883, 1116, 1196-1200, 1241-1247, 1294-1295
+packages/nanolab/src/nanolab/tasks/soak/adapters.py                       145     12    92%   31, 45, 47, 51, 101, 106, 109, 148, 150, 247, 298, 302
+packages/nanolab/src/nanolab/tasks/soak/artifacts.py                       75      2    97%   65, 123
+packages/nanolab/src/nanolab/tasks/soak/build_executor.py                 133     10    92%   30, 81, 89, 91, 97, 185, 191, 213, 267, 290
+packages/nanolab/src/nanolab/tasks/soak/build_observation.py              257     33    87%   215, 217, 245, 259, 263, 275, 282, 290, 306, 310, 319, 328, 408, 420, 423, 470, 478, 495, 523, 525, 532, 537, 585, 603, 605, 610, 631, 641-660, 677
+packages/nanolab/src/nanolab/tasks/soak/build_provenance.py               330     50    85%   61, 67, 73, 78, 91, 98, 107, 127, 139, 145, 148, 163, 165, 167, 169, 172, 196, 198, 212, 220, 245, 251, 253, 258, 263, 266, 295, 300, 326, 336, 340, 344, 364, 381, 391, 404, 408, 413, 428, 442, 447, 455, 464, 502, 508, 531, 539, 542, 568, 571
+packages/nanolab/src/nanolab/tasks/soak/builds.py                          91      7    92%   57, 145, 157, 192-193, 206-207
+packages/nanolab/src/nanolab/tasks/soak/collector.py                      118     64    46%   39, 55, 68, 74-75, 78-80, 84-95, 99-105, 116, 125-132, 141-183, 188-197, 201
+packages/nanolab/src/nanolab/tasks/soak/composition.py                     33      3    91%   41, 47, 57
+packages/nanolab/src/nanolab/tasks/soak/containerd.py                      36      3    92%   52, 55, 74
+packages/nanolab/src/nanolab/tasks/soak/containerd_runtime.py             243     51    79%   63, 66, 94, 175, 234, 243, 256, 274-377, 383, 392
+packages/nanolab/src/nanolab/tasks/soak/diagnostic_exec.py                333     55    83%   90, 95, 99, 102, 135, 139, 149, 156, 173, 183, 195, 198, 208, 211, 223, 272, 284, 289, 295, 301, 314, 357, 374-375, 394-395, 397, 400, 404-409, 415, 420, 422, 424, 429, 431, 443, 448, 525, 530-536, 543, 548, 562, 564, 572, 598, 617, 651-652
+packages/nanolab/src/nanolab/tasks/soak/diagnostic_helper.py              452    121    73%   147, 300, 377, 419, 464, 474, 480, 482-483, 505, 512, 530, 536, 539, 544, 557, 584, 615, 635-660, 682, 693, 697, 703-705, 713, 729-731, 739, 743, 761, 763, 782, 792, 814, 830, 854, 886, 911, 970-992, 996-1092
+packages/nanolab/src/nanolab/tasks/soak/diagnostics.py                    276     32    88%   89-90, 97, 100, 112, 114, 120, 203, 213, 238, 240, 242, 244, 270, 279, 295, 307, 325, 347, 381, 405, 412, 446, 466, 476-477, 482-483, 491, 510, 593, 606
+packages/nanolab/src/nanolab/tasks/soak/evaluate.py                       304     33    89%   43-44, 49, 53, 56, 71, 74, 77, 96, 99, 102, 105, 110, 113, 117, 126, 128-139, 171, 179, 210-211, 235-236, 249, 253, 257, 261, 386, 391, 443, 544, 690
+packages/nanolab/src/nanolab/tasks/soak/evidence_validation.py            107      6    94%   36, 39-40, 57, 126, 217
+packages/nanolab/src/nanolab/tasks/soak/helper_build.py                    92      9    90%   80, 91-92, 96, 116, 124-125, 136, 176
+packages/nanolab/src/nanolab/tasks/soak/images.py                         140     16    89%   68, 76, 79, 83, 94, 156, 158, 161, 167, 170, 178, 186, 214, 264, 272, 278
+packages/nanolab/src/nanolab/tasks/soak/models.py                          33      0   100%
+packages/nanolab/src/nanolab/tasks/soak/observations.py                   170     46    73%   27, 36-39, 58, 88, 105, 111, 119, 171, 188, 194, 237, 246-251, 279-316
+packages/nanolab/src/nanolab/tasks/soak/observer.py                       102      8    92%   61, 80, 94, 97, 119, 144, 148, 155
+packages/nanolab/src/nanolab/tasks/soak/owned_functions.py                 92     17    82%   37, 39, 57, 62, 64, 69, 79, 110, 115-125, 185
+packages/nanolab/src/nanolab/tasks/soak/ports.py                           14      0   100%
+packages/nanolab/src/nanolab/tasks/soak/preflight.py                      106      5    95%   27-28, 88, 93, 143
+packages/nanolab/src/nanolab/tasks/soak/preparation.py                    164     32    80%   117-122, 127-162, 168, 173, 192, 202, 224, 230, 270, 316, 318, 320
+packages/nanolab/src/nanolab/tasks/soak/prerequisite_platform.py          304     47    85%   105, 114, 128, 132, 135, 142-143, 158, 165, 170, 224, 233, 240, 244, 249, 277, 294, 315, 321, 324, 336, 342, 345, 357, 406, 447-448, 460, 462, 470, 498-524, 534, 555, 606, 611-615, 639, 643, 659, 675, 691
+packages/nanolab/src/nanolab/tasks/soak/prerequisite_runtime.py           416     60    86%   158, 160, 175, 204, 208, 212, 214, 219, 226, 234, 239, 241-242, 255, 273, 286, 316, 339-340, 368, 387, 390, 407, 412, 456, 492, 500, 506-511, 516, 522, 532, 536, 542, 545, 553, 572, 575, 588, 593-595, 604, 614, 648, 665-666, 682, 690, 700, 705, 717, 723, 731, 736, 746
+packages/nanolab/src/nanolab/tasks/soak/prerequisites.py                  523    150    71%   150, 166, 171, 175, 177, 209, 217, 220, 222, 227, 231, 243, 247, 251, 346, 356, 359, 361, 364, 376, 382, 398, 416, 458, 469, 472, 475, 481, 484, 498, 500, 526, 531-569, 574-652, 659-667, 675-677, 700-701, 759, 765, 790-791, 809, 812, 847-851, 867, 872, 892-924, 964, 966, 1025-1026, 1065
+packages/nanolab/src/nanolab/tasks/soak/probes.py                          57      4    93%   38, 43, 62, 76
+packages/nanolab/src/nanolab/tasks/soak/processes.py                        2      0   100%
+packages/nanolab/src/nanolab/tasks/soak/recipe.py                         121      8    93%   82, 85, 143, 176, 233, 253, 257, 286
+packages/nanolab/src/nanolab/tasks/soak/recipe_evidence.py                 82     10    88%   40, 50, 72, 76, 116, 131, 141, 148, 181, 195
+packages/nanolab/src/nanolab/tasks/soak/recipe_observation.py             215     15    93%   94, 105, 108, 113, 152-153, 178, 184, 198, 308, 327, 364, 398, 408, 532
+packages/nanolab/src/nanolab/tasks/soak/recipe_registry.py                103     10    90%   63, 71, 104, 112, 135, 141, 149, 177, 180, 185
+packages/nanolab/src/nanolab/tasks/soak/report.py                          84     12    86%   30, 37, 41, 44, 52, 90-93, 193, 198-199
+packages/nanolab/src/nanolab/tasks/soak/retention.py                      205     30    85%   38, 62, 89-90, 104-106, 113-115, 123-124, 163, 207, 241, 250, 255, 272, 274, 299, 356, 359, 363, 409-411, 419, 429-431
+packages/nanolab/src/nanolab/tasks/soak/runtime.py                        965    141    85%   140, 147, 159, 189-190, 225, 246, 257, 263, 268, 325, 419, 424, 427, 434, 451, 468, 472, 482, 509-520, 645, 657, 661, 671, 786, 789, 833, 878, 918-919, 927, 935, 938, 1001, 1062, 1065, 1136, 1179, 1244-1247, 1313, 1326, 1331, 1358-1383, 1416-1417, 1429-1430, 1436-1437, 1444, 1446, 1523, 1541, 1562, 1566, 1683, 1750-1781, 1877, 1880, 1892, 1897, 1908-1910, 2131-2139, 2179, 2226, 2247, 2263-2271, 2282, 2304-2305, 2396-2471, 2480-2497, 2502-2528
+packages/nanolab/src/nanolab/tasks/soak/scheduler_switch.py               149     12    92%   183, 202, 277, 284, 291, 307, 313, 370, 377, 382, 394, 411
+packages/nanolab/src/nanolab/tasks/soak/sources.py                         27      2    93%   26, 30
+packages/nanolab/src/nanolab/tasks/soak/teardown.py                       235     46    80%   51-76, 84, 89, 101, 105, 111, 114, 120, 127, 133, 136, 145, 148, 164, 174, 176, 181, 183, 186, 191, 196, 205, 254, 299, 318, 321, 339, 345, 400, 411, 413, 416, 434, 462, 510, 512
+packages/nanolab/src/nanolab/tasks/soak/workflow.py                       273     46    83%   133, 242, 326, 330, 354, 370, 401, 403, 411-415, 417, 424, 432, 513, 528-572
+packages/nanolab/src/nanolab/tasks/soak/workload.py                       233     19    92%   211-212, 250, 252, 255, 270, 279, 287, 289, 324, 346, 440, 454, 495, 524-526, 539, 568
+packages/nanolab/src/nanolab/tasks/telegram.py                             40      6    85%   74-87
+packages/nanolab/src/nanolab/tasks/testing.py                              18      0   100%
+packages/nanolab/src/nanolab/tasks/validation/__init__.py                   0      0   100%
+packages/nanolab/src/nanolab/tasks/validation/cli_parity.py               254     20    92%   106, 172, 192, 204, 213, 222, 308, 316, 331, 347, 401, 419, 436, 454, 495, 510, 650-651, 676, 696
+packages/nanolab/src/nanolab/tasks/validation/contract_resources.py       302     25    92%   47, 75, 94, 112, 147, 163, 167, 204, 241-242, 244, 332, 447, 455, 482, 541, 573, 601, 614, 655, 687-689, 709, 726
+packages/nanolab/src/nanolab/tasks/validation/function_contracts.py       341     50    85%   45, 61, 67, 78, 84, 87, 90-92, 100, 103, 106, 145-146, 153, 157, 165, 171, 186, 202, 220, 265, 343, 354, 360, 367, 377, 383, 390, 416-419, 434-436, 462-473, 491-497, 511, 555, 618, 645, 658-659, 671
+packages/nanolab/src/nanolab/tasks/validation/native_kubernetes.py        270     37    86%   92, 109, 159, 171, 196, 224, 232, 265, 273, 306, 320, 323, 326, 371, 387-419, 460, 470, 473, 480, 534, 547, 569, 629, 633, 695-706, 709
+packages/nanolab/src/nanolab/tasks/validation/recovery.py                 170     15    91%   33, 121, 244, 300, 355, 393, 400-401, 404, 409, 412, 514, 531-535
+packages/nanolab/src/nanolab/tasks/validation/workflow.py                 139      8    94%   138, 237, 326, 341, 363-398, 421-422
+packages/nanolab/src/nanolab/tasks/vm/__init__.py                           0      0   100%
+packages/nanolab/src/nanolab/tasks/vm/models.py                            21      2    90%   40-41
+packages/nanolab/src/nanolab/tasks/vm/orchestrator.py                      24      1    96%   43
+packages/nanolab/src/nanolab/tasks/vm/runners.py                            2      0   100%
+packages/nanolab/src/nanolab/tasks/vm/sync.py                              10      0   100%
+packages/nanolab/src/nanolab/tui/__init__.py                                2      0   100%
+packages/nanolab/src/nanolab/tui/app.py                                   244     17    93%   238, 273, 277-278, 326, 498, 556-568
+packages/nanolab/src/nanolab/tui/event_aggregator.py                      149     18    88%   86-88, 181, 198-199, 201-208, 214, 235-236, 238-241, 261
+packages/nanolab/src/nanolab/tui/models.py                                 19      0   100%
+packages/nanolab/src/nanolab/tui/setup.py                                   6      0   100%
+packages/nanolab/src/nanolab/tui/workflow.py                              201     24    88%   272-282, 322, 329-330, 339, 343-344, 351-358
+packages/nanolab/src/nanolab/tui/workflow_controller.py                    82      1    99%   41
+packages/nanolab/src/nanolab/workspace/__init__.py                          1      0   100%
+packages/nanolab/src/nanolab/workspace/paths.py                            46      0   100%
+packages/nanolab/src/nanolab/workspace/provenance.py                       36      2    94%   86-87
+packages/nanolab/src/nanolab/workspace/recipe.py                           60      2    97%   41, 112
+-----------------------------------------------------------------------------------------------------
+TOTAL                                                                   25615   2592    90%
+================= 4130 passed, 3 skipped in 380.55s (0:06:20) ==================

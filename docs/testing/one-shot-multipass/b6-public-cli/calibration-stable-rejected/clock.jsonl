@@ -1,0 +1,12 @@
+{"node": "edge-0", "offsetSeconds": -0.00437474250793457, "uncertaintySeconds": 0.0011175870895385742, "measuredAt": "2026-10-09T20:01:32.462368+00:00"}
+{"node": "edge-1", "offsetSeconds": -0.004484415054321289, "uncertaintySeconds": 0.0010249614715576172, "measuredAt": "2026-10-09T20:01:32.559848+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.00451207160949707, "uncertaintySeconds": 0.0006606578826904297, "measuredAt": "2026-10-09T20:01:42.671616+00:00"}
+{"node": "edge-1", "offsetSeconds": -0.004780292510986328, "uncertaintySeconds": 0.000764012336730957, "measuredAt": "2026-10-09T20:01:42.762438+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.004494905471801758, "uncertaintySeconds": 0.001153707504272461, "measuredAt": "2026-10-09T20:01:52.866694+00:00"}
+{"node": "edge-1", "offsetSeconds": -0.00458836555480957, "uncertaintySeconds": 0.0009565353393554688, "measuredAt": "2026-10-09T20:01:52.957944+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.004347085952758789, "uncertaintySeconds": 0.0007401704788208008, "measuredAt": "2026-10-09T20:02:03.060958+00:00"}
+{"node": "edge-1", "offsetSeconds": -0.004390716552734375, "uncertaintySeconds": 0.0010356903076171875, "measuredAt": "2026-10-09T20:02:03.155220+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.004294395446777344, "uncertaintySeconds": 0.0008891820907592773, "measuredAt": "2026-10-09T20:02:13.258713+00:00"}
+{"node": "edge-1", "offsetSeconds": -0.004308462142944336, "uncertaintySeconds": 0.0009984970092773438, "measuredAt": "2026-10-09T20:02:13.348348+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.004327297210693359, "uncertaintySeconds": 0.0009951591491699219, "measuredAt": "2026-10-09T20:02:23.452321+00:00"}
+{"node": "edge-1", "offsetSeconds": -0.0044078826904296875, "uncertaintySeconds": 0.000710606575012207, "measuredAt": "2026-10-09T20:02:23.541208+00:00"}

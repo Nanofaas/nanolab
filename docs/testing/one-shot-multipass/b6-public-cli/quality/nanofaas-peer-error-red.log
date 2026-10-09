@@ -1,0 +1,248 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+> Task :gradle-plugin:compileJava UP-TO-DATE
+> Task :gradle-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:jar UP-TO-DATE
+
+> Configure project :control-plane
+(dependency analysis) You have both java-library and org.springframework.boot applied. You probably want java, not java-library.
+
+> Task :common:compileJava UP-TO-DATE
+> Task :common:processResources NO-SOURCE
+> Task :common:classes UP-TO-DATE
+> Task :common:jar UP-TO-DATE
+> Task :control-plane-spi:compileJava UP-TO-DATE
+> Task :execution-runtime:compileJava UP-TO-DATE
+> Task :forecasting-api:compileJava UP-TO-DATE
+> Task :workload-metrics:compileJava UP-TO-DATE
+> Task :control-plane:compileJava UP-TO-DATE
+> Task :control-plane:composeControlPlaneOpenApi UP-TO-DATE
+> Task :control-plane:processResources UP-TO-DATE
+> Task :control-plane:classes UP-TO-DATE
+> Task :control-plane:resolveMainClassName UP-TO-DATE
+> Task :control-plane-spi:processResources NO-SOURCE
+> Task :control-plane-spi:classes UP-TO-DATE
+> Task :control-plane-spi:jar UP-TO-DATE
+> Task :execution-runtime:processResources NO-SOURCE
+> Task :execution-runtime:classes UP-TO-DATE
+> Task :execution-runtime:jar UP-TO-DATE
+> Task :forecasting-api:processResources NO-SOURCE
+> Task :forecasting-api:classes UP-TO-DATE
+> Task :forecasting-api:jar UP-TO-DATE
+> Task :p2p-api:compileJava UP-TO-DATE
+> Task :p2p-api:processResources NO-SOURCE
+> Task :p2p-api:classes UP-TO-DATE
+> Task :p2p-api:jar UP-TO-DATE
+> Task :workload-metrics:processResources NO-SOURCE
+> Task :workload-metrics:classes UP-TO-DATE
+> Task :workload-metrics:jar UP-TO-DATE
+> Task :control-plane-modules:async-queue:compileJava UP-TO-DATE
+> Task :control-plane-modules:async-queue:processResources UP-TO-DATE
+> Task :control-plane-modules:async-queue:classes UP-TO-DATE
+> Task :control-plane-modules:async-queue:jar UP-TO-DATE
+> Task :control-plane-modules:autoscaler:compileJava UP-TO-DATE
+> Task :control-plane-modules:autoscaler:processResources UP-TO-DATE
+> Task :control-plane-modules:autoscaler:classes UP-TO-DATE
+> Task :control-plane-modules:autoscaler:jar UP-TO-DATE
+> Task :control-plane-modules:build-metadata:compileJava UP-TO-DATE
+> Task :control-plane-modules:build-metadata:generateBuildMetadata
+> Task :control-plane-modules:build-metadata:processResources UP-TO-DATE
+> Task :control-plane-modules:build-metadata:classes
+> Task :control-plane-modules:build-metadata:jar
+> Task :control-plane-modules:concurrency-control:compileJava UP-TO-DATE
+> Task :control-plane-modules:concurrency-control:processResources UP-TO-DATE
+> Task :control-plane-modules:concurrency-control:classes UP-TO-DATE
+> Task :control-plane-modules:concurrency-control:jar UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:compileJava UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:processResources UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:classes UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:jar UP-TO-DATE
+> Task :control-plane-modules:offload:compileJava UP-TO-DATE
+> Task :control-plane-modules:offload:processResources UP-TO-DATE
+> Task :control-plane-modules:offload:classes UP-TO-DATE
+> Task :control-plane-modules:offload:jar UP-TO-DATE
+> Task :control-plane-modules:runtime-config:compileJava UP-TO-DATE
+> Task :control-plane-modules:runtime-config:processResources UP-TO-DATE
+> Task :control-plane-modules:runtime-config:classes UP-TO-DATE
+> Task :control-plane-modules:runtime-config:jar UP-TO-DATE
+> Task :control-plane-modules:sync-queue:compileJava UP-TO-DATE
+> Task :control-plane-modules:sync-queue:processResources UP-TO-DATE
+> Task :control-plane-modules:sync-queue:classes UP-TO-DATE
+> Task :control-plane-modules:sync-queue:jar UP-TO-DATE
+> Task :control-plane:processAot SKIPPED
+> Task :control-plane:compileAotJava SKIPPED
+> Task :control-plane:processAotResources SKIPPED
+> Task :control-plane:aotClasses SKIPPED
+> Task :control-plane:collectReachabilityMetadata UP-TO-DATE
+> Task :control-plane:bootJar
+
+> Task :control-plane:compileTestJava
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/RetryBackoffIntegrationTest.java:251: warning: [UnsafeReflectiveConstructionCast] Prefer `asSubclass` instead of casting the result of `newInstance`, to detect classes of incorrect type before invoking their constructors. This way, if the class is of the incorrect type, it will throw an exception before invoking its constructor.
+                var strategy = (SchedulingStrategy) Class.forName(profile).getConstructor().newInstance();
+                                                                 ^
+    (see https://errorprone.info/bugpattern/UnsafeReflectiveConstructionCast)
+  Did you mean 'var strategy = Class.forName(profile).asSubclass(SchedulingStrategy.class).getConstructor().newInstance();'?
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceDispatchTest.java:89: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+        completionHandler = new ExecutionCompletionHandler(executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics);
+                                                                                                                      ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceDispatchTest.java:312: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+        ExecutionCompletionHandler handler = new ExecutionCompletionHandler(executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics);
+                                                                                                                                       ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceDispatchTest.java:653: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+                new ExecutionCompletionHandler(blockedStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics),
+                                                                                                        ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/MarkedResponseCallbackOrderTest.java:24: warning: [MissingOverride] dispatch implements method in Dispatcher; expected @Override
+                public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
+                                    ^
+    (see https://errorprone.info/bugpattern/MissingOverride)
+  Did you mean '@Override public MockResponse dispatch(RecordedRequest request) throws InterruptedException {'?
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationPathAccountingTest.java:66: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+                new ExecutionCompletionHandler(executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics),
+                                                                                                          ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceAsyncReplayTest.java:86: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+                executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics);
+                                                                           ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceAsyncReplayTest.java:254: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+                executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics);
+                                                                           ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceRetryTest.java:63: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+                executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics);
+                                                                           ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/WaiterTimeoutHttpContractTest.java:45: warning: [MissingOverride] enabled implements method in OffloadGateway; expected @Override
+            public boolean enabled() { return true; }
+                           ^
+    (see https://errorprone.info/bugpattern/MissingOverride)
+  Did you mean '@Override public boolean enabled() { return true; }'?
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/WaiterTimeoutHttpContractTest.java:46: warning: [MissingOverride] shouldOffloadEagerly implements method in OffloadGateway; expected @Override
+            public boolean shouldOffloadEagerly(FunctionSpec s) { return true; }
+                           ^
+    (see https://errorprone.info/bugpattern/MissingOverride)
+  Did you mean '@Override public boolean shouldOffloadEagerly(FunctionSpec s) { return true; }'?
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/WaiterTimeoutHttpContractTest.java:47: warning: [MissingOverride] shouldOffloadOnPressure implements method in OffloadGateway; expected @Override
+            public boolean shouldOffloadOnPressure(FunctionSpec s) { return false; }
+                           ^
+    (see https://errorprone.info/bugpattern/MissingOverride)
+  Did you mean '@Override public boolean shouldOffloadOnPressure(FunctionSpec s) { return false; }'?
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/WaiterTimeoutHttpContractTest.java:48: warning: [MissingOverride] targetUrl implements method in OffloadGateway; expected @Override
+            public String targetUrl(FunctionSpec s) { return "http://remote"; }
+                          ^
+    (see https://errorprone.info/bugpattern/MissingOverride)
+  Did you mean '@Override public String targetUrl(FunctionSpec s) { return "http:'?
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/WaiterTimeoutHttpContractTest.java:49: warning: [MissingOverride] invokeRemote implements method in OffloadGateway; expected @Override
+            public Mono<InvocationResult> invokeRemote(InvocationTask task,OffloadTrigger trigger,OffloadContext context,int budget) {
+                                          ^
+    (see https://errorprone.info/bugpattern/MissingOverride)
+  Did you mean '@Override public Mono<InvocationResult> invokeRemote(InvocationTask task,OffloadTrigger trigger,OffloadContext'?
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceRetryQueueFullTest.java:51: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+                executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics);
+                                                                           ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+/tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/service/InvocationServiceEarlyRefusalTest.java:69: warning: [DirectInvocationOnMock] Methods should not be directly invoked on the mock `enqueuer`. Should this be part of a verify(..) call?
+                new ExecutionCompletionHandler(executionStore, (queued, due, rejected) -> enqueuer.enqueue(queued), dispatcherRouter, metrics),
+                                                                                                          ^
+    (see https://errorprone.info/bugpattern/DirectInvocationOnMock)
+Note: /tmp/nanofaas-one-shot-correlation/platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/P07ConfiguredHttpCalibrationTest.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+16 warnings
+
+> Task :control-plane:processTestResources NO-SOURCE
+> Task :control-plane:testClasses
+> Task :control-plane:processTestAot SKIPPED
+> Task :control-plane:compileAotTestJava SKIPPED
+> Task :control-plane:processAotTestResources SKIPPED
+> Task :control-plane:aotTestClasses SKIPPED
+> Task :sdks:java:compileJava UP-TO-DATE
+> Task :sdks:java:processResources UP-TO-DATE
+> Task :sdks:java:classes UP-TO-DATE
+> Task :sdks:java:jar UP-TO-DATE
+> Task :functions:java:figlet:compileJava UP-TO-DATE
+> Task :functions:java:figlet:processResources NO-SOURCE
+> Task :functions:java:figlet:classes UP-TO-DATE
+> Task :functions:java:figlet:resolveMainClassName UP-TO-DATE
+> Task :functions:java:figlet:processAot SKIPPED
+> Task :functions:java:figlet:compileAotJava SKIPPED
+> Task :functions:java:figlet:processAotResources SKIPPED
+> Task :functions:java:figlet:aotClasses SKIPPED
+> Task :functions:java:figlet:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:figlet:bootJar UP-TO-DATE
+> Task :functions:java:json-transform:compileJava UP-TO-DATE
+> Task :functions:java:json-transform:processResources UP-TO-DATE
+> Task :functions:java:json-transform:classes UP-TO-DATE
+> Task :functions:java:json-transform:resolveMainClassName UP-TO-DATE
+> Task :functions:java:json-transform:processAot SKIPPED
+> Task :functions:java:json-transform:compileAotJava SKIPPED
+> Task :functions:java:json-transform:processAotResources SKIPPED
+> Task :functions:java:json-transform:aotClasses SKIPPED
+> Task :functions:java:json-transform:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:json-transform:bootJar UP-TO-DATE
+> Task :functions:java:roman-numeral:compileJava UP-TO-DATE
+> Task :functions:java:roman-numeral:processResources NO-SOURCE
+> Task :functions:java:roman-numeral:classes UP-TO-DATE
+> Task :functions:java:roman-numeral:resolveMainClassName UP-TO-DATE
+> Task :functions:java:roman-numeral:processAot SKIPPED
+> Task :functions:java:roman-numeral:compileAotJava SKIPPED
+> Task :functions:java:roman-numeral:processAotResources SKIPPED
+> Task :functions:java:roman-numeral:aotClasses SKIPPED
+> Task :functions:java:roman-numeral:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:roman-numeral:bootJar UP-TO-DATE
+> Task :functions:java:word-stats:compileJava UP-TO-DATE
+> Task :functions:java:word-stats:processResources UP-TO-DATE
+> Task :functions:java:word-stats:classes UP-TO-DATE
+> Task :functions:java:word-stats:resolveMainClassName UP-TO-DATE
+> Task :functions:java:word-stats:processAot SKIPPED
+> Task :functions:java:word-stats:compileAotJava SKIPPED
+> Task :functions:java:word-stats:processAotResources SKIPPED
+> Task :functions:java:word-stats:aotClasses SKIPPED
+> Task :functions:java:word-stats:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:word-stats:bootJar UP-TO-DATE
+> Task :services:java:warm-echo:compileJava UP-TO-DATE
+> Task :services:java:warm-echo:processResources UP-TO-DATE
+> Task :services:java:warm-echo:classes UP-TO-DATE
+> Task :services:java:warm-echo:resolveMainClassName UP-TO-DATE
+> Task :services:java:warm-echo:processAot SKIPPED
+> Task :services:java:warm-echo:compileAotJava SKIPPED
+> Task :services:java:warm-echo:processAotResources SKIPPED
+> Task :services:java:warm-echo:aotClasses SKIPPED
+> Task :services:java:warm-echo:collectReachabilityMetadata UP-TO-DATE
+> Task :services:java:warm-echo:bootJar UP-TO-DATE
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :control-plane:test
+
+InvocationControllerTest > invokeSync_remoteAdmissionRefusalPreservesReasonWithoutInventingExecution() FAILED
+    java.lang.AssertionError at InvocationControllerTest.java:425
+        Caused by: java.lang.IllegalArgumentException at InvocationControllerTest.java:425
+
+8 tests completed, 1 failed
+
+> Task :control-plane:test FAILED
+
+[Incubating] Problems report is available at: file:///tmp/nanofaas-one-shot-correlation/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':control-plane:test'.
+> There were failing tests. See the report at: file:///tmp/nanofaas-one-shot-correlation/platform/control-plane/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.7.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 23s
+75 actionable tasks: 5 executed, 70 up-to-date

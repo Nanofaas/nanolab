@@ -1,0 +1,80 @@
+[
+  {
+    "originalPath": "capacity-samples.jsonl",
+    "originalBytes": 138368,
+    "originalSha256": "0f093de08feb8b8aa332be6846eef55cd19ae1abf936a065641ea7223dd533e8",
+    "storedPath": "capacity-samples.jsonl"
+  },
+  {
+    "originalPath": "capacity.jsonl",
+    "originalBytes": 1752,
+    "originalSha256": "a7def816389a1b2c7a542e3d684aa38d30fd60d73b3754d6fc4c0b243e2d3f70",
+    "storedPath": "capacity.jsonl"
+  },
+  {
+    "originalPath": "clock.jsonl",
+    "originalBytes": 2161,
+    "originalSha256": "a394ade8c3d8f904204b3dbd0d4cac370361610c0a303b286c880d7c06d0c05e",
+    "storedPath": "clock.jsonl"
+  },
+  {
+    "originalPath": "cpu-runtime-observations.json",
+    "originalBytes": 9055,
+    "originalSha256": "7ab6064375d9f47e69fc1bed475e983f58fe2c2760bae0bd869613dbaa515d24",
+    "storedPath": "cpu-runtime-observations.json"
+  },
+  {
+    "originalPath": "preflight.json",
+    "originalBytes": 2538,
+    "originalSha256": "393664e47d75bc0cf1e4727b35c222ed75e4c92d472095f22796deaa8974090c",
+    "storedPath": "preflight.json"
+  },
+  {
+    "originalPath": "profile-reference.json",
+    "originalBytes": 140,
+    "originalSha256": "dfa4cb22f988be2677f0a947e82b4c84ba5999549b0cb617e51519e5afe5b4f4",
+    "storedPath": "profile-reference.json"
+  },
+  {
+    "originalPath": "profile.json",
+    "originalBytes": 1255,
+    "originalSha256": "071763e44776537354ffdcba23cac010595e98207ac512a8e954f54c0f071a34",
+    "storedPath": "profile.json"
+  },
+  {
+    "originalPath": "readiness.jsonl",
+    "originalBytes": 571,
+    "originalSha256": "1478d10ac605af5146aeb8ba82b54f6c877726fee00f7398a2e76cada92a3164",
+    "storedPath": "readiness.jsonl"
+  },
+  {
+    "originalPath": "run-metadata.json",
+    "originalBytes": 14196,
+    "originalSha256": "480baed03afd86c86cb9fb9425bffde6b4fa6b19542f2d559515e40877f31ec5",
+    "storedPath": "run-metadata.json"
+  },
+  {
+    "originalPath": "runtime-distribution.json",
+    "originalBytes": 1273,
+    "originalSha256": "dba38b80ac9f58daa1134f5885f1a24fd40bfa278e3adf8500d56dc40604d2f4",
+    "storedPath": "runtime-distribution.json"
+  },
+  {
+    "originalPath": "samples.jsonl",
+    "originalBytes": 80569,
+    "originalSha256": "02a9771fd890fbf79b22e78aab4411a71113afac91ae50db59d133d7fa6f0d83",
+    "storedPath": "samples.jsonl"
+  },
+  {
+    "originalPath": "statistics.json",
+    "originalBytes": 1283,
+    "originalSha256": "e09a118dd6901b92aa07d7d86be55cf3507cd1bb0db701122c3c058e1f76e9a6",
+    "storedPath": "statistics.json"
+  },
+  {
+    "originalPath": "warmup.jsonl",
+    "originalBytes": 9225,
+    "originalSha256": "e320334c222bdadd6808947c4db551e55a867d49eb77dcad1d885632d4fe19ef",
+    "storedPath": "warmup.jsonl"
+  }
+]

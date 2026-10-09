@@ -96,14 +96,14 @@ def test_campaign_requires_all_modes_and_reports_uncertainty_as_unavailable_for_
         directory.mkdir()
         (directory / "manifest.json").write_text(manifest(mode).model_dump_json())
         (directory / "evidence.json").write_text(evidence().model_dump_json())
-    path = render_campaign(tmp_path)
+    path = render_campaign(tmp_path, workflow_completed=True)
     data = json.loads(path.with_suffix(".json").read_text())
     assert data["validComparison"]
     assert all(
         row["confidence95"] is None for row in data["betweenRepetitions"].values()
     )
     (tmp_path / "rep-0-ewma/evidence.json").unlink()
-    render_campaign(tmp_path)
+    render_campaign(tmp_path, workflow_completed=True)
     assert not json.loads(path.with_suffix(".json").read_text())["validComparison"]
 
 
@@ -120,12 +120,12 @@ def test_distinct_run_anchors_are_allowed_but_duplicate_modes_are_not(tmp_path):
         value = manifest(mode).model_copy(update={"anchor": str(index), "run_id": mode})
         (directory / "manifest.json").write_text(value.model_dump_json())
         (directory / "evidence.json").write_text(evidence().model_dump_json())
-    path = render_campaign(tmp_path)
+    path = render_campaign(tmp_path, workflow_completed=True)
     assert json.loads(path.with_suffix(".json").read_text())["validComparison"]
     (tmp_path / "rep-0-ewma/manifest.json").write_text(
         manifest("baseline").model_dump_json()
     )
-    render_campaign(tmp_path)
+    render_campaign(tmp_path, workflow_completed=True)
     assert not json.loads(path.with_suffix(".json").read_text())["validComparison"]
 
 
@@ -137,7 +137,7 @@ def test_changed_runtime_package_invalidates_comparison(tmp_path):
         value.parameters["nanolabPackageSha256"] = mode
         (directory / "manifest.json").write_text(value.model_dump_json())
         (directory / "evidence.json").write_text(evidence().model_dump_json())
-    path = render_campaign(tmp_path)
+    path = render_campaign(tmp_path, workflow_completed=True)
     assert not json.loads(path.with_suffix(".json").read_text())["validComparison"]
 
 
@@ -190,7 +190,7 @@ def test_between_repetition_interval_requires_independent_complete_runs(tmp_path
             frozen.parameters["generator"] = {"repetitions": 2}
             (directory / "manifest.json").write_text(frozen.model_dump_json())
             (directory / "evidence.json").write_text(evidence().model_dump_json())
-    path = render_campaign(tmp_path)
+    path = render_campaign(tmp_path, workflow_completed=True)
     summary = json.loads(path.with_suffix(".json").read_text())
     assert summary["validComparison"]
     assert summary["betweenRepetitions"]["oracle"]["confidence95"] == [0.5, 0.5]
@@ -214,5 +214,28 @@ def test_a_single_declared_mode_cannot_qualify_the_three_mode_comparison(tmp_pat
     frozen = manifest("baseline").model_copy(update={"modes": ["baseline"]})
     (directory / "manifest.json").write_text(frozen.model_dump_json())
     (directory / "evidence.json").write_text(evidence().model_dump_json())
+    path = render_campaign(tmp_path, workflow_completed=True)
+    assert not json.loads(path.with_suffix(".json").read_text())["validComparison"]
+
+
+def test_failed_workflow_cannot_publish_valid_comparison(tmp_path):
+    for mode in MODES:
+        directory = tmp_path / ("rep-0-" + mode)
+        directory.mkdir()
+        (directory / "manifest.json").write_text(manifest(mode).model_dump_json())
+        (directory / "evidence.json").write_text(evidence().model_dump_json())
+    (tmp_path / "run-metadata.json").write_text(json.dumps({"status": "failed"}))
+    path = render_campaign(tmp_path, workflow_completed=True)
+    data = json.loads(path.with_suffix(".json").read_text())
+    assert not data["validComparison"]
+    assert all(row["conforming"] for row in data["runs"])
+
+
+def test_missing_workflow_outcome_is_not_inferred_from_physical_measurements(tmp_path):
+    for mode in MODES:
+        directory = tmp_path / ("rep-0-" + mode)
+        directory.mkdir()
+        (directory / "manifest.json").write_text(manifest(mode).model_dump_json())
+        (directory / "evidence.json").write_text(evidence().model_dump_json())
     path = render_campaign(tmp_path)
     assert not json.loads(path.with_suffix(".json").read_text())["validComparison"]

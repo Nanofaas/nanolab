@@ -1,0 +1,43 @@
+ruff (lint)..............................................................Failed
+- hook id: ruff
+- exit code: 1
+
+E501 Line too long (97 > 88)
+   --> packages/nanolab/tests/one_shot/test_experiment_task.py:133:89
+    |
+131 |     assert not classify_result(row, expected="42", physical=[])["terminalError"]
+132 |     row["responseBody"] = (
+133 |         '{"error":"OFFLOAD_FAILED","message":"remote http://peer:8080 returned 429: queue full"}'
+    |                                                                                         ^^^^^^^^^
+134 |     )
+135 |     assert classify_result(row, expected="42", physical=[])["terminalError"]
+    |
+
+PT006 Wrong type passed to first argument of `pytest.mark.parametrize`; expected `tuple`
+   --> packages/nanolab/tests/one_shot/test_experiment_task.py:144:5
+    |
+143 | @pytest.mark.parametrize(
+144 |     "message,target",
+    |     ^^^^^^^^^^^^^^^^
+145 |     [
+146 |         ("remote http://peer:8080 returned 500: returned 429", "http://peer:8080"),
+    |
+help: Use a `tuple` for the first argument
+
+Found 2 errors.
+No fixes available (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+ruff (format)............................................................Passed
+basedpyright (nanolab)...................................................Passed
+basedpyright (tui-toolkit)...............................................Passed
+import-linter (nanolab)..................................................Passed
+import-linter (tui-toolkit)..............................................Passed
+bandit (nanolab).........................................................Passed
+bandit (tui-toolkit).....................................................Passed
+check toml...............................................................Passed
+check yaml...............................................................Passed
+check for merge conflicts................................................Passed
+check for added large files..............................................Passed
+fix end of files.........................................................Passed
+trim trailing whitespace.................................................Passed
+mixed line ending........................................................Passed

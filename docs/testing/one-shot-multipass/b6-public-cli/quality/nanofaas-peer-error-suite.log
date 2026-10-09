@@ -1,0 +1,216 @@
+> Task :gradle-plugin:compileJava UP-TO-DATE
+> Task :gradle-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:jar UP-TO-DATE
+
+> Configure project :control-plane
+(dependency analysis) You have both java-library and org.springframework.boot applied. You probably want java, not java-library.
+
+> Task :common:compileJava UP-TO-DATE
+> Task :control-plane-spi:compileJava UP-TO-DATE
+> Task :execution-runtime:compileJava UP-TO-DATE
+> Task :execution-runtime:processResources NO-SOURCE
+> Task :execution-runtime:classes UP-TO-DATE
+> Task :execution-runtime:jar UP-TO-DATE
+> Task :common:processResources NO-SOURCE
+> Task :common:classes UP-TO-DATE
+> Task :common:jar UP-TO-DATE
+> Task :control-plane-spi:processResources NO-SOURCE
+> Task :control-plane-spi:classes UP-TO-DATE
+> Task :control-plane-spi:jar UP-TO-DATE
+> Task :workload-metrics:compileJava UP-TO-DATE
+> Task :control-plane-modules:async-queue:compileJava UP-TO-DATE
+> Task :forecasting-api:compileJava UP-TO-DATE
+> Task :control-plane:compileJava UP-TO-DATE
+> Task :control-plane-modules:sync-queue:compileJava UP-TO-DATE
+> Task :execution-runtime:compileTestJava UP-TO-DATE
+> Task :execution-runtime:processTestResources NO-SOURCE
+> Task :execution-runtime:testClasses UP-TO-DATE
+> Task :control-plane-modules:async-queue:processResources UP-TO-DATE
+> Task :control-plane-modules:async-queue:classes UP-TO-DATE
+> Task :control-plane-modules:async-queue:jar UP-TO-DATE
+> Task :control-plane-modules:sync-queue:processResources UP-TO-DATE
+> Task :control-plane-modules:sync-queue:classes UP-TO-DATE
+> Task :control-plane-modules:sync-queue:jar UP-TO-DATE
+> Task :execution-runtime:test UP-TO-DATE
+> Task :execution-runtime:jacocoTestReport UP-TO-DATE
+> Task :p2p-api:compileJava UP-TO-DATE
+> Task :control-plane-modules:offload:compileJava UP-TO-DATE
+> Task :control-plane-modules:offload:processResources UP-TO-DATE
+> Task :control-plane-modules:offload:classes UP-TO-DATE
+> Task :control-plane-modules:offload:jar UP-TO-DATE
+> Task :container-deployment-runtime:compileJava UP-TO-DATE
+> Task :container-deployment-runtime:processResources NO-SOURCE
+> Task :container-deployment-runtime:classes UP-TO-DATE
+> Task :container-deployment-runtime:jar UP-TO-DATE
+> Task :control-plane:composeControlPlaneOpenApi
+> Task :control-plane:processResources
+> Task :control-plane:classes
+> Task :control-plane:jar
+> Task :forecasting-api:processResources NO-SOURCE
+> Task :forecasting-api:classes UP-TO-DATE
+> Task :forecasting-api:jar UP-TO-DATE
+> Task :p2p-api:processResources NO-SOURCE
+> Task :p2p-api:classes UP-TO-DATE
+> Task :p2p-api:jar UP-TO-DATE
+> Task :workload-metrics:processResources NO-SOURCE
+> Task :workload-metrics:classes UP-TO-DATE
+> Task :workload-metrics:jar UP-TO-DATE
+> Task :control-plane-modules:autoscaler:compileJava UP-TO-DATE
+> Task :control-plane-modules:autoscaler:processResources UP-TO-DATE
+> Task :control-plane-modules:autoscaler:classes UP-TO-DATE
+> Task :control-plane-modules:autoscaler:jar UP-TO-DATE
+> Task :control-plane-modules:build-metadata:compileJava UP-TO-DATE
+> Task :control-plane-modules:build-metadata:generateBuildMetadata UP-TO-DATE
+> Task :control-plane-modules:build-metadata:processResources UP-TO-DATE
+> Task :control-plane-modules:build-metadata:classes UP-TO-DATE
+> Task :control-plane-modules:build-metadata:jar UP-TO-DATE
+> Task :control-plane-modules:concurrency-control:compileJava UP-TO-DATE
+> Task :control-plane-modules:concurrency-control:processResources UP-TO-DATE
+> Task :control-plane-modules:concurrency-control:classes UP-TO-DATE
+> Task :control-plane-modules:concurrency-control:jar UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:compileJava UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:processResources UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:classes UP-TO-DATE
+> Task :control-plane-modules:k8s-deployment-provider:jar UP-TO-DATE
+> Task :control-plane-modules:p2p-discovery:compileJava UP-TO-DATE
+
+> Task :control-plane-modules:offload:compileTestJava
+Note: /tmp/nanofaas-one-shot-correlation/platform/modules/offload/src/test/java/it/unimib/datai/nanofaas/modules/offload/oneshot/routing/OneShotHopGuardE2eTest.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :control-plane-modules:offload:processTestResources UP-TO-DATE
+> Task :control-plane-modules:offload:testClasses
+> Task :control-plane-modules:p2p-discovery:processResources UP-TO-DATE
+> Task :control-plane-modules:p2p-discovery:classes UP-TO-DATE
+> Task :control-plane-modules:p2p-discovery:jar UP-TO-DATE
+> Task :control-plane-modules:runtime-config:compileJava UP-TO-DATE
+> Task :control-plane-modules:runtime-config:processResources UP-TO-DATE
+> Task :control-plane-modules:runtime-config:classes UP-TO-DATE
+> Task :control-plane-modules:runtime-config:jar UP-TO-DATE
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::loadLibrary has been called by io.netty.util.internal.NativeLibraryUtil in an unnamed module (file:/home/michele/.gradle/caches/modules-2/files-2.1/io.netty/netty-common/4.2.17.Final/57fa9e9af0bf70530e2fe1c8c8d6138f9167cf7a/netty-common-4.2.17.Final.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+> Task :control-plane-modules:offload:test
+> Task :control-plane:resolveMainClassName
+> Task :control-plane:processAot SKIPPED
+> Task :control-plane:compileAotJava SKIPPED
+> Task :control-plane:processAotResources SKIPPED
+> Task :control-plane:aotClasses SKIPPED
+> Task :control-plane:collectReachabilityMetadata UP-TO-DATE
+> Task :control-plane:bootJar
+> Task :control-plane:compileTestJava UP-TO-DATE
+> Task :control-plane:processTestResources NO-SOURCE
+> Task :control-plane:testClasses UP-TO-DATE
+> Task :control-plane:processTestAot SKIPPED
+> Task :control-plane:compileAotTestJava SKIPPED
+> Task :control-plane:processAotTestResources SKIPPED
+> Task :control-plane:aotTestClasses SKIPPED
+> Task :sdks:java:compileJava UP-TO-DATE
+> Task :sdks:java:processResources UP-TO-DATE
+> Task :sdks:java:classes UP-TO-DATE
+> Task :sdks:java:jar UP-TO-DATE
+> Task :functions:java:figlet:compileJava UP-TO-DATE
+> Task :functions:java:figlet:processResources NO-SOURCE
+> Task :functions:java:figlet:classes UP-TO-DATE
+> Task :functions:java:figlet:resolveMainClassName UP-TO-DATE
+> Task :functions:java:figlet:processAot SKIPPED
+> Task :functions:java:figlet:compileAotJava SKIPPED
+> Task :functions:java:figlet:processAotResources SKIPPED
+> Task :functions:java:figlet:aotClasses SKIPPED
+> Task :functions:java:figlet:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:figlet:bootJar UP-TO-DATE
+> Task :functions:java:json-transform:compileJava UP-TO-DATE
+> Task :functions:java:json-transform:processResources UP-TO-DATE
+> Task :functions:java:json-transform:classes UP-TO-DATE
+> Task :functions:java:json-transform:resolveMainClassName UP-TO-DATE
+> Task :functions:java:json-transform:processAot SKIPPED
+> Task :functions:java:json-transform:compileAotJava SKIPPED
+> Task :functions:java:json-transform:processAotResources SKIPPED
+> Task :functions:java:json-transform:aotClasses SKIPPED
+> Task :functions:java:json-transform:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:json-transform:bootJar UP-TO-DATE
+> Task :functions:java:roman-numeral:compileJava UP-TO-DATE
+> Task :functions:java:roman-numeral:processResources NO-SOURCE
+> Task :functions:java:roman-numeral:classes UP-TO-DATE
+> Task :functions:java:roman-numeral:resolveMainClassName UP-TO-DATE
+> Task :functions:java:roman-numeral:processAot SKIPPED
+> Task :functions:java:roman-numeral:compileAotJava SKIPPED
+> Task :functions:java:roman-numeral:processAotResources SKIPPED
+> Task :functions:java:roman-numeral:aotClasses SKIPPED
+> Task :functions:java:roman-numeral:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:roman-numeral:bootJar UP-TO-DATE
+> Task :control-plane-modules:offload:jacocoTestReport
+> Task :functions:java:word-stats:compileJava UP-TO-DATE
+> Task :functions:java:word-stats:processResources UP-TO-DATE
+> Task :functions:java:word-stats:classes UP-TO-DATE
+> Task :functions:java:word-stats:resolveMainClassName UP-TO-DATE
+> Task :functions:java:word-stats:processAot SKIPPED
+> Task :functions:java:word-stats:compileAotJava SKIPPED
+> Task :functions:java:word-stats:processAotResources SKIPPED
+> Task :functions:java:word-stats:aotClasses SKIPPED
+> Task :functions:java:word-stats:collectReachabilityMetadata UP-TO-DATE
+> Task :functions:java:word-stats:bootJar UP-TO-DATE
+> Task :services:java:warm-echo:compileJava UP-TO-DATE
+> Task :services:java:warm-echo:processResources UP-TO-DATE
+> Task :services:java:warm-echo:classes UP-TO-DATE
+> Task :services:java:warm-echo:resolveMainClassName UP-TO-DATE
+> Task :services:java:warm-echo:processAot SKIPPED
+> Task :services:java:warm-echo:compileAotJava SKIPPED
+> Task :services:java:warm-echo:processAotResources SKIPPED
+> Task :services:java:warm-echo:aotClasses SKIPPED
+> Task :services:java:warm-echo:collectReachabilityMetadata UP-TO-DATE
+> Task :services:java:warm-echo:bootJar UP-TO-DATE
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::loadLibrary has been called by io.netty.util.internal.NativeLibraryUtil in an unnamed module (file:/home/michele/.gradle/caches/modules-2/files-2.1/io.netty/netty-common/4.2.17.Final/57fa9e9af0bf70530e2fe1c8c8d6138f9167cf7a/netty-common-4.2.17.Final.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+> Task :control-plane:test
+
+2026-10-09T23:10:51.993+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:10:51.994+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:10:54.006+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:10:54.006+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:10:56.014+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:10:56.014+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:10:58.021+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:10:58.021+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:00.032+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:00.033+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:02.040+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:02.040+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:04.047+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:04.047+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:06.055+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:06.055+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:08.061+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:08.062+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:10.068+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:10.069+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:12.075+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:12.076+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:14.081+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:14.082+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:16.087+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:16.087+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:18.093+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:18.093+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:20.099+02:00  INFO 2339395 --- [ionShutdownHook] o.s.boot.reactor.netty.GracefulShutdown  : Commencing graceful shutdown. Waiting for active requests to complete
+2026-10-09T23:11:20.099+02:00  INFO 2339395 --- [ netty-shutdown] o.s.boot.reactor.netty.GracefulShutdown  : Graceful shutdown complete
+2026-10-09T23:11:22.106+02:00  INFO 2339395 --- [ionShutdownHook] i.u.d.n.m.autoscaler.InternalScaler      : InternalScaler stopping...
+2026-10-09T23:11:22.107+02:00  INFO 2339395 --- [ionShutdownHook] i.u.d.n.m.autoscaler.InternalScaler      : InternalScaler stopped
+2026-10-09T23:11:22.107+02:00  INFO 2339395 --- [ionShutdownHook] i.u.d.n.m.c.ConcurrencyGovernor          : ConcurrencyGovernor stopping...
+2026-10-09T23:11:22.107+02:00  INFO 2339395 --- [ionShutdownHook] i.u.d.n.m.c.ConcurrencyGovernor          : ConcurrencyGovernor stopped
+
+> Task :control-plane:jacocoTestReport
+
+[Incubating] Problems report is available at: file:///tmp/nanofaas-one-shot-correlation/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 2m 46s
+89 actionable tasks: 10 executed, 79 up-to-date

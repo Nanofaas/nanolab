@@ -1,0 +1,127 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_admission_refusal_requires_exact_gateway_target_and_status[remote http://peer:8080 returned 500: returned 429-http://peer:8080] _
+
+message = 'remote http://peer:8080 returned 500: returned 429'
+target = 'http://peer:8080'
+
+    @pytest.mark.parametrize(
+        "message,target",
+        [
+            ("remote http://peer:8080 returned 500: returned 429", "http://peer:8080"),
+            ("remote http://peer:8080 returned 4290: failure", "http://peer:8080"),
+            ("remote http://other:8080 returned 429: failure", "http://peer:8080"),
+            ("remote http://peer:8080 returned 429: failure", None),
+        ],
+    )
+    def test_admission_refusal_requires_exact_gateway_target_and_status(message, target):
+        import json
+    
+        from nanolab.tasks.one_shot.experiment import classify_result
+    
+        row = {
+            "statusCode": 502,
+            "offloadedTarget": target,
+            "responseStatus": None,
+            "outputJson": None,
+            "responseBody": json.dumps({"error": "OFFLOAD_FAILED", "message": message}),
+        }
+>       assert not classify_result(row, expected="42", physical=[])["terminalError"]
+E       assert not True
+
+packages/nanolab/tests/one_shot/test_experiment_task.py:164: AssertionError
+_ test_admission_refusal_requires_exact_gateway_target_and_status[remote http://peer:8080 returned 4290: failure-http://peer:8080] _
+
+message = 'remote http://peer:8080 returned 4290: failure'
+target = 'http://peer:8080'
+
+    @pytest.mark.parametrize(
+        "message,target",
+        [
+            ("remote http://peer:8080 returned 500: returned 429", "http://peer:8080"),
+            ("remote http://peer:8080 returned 4290: failure", "http://peer:8080"),
+            ("remote http://other:8080 returned 429: failure", "http://peer:8080"),
+            ("remote http://peer:8080 returned 429: failure", None),
+        ],
+    )
+    def test_admission_refusal_requires_exact_gateway_target_and_status(message, target):
+        import json
+    
+        from nanolab.tasks.one_shot.experiment import classify_result
+    
+        row = {
+            "statusCode": 502,
+            "offloadedTarget": target,
+            "responseStatus": None,
+            "outputJson": None,
+            "responseBody": json.dumps({"error": "OFFLOAD_FAILED", "message": message}),
+        }
+>       assert not classify_result(row, expected="42", physical=[])["terminalError"]
+E       assert not True
+
+packages/nanolab/tests/one_shot/test_experiment_task.py:164: AssertionError
+_ test_admission_refusal_requires_exact_gateway_target_and_status[remote http://other:8080 returned 429: failure-http://peer:8080] _
+
+message = 'remote http://other:8080 returned 429: failure'
+target = 'http://peer:8080'
+
+    @pytest.mark.parametrize(
+        "message,target",
+        [
+            ("remote http://peer:8080 returned 500: returned 429", "http://peer:8080"),
+            ("remote http://peer:8080 returned 4290: failure", "http://peer:8080"),
+            ("remote http://other:8080 returned 429: failure", "http://peer:8080"),
+            ("remote http://peer:8080 returned 429: failure", None),
+        ],
+    )
+    def test_admission_refusal_requires_exact_gateway_target_and_status(message, target):
+        import json
+    
+        from nanolab.tasks.one_shot.experiment import classify_result
+    
+        row = {
+            "statusCode": 502,
+            "offloadedTarget": target,
+            "responseStatus": None,
+            "outputJson": None,
+            "responseBody": json.dumps({"error": "OFFLOAD_FAILED", "message": message}),
+        }
+>       assert not classify_result(row, expected="42", physical=[])["terminalError"]
+E       assert not True
+
+packages/nanolab/tests/one_shot/test_experiment_task.py:164: AssertionError
+_ test_admission_refusal_requires_exact_gateway_target_and_status[remote http://peer:8080 returned 429: failure-None] _
+
+message = 'remote http://peer:8080 returned 429: failure', target = None
+
+    @pytest.mark.parametrize(
+        "message,target",
+        [
+            ("remote http://peer:8080 returned 500: returned 429", "http://peer:8080"),
+            ("remote http://peer:8080 returned 4290: failure", "http://peer:8080"),
+            ("remote http://other:8080 returned 429: failure", "http://peer:8080"),
+            ("remote http://peer:8080 returned 429: failure", None),
+        ],
+    )
+    def test_admission_refusal_requires_exact_gateway_target_and_status(message, target):
+        import json
+    
+        from nanolab.tasks.one_shot.experiment import classify_result
+    
+        row = {
+            "statusCode": 502,
+            "offloadedTarget": target,
+            "responseStatus": None,
+            "outputJson": None,
+            "responseBody": json.dumps({"error": "OFFLOAD_FAILED", "message": message}),
+        }
+>       assert not classify_result(row, expected="42", physical=[])["terminalError"]
+E       assert not True
+
+packages/nanolab/tests/one_shot/test_experiment_task.py:164: AssertionError
+=========================== short test summary info ============================
+FAILED packages/nanolab/tests/one_shot/test_experiment_task.py::test_admission_refusal_requires_exact_gateway_target_and_status[remote http://peer:8080 returned 500: returned 429-http://peer:8080]
+FAILED packages/nanolab/tests/one_shot/test_experiment_task.py::test_admission_refusal_requires_exact_gateway_target_and_status[remote http://peer:8080 returned 4290: failure-http://peer:8080]
+FAILED packages/nanolab/tests/one_shot/test_experiment_task.py::test_admission_refusal_requires_exact_gateway_target_and_status[remote http://other:8080 returned 429: failure-http://peer:8080]
+FAILED packages/nanolab/tests/one_shot/test_experiment_task.py::test_admission_refusal_requires_exact_gateway_target_and_status[remote http://peer:8080 returned 429: failure-None]
+4 failed, 9 deselected in 0.54s

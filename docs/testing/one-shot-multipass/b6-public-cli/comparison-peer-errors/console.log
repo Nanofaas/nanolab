@@ -1,0 +1,330 @@
+[001.acquire-edge-0-vm] running  Acquire edge-0 VM
+[001.acquire-edge-0-vm] passed   34.1s
+[002.acquire-edge-1-vm] running  Acquire edge-1 VM
+[002.acquire-edge-1-vm] passed   37.1s
+[003.acquire-cloud-vm] running  Acquire cloud VM
+[003.acquire-cloud-vm] passed   34.9s
+[004.acquire-d0968fbcd653-operator-host-generator] running  Acquire d0968fbcd653 operator-host generator
+[004.acquire-d0968fbcd653-operator-host-generator] passed   0.0s
+[005.bootstrap-edge-0-container-vm] running  Bootstrap edge-0 container VM
+[provision.edge-0.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-0.vm.provision_base] passed   22.8s
+[005.bootstrap-edge-0-container-vm] passed   22.8s
+[006.reuse-immutable-one-shot-runtime-distribution] running  Reuse immutable one-shot runtime distribution
+[006.reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[007.archive-digest-pinned-one-shot-runtime-images] running  Archive digest-pinned one-shot runtime images
+[007.archive-digest-pinned-one-shot-runtime-images] passed   0.9s
+[008.acquire-edge-0-control-plane] running  Acquire edge-0 control plane
+[008.acquire-edge-0-control-plane] passed   7.5s
+[009.bootstrap-edge-1-container-vm] running  Bootstrap edge-1 container VM
+[provision.edge-1.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-1.vm.provision_base] passed   22.4s
+[009.bootstrap-edge-1-container-vm] passed   22.4s
+[010.acquire-edge-1-control-plane] running  Acquire edge-1 control plane
+[010.acquire-edge-1-control-plane] passed   7.6s
+[011.bootstrap-cloud-container-vm] running  Bootstrap cloud container VM
+[provision.cloud.vm.provision_base] running  Provision base VM dependencies
+[provision.cloud.vm.provision_base] passed   23.3s
+[011.bootstrap-cloud-container-vm] passed   23.3s
+[012.acquire-cloud-control-plane] running  Acquire cloud control plane
+[012.acquire-cloud-control-plane] passed   7.4s
+[013.acquire-edge-0-clock-network-probe] running  Acquire edge-0 clock/network probe
+[013.acquire-edge-0-clock-network-probe] passed   0.8s
+[014.acquire-edge-1-clock-network-probe] running  Acquire edge-1 clock/network probe
+[014.acquire-edge-1-clock-network-probe] passed   0.9s
+[015.acquire-cloud-clock-network-probe] running  Acquire cloud clock/network probe
+[015.acquire-cloud-clock-network-probe] passed   0.8s
+[016.pin-function-registrations-to-immutable-target-image-ids] running  Pin function registrations to immutable target image IDs
+[016.pin-function-registrations-to-immutable-target-image-ids] passed   2.1s
+[017.acquire-one-shot-workload-on-the-edge-0] running  Acquire one-shot-workload on the edge-0
+[017.acquire-one-shot-workload-on-the-edge-0] passed   0.7s
+[018.acquire-one-shot-workload-on-the-edge-1] running  Acquire one-shot-workload on the edge-1
+[018.acquire-one-shot-workload-on-the-edge-1] passed   0.8s
+[019.acquire-one-shot-workload-on-the-cloud] running  Acquire one-shot-workload on the cloud
+[019.acquire-one-shot-workload-on-the-cloud] passed   0.8s
+[020.acquire-measured-periodic-one-shot-clock-health] running  Acquire measured periodic one-shot clock health
+[020.acquire-measured-periodic-one-shot-clock-health] passed   0.2s
+[021.verify-and-freeze-ewma-comparison] running  Verify and freeze ewma comparison
+[021.verify-and-freeze-ewma-comparison/measure-and-validate-deployed-one-shot-topology] running  Measure and validate deployed one-shot topology
+[021.verify-and-freeze-ewma-comparison/measure-and-validate-deployed-one-shot-topology] passed   5.6s
+[021.verify-and-freeze-ewma-comparison/freeze-verified-one-shot-comparison-manifest] running  Freeze verified one-shot comparison manifest
+[021.verify-and-freeze-ewma-comparison/freeze-verified-one-shot-comparison-manifest] passed   0.0s
+[021.verify-and-freeze-ewma-comparison] passed   5.7s
+[022.configure-comparison-mode-and-confirm-forecast-upload] running  Configure comparison mode and confirm forecast upload
+[022.configure-comparison-mode-and-confirm-forecast-upload] passed   1.7s
+[023.own-bounded-one-shot-k6-generator] running  Own bounded one-shot k6 generator
+[023.own-bounded-one-shot-k6-generator] passed   0.0s
+[024.own-live-physical-evidence-collector] running  Own live physical evidence collector
+[024.own-live-physical-evidence-collector] passed   0.0s
+[025.run-original-load-and-collect-best-effort-physical-evidence] running  Run original load and collect best-effort physical evidence
+[025.run-original-load-and-collect-best-effort-physical-evidence] passed   71.5s
+[026.release-own-live-physical-evidence-collector] running  Release Own live physical evidence collector
+[026.release-own-live-physical-evidence-collector] passed   0.0s
+[027.release-own-bounded-one-shot-k6-generator] running  Release Own bounded one-shot k6 generator
+[027.release-own-bounded-one-shot-k6-generator] passed   0.0s
+[028.evaluate-ewma-evidence] running  Evaluate ewma evidence
+[028.evaluate-ewma-evidence/correlate-original-ids-and-physical-completions] running  Correlate original IDs and physical completions
+[028.evaluate-ewma-evidence/correlate-original-ids-and-physical-completions] passed   3.8s
+[028.evaluate-ewma-evidence/verify-one-shot-comparison-assumptions-and-conservation] running  Verify one-shot comparison assumptions and conservation
+[028.evaluate-ewma-evidence/verify-one-shot-comparison-assumptions-and-conservation] passed   0.0s
+[028.evaluate-ewma-evidence] passed   3.8s
+[029.release-measured-periodic-one-shot-clock-health] running  Release measured periodic one-shot clock health
+[029.release-measured-periodic-one-shot-clock-health] passed   0.0s
+[030.release-one-shot-workload-on-the-cloud] running  Release one-shot-workload on the cloud
+[030.release-one-shot-workload-on-the-cloud] passed   0.6s
+[031.release-one-shot-workload-on-the-edge-1] running  Release one-shot-workload on the edge-1
+[031.release-one-shot-workload-on-the-edge-1] passed   0.5s
+[032.release-one-shot-workload-on-the-edge-0] running  Release one-shot-workload on the edge-0
+[032.release-one-shot-workload-on-the-edge-0] passed   0.5s
+[033.release-pin-function-registrations-to-immutable-target-image-ids] running  Release Pin function registrations to immutable target image IDs
+[033.release-pin-function-registrations-to-immutable-target-image-ids] passed   0.0s
+[034.release-cloud-clock-network-probe] running  Release cloud clock/network probe
+[034.release-cloud-clock-network-probe] passed   0.4s
+[035.release-edge-1-clock-network-probe] running  Release edge-1 clock/network probe
+[035.release-edge-1-clock-network-probe] passed   0.3s
+[036.release-edge-0-clock-network-probe] running  Release edge-0 clock/network probe
+[036.release-edge-0-clock-network-probe] passed   0.3s
+[037.release-cloud-control-plane] running  Release cloud control plane
+[037.release-cloud-control-plane] passed   0.8s
+[038.release-bootstrap-cloud-container-vm] running  Release Bootstrap cloud container VM
+[038.release-bootstrap-cloud-container-vm] passed   0.0s
+[039.release-edge-1-control-plane] running  Release edge-1 control plane
+[039.release-edge-1-control-plane] passed   0.7s
+[040.release-bootstrap-edge-1-container-vm] running  Release Bootstrap edge-1 container VM
+[040.release-bootstrap-edge-1-container-vm] passed   0.0s
+[041.release-edge-0-control-plane] running  Release edge-0 control plane
+[041.release-edge-0-control-plane] passed   0.8s
+[042.release-archive-digest-pinned-one-shot-runtime-images] running  Release Archive digest-pinned one-shot runtime images
+[042.release-archive-digest-pinned-one-shot-runtime-images] passed   0.0s
+[043.release-reuse-immutable-one-shot-runtime-distribution] running  Release Reuse immutable one-shot runtime distribution
+[043.release-reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[044.release-bootstrap-edge-0-container-vm] running  Release Bootstrap edge-0 container VM
+[044.release-bootstrap-edge-0-container-vm] passed   0.0s
+[045.release-d0968fbcd653-operator-host-generator] running  Release d0968fbcd653 operator-host generator
+[045.release-d0968fbcd653-operator-host-generator] passed   0.0s
+[046.release-cloud-vm] running  Release cloud VM
+[046.release-cloud-vm] passed   0.5s
+[047.release-edge-1-vm] running  Release edge-1 VM
+[047.release-edge-1-vm] passed   0.5s
+[048.release-edge-0-vm] running  Release edge-0 VM
+[048.release-edge-0-vm] passed   0.4s
+[049.acquire-edge-0-vm] running  Acquire edge-0 VM
+[049.acquire-edge-0-vm] passed   34.6s
+[050.acquire-edge-1-vm] running  Acquire edge-1 VM
+[050.acquire-edge-1-vm] passed   31.9s
+[051.acquire-cloud-vm] running  Acquire cloud VM
+[051.acquire-cloud-vm] passed   44.0s
+[052.acquire-df9df785875d-operator-host-generator] running  Acquire df9df785875d operator-host generator
+[052.acquire-df9df785875d-operator-host-generator] passed   0.0s
+[053.bootstrap-edge-0-container-vm] running  Bootstrap edge-0 container VM
+[provision.edge-0.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-0.vm.provision_base] passed   39.7s
+[053.bootstrap-edge-0-container-vm] passed   39.7s
+[054.reuse-immutable-one-shot-runtime-distribution] running  Reuse immutable one-shot runtime distribution
+[054.reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[055.archive-digest-pinned-one-shot-runtime-images] running  Archive digest-pinned one-shot runtime images
+[055.archive-digest-pinned-one-shot-runtime-images] passed   2.6s
+[056.acquire-edge-0-control-plane] running  Acquire edge-0 control plane
+[056.acquire-edge-0-control-plane] passed   18.5s
+[057.bootstrap-edge-1-container-vm] running  Bootstrap edge-1 container VM
+[provision.edge-1.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-1.vm.provision_base] passed   23.6s
+[057.bootstrap-edge-1-container-vm] passed   23.6s
+[058.acquire-edge-1-control-plane] running  Acquire edge-1 control plane
+[058.acquire-edge-1-control-plane] passed   7.8s
+[059.bootstrap-cloud-container-vm] running  Bootstrap cloud container VM
+[provision.cloud.vm.provision_base] running  Provision base VM dependencies
+[provision.cloud.vm.provision_base] passed   22.1s
+[059.bootstrap-cloud-container-vm] passed   22.1s
+[060.acquire-cloud-control-plane] running  Acquire cloud control plane
+[060.acquire-cloud-control-plane] passed   7.2s
+[061.acquire-edge-0-clock-network-probe] running  Acquire edge-0 clock/network probe
+[061.acquire-edge-0-clock-network-probe] passed   1.0s
+[062.acquire-edge-1-clock-network-probe] running  Acquire edge-1 clock/network probe
+[062.acquire-edge-1-clock-network-probe] passed   0.9s
+[063.acquire-cloud-clock-network-probe] running  Acquire cloud clock/network probe
+[063.acquire-cloud-clock-network-probe] passed   0.7s
+[064.pin-function-registrations-to-immutable-target-image-ids] running  Pin function registrations to immutable target image IDs
+[064.pin-function-registrations-to-immutable-target-image-ids] passed   2.2s
+[065.acquire-one-shot-workload-on-the-edge-0] running  Acquire one-shot-workload on the edge-0
+[065.acquire-one-shot-workload-on-the-edge-0] passed   0.8s
+[066.acquire-one-shot-workload-on-the-edge-1] running  Acquire one-shot-workload on the edge-1
+[066.acquire-one-shot-workload-on-the-edge-1] passed   0.7s
+[067.acquire-one-shot-workload-on-the-cloud] running  Acquire one-shot-workload on the cloud
+[067.acquire-one-shot-workload-on-the-cloud] passed   0.8s
+[068.acquire-measured-periodic-one-shot-clock-health] running  Acquire measured periodic one-shot clock health
+[068.acquire-measured-periodic-one-shot-clock-health] passed   0.2s
+[069.verify-and-freeze-baseline-comparison] running  Verify and freeze baseline comparison
+[069.verify-and-freeze-baseline-comparison/measure-and-validate-deployed-one-shot-topology] running  Measure and validate deployed one-shot topology
+[069.verify-and-freeze-baseline-comparison/measure-and-validate-deployed-one-shot-topology] passed   5.4s
+[069.verify-and-freeze-baseline-comparison/freeze-verified-one-shot-comparison-manifest] running  Freeze verified one-shot comparison manifest
+[069.verify-and-freeze-baseline-comparison/freeze-verified-one-shot-comparison-manifest] passed   0.1s
+[069.verify-and-freeze-baseline-comparison] passed   5.5s
+[070.configure-comparison-mode-and-confirm-forecast-upload] running  Configure comparison mode and confirm forecast upload
+[070.configure-comparison-mode-and-confirm-forecast-upload] passed   4.6s
+[071.own-bounded-one-shot-k6-generator] running  Own bounded one-shot k6 generator
+[071.own-bounded-one-shot-k6-generator] passed   0.0s
+[072.own-live-physical-evidence-collector] running  Own live physical evidence collector
+[072.own-live-physical-evidence-collector] passed   0.0s
+[073.run-original-load-and-collect-best-effort-physical-evidence] running  Run original load and collect best-effort physical evidence
+[073.run-original-load-and-collect-best-effort-physical-evidence] passed   70.7s
+[074.release-own-live-physical-evidence-collector] running  Release Own live physical evidence collector
+[074.release-own-live-physical-evidence-collector] passed   0.0s
+[075.release-own-bounded-one-shot-k6-generator] running  Release Own bounded one-shot k6 generator
+[075.release-own-bounded-one-shot-k6-generator] passed   0.0s
+[076.evaluate-baseline-evidence] running  Evaluate baseline evidence
+[076.evaluate-baseline-evidence/correlate-original-ids-and-physical-completions] running  Correlate original IDs and physical completions
+[076.evaluate-baseline-evidence/correlate-original-ids-and-physical-completions] passed   3.8s
+[076.evaluate-baseline-evidence/verify-one-shot-comparison-assumptions-and-conservation] running  Verify one-shot comparison assumptions and conservation
+[076.evaluate-baseline-evidence/verify-one-shot-comparison-assumptions-and-conservation] passed   0.0s
+[076.evaluate-baseline-evidence] passed   3.8s
+[077.release-measured-periodic-one-shot-clock-health] running  Release measured periodic one-shot clock health
+[077.release-measured-periodic-one-shot-clock-health] passed   0.0s
+[078.release-one-shot-workload-on-the-cloud] running  Release one-shot-workload on the cloud
+[078.release-one-shot-workload-on-the-cloud] passed   0.7s
+[079.release-one-shot-workload-on-the-edge-1] running  Release one-shot-workload on the edge-1
+[079.release-one-shot-workload-on-the-edge-1] passed   0.6s
+[080.release-one-shot-workload-on-the-edge-0] running  Release one-shot-workload on the edge-0
+[080.release-one-shot-workload-on-the-edge-0] passed   0.6s
+[081.release-pin-function-registrations-to-immutable-target-image-ids] running  Release Pin function registrations to immutable target image IDs
+[081.release-pin-function-registrations-to-immutable-target-image-ids] passed   0.0s
+[082.release-cloud-clock-network-probe] running  Release cloud clock/network probe
+[082.release-cloud-clock-network-probe] passed   0.4s
+[083.release-edge-1-clock-network-probe] running  Release edge-1 clock/network probe
+[083.release-edge-1-clock-network-probe] passed   0.4s
+[084.release-edge-0-clock-network-probe] running  Release edge-0 clock/network probe
+[084.release-edge-0-clock-network-probe] passed   0.3s
+[085.release-cloud-control-plane] running  Release cloud control plane
+[085.release-cloud-control-plane] passed   0.7s
+[086.release-bootstrap-cloud-container-vm] running  Release Bootstrap cloud container VM
+[086.release-bootstrap-cloud-container-vm] passed   0.0s
+[087.release-edge-1-control-plane] running  Release edge-1 control plane
+[087.release-edge-1-control-plane] passed   0.8s
+[088.release-bootstrap-edge-1-container-vm] running  Release Bootstrap edge-1 container VM
+[088.release-bootstrap-edge-1-container-vm] passed   0.0s
+[089.release-edge-0-control-plane] running  Release edge-0 control plane
+[089.release-edge-0-control-plane] passed   0.7s
+[090.release-archive-digest-pinned-one-shot-runtime-images] running  Release Archive digest-pinned one-shot runtime images
+[090.release-archive-digest-pinned-one-shot-runtime-images] passed   0.0s
+[091.release-reuse-immutable-one-shot-runtime-distribution] running  Release Reuse immutable one-shot runtime distribution
+[091.release-reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[092.release-bootstrap-edge-0-container-vm] running  Release Bootstrap edge-0 container VM
+[092.release-bootstrap-edge-0-container-vm] passed   0.0s
+[093.release-df9df785875d-operator-host-generator] running  Release df9df785875d operator-host generator
+[093.release-df9df785875d-operator-host-generator] passed   0.0s
+[094.release-cloud-vm] running  Release cloud VM
+[094.release-cloud-vm] passed   0.4s
+[095.release-edge-1-vm] running  Release edge-1 VM
+[095.release-edge-1-vm] passed   0.4s
+[096.release-edge-0-vm] running  Release edge-0 VM
+[096.release-edge-0-vm] passed   0.4s
+[097.acquire-edge-0-vm] running  Acquire edge-0 VM
+[097.acquire-edge-0-vm] passed   29.9s
+[098.acquire-edge-1-vm] running  Acquire edge-1 VM
+[098.acquire-edge-1-vm] passed   30.3s
+[099.acquire-cloud-vm] running  Acquire cloud VM
+[099.acquire-cloud-vm] passed   32.9s
+[100.acquire-10b898e17530-operator-host-generator] running  Acquire 10b898e17530 operator-host generator
+[100.acquire-10b898e17530-operator-host-generator] passed   0.0s
+[101.bootstrap-edge-0-container-vm] running  Bootstrap edge-0 container VM
+[provision.edge-0.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-0.vm.provision_base] passed   24.3s
+[101.bootstrap-edge-0-container-vm] passed   24.3s
+[102.reuse-immutable-one-shot-runtime-distribution] running  Reuse immutable one-shot runtime distribution
+[102.reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[103.archive-digest-pinned-one-shot-runtime-images] running  Archive digest-pinned one-shot runtime images
+[103.archive-digest-pinned-one-shot-runtime-images] passed   0.6s
+[104.acquire-edge-0-control-plane] running  Acquire edge-0 control plane
+[104.acquire-edge-0-control-plane] passed   16.5s
+[105.bootstrap-edge-1-container-vm] running  Bootstrap edge-1 container VM
+[provision.edge-1.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-1.vm.provision_base] passed   35.8s
+[105.bootstrap-edge-1-container-vm] passed   35.8s
+[106.acquire-edge-1-control-plane] running  Acquire edge-1 control plane
+[106.acquire-edge-1-control-plane] passed   10.7s
+[107.bootstrap-cloud-container-vm] running  Bootstrap cloud container VM
+[provision.cloud.vm.provision_base] running  Provision base VM dependencies
+[provision.cloud.vm.provision_base] passed   35.9s
+[107.bootstrap-cloud-container-vm] passed   35.9s
+[108.acquire-cloud-control-plane] running  Acquire cloud control plane
+[108.acquire-cloud-control-plane] passed   8.8s
+[109.acquire-edge-0-clock-network-probe] running  Acquire edge-0 clock/network probe
+[109.acquire-edge-0-clock-network-probe] passed   0.9s
+[110.acquire-edge-1-clock-network-probe] running  Acquire edge-1 clock/network probe
+[110.acquire-edge-1-clock-network-probe] passed   0.9s
+[111.acquire-cloud-clock-network-probe] running  Acquire cloud clock/network probe
+[111.acquire-cloud-clock-network-probe] passed   0.8s
+[112.pin-function-registrations-to-immutable-target-image-ids] running  Pin function registrations to immutable target image IDs
+[112.pin-function-registrations-to-immutable-target-image-ids] passed   2.1s
+[113.acquire-one-shot-workload-on-the-edge-0] running  Acquire one-shot-workload on the edge-0
+[113.acquire-one-shot-workload-on-the-edge-0] passed   0.9s
+[114.acquire-one-shot-workload-on-the-edge-1] running  Acquire one-shot-workload on the edge-1
+[114.acquire-one-shot-workload-on-the-edge-1] passed   0.9s
+[115.acquire-one-shot-workload-on-the-cloud] running  Acquire one-shot-workload on the cloud
+[115.acquire-one-shot-workload-on-the-cloud] passed   1.0s
+[116.acquire-measured-periodic-one-shot-clock-health] running  Acquire measured periodic one-shot clock health
+[116.acquire-measured-periodic-one-shot-clock-health] passed   0.2s
+[117.verify-and-freeze-oracle-comparison] running  Verify and freeze oracle comparison
+[117.verify-and-freeze-oracle-comparison/measure-and-validate-deployed-one-shot-topology] running  Measure and validate deployed one-shot topology
+[117.verify-and-freeze-oracle-comparison/measure-and-validate-deployed-one-shot-topology] passed   5.4s
+[117.verify-and-freeze-oracle-comparison/freeze-verified-one-shot-comparison-manifest] running  Freeze verified one-shot comparison manifest
+[117.verify-and-freeze-oracle-comparison/freeze-verified-one-shot-comparison-manifest] passed   0.1s
+[117.verify-and-freeze-oracle-comparison] passed   5.5s
+[118.configure-comparison-mode-and-confirm-forecast-upload] running  Configure comparison mode and confirm forecast upload
+[118.configure-comparison-mode-and-confirm-forecast-upload] passed   1.9s
+[119.own-bounded-one-shot-k6-generator] running  Own bounded one-shot k6 generator
+[119.own-bounded-one-shot-k6-generator] passed   0.0s
+[120.own-live-physical-evidence-collector] running  Own live physical evidence collector
+[120.own-live-physical-evidence-collector] passed   0.0s
+[121.run-original-load-and-collect-best-effort-physical-evidence] running  Run original load and collect best-effort physical evidence
+[121.run-original-load-and-collect-best-effort-physical-evidence] passed   69.6s
+[122.release-own-live-physical-evidence-collector] running  Release Own live physical evidence collector
+[122.release-own-live-physical-evidence-collector] passed   0.0s
+[123.release-own-bounded-one-shot-k6-generator] running  Release Own bounded one-shot k6 generator
+[123.release-own-bounded-one-shot-k6-generator] passed   0.0s
+[124.evaluate-oracle-evidence] running  Evaluate oracle evidence
+[124.evaluate-oracle-evidence/correlate-original-ids-and-physical-completions] running  Correlate original IDs and physical completions
+[124.evaluate-oracle-evidence/correlate-original-ids-and-physical-completions] passed   3.7s
+[124.evaluate-oracle-evidence/verify-one-shot-comparison-assumptions-and-conservation] running  Verify one-shot comparison assumptions and conservation
+[124.evaluate-oracle-evidence/verify-one-shot-comparison-assumptions-and-conservation] passed   0.0s
+[124.evaluate-oracle-evidence] passed   3.7s
+[125.release-measured-periodic-one-shot-clock-health] running  Release measured periodic one-shot clock health
+[125.release-measured-periodic-one-shot-clock-health] passed   0.0s
+[126.release-one-shot-workload-on-the-cloud] running  Release one-shot-workload on the cloud
+[126.release-one-shot-workload-on-the-cloud] passed   0.8s
+[127.release-one-shot-workload-on-the-edge-1] running  Release one-shot-workload on the edge-1
+[127.release-one-shot-workload-on-the-edge-1] passed   0.6s
+[128.release-one-shot-workload-on-the-edge-0] running  Release one-shot-workload on the edge-0
+[128.release-one-shot-workload-on-the-edge-0] passed   0.9s
+[129.release-pin-function-registrations-to-immutable-target-image-ids] running  Release Pin function registrations to immutable target image IDs
+[129.release-pin-function-registrations-to-immutable-target-image-ids] passed   0.0s
+[130.release-cloud-clock-network-probe] running  Release cloud clock/network probe
+[130.release-cloud-clock-network-probe] passed   0.4s
+[131.release-edge-1-clock-network-probe] running  Release edge-1 clock/network probe
+[131.release-edge-1-clock-network-probe] passed   0.3s
+[132.release-edge-0-clock-network-probe] running  Release edge-0 clock/network probe
+[132.release-edge-0-clock-network-probe] passed   0.3s
+[133.release-cloud-control-plane] running  Release cloud control plane
+[133.release-cloud-control-plane] passed   0.8s
+[134.release-bootstrap-cloud-container-vm] running  Release Bootstrap cloud container VM
+[134.release-bootstrap-cloud-container-vm] passed   0.0s
+[135.release-edge-1-control-plane] running  Release edge-1 control plane
+[135.release-edge-1-control-plane] passed   0.9s
+[136.release-bootstrap-edge-1-container-vm] running  Release Bootstrap edge-1 container VM
+[136.release-bootstrap-edge-1-container-vm] passed   0.0s
+[137.release-edge-0-control-plane] running  Release edge-0 control plane
+[137.release-edge-0-control-plane] passed   0.8s
+[138.release-archive-digest-pinned-one-shot-runtime-images] running  Release Archive digest-pinned one-shot runtime images
+[138.release-archive-digest-pinned-one-shot-runtime-images] passed   0.0s
+[139.release-reuse-immutable-one-shot-runtime-distribution] running  Release Reuse immutable one-shot runtime distribution
+[139.release-reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[140.release-bootstrap-edge-0-container-vm] running  Release Bootstrap edge-0 container VM
+[140.release-bootstrap-edge-0-container-vm] passed   0.0s
+[141.release-10b898e17530-operator-host-generator] running  Release 10b898e17530 operator-host generator
+[141.release-10b898e17530-operator-host-generator] passed   0.0s
+[142.release-cloud-vm] running  Release cloud VM
+[142.release-cloud-vm] passed   0.5s
+[143.release-edge-1-vm] running  Release edge-1 VM
+[143.release-edge-1-vm] passed   0.4s
+[144.release-edge-0-vm] running  Release edge-0 VM
+[144.release-edge-0-vm] passed   0.4s

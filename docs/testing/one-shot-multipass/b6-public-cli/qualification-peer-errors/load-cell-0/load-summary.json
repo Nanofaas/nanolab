@@ -1,0 +1,24 @@
+{
+  "valid": true,
+  "planned": 1708,
+  "emitted": 1708,
+  "returned": 1708,
+  "generatorDeficit": 0,
+  "httpErrors": 270,
+  "physicalCompletions": 1438,
+  "physicalOccupancySeconds": 165.054174464,
+  "physicalGroups": [
+    [
+      "edge-0",
+      "one-shot-workload"
+    ],
+    [
+      "edge-1",
+      "one-shot-workload"
+    ]
+  ],
+  "maxArrivalLatenessSeconds": 0.004779815673828125,
+  "measuredThrough": 1791581251.9068182,
+  "method": "owned-http-sdk-contention-v1",
+  "outsideMeasuredPrefixOriginals": 1812
+}

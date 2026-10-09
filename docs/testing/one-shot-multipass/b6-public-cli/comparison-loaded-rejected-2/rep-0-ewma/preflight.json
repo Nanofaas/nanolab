@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "provider": "multipass",
+  "purpose": "workflow-validation",
+  "measured_at": "2026-10-09T20:46:51.227060Z",
+  "generator_location": "operator-host",
+  "shared_physical_host": true,
+  "nodes": [
+    {
+      "node_id": "edge-0",
+      "kind": "edge",
+      "vm_name": "nl-os-1fa509592a5d-edge-0",
+      "host": "10.83.80.32",
+      "cpus": 2,
+      "memory_mib": 3891,
+      "memory_capacity_mib": 256,
+      "backend": "container-local",
+      "concurrency": 1,
+      "hpa_active": false,
+      "ready": true,
+      "peer_count": 1,
+      "image_digests": {
+        "one-shot-workload": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+      },
+      "clock_offset_seconds": -0.022980928421020508,
+      "clock_uncertainty_seconds": 0.020635366439819336,
+      "rtt_seconds": 0.04127073287963867,
+      "bandwidth_mbps": 4539.300175656624,
+      "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43",
+      "architecture": "aarch64"
+    },
+    {
+      "node_id": "edge-1",
+      "kind": "edge",
+      "vm_name": "nl-os-1fa509592a5d-edge-1",
+      "host": "10.83.80.81",
+      "cpus": 2,
+      "memory_mib": 3891,
+      "memory_capacity_mib": 256,
+      "backend": "container-local",
+      "concurrency": 1,
+      "hpa_active": false,
+      "ready": true,
+      "peer_count": 1,
+      "image_digests": {
+        "one-shot-workload": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+      },
+      "clock_offset_seconds": -0.020543336868286133,
+      "clock_uncertainty_seconds": 0.020654797554016113,
+      "rtt_seconds": 0.04130959510803223,
+      "bandwidth_mbps": 4738.484602594972,
+      "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43",
+      "architecture": "aarch64"
+    },
+    {
+      "node_id": "cloud",
+      "kind": "cloud",
+      "vm_name": "nl-os-1fa509592a5d-cloud",
+      "host": "10.83.80.215",
+      "cpus": 2,
+      "memory_mib": 3891,
+      "memory_capacity_mib": 256,
+      "backend": "container-local",
+      "concurrency": 1,
+      "hpa_active": false,
+      "ready": true,
+      "peer_count": 0,
+      "image_digests": {
+        "one-shot-workload": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+      },
+      "clock_offset_seconds": -0.02146005630493164,
+      "clock_uncertainty_seconds": 0.020496726036071777,
+      "rtt_seconds": 0.040993452072143555,
+      "bandwidth_mbps": 3900.5467542018773,
+      "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43",
+      "architecture": "aarch64"
+    }
+  ]
+}

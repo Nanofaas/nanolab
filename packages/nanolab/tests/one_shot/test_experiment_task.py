@@ -123,13 +123,15 @@ def test_ambiguous_bad_gateway_is_censored_but_explicit_admission_refusal_is_ter
 
     row = {
         "statusCode": 502,
+        "offloadedTarget": "http://peer:8080",
         "responseStatus": None,
         "outputJson": None,
         "responseBody": "upstream unavailable",
     }
     assert not classify_result(row, expected="42", physical=[])["terminalError"]
     row["responseBody"] = (
-        '{"error":"OFFLOAD_FAILED","message":"remote returned 429: queue full"}'
+        '{"error":"OFFLOAD_FAILED",'
+        '"message":"remote http://peer:8080 returned 429: queue full"}'
     )
     assert classify_result(row, expected="42", physical=[])["terminalError"]
     row.update(statusCode=200, responseStatus="error")
@@ -137,6 +139,30 @@ def test_ambiguous_bad_gateway_is_censored_but_explicit_admission_refusal_is_ter
     assert classify_result(row, expected="42", physical=[{"state": "RELEASED"}])[
         "terminalError"
     ]
+
+
+@pytest.mark.parametrize(
+    ("message", "target"),
+    [
+        ("remote http://peer:8080 returned 500: returned 429", "http://peer:8080"),
+        ("remote http://peer:8080 returned 4290: failure", "http://peer:8080"),
+        ("remote http://other:8080 returned 429: failure", "http://peer:8080"),
+        ("remote http://peer:8080 returned 429: failure", None),
+    ],
+)
+def test_admission_refusal_requires_exact_gateway_target_and_status(message, target):
+    import json
+
+    from nanolab.tasks.one_shot.experiment import classify_result
+
+    row = {
+        "statusCode": 502,
+        "offloadedTarget": target,
+        "responseStatus": None,
+        "outputJson": None,
+        "responseBody": json.dumps({"error": "OFFLOAD_FAILED", "message": message}),
+    }
+    assert not classify_result(row, expected="42", physical=[])["terminalError"]
 
 
 @pytest.mark.parametrize("censored", [False, True])
@@ -258,3 +284,53 @@ def test_proxy_admission_error_is_terminal_without_an_invented_sdk_receipt():
         }
     )
     assert not classify_result(row, expected="7", physical=[])["terminalError"]
+
+
+def test_artifact_write_failure_keeps_primary_load_error_and_attempts_cleanup(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "manifest.json").write_text(manifest().model_dump_json())
+    actions = []
+
+    class Child:
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            actions.append("terminate")
+            self.returncode = -15
+
+        def wait(self, **kwargs):
+            actions.append("wait")
+            return self.returncode
+
+    freeze = SimpleNamespace(
+        run_dir=tmp_path,
+        clock="clock",
+        settings=SimpleNamespace(experiment=SimpleNamespace(fail_load=True)),
+    )
+    values = {
+        "generator": Child(),
+        "collector": SimpleNamespace(close=lambda: actions.append("close")),
+        "clock": object(),
+    }
+    inputs = cast(Any, SimpleNamespace(resource=lambda key: values[key]))
+
+    def write(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("nanolab.tasks.one_shot.experiment.append_observation", write)
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.collect_runtime_evidence",
+        lambda *args: actions.append("collect"),
+    )
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.collect_original_evidence",
+        lambda *args: actions.append("evidence"),
+    )
+    with pytest.raises(RuntimeError, match="injected load-task failure") as error:
+        RunOneShotLoadTask(freeze, "generator", "collector").run(inputs)
+    assert actions == ["close", "terminate", "wait", "collect", "evidence"]
+    assert any("No space left" in note for note in error.value.__notes__)

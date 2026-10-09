@@ -6,6 +6,7 @@ import math
 import platform
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -143,7 +144,42 @@ def environment_identity(
     built: Any,
 ) -> tuple[str, dict[str, str]]:
     """Bind stable hardware/configuration/image facts, excluding run names and IPs."""
-    cpu_info = Path("/proc/cpuinfo").read_bytes()
+    cpu_snapshot = Path("/proc/cpuinfo").read_bytes()
+    stable_keys = {
+        "processor",
+        "vendor_id",
+        "cpu family",
+        "model",
+        "model name",
+        "stepping",
+        "microcode",
+        "cpu cores",
+        "siblings",
+        "core id",
+        "physical id",
+        "cache size",
+        "address sizes",
+        "flags",
+        "features",
+        "cpu implementer",
+        "cpu architecture",
+        "cpu variant",
+        "cpu part",
+        "cpu revision",
+    }
+    records = []
+    for block in cpu_snapshot.decode().split("\n\n"):
+        record = {}
+        for line in block.splitlines():
+            key, separator, value = line.partition(":")
+            key = key.strip().lower()
+            if separator and key in stable_keys:
+                record[key] = value.strip()
+        if record:
+            records.append(record)
+    if not records:
+        raise ValueError("no stable CPU identity/topology fields")
+    cpu_info = canonical_bytes(records)
     if any(not node.os or not node.architecture for node in topology.nodes):
         raise ValueError("missing measured VM OS/architecture fingerprint")
     environment = {
@@ -181,7 +217,8 @@ def environment_identity(
         },
         "flowQuantum": settings.flow_quantum,
     }
-    return "sha256:" + content_hash(canonical_bytes(identity)), environment
+    fingerprint = "sha256:" + content_hash(canonical_bytes(identity))
+    return fingerprint, environment
 
 
 class _CalibrationTask[T](Task[T]):
@@ -208,6 +245,15 @@ class WarmupTask(_CalibrationTask[dict[str, Any]]):
         preflight = inputs.upstream()
         built = inputs.resource(self.topology.distribution)
         fingerprint, environment = environment_identity(self.settings, preflight, built)
+        write_immutable_artifact(
+            self.run_dir / "cpu-runtime-observations.json",
+            canonical_bytes(
+                {
+                    "observedAt": datetime.now(UTC).isoformat(),
+                    "rawCpuInfo": Path("/proc/cpuinfo").read_text(),
+                }
+            ),
+        )
         value: dict[str, Any] = {
             "fingerprint": fingerprint,
             "environment": environment,

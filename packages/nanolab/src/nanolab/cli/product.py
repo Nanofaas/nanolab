@@ -868,6 +868,7 @@ def _execute_workflow(
             sonata_workflow.keep = keep
             selection = Selection(only=only, start=start, until=until)
             observers = _workflow_observers(scenario)
+            one_shot_workflow_completed = False
             try:
                 _run_selected_workflow(
                     sonata_workflow,
@@ -929,6 +930,7 @@ def _execute_workflow(
                     and effective_run_dir is not None
                 ):
                     _print_offload_summary(effective_run_dir)
+                one_shot_workflow_completed = True
             except SelectionError as error:
                 raise typer.BadParameter(str(error)) from None
             finally:
@@ -940,7 +942,10 @@ def _execute_workflow(
 
                     # Report failures must not mask the original workflow error.
                     try:
-                        render_campaign(effective_run_dir)
+                        render_campaign(
+                            effective_run_dir,
+                            workflow_completed=one_shot_workflow_completed,
+                        )
                     except Exception as error:
                         typer.echo(f"one-shot report unavailable: {error}", err=True)
 

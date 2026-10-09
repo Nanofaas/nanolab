@@ -1,0 +1,78 @@
+workflow: one-shot-qualification
+backend: container
+functions:
+- one-shot-workload-rust
+oneShot:
+  provider: multipass
+  purpose: workflow-validation
+  nodes:
+  - id: edge-0
+    kind: edge
+    cpus: 2
+    memoryMiB: 4096
+    memoryCapacityMiB: 256
+  - id: edge-1
+    kind: edge
+    cpus: 2
+    memoryMiB: 4096
+    memoryCapacityMiB: 256
+  - id: cloud
+    kind: cloud
+    cpus: 2
+    memoryMiB: 4096
+    memoryCapacityMiB: 256
+  functions:
+    one-shot-workload-rust:
+      input:
+        iterations: 20000000
+        working_set_bytes: 4096
+        seed: 7
+      cpu: 1
+      memoryMiB: 128
+      maxReplicas: 2
+      utilization: 0.8
+  seed: 7
+  profile:
+    path: /tmp/oneshot-b6-cli/calibration-peer-errors/profile.json
+    sha256: afd05d350c7803bc9bca3f0f426673e4e3c8f4550f110246448c580a4a685875
+  timing:
+    periodCandidatesSeconds:
+    - 20
+    - 30
+    maxTraceResolutionSeconds: 30
+    minSamples: 10
+    quantile: 0.9
+    marginSeconds: 0.2
+    readyMarginSeconds: 0.3
+    epsilon: 0.1
+    measurementLeadSeconds: 3
+    maxCensoredFraction: 0
+    protocol:
+      auctionSeconds: 0.6
+      peerSeconds: 0.15
+      solverSeconds: 0.15
+      preparationSeconds: 1
+      maxRounds: 8
+      parallelism: 4
+      queueCapacity: 64
+      maxPeers: 16
+      maxSolverStates: 2000000
+      maxSolverBytes: 67108864
+    matrix:
+    - id: balanced
+      network: observed-local
+      rates:
+        edge-0:
+          one-shot-workload-rust: 4
+        edge-1:
+          one-shot-workload-rust: 4
+    - id: imbalanced
+      network: observed-local
+      rates:
+        edge-0:
+          one-shot-workload-rust: 24
+        edge-1:
+          one-shot-workload-rust: 0
+  runtimeDistribution:
+    path: /tmp/oneshot-runtime-build-v5/distribution/distribution.json
+    sha256: 356b27df9e01ef2deefde0183e7d60555a974eac4641299a6cf3c6048efcaf64

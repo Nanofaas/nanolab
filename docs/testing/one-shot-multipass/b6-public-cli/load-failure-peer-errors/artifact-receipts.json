@@ -1,0 +1,140 @@
+[
+  {
+    "originalPath": "comparison.json",
+    "originalBytes": 19401,
+    "originalSha256": "eb75c48ad7ad40a4d8ee814e52847fbc86ed1050b650fe0f6fe54e0d93adba9a",
+    "storedPath": "comparison.json"
+  },
+  {
+    "originalPath": "rep-0-ewma/api.jsonl",
+    "originalBytes": 2190,
+    "originalSha256": "a05ab4149d6a82449d8ce302bce58678af3aac9807b2c7778f67931c6b4a078a",
+    "storedPath": "rep-0-ewma/api.jsonl"
+  },
+  {
+    "originalPath": "rep-0-ewma/clock.jsonl",
+    "originalBytes": 612,
+    "originalSha256": "5f718f7295c555697455ac9d6c90013a2b0c8298be8b78190db09900d295c064",
+    "storedPath": "rep-0-ewma/clock.jsonl"
+  },
+  {
+    "originalPath": "rep-0-ewma/cloud-metrics.txt",
+    "originalBytes": 56922,
+    "originalSha256": "252cb5c8f0be2c2582aaebbd5f9485ea100ec2572a1dd06bd5ad17c6adb43ec1",
+    "storedPath": "rep-0-ewma/cloud-metrics.txt"
+  },
+  {
+    "originalPath": "rep-0-ewma/cloud-one-shot-workload-1-metrics.txt",
+    "originalBytes": 2497,
+    "originalSha256": "0d10f4b3545844ded2ac293d9af80a8cfb3944fb5d822de23633ffc2af402371",
+    "storedPath": "rep-0-ewma/cloud-one-shot-workload-1-metrics.txt"
+  },
+  {
+    "originalPath": "rep-0-ewma/cloud-one-shot-workload-2-metrics.txt",
+    "originalBytes": 2497,
+    "originalSha256": "0d10f4b3545844ded2ac293d9af80a8cfb3944fb5d822de23633ffc2af402371",
+    "storedPath": "rep-0-ewma/cloud-one-shot-workload-2-metrics.txt"
+  },
+  {
+    "originalPath": "rep-0-ewma/collection-errors.jsonl",
+    "originalBytes": 360,
+    "originalSha256": "6d94eeefbc650413b94c9f642b0ca1ae3b69732c02fc26d55a82e4ab136d09ca",
+    "storedPath": "rep-0-ewma/collection-errors.jsonl"
+  },
+  {
+    "originalPath": "rep-0-ewma/edge-0-metrics.txt",
+    "originalBytes": 58629,
+    "originalSha256": "66237d5db4e50df59247c3178fe2ed649d5c45a68ef263c7468921a4a4eaf358",
+    "storedPath": "rep-0-ewma/edge-0-metrics.txt"
+  },
+  {
+    "originalPath": "rep-0-ewma/edge-0-one-shot-workload-1-metrics.txt",
+    "originalBytes": 2497,
+    "originalSha256": "0d10f4b3545844ded2ac293d9af80a8cfb3944fb5d822de23633ffc2af402371",
+    "storedPath": "rep-0-ewma/edge-0-one-shot-workload-1-metrics.txt"
+  },
+  {
+    "originalPath": "rep-0-ewma/edge-1-metrics.txt",
+    "originalBytes": 58639,
+    "originalSha256": "b57655bb1b0d2cd9b8ae93e863e677bc74259cd59ba9f1ebef633b2e7da52db7",
+    "storedPath": "rep-0-ewma/edge-1-metrics.txt"
+  },
+  {
+    "originalPath": "rep-0-ewma/edge-1-one-shot-workload-1-metrics.txt",
+    "originalBytes": 2497,
+    "originalSha256": "0d10f4b3545844ded2ac293d9af80a8cfb3944fb5d822de23633ffc2af402371",
+    "storedPath": "rep-0-ewma/edge-1-one-shot-workload-1-metrics.txt"
+  },
+  {
+    "originalPath": "rep-0-ewma/evidence.json",
+    "originalBytes": 3448,
+    "originalSha256": "1bd0698636c275113e5a0a04e0e69d20dd077e7558eb2495cbb10c35beb24c52",
+    "storedPath": "rep-0-ewma/evidence.json"
+  },
+  {
+    "originalPath": "rep-0-ewma/generator.jsonl",
+    "originalBytes": 0,
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "storedPath": "rep-0-ewma/generator.jsonl"
+  },
+  {
+    "originalPath": "rep-0-ewma/load-status.jsonl",
+    "originalBytes": 56,
+    "originalSha256": "013628dcccf258938e84d01419697f87b98ede6f3c2df194bcb5a66c08b01e76",
+    "storedPath": "rep-0-ewma/load-status.jsonl"
+  },
+  {
+    "originalPath": "rep-0-ewma/manifest.json",
+    "originalBytes": 7668,
+    "originalSha256": "c194fb10af462e341e28f254edf4e2e18ccf628197625e83adab1fe0eaf1c000",
+    "storedPath": "rep-0-ewma/manifest.json"
+  },
+  {
+    "originalPath": "rep-0-ewma/metrics.jsonl",
+    "originalBytes": 1877,
+    "originalSha256": "99776eaaf0596c48dee785a9ec0bd70ca1deff7741c50718eefba088108f4a89",
+    "storedPath": "rep-0-ewma/metrics.jsonl"
+  },
+  {
+    "originalPath": "rep-0-ewma/preflight.json",
+    "originalBytes": 2531,
+    "originalSha256": "674371b13365104d04ca83a8241497e1dbbfe3be37e936f410e5b0d67328dec0",
+    "storedPath": "rep-0-ewma/preflight.json"
+  },
+  {
+    "originalPath": "rep-0-ewma/report.json",
+    "originalBytes": 16738,
+    "originalSha256": "7ab10ddc34ae3abb7751a94c1c2ac7385297dc8e051b16b1a1bb6ac8a387e671",
+    "storedPath": "rep-0-ewma/report.json"
+  },
+  {
+    "originalPath": "rep-0-ewma/runtime-distribution.json",
+    "originalBytes": 1276,
+    "originalSha256": "356b27df9e01ef2deefde0183e7d60555a974eac4641299a6cf3c6048efcaf64",
+    "storedPath": "rep-0-ewma/runtime-distribution.json"
+  },
+  {
+    "originalPath": "rep-0-ewma/runtime-inventory.jsonl",
+    "originalBytes": 20308,
+    "originalSha256": "0132ecbf8bd1d828463d5c9cae32934c2e867bf685fa58460314961af88b5a64",
+    "storedPath": "rep-0-ewma/runtime-inventory.jsonl"
+  },
+  {
+    "originalPath": "rep-0-ewma/schedule.json",
+    "originalBytes": 157111,
+    "originalSha256": "361729f58a06b028c2535dd8f27a615b1579893c47c8545af87bc41504ac43fb",
+    "storedPath": "rep-0-ewma/schedule.json"
+  },
+  {
+    "originalPath": "rep-0-ewma/trace.json",
+    "originalBytes": 380,
+    "originalSha256": "9e9d33d16241db6f223b1eb7bd032c4b5eab2fbcd82b20ea99b18429873a6da4",
+    "storedPath": "rep-0-ewma/trace.json"
+  },
+  {
+    "originalPath": "run-metadata.json",
+    "originalBytes": 16021,
+    "originalSha256": "c858cc9cbb55b9f98f654abe0d9c366b27a45d068f770e2e961c266a57f2c18a",
+    "storedPath": "run-metadata.json"
+  }
+]

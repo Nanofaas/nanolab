@@ -65,6 +65,24 @@ def task_fixture(tmp_path, monkeypatch, *, censored=False, release=True):
         target + "capture_replica_diagnostics",
         lambda *args, **kwargs: calls.append((kwargs["epoch"], "diagnostics")),
     )
+
+    class LoadedCell:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def require_healthy(self):
+            pass
+
+        def audit(self, **kwargs):
+            return {"valid": True, "method": "owned-http-sdk-contention-v1"}
+
+    monkeypatch.setattr(target + "QualificationLoad", LoadedCell, raising=False)
     topology = SimpleNamespace(
         resources=SimpleNamespace(
             nodes={node.id: SimpleNamespace(config=node) for node in settings.nodes}
@@ -132,6 +150,7 @@ def test_censored_transition_diagnostics_keep_container_identity_and_lookup_fail
         return "http://runtime", {"State": {"StartedAt": "timestamp"}}
 
     monkeypatch.setattr("nanolab.tasks.one_shot.qualification.runtime_endpoint", lookup)
+
     topology = SimpleNamespace(
         resources=SimpleNamespace(nodes={"edge-0": object()}),
         function_settings={"work": SimpleNamespace(max_replicas=2)},
@@ -142,3 +161,38 @@ def test_censored_transition_diagnostics_keep_container_identity_and_lookup_fail
     assert rows[0]["container"]["State"]["StartedAt"] == "timestamp"
     assert rows[1]["error"] == "replica missing"
     assert all(row["epoch"] == 10 for row in rows)
+
+
+def test_qualification_freezes_owned_loaded_scope(tmp_path, monkeypatch):
+    task, inputs, calls = task_fixture(tmp_path, monkeypatch)
+
+    class Load:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            calls.append(("load", "begin"))
+            return self
+
+        def __exit__(self, *args):
+            calls.append(("load", "close"))
+
+        def require_healthy(self):
+            calls.append(("load", "health"))
+
+        def audit(self, **kwargs):
+            return {
+                "valid": True,
+                "emitted": 100,
+                "physicalCompletions": 100,
+                "method": "owned-http-sdk-contention-v1",
+            }
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.qualification.QualificationLoad", Load, raising=False
+    )
+    result = task.run(inputs).value
+    assert result is not None and result.qualified
+    assert all(cast(dict, row["load"])["valid"] for row in result.matrix)
+    assert calls.count(("load", "begin")) == calls.count(("load", "close")) == 2
+    assert calls.count(("load", "health")) >= 20

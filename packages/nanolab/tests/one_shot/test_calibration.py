@@ -282,3 +282,74 @@ def test_invalid_runtime_transport_or_release_evidence_never_qualifies(failure):
     assert sample["state"] != "complete"
     if failure == "proof-http":
         assert "proofError" in sample
+
+
+def test_frequency_changes_do_not_change_hardware_fingerprint(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from nanolab.config.one_shot import OneShotConfig
+    from nanolab.tasks.one_shot.calibration import environment_identity
+
+    settings = OneShotConfig.model_validate(
+        {
+            "provider": "multipass",
+            "purpose": "workflow-validation",
+            "nodes": [
+                {"id": "edge", "kind": "edge"},
+                {"id": "edge-1", "kind": "edge"},
+                {"id": "cloud", "kind": "cloud"},
+            ],
+            "functions": {"work": {"input": {}}},
+        }
+    )
+    topology = cast(Any, SimpleNamespace(nodes=[]))
+    built = SimpleNamespace(source={}, recipe_sha256="recipe", components=[])
+    original = Path.read_bytes
+    cpu = (
+        b"processor : 0\nmodel name : Stable CPU\n"
+        b"cpu MHz : 800.000\nbogomips : 2000.00\n"
+    )
+
+    def read(path):
+        return cpu if str(path) == "/proc/cpuinfo" else original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    first = environment_identity(settings, topology, built)[0]
+    cpu = cpu.replace(b"800.000", b"3200.000").replace(b"2000.00", b"5000.00")
+    assert environment_identity(settings, topology, built)[0] == first
+    cpu = cpu.replace(b"Stable CPU", b"Other CPU")
+    assert environment_identity(settings, topology, built)[0] != first
+
+
+def test_stable_cpu_environment_still_satisfies_frozen_profile_contract(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from nanolab.config.one_shot import OneShotConfig
+    from nanolab.one_shot.contracts import contract_asset
+    from nanolab.one_shot.models import CalibrationProfile
+    from nanolab.tasks.one_shot.calibration import environment_identity
+
+    settings = OneShotConfig.model_validate(
+        {
+            "provider": "multipass",
+            "purpose": "workflow-validation",
+            "nodes": [
+                {"id": "edge-0", "kind": "edge"},
+                {"id": "edge-1", "kind": "edge"},
+                {"id": "cloud", "kind": "cloud"},
+            ],
+            "functions": {"work": {"input": {}}},
+        }
+    )
+    _, environment = environment_identity(
+        settings,
+        cast(Any, SimpleNamespace(nodes=[])),
+        SimpleNamespace(source={}, recipe_sha256="recipe", components=[]),
+    )
+    doc = json.loads(contract_asset("examples/synthetic-profile.json").read_bytes())
+    doc["environment"] = environment
+    CalibrationProfile.model_validate(doc)

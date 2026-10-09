@@ -187,3 +187,49 @@ def test_standard_baseline_without_node_header_uses_sdk_and_one_hop_target():
     assert verify_observations(
         attempts, results, require_execution_node=False, **kwargs
     )[0]
+
+
+def test_comparison_cannot_relax_immutable_profile_tolerance():
+    profile = SimpleNamespace(
+        functions=[
+            {
+                "function": "work",
+                "serviceSeconds": 0.1,
+                "validity": {"maxRelativeCapacityError": 0.1},
+            }
+        ]
+    )
+    attempts = [{**proof(), "originalId": "x", "occupancySeconds": 0.18}]
+    results = [{"originalId": "x", "executionNode": "cloud"}]
+    violations, _ = verify_observations(
+        attempts, results, profile=profile, tolerance=0.95, nodes=["cloud"]
+    )
+    assert any("service drift" in item for item in violations)
+
+
+def test_warmup_requires_timed_unique_emissions_and_returned_outcomes():
+    from nanolab.tasks.one_shot.verification import verify_warmup
+
+    schedule = [{"phase": "warmup", "originalId": "w", "scheduledAt": 10}]
+    emitted = {
+        "phase": "warmup",
+        "event": "emitted",
+        "originalId": "w",
+        "scheduledAt": 10,
+        "emittedAt": 10.01,
+    }
+    result = {
+        **emitted,
+        "event": "result",
+        "finishedAt": 10.2,
+        "statusCode": 200,
+        "responseStatus": "success",
+    }
+    assert verify_warmup(schedule, [emitted, result], max_lateness=0.25)["valid"]
+    assert not verify_warmup(schedule, [emitted], max_lateness=0.25)["valid"]
+    assert not verify_warmup(
+        schedule, [{**emitted, "emittedAt": 11}, result], max_lateness=0.25
+    )["valid"]
+    assert not verify_warmup(schedule, [emitted, emitted, result], max_lateness=0.25)[
+        "valid"
+    ]

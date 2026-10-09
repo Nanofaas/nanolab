@@ -1,0 +1,74 @@
+{
+  "summary": {
+    "changed_count": 9,
+    "affected_count": 0,
+    "changed_files": 5,
+    "risk_level": "low"
+  },
+  "changed_symbols": [
+    {
+      "id": "Section:docs/one-shot.md:L1:One-shot offload in NanoFaaS",
+      "name": "One-shot offload in NanoFaaS",
+      "type": "Section",
+      "filePath": "docs/one-shot.md",
+      "change_type": "touched"
+    },
+    {
+      "id": "Section:docs/one-shot.md:L99:Native invocation routing",
+      "name": "Native invocation routing",
+      "type": "Section",
+      "filePath": "docs/one-shot.md",
+      "change_type": "touched"
+    },
+    {
+      "id": "Class:platform/control-plane/src/main/java/it/unimib/datai/nanofaas/controlplane/api/InvocationController.java:InvocationController",
+      "name": "InvocationController",
+      "type": "Class",
+      "filePath": "platform/control-plane/src/main/java/it/unimib/datai/nanofaas/controlplane/api/InvocationController.java",
+      "change_type": "touched"
+    },
+    {
+      "id": "Method:platform/control-plane/src/main/java/it/unimib/datai/nanofaas/controlplane/api/InvocationController.java:InvocationController.offloadFailed#1",
+      "name": "offloadFailed",
+      "type": "Method",
+      "filePath": "platform/control-plane/src/main/java/it/unimib/datai/nanofaas/controlplane/api/InvocationController.java",
+      "change_type": "touched"
+    },
+    {
+      "id": "Class:platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/api/InvocationControllerTest.java:InvocationControllerTest",
+      "name": "InvocationControllerTest",
+      "type": "Class",
+      "filePath": "platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/api/InvocationControllerTest.java",
+      "change_type": "touched"
+    },
+    {
+      "id": "Method:platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/api/InvocationControllerTest.java:InvocationControllerTest.invokeSync_offloadFailed_returns502WithTargetHeader#0",
+      "name": "invokeSync_offloadFailed_returns502WithTargetHeader",
+      "type": "Method",
+      "filePath": "platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/api/InvocationControllerTest.java",
+      "change_type": "touched"
+    },
+    {
+      "id": "Method:platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/api/InvocationControllerTest.java:InvocationControllerTest.invokeSync_offloadGatewayTimeout_returns504#0",
+      "name": "invokeSync_offloadGatewayTimeout_returns504",
+      "type": "Method",
+      "filePath": "platform/control-plane/src/test/java/it/unimib/datai/nanofaas/controlplane/api/InvocationControllerTest.java",
+      "change_type": "touched"
+    },
+    {
+      "id": "Class:platform/modules/offload/src/test/java/it/unimib/datai/nanofaas/modules/offload/DefaultOffloadGatewayTest.java:DefaultOffloadGatewayTest",
+      "name": "DefaultOffloadGatewayTest",
+      "type": "Class",
+      "filePath": "platform/modules/offload/src/test/java/it/unimib/datai/nanofaas/modules/offload/DefaultOffloadGatewayTest.java",
+      "change_type": "touched"
+    },
+    {
+      "id": "Method:platform/modules/offload/src/test/java/it/unimib/datai/nanofaas/modules/offload/DefaultOffloadGatewayTest.java:DefaultOffloadGatewayTest.successResponseMapsToSuccessResultAndForwardsHeaders#0",
+      "name": "successResponseMapsToSuccessResultAndForwardsHeaders",
+      "type": "Method",
+      "filePath": "platform/modules/offload/src/test/java/it/unimib/datai/nanofaas/modules/offload/DefaultOffloadGatewayTest.java",
+      "change_type": "touched"
+    }
+  ],
+  "affected_processes": []
+}

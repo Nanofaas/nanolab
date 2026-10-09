@@ -1,0 +1,45 @@
+# HELP nanofaas_runtime_active_handlers Physically occupied handler reservations.
+# TYPE nanofaas_runtime_active_handlers gauge
+nanofaas_runtime_active_handlers 0
+# HELP nanofaas_runtime_replica_occupancy_seconds Physical handler reservation occupancy.
+# TYPE nanofaas_runtime_replica_occupancy_seconds histogram
+nanofaas_runtime_replica_occupancy_seconds_sum 0.76260235
+nanofaas_runtime_replica_occupancy_seconds_count 6
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="0.005"} 0
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="0.01"} 0
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="0.025"} 0
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="0.05"} 0
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="0.1"} 0
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="0.25"} 6
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="0.5"} 6
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="1.0"} 6
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="2.5"} 6
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="5.0"} 6
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="10.0"} 6
+nanofaas_runtime_replica_occupancy_seconds_bucket{le="+Inf"} 6
+# HELP nanofaas_runtime_invocations Total runtime invocations by status.
+# TYPE nanofaas_runtime_invocations counter
+nanofaas_runtime_invocations_total{status="success"} 6
+# HELP nanofaas_runtime_handler_duration_seconds Handler execution duration.
+# TYPE nanofaas_runtime_handler_duration_seconds histogram
+nanofaas_runtime_handler_duration_seconds_sum 0.762342183
+nanofaas_runtime_handler_duration_seconds_count 6
+nanofaas_runtime_handler_duration_seconds_bucket{le="0.005"} 0
+nanofaas_runtime_handler_duration_seconds_bucket{le="0.01"} 0
+nanofaas_runtime_handler_duration_seconds_bucket{le="0.025"} 0
+nanofaas_runtime_handler_duration_seconds_bucket{le="0.05"} 0
+nanofaas_runtime_handler_duration_seconds_bucket{le="0.1"} 0
+nanofaas_runtime_handler_duration_seconds_bucket{le="0.25"} 6
+nanofaas_runtime_handler_duration_seconds_bucket{le="0.5"} 6
+nanofaas_runtime_handler_duration_seconds_bucket{le="1.0"} 6
+nanofaas_runtime_handler_duration_seconds_bucket{le="2.5"} 6
+nanofaas_runtime_handler_duration_seconds_bucket{le="5.0"} 6
+nanofaas_runtime_handler_duration_seconds_bucket{le="10.0"} 6
+nanofaas_runtime_handler_duration_seconds_bucket{le="+Inf"} 6
+# HELP nanofaas_runtime_callback_drops Callbacks rejected or exhausted before successful delivery.
+# TYPE nanofaas_runtime_callback_drops counter
+nanofaas_runtime_callback_drops_total 6
+# HELP nanofaas_runtime_cold_starts Total cold starts observed by the runtime.
+# TYPE nanofaas_runtime_cold_starts counter
+nanofaas_runtime_cold_starts_total 1
+# EOF

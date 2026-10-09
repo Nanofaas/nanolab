@@ -1,0 +1,1 @@
+{"flow_quantum":1.0,"functions":["one-shot-workload"],"nodes":["edge-0","edge-1"],"payloads":{"one-shot-workload":{"iterations":20000000,"seed":7,"working_set_bytes":4096}},"period_seconds":20.0,"schema_version":1,"seed":7,"windows":[{"edge-0":{"one-shot-workload":4.0},"edge-1":{"one-shot-workload":4.0}},{"edge-0":{"one-shot-workload":15.0},"edge-1":{"one-shot-workload":0.0}}]}

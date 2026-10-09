@@ -209,7 +209,7 @@ def render_report(
     return _write(summarize(manifest, evidence), output, f"One-shot {manifest.mode}")
 
 
-def render_campaign(run_dir: Path) -> Path:
+def render_campaign(run_dir: Path, *, workflow_completed: bool | None = None) -> Path:
     """Require every frozen mode and repetition; report incomplete runs visibly."""
     manifests = []
     rows = []
@@ -248,8 +248,15 @@ def render_campaign(run_dir: Path) -> Path:
     expected = repetitions * len(modes)
     required = {(rep, mode) for rep in range(repetitions) for mode in modes}
     observed = {(m.repetition, m.mode) for m in manifests}
+    metadata_path = run_dir / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+    workflow_ok = (
+        workflow_completed is True
+        or (workflow_completed is None and metadata.get("status") == "passed")
+    ) and metadata.get("status") not in {"failed", "cancelled", "running"}
     valid = bool(
-        expected
+        workflow_ok
+        and expected
         and len(rows) == expected
         and observed == required
         and all(sorted(m.modes) == sorted(modes) for m in manifests)
@@ -279,7 +286,12 @@ def render_campaign(run_dir: Path) -> Path:
             "method": "seeded-percentile-bootstrap",
         }
     return _write(
-        {"validComparison": valid, "runs": rows, "betweenRepetitions": between},
+        {
+            "validComparison": valid,
+            "workflowCompleted": workflow_ok,
+            "runs": rows,
+            "betweenRepetitions": between,
+        },
         run_dir / "comparison.html",
         "One-shot workflow-validation comparison",
     )

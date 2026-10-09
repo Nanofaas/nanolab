@@ -1,0 +1,56 @@
+[
+  {
+    "originalPath": "capacity-samples.jsonl",
+    "originalBytes": 138318,
+    "originalSha256": "ec532929915c91dfcb14c8fcf2dd361dbc64950ccf8a13a3ee94573da691444b",
+    "storedPath": "capacity-samples.jsonl"
+  },
+  {
+    "originalPath": "capacity.jsonl",
+    "originalBytes": 1753,
+    "originalSha256": "94682e8d9468038c14ea180208367c5c20c254e3b9be2b8c12ad7d76a5790750",
+    "storedPath": "capacity.jsonl"
+  },
+  {
+    "originalPath": "clock.jsonl",
+    "originalBytes": 1843,
+    "originalSha256": "82da1da1ed225c7e56a48a713d2255fa79e8e4dc82209de83c20487186511eec",
+    "storedPath": "clock.jsonl"
+  },
+  {
+    "originalPath": "preflight.json",
+    "originalBytes": 2535,
+    "originalSha256": "12991a371b1c210f1ba26dc00732b2b7ba3747c57b86c3ec51512408bc555a11",
+    "storedPath": "preflight.json"
+  },
+  {
+    "originalPath": "readiness.jsonl",
+    "originalBytes": 575,
+    "originalSha256": "ce8b90f699d27eefed280a93002feaf1bc6140e11071c22bbe0b7d90bd05a6a5",
+    "storedPath": "readiness.jsonl"
+  },
+  {
+    "originalPath": "run-metadata.json",
+    "originalBytes": 15238,
+    "originalSha256": "7f5cba45028632441f5542ea4d643f7ac9829f3aa6e22dbbf04795229a7af28e",
+    "storedPath": "run-metadata.json"
+  },
+  {
+    "originalPath": "runtime-distribution.json",
+    "originalBytes": 1273,
+    "originalSha256": "dba38b80ac9f58daa1134f5885f1a24fd40bfa278e3adf8500d56dc40604d2f4",
+    "storedPath": "runtime-distribution.json"
+  },
+  {
+    "originalPath": "samples.jsonl",
+    "originalBytes": 80571,
+    "originalSha256": "285870470973e5b3377e99664ddd984233e60f2e2b3268a7abca89d506305719",
+    "storedPath": "samples.jsonl"
+  },
+  {
+    "originalPath": "warmup.jsonl",
+    "originalBytes": 9225,
+    "originalSha256": "a452a050734144ab46286b6b3c135942a8423682f044919239a48cc04a1a5021",
+    "storedPath": "warmup.jsonl"
+  }
+]

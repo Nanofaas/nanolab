@@ -67,7 +67,12 @@ def verify_observations(
             "meanSeconds": mean,
             "drift": drift,
         }
-        if drift > tolerance:
+        profile_limit = (
+            next(row for row in profile.functions if row["function"] == name)
+            .get("validity", {})
+            .get("maxRelativeCapacityError", tolerance)
+        )
+        if drift > min(tolerance, profile_limit):
             violations.append(
                 f"physical service drift exceeds tolerance: {node}/{name}"
             )
@@ -156,3 +161,49 @@ def realized_utility(cells, *, functions, cloud) -> float | None:
             fn.alpha * local + fn.delta * peer - fn.gamma * (terminal + cell["errors"])
         )
     return welfare / planned
+
+
+def verify_warmup(schedule, rows, *, max_lateness):
+    """Account for warmup arrivals and HTTP outcomes separately from SDK completions."""
+    planned = {
+        row["originalId"]: row for row in schedule if row.get("phase") == "warmup"
+    }
+    emitted = [
+        row
+        for row in rows
+        if row.get("phase") == "warmup" and row.get("event") == "emitted"
+    ]
+    returned = [
+        row
+        for row in rows
+        if row.get("phase") == "warmup" and row.get("event") == "result"
+    ]
+    emitted_ids = [row["originalId"] for row in emitted]
+    returned_ids = [row["originalId"] for row in returned]
+    valid = bool(
+        planned
+        and len(emitted_ids) == len(set(emitted_ids)) == len(planned)
+        and len(returned_ids) == len(set(returned_ids)) == len(planned)
+        and set(emitted_ids) == set(returned_ids) == set(planned)
+    )
+    for row in emitted:
+        lateness = row["emittedAt"] - planned.get(row["originalId"], row)["scheduledAt"]
+        valid = valid and -0.001 <= lateness <= max_lateness
+    for row in returned:
+        valid = (
+            valid
+            and row.get("finishedAt", -1) >= row["emittedAt"]
+            and 0 < row.get("statusCode", 0) < 600
+        )
+    return {
+        "planned": len(planned),
+        "emitted": len(emitted),
+        "returned": len(returned),
+        "httpErrors": sum(
+            row.get("statusCode", 0) >= 400
+            or str(row.get("responseStatus", "")).upper() == "ERROR"
+            for row in returned
+        ),
+        "valid": bool(valid),
+        "basis": "generator HTTP outcomes; separate from campaign SDK completions",
+    }

@@ -30,6 +30,7 @@ from nanolab.tasks.one_shot.artifacts import (
 from nanolab.tasks.one_shot.calibration import environment_identity
 from nanolab.tasks.one_shot.clock import ClockMonitor
 from nanolab.tasks.one_shot.preflight import runtime_endpoint
+from nanolab.tasks.one_shot.qualification_load import QualificationLoad
 from nanolab.tasks.one_shot.timing import WallTimingSample, select_timing
 
 AUCTION_SUM = "nanofaas_oneshot_auction_seconds_sum"
@@ -414,63 +415,78 @@ class QualifyTimingTask(Task[TimingQualification]):
                     revision=client.status().revision,
                     output=self.run_dir / "api.jsonl",
                 )
-            for cell in timing.matrix:
+            for cell_number, cell in enumerate(timing.matrix):
                 if set(cell.rates) != set(clients):
                     raise ValueError("timing matrix must declare every edge")
                 samples = []
-                for number in range(timing.minimum_samples):
-                    monitor.require_healthy()
-                    starts = datetime.now(UTC) + timedelta(seconds=timing.lead_seconds)
-                    ends = starts + timedelta(seconds=period)
-                    for key, client in clients.items():
-                        rates = {
-                            self.topology.function_aliases[name]: rate
-                            for name, rate in cell.rates[key].items()
-                        }
-                        if set(rates) != set(self.topology.function_settings):
-                            raise ValueError(
-                                "timing matrix must declare every function"
-                            )
-                        if any(
-                            abs(
-                                rate / self.settings.flow_quantum
-                                - round(rate / self.settings.flow_quantum)
-                            )
-                            > 1e-9
-                            for rate in rates.values()
-                        ):
-                            raise ValueError(
-                                "oracle rate is not representable on flowQuantum"
-                            )
-                        revisions[key] = upload_window(
-                            client,
-                            node_id=key,
-                            epoch_start=starts,
-                            epoch_end=ends,
-                            rates=rates,
-                            revision=revisions[key],
+                measured_through = time.time()
+                with QualificationLoad(
+                    self.topology,
+                    self.settings,
+                    inputs,
+                    cell=cell,
+                    period=period,
+                    run_dir=self.run_dir / f"load-cell-{cell_number}",
+                    clock=monitor,
+                ) as loaded:
+                    for number in range(timing.minimum_samples):
+                        monitor.require_healthy()
+                        loaded.require_healthy()
+                        starts = datetime.now(UTC) + timedelta(
+                            seconds=timing.lead_seconds
                         )
-                    sample, observation = prepare_parallel_epoch(
-                        clients,
-                        epoch=epoch,
-                        starts_at=starts,
-                        ends_at=ends,
-                        output=self.run_dir / "timing-samples.jsonl",
-                    )
-                    append_observation(
-                        self.run_dir / "matrix.jsonl",
-                        {"cell": cell.id, "number": number, **observation},
-                    )
-                    if sample.censored:
-                        capture_replica_diagnostics(
-                            self.topology,
-                            inputs,
-                            self.run_dir / "replica-diagnostics.jsonl",
+                        ends = starts + timedelta(seconds=period)
+                        for key, client in clients.items():
+                            rates = {
+                                self.topology.function_aliases[name]: rate
+                                for name, rate in cell.rates[key].items()
+                            }
+                            if set(rates) != set(self.topology.function_settings):
+                                raise ValueError(
+                                    "timing matrix must declare every function"
+                                )
+                            if any(
+                                abs(
+                                    rate / self.settings.flow_quantum
+                                    - round(rate / self.settings.flow_quantum)
+                                )
+                                > 1e-9
+                                for rate in rates.values()
+                            ):
+                                raise ValueError(
+                                    "oracle rate is not representable on flowQuantum"
+                                )
+                            revisions[key] = upload_window(
+                                client,
+                                node_id=key,
+                                epoch_start=starts,
+                                epoch_end=ends,
+                                rates=rates,
+                                revision=revisions[key],
+                            )
+                        sample, observation = prepare_parallel_epoch(
+                            clients,
                             epoch=epoch,
+                            starts_at=starts,
+                            ends_at=ends,
+                            output=self.run_dir / "timing-samples.jsonl",
                         )
-                    samples.append(sample)
-                    epoch += 1
-                    wait_until(ends + timedelta(milliseconds=100), clock=monitor)
+                        append_observation(
+                            self.run_dir / "matrix.jsonl",
+                            {"cell": cell.id, "number": number, **observation},
+                        )
+                        if sample.censored:
+                            capture_replica_diagnostics(
+                                self.topology,
+                                inputs,
+                                self.run_dir / "replica-diagnostics.jsonl",
+                                epoch=epoch,
+                            )
+                        measured_through = time.time()
+                        samples.append(sample)
+                        epoch += 1
+                        wait_until(ends + timedelta(milliseconds=100), clock=monitor)
+                    load = loaded.audit(cutoff=measured_through)
                 result = select_timing(
                     samples,
                     period_candidates=timing.period_candidates,
@@ -486,7 +502,20 @@ class QualifyTimingTask(Task[TimingQualification]):
                     fingerprint=fingerprint,
                     profile_sha256=self.settings.profile.sha256,
                 )
-                cells.append({"cell": cell.model_dump(), "result": result.model_dump()})
+                if not load["valid"]:
+                    result = result.model_copy(
+                        update={
+                            "qualified": False,
+                            "reason": "NOT_QUALIFIED: actual handler load failed",
+                        }
+                    )
+                cells.append(
+                    {
+                        "cell": cell.model_dump(),
+                        "result": result.model_dump(),
+                        "load": load,
+                    }
+                )
                 all_samples.extend(samples)
             for client in clients.values():
                 if not client.drain_and_release():

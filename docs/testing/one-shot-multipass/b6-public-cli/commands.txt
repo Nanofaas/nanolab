@@ -13,3 +13,22 @@ NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-ca
 NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/experiment.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/experiment-3
 
 NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/load-failure.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/load-failure
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/calibration.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/calibration-stable
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/calibration.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/calibration-stable-2
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/qualification-loaded.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/qualification-loaded
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/experiment-loaded.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/experiment-loaded
+
+# Independent whole comparison; unchanged prerequisites after retained censored peer response.
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/experiment-loaded.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/experiment-loaded-2
+
+# New explicit runtime identity after preserving remote failure diagnostics.
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/calibration-peer-errors.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/calibration-peer-errors
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/qualification-peer-errors.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/qualification-peer-errors
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/experiment-peer-errors.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/experiment-peer-errors
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/load-failure-peer-errors.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/load-failure-peer-errors

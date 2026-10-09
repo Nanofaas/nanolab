@@ -102,7 +102,8 @@ def test_public_cli_load_failure_still_reports_and_preserves_original_error(
     def fail_load(*args, **kwargs):
         raise RuntimeError("load aborted")
 
-    def report(path):
+    def report(path, *, workflow_completed):
+        assert workflow_completed is False
         calls.append(path)
         if report_fails:
             raise ValueError("invalid report data")
