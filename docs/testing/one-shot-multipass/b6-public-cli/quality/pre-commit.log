@@ -1,0 +1,28 @@
+[INFO] Initializing environment for https://github.com/astral-sh/ruff-pre-commit.
+[INFO] Initializing environment for https://github.com/PyCQA/bandit.
+[INFO] Initializing environment for https://github.com/PyCQA/bandit:bandit[toml].
+[INFO] Initializing environment for https://github.com/pre-commit/pre-commit-hooks.
+[INFO] Installing environment for https://github.com/astral-sh/ruff-pre-commit.
+[INFO] Once installed this environment will be reused.
+[INFO] This may take a few minutes...
+[INFO] Installing environment for https://github.com/PyCQA/bandit.
+[INFO] Once installed this environment will be reused.
+[INFO] This may take a few minutes...
+[INFO] Installing environment for https://github.com/pre-commit/pre-commit-hooks.
+[INFO] Once installed this environment will be reused.
+[INFO] This may take a few minutes...
+ruff (lint)..............................................................Passed
+ruff (format)............................................................Passed
+basedpyright (nanolab)...................................................Passed
+basedpyright (tui-toolkit)...............................................Passed
+import-linter (nanolab)..................................................Passed
+import-linter (tui-toolkit)..............................................Passed
+bandit (nanolab).........................................................Passed
+bandit (tui-toolkit).....................................................Passed
+check toml...............................................................Passed
+check yaml...............................................................Passed
+check for merge conflicts................................................Passed
+check for added large files..............................................Passed
+fix end of files.........................................................Passed
+trim trailing whitespace.................................................Passed
+mixed line ending........................................................Passed

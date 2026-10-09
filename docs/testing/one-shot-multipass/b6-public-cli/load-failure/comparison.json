@@ -1,0 +1,510 @@
+{
+  "validComparison": false,
+  "runs": [
+    {
+      "provider": "multipass",
+      "purpose": "workflow-validation",
+      "mode": "ewma",
+      "conforming": false,
+      "missingEvidence": false,
+      "manifest": {
+        "schema_version": 1,
+        "provider": "multipass",
+        "purpose": "workflow-validation",
+        "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+        "source_commit": "3958d488a46bf608f749d9c1f673c984447c08a7",
+        "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+        "qualification_sha256": "346a75a5657eeba3cd3446ff449d4f9888e14f2cfead383370dd51e1b9e3bf14",
+        "trace_sha256": "9e9d33d16241db6f223b1eb7bd032c4b5eab2fbcd82b20ea99b18429873a6da4",
+        "seed": 7,
+        "nodes": [
+          "edge-0",
+          "edge-1",
+          "cloud"
+        ],
+        "functions": [
+          "one-shot-workload"
+        ],
+        "period_seconds": 20.0,
+        "lead_seconds": 1.9000000000000001,
+        "flow_quantum": 1.0,
+        "modes": [
+          "ewma",
+          "baseline",
+          "oracle"
+        ],
+        "run_id": "9e9d33d16241:ewma:0",
+        "mode": "ewma",
+        "repetition": 0,
+        "anchor": "2026-10-09T19:26:12.536918+00:00",
+        "parameters": {
+          "admissionProfile": "SYNC_QUEUE",
+          "baselinePolicy": {
+            "edgeMaxDepth": 2,
+            "edgeSyncQueue": true,
+            "mode": "pressure",
+            "replicas": {
+              "one-shot-workload": 2
+            }
+          },
+          "cloudMemoryCapacityMiB": 256,
+          "functions": {
+            "one-shot-workload": {
+              "alpha": 1,
+              "cpu": 1.0,
+              "delta": 0.9,
+              "gamma": 0.1,
+              "input": {
+                "iterations": 20000000,
+                "seed": 7,
+                "working_set_bytes": 4096
+              },
+              "maxReplicas": 2,
+              "memoryMiB": 128,
+              "utilization": 0.8
+            }
+          },
+          "generator": {
+            "failLoad": true,
+            "generatorVus": 64,
+            "location": "operator-host",
+            "maxArrivalLatenessSeconds": 0.25,
+            "repetitions": 1,
+            "retry": false,
+            "version": "k6 v2.2.0 (commit/00a9a1b7f5, go1.26.5, linux/arm64)",
+            "warmupRate": 4.0,
+            "warmupSeconds": 5,
+            "windows": [
+              {
+                "id": "balanced",
+                "network": "observed-local",
+                "rates": {
+                  "edge-0": {
+                    "one-shot-workload-rust": 4.0
+                  },
+                  "edge-1": {
+                    "one-shot-workload-rust": 4.0
+                  }
+                }
+              },
+              {
+                "id": "imbalanced",
+                "network": "observed-local",
+                "rates": {
+                  "edge-0": {
+                    "one-shot-workload-rust": 15.0
+                  },
+                  "edge-1": {
+                    "one-shot-workload-rust": 0.0
+                  }
+                }
+              }
+            ]
+          },
+          "images": {
+            "control-plane": "sha256:4737b976ceefd49a1dff840f7b67a10a2f0da60824a48e591f84acbf3d81d35f",
+            "one-shot-workload": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+          },
+          "metricsProfile": "advanced",
+          "nanolabPackageSha256": "b5c96f91aea0d6357d016d0f349a50747373bc3dd5367382b6a4e147cf756fba",
+          "nanolabVersion": "0.6.0",
+          "network": "observed-local; shared physical host",
+          "nodeEndpoints": {
+            "cloud": "http://10.83.80.83:8080",
+            "edge-0": "http://10.83.80.231:8080",
+            "edge-1": "http://10.83.80.48:8080"
+          },
+          "nodes": [
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "edge-0",
+              "kind": "edge",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            },
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "edge-1",
+              "kind": "edge",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            },
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "cloud",
+              "kind": "cloud",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            }
+          ],
+          "protocol": {
+            "auctionSeconds": 0.6,
+            "maxPeers": 16,
+            "maxRounds": 8,
+            "maxSolverBytes": 67108864,
+            "maxSolverStates": 2000000,
+            "parallelism": 4,
+            "peerSeconds": 0.15,
+            "preparationSeconds": 1.0,
+            "queueCapacity": 64,
+            "solverSeconds": 0.15
+          },
+          "source": {
+            "dirty": false,
+            "revision": "3958d488a46bf608f749d9c1f673c984447c08a7"
+          },
+          "terminalCloudQueueing": true,
+          "timing": {
+            "censored_count": 0,
+            "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+            "epsilon": 0.1,
+            "lead_seconds": 1.9000000000000001,
+            "margin_seconds": 0.2,
+            "matrix": [
+              {
+                "cell": {
+                  "id": "balanced",
+                  "network": "observed-local",
+                  "rates": {
+                    "edge-0": {
+                      "one-shot-workload-rust": 4.0
+                    },
+                    "edge-1": {
+                      "one-shot-workload-rust": 4.0
+                    }
+                  }
+                },
+                "result": {
+                  "censored_count": 0,
+                  "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+                  "epsilon": 0.1,
+                  "lead_seconds": 1.9000000000000001,
+                  "margin_seconds": 0.2,
+                  "matrix": [],
+                  "max_trace_resolution": 30.0,
+                  "minimum_samples": 10,
+                  "period_candidates": [
+                    20.0,
+                    30.0
+                  ],
+                  "period_seconds": 20.0,
+                  "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+                  "protocol": {},
+                  "provider": "multipass",
+                  "purpose": "workflow-validation",
+                  "qualified": true,
+                  "quantile": 0.9,
+                  "quantile_seconds": 0.07340456804377024,
+                  "ready_samples_seconds": [
+                    0.14053748501464725,
+                    0.047008730995003134,
+                    0.06594535504700616,
+                    0.05387225199956447,
+                    0.06346377200679854,
+                    0.06352398300077766,
+                    0.06453213997883722,
+                    0.0435259590158239,
+                    0.046255338995251805,
+                    0.056280170974787325
+                  ],
+                  "reason": null,
+                  "sample_count": 10,
+                  "samples_seconds": [
+                    0.14053748501464725,
+                    0.047008730995003134,
+                    0.06594535504700616,
+                    0.05387225199956447,
+                    0.06346377200679854,
+                    0.06352398300077766,
+                    0.06453213997883722,
+                    0.0435259590158239,
+                    0.046255338995251805,
+                    0.056280170974787325
+                  ],
+                  "schema_version": 1
+                }
+              },
+              {
+                "cell": {
+                  "id": "imbalanced",
+                  "network": "observed-local",
+                  "rates": {
+                    "edge-0": {
+                      "one-shot-workload-rust": 24.0
+                    },
+                    "edge-1": {
+                      "one-shot-workload-rust": 0.0
+                    }
+                  }
+                },
+                "result": {
+                  "censored_count": 0,
+                  "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+                  "epsilon": 0.1,
+                  "lead_seconds": 1.9000000000000001,
+                  "margin_seconds": 0.2,
+                  "matrix": [],
+                  "max_trace_resolution": 30.0,
+                  "minimum_samples": 10,
+                  "period_candidates": [
+                    20.0,
+                    30.0
+                  ],
+                  "period_seconds": 20.0,
+                  "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+                  "protocol": {},
+                  "provider": "multipass",
+                  "purpose": "workflow-validation",
+                  "qualified": true,
+                  "quantile": 0.9,
+                  "quantile_seconds": 0.1166796573728788,
+                  "ready_samples_seconds": [
+                    0.2876101449946873,
+                    0.0976873809704557,
+                    0.07836658001178876,
+                    0.05401671602157876,
+                    0.06357782299164683,
+                    0.04713620699476451,
+                    0.05284483701689169,
+                    0.058115324995014817,
+                    0.04964125499827787,
+                    0.08799880399601534
+                  ],
+                  "reason": null,
+                  "sample_count": 10,
+                  "samples_seconds": [
+                    0.2876101449946873,
+                    0.0976873809704557,
+                    0.07836658001178876,
+                    0.05401671602157876,
+                    0.06357782299164683,
+                    0.04713620699476451,
+                    0.05284483701689169,
+                    0.058115324995014817,
+                    0.04964125499827787,
+                    0.08799880399601534
+                  ],
+                  "schema_version": 1
+                }
+              }
+            ],
+            "max_trace_resolution": 30.0,
+            "minimum_samples": 10,
+            "period_candidates": [
+              20.0,
+              30.0
+            ],
+            "period_seconds": 20.0,
+            "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+            "protocol": {
+              "auctionSeconds": 0.6,
+              "maxPeers": 16,
+              "maxRounds": 8,
+              "maxSolverBytes": 67108864,
+              "maxSolverStates": 2000000,
+              "parallelism": 4,
+              "peerSeconds": 0.15,
+              "preparationSeconds": 1.0,
+              "queueCapacity": 64,
+              "solverSeconds": 0.15
+            },
+            "provider": "multipass",
+            "purpose": "workflow-validation",
+            "qualified": true,
+            "quantile": 0.9,
+            "quantile_seconds": 0.1166796573728788,
+            "ready_samples_seconds": [
+              0.14053748501464725,
+              0.047008730995003134,
+              0.06594535504700616,
+              0.05387225199956447,
+              0.06346377200679854,
+              0.06352398300077766,
+              0.06453213997883722,
+              0.0435259590158239,
+              0.046255338995251805,
+              0.056280170974787325,
+              0.2876101449946873,
+              0.0976873809704557,
+              0.07836658001178876,
+              0.05401671602157876,
+              0.06357782299164683,
+              0.04713620699476451,
+              0.05284483701689169,
+              0.058115324995014817,
+              0.04964125499827787,
+              0.08799880399601534
+            ],
+            "reason": null,
+            "sample_count": 20,
+            "samples_seconds": [
+              0.14053748501464725,
+              0.047008730995003134,
+              0.06594535504700616,
+              0.05387225199956447,
+              0.06346377200679854,
+              0.06352398300077766,
+              0.06453213997883722,
+              0.0435259590158239,
+              0.046255338995251805,
+              0.056280170974787325,
+              0.2876101449946873,
+              0.0976873809704557,
+              0.07836658001178876,
+              0.05401671602157876,
+              0.06357782299164683,
+              0.04713620699476451,
+              0.05284483701689169,
+              0.058115324995014817,
+              0.04964125499827787,
+              0.08799880399601534
+            ],
+            "schema_version": 1
+          }
+        }
+      },
+      "planned": 460,
+      "emitted": 0,
+      "received": 0,
+      "attempts": 0,
+      "completed": 0,
+      "errors": 0,
+      "censored": 0,
+      "generator_deficit": 460,
+      "violations": [
+        "no load was executed",
+        "generator deficit or unexpected originals",
+        "missing physical receipt/completion or unresolved outcome",
+        "load task failed: {'exitCode': -15, 'failure': 'injected load-task failure'}",
+        "physical service drift cannot be measured"
+      ],
+      "throughputOriginalsPerSecond": 0.0,
+      "routing": {
+        "local": 0,
+        "peer": 0,
+        "cloud": 0
+      },
+      "latencySeconds": null,
+      "realizedUtility": null,
+      "utilityConvention": "(alpha*local + delta*peer - gamma*(cloud+errors))/planned originals; final solver zero-price convention, excludes bidding transfers",
+      "telemetry": {
+        "metricSamples": [
+          {
+            "at": "2026-10-09T19:25:50.244798+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T19:25:51.262237+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T19:25:52.257637+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T19:25:52.934372+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T19:25:52.974248+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 150454392.0,
+              "process_cpu_usage": 0.0,
+              "sync_queue_depth": 0.0
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T19:25:53.000509+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 147566376.0,
+              "process_cpu_usage": 0.0,
+              "sync_queue_depth": 0.0
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T19:25:53.043205+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 138155448.0,
+              "process_cpu_usage": 1.0,
+              "sync_queue_depth": 0.0
+            },
+            "node": "cloud"
+          }
+        ],
+        "epochs": [],
+        "physicalServiceByNodeFunction": {}
+      },
+      "telemetryUnavailable": [
+        "epochs",
+        "physicalServiceByNodeFunction"
+      ],
+      "auctionEpochs": [],
+      "transitions": []
+    }
+  ],
+  "betweenRepetitions": {
+    "baseline": {
+      "sampleCount": 0,
+      "mean": null,
+      "confidence95": null,
+      "method": "seeded-percentile-bootstrap"
+    },
+    "oracle": {
+      "sampleCount": 0,
+      "mean": null,
+      "confidence95": null,
+      "method": "seeded-percentile-bootstrap"
+    },
+    "ewma": {
+      "sampleCount": 0,
+      "mean": null,
+      "confidence95": null,
+      "method": "seeded-percentile-bootstrap"
+    }
+  }
+}

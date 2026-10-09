@@ -1,0 +1,56 @@
+[
+  {
+    "originalPath": "api.jsonl",
+    "originalBytes": 2194,
+    "originalSha256": "d1e94087dccca47435b72092cfa6327487bf49b1c7c908aedcb7fcc1073d81ad",
+    "storedPath": "api.jsonl"
+  },
+  {
+    "originalPath": "clock.jsonl",
+    "originalBytes": 14205,
+    "originalSha256": "e39ce1eeb2a873a28330775abdfd05cedcd97752da5a967ad7d935c1a4093158",
+    "storedPath": "clock.jsonl"
+  },
+  {
+    "originalPath": "matrix.jsonl",
+    "originalBytes": 67939,
+    "originalSha256": "2f65e6e491ffc6ef61c44047873796fc753c258b60cf051aae2373670e7ad313",
+    "storedPath": "matrix.jsonl"
+  },
+  {
+    "originalPath": "preflight.json",
+    "originalBytes": 2541,
+    "originalSha256": "8be98e71cc3b346f1b750cae9f79642d49aa44b105cd5c33f677b6697c39330d",
+    "storedPath": "preflight.json"
+  },
+  {
+    "originalPath": "run-metadata.json",
+    "originalBytes": 15861,
+    "originalSha256": "61add20934e652370a1a5997bb00e2f380839633ee3905e0766d1d4383e9f213",
+    "storedPath": "run-metadata.json"
+  },
+  {
+    "originalPath": "runtime-distribution.json",
+    "originalBytes": 1273,
+    "originalSha256": "dba38b80ac9f58daa1134f5885f1a24fd40bfa278e3adf8500d56dc40604d2f4",
+    "storedPath": "runtime-distribution.json"
+  },
+  {
+    "originalPath": "timing-reference.json",
+    "originalBytes": 132,
+    "originalSha256": "8702d51b646f72973998231caa5b406a0c49cfb037903fb4c133312d82a8327e",
+    "storedPath": "timing-reference.json"
+  },
+  {
+    "originalPath": "timing-samples.jsonl",
+    "originalBytes": 67339,
+    "originalSha256": "4f408d9291aefd4df80795c8f8111af8e10d5fa1b952cfb97b42af64f78425b5",
+    "storedPath": "timing-samples.jsonl"
+  },
+  {
+    "originalPath": "timing.json",
+    "originalBytes": 4016,
+    "originalSha256": "6e5415553d9bae90447e77d33d15a7834ab27fce2a7cb959cccb1ac022eb46f2",
+    "storedPath": "timing.json"
+  }
+]

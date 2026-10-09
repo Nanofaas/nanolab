@@ -1,0 +1,37 @@
+{
+  "schemaVersion" : 2,
+  "recipe" : {
+    "name" : "one-shot-multipass-jvm",
+    "sha256" : "9454f49632761a8352f5c83a671ef298e9ab51902fc0649f18bea9511a870d3b",
+    "schemaVersion" : 2
+  },
+  "tag" : "one-shot-3958d488",
+  "source" : {
+    "revision" : "3958d488a46bf608f749d9c1f673c984447c08a7",
+    "dirty" : false
+  },
+  "modules" : [ "build-metadata", "container-deployment-provider", "forecasting", "offload", "p2p-discovery" ],
+  "components" : [ {
+    "kind" : "control-plane",
+    "name" : "control-plane",
+    "sdk" : "java",
+    "mode" : "jvm",
+    "artifact" : "control-plane/",
+    "image" : {
+      "reference" : "127.0.0.1:5000/nanofaas/one-shot-multipass/control-plane-one-shot-jvm:one-shot-3958d488",
+      "status" : "built",
+      "id" : "sha256:fb9cd372395667e736c983ac80d54b848726d2eced6d60feb7e77f77ace0930f"
+    }
+  }, {
+    "kind" : "function",
+    "name" : "one-shot-workload",
+    "sdk" : "rust",
+    "mode" : "container",
+    "artifact" : null,
+    "image" : {
+      "reference" : "127.0.0.1:5000/nanofaas/one-shot-multipass/nanofaas-one-shot-workload:one-shot-3958d488",
+      "status" : "built",
+      "id" : "sha256:067b1f30c19f232b13338121691488d27c47a04a4b9b16a1525ff3115830cf19"
+    }
+  } ]
+}

@@ -1,0 +1,253 @@
+[provision.stack.ensure] running  Ensure stack VM is running
+[provision.stack.ensure] passed   41.0s
+[provision.stack.vm.provision_base] running  Provision base VM dependencies
+[provision.stack.vm.provision_base] passed   37.8s
+[provision.stack.repo.sync_to_vm] running  Sync repository into VM
+[provision.stack.repo.sync_to_vm] passed   0.9s
+[001.acquire-edge-0-vm] running  Acquire edge-0 VM
+[001.acquire-edge-0-vm] passed   33.1s
+[002.acquire-edge-1-vm] running  Acquire edge-1 VM
+[002.acquire-edge-1-vm] passed   36.0s
+[003.acquire-cloud-vm] running  Acquire cloud VM
+[003.acquire-cloud-vm] passed   34.9s
+[004.acquire-d10cf5b11d0b-operator-host-generator] running  Acquire d10cf5b11d0b operator-host generator
+[004.acquire-d10cf5b11d0b-operator-host-generator] passed   0.0s
+[005.bootstrap-edge-0-container-vm] running  Bootstrap edge-0 container VM
+[provision.edge-0.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-0.vm.provision_base] passed   29.5s
+[005.bootstrap-edge-0-container-vm] passed   29.5s
+[006.reuse-immutable-one-shot-runtime-distribution] running  Reuse immutable one-shot runtime distribution
+[006.reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[007.archive-digest-pinned-one-shot-runtime-images] running  Archive digest-pinned one-shot runtime images
+[007.archive-digest-pinned-one-shot-runtime-images] passed   1.3s
+[008.acquire-edge-0-control-plane] running  Acquire edge-0 control plane
+[008.acquire-edge-0-control-plane] passed   7.2s
+[009.bootstrap-edge-1-container-vm] running  Bootstrap edge-1 container VM
+[provision.edge-1.vm.provision_base] running  Provision base VM dependencies
+[provision.edge-1.vm.provision_base] passed   29.6s
+[009.bootstrap-edge-1-container-vm] passed   29.6s
+[010.acquire-edge-1-control-plane] running  Acquire edge-1 control plane
+[010.acquire-edge-1-control-plane] passed   12.1s
+[011.bootstrap-cloud-container-vm] running  Bootstrap cloud container VM
+[provision.cloud.vm.provision_base] running  Provision base VM dependencies
+[provision.cloud.vm.provision_base] passed   29.4s
+[011.bootstrap-cloud-container-vm] passed   29.4s
+[012.acquire-cloud-control-plane] running  Acquire cloud control plane
+[012.acquire-cloud-control-plane] passed   7.3s
+[013.acquire-edge-0-clock-network-probe] running  Acquire edge-0 clock/network probe
+[013.acquire-edge-0-clock-network-probe] passed   0.8s
+[014.acquire-edge-1-clock-network-probe] running  Acquire edge-1 clock/network probe
+[014.acquire-edge-1-clock-network-probe] passed   0.9s
+[015.acquire-cloud-clock-network-probe] running  Acquire cloud clock/network probe
+[015.acquire-cloud-clock-network-probe] passed   0.8s
+[016.pin-function-registrations-to-immutable-target-image-ids] running  Pin function registrations to immutable target image IDs
+[016.pin-function-registrations-to-immutable-target-image-ids] passed   2.1s
+[017.acquire-one-shot-workload-on-the-edge-0] running  Acquire one-shot-workload on the edge-0
+[017.acquire-one-shot-workload-on-the-edge-0] passed   0.9s
+[018.acquire-one-shot-workload-on-the-edge-1] running  Acquire one-shot-workload on the edge-1
+[018.acquire-one-shot-workload-on-the-edge-1] passed   0.8s
+[019.acquire-one-shot-workload-on-the-cloud] running  Acquire one-shot-workload on the cloud
+[019.acquire-one-shot-workload-on-the-cloud] passed   0.8s
+[020.acquire-measured-periodic-one-shot-clock-health] running  Acquire measured periodic one-shot clock health
+[020.acquire-measured-periodic-one-shot-clock-health] passed   0.2s
+[021.independent-one-shot-timing-qualification] running  Independent one-shot timing qualification
+[021.independent-one-shot-timing-qualification/measure-and-validate-deployed-one-shot-topology] running  Measure and validate deployed one-shot topology
+[021.independent-one-shot-timing-qualification/measure-and-validate-deployed-one-shot-topology] passed   5.6s
+[021.independent-one-shot-timing-qualification/qualify-local-one-shot-wall-time-and-readiness] running  Qualify local one-shot wall time and readiness
+[021.independent-one-shot-timing-qualification/qualify-local-one-shot-wall-time-and-readiness] failed   462.6s  NOT_QUALIFIED: a matrix cell failed
+[021.independent-one-shot-timing-qualification] failed   468.2s  NOT_QUALIFIED: a matrix cell failed
+[022.release-measured-periodic-one-shot-clock-health] running  Release measured periodic one-shot clock health
+[022.release-measured-periodic-one-shot-clock-health] passed   0.0s
+[023.release-one-shot-workload-on-the-cloud] running  Release one-shot-workload on the cloud
+[023.release-one-shot-workload-on-the-cloud] passed   0.6s
+[024.release-one-shot-workload-on-the-edge-1] running  Release one-shot-workload on the edge-1
+[024.release-one-shot-workload-on-the-edge-1] passed   0.5s
+[025.release-one-shot-workload-on-the-edge-0] running  Release one-shot-workload on the edge-0
+[025.release-one-shot-workload-on-the-edge-0] passed   0.5s
+[026.release-pin-function-registrations-to-immutable-target-image-ids] running  Release Pin function registrations to immutable target image IDs
+[026.release-pin-function-registrations-to-immutable-target-image-ids] passed   0.0s
+[027.release-cloud-clock-network-probe] running  Release cloud clock/network probe
+[027.release-cloud-clock-network-probe] passed   0.3s
+[028.release-edge-1-clock-network-probe] running  Release edge-1 clock/network probe
+[028.release-edge-1-clock-network-probe] passed   0.3s
+[029.release-edge-0-clock-network-probe] running  Release edge-0 clock/network probe
+[029.release-edge-0-clock-network-probe] passed   0.4s
+[030.release-cloud-control-plane] running  Release cloud control plane
+[030.release-cloud-control-plane] passed   0.8s
+[031.release-bootstrap-cloud-container-vm] running  Release Bootstrap cloud container VM
+[031.release-bootstrap-cloud-container-vm] passed   0.0s
+[032.release-edge-1-control-plane] running  Release edge-1 control plane
+[032.release-edge-1-control-plane] passed   0.8s
+[033.release-bootstrap-edge-1-container-vm] running  Release Bootstrap edge-1 container VM
+[033.release-bootstrap-edge-1-container-vm] passed   0.0s
+[034.release-edge-0-control-plane] running  Release edge-0 control plane
+[034.release-edge-0-control-plane] passed   0.7s
+[035.release-archive-digest-pinned-one-shot-runtime-images] running  Release Archive digest-pinned one-shot runtime images
+[035.release-archive-digest-pinned-one-shot-runtime-images] passed   0.0s
+[036.release-reuse-immutable-one-shot-runtime-distribution] running  Release Reuse immutable one-shot runtime distribution
+[036.release-reuse-immutable-one-shot-runtime-distribution] passed   0.0s
+[037.release-bootstrap-edge-0-container-vm] running  Release Bootstrap edge-0 container VM
+[037.release-bootstrap-edge-0-container-vm] passed   0.0s
+[038.release-d10cf5b11d0b-operator-host-generator] running  Release d10cf5b11d0b operator-host generator
+[038.release-d10cf5b11d0b-operator-host-generator] passed   0.0s
+[039.release-cloud-vm] running  Release cloud VM
+[039.release-cloud-vm] passed   0.5s
+[040.release-edge-1-vm] running  Release edge-1 VM
+[040.release-edge-1-vm] passed   0.4s
+[041.release-edge-0-vm] running  Release edge-0 VM
+[041.release-edge-0-vm] passed   0.4s
+[provision.stack.destroy] running  Destroy stack VM
+[provision.stack.destroy] passed   0.5s
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /tmp/nanolab-one-shot/packages/nanolab/src/nanolab/cli/product.py:1248 in    │
+│ run_command                                                                  │
+│                                                                              │
+│   1245 │   │   │   │   scenario=scenario,                                    │
+│   1246 │   │   │   │   environment=environment,                              │
+│   1247 │   │   │   │   release_config=release_config,                        │
+│ ❱ 1248 │   │   │   │   run_dir=run_dir,                                      │
+│   1249 │   │   │   │   resume=resume,                                        │
+│   1250 │   │   │   │   environment_config=environment_config,                │
+│   1251 │   │   │   │   paths=paths,                                          │
+│                                                                              │
+│ /tmp/nanolab-one-shot/packages/nanolab/src/nanolab/cli/product.py:871 in     │
+│ _execute_workflow                                                            │
+│                                                                              │
+│    868 │   │   │   sonata_workflow.keep = keep                               │
+│    869 │   │   │   selection = Selection(only=only, start=start,             │
+│        until=until)                                                          │
+│    870 │   │   │   observers = _workflow_observers(scenario)                 │
+│ ❱  871 │   │   │   try:                                                      │
+│    872 │   │   │   │   _run_selected_workflow(                               │
+│    873 │   │   │   │   │   sonata_workflow,                                  │
+│    874 │   │   │   │   │   release_request=release_request,                  │
+│                                                                              │
+│ /tmp/nanolab-one-shot/packages/nanolab/src/nanolab/cli/product.py:794 in     │
+│ _run_selected_workflow                                                       │
+│                                                                              │
+│    791 │   │   │   )                                                         │
+│    792 │   elif observers:                                                   │
+│    793 │   │   sonata_workflow.run(select=selection, observers=observers)    │
+│ ❱  794 │   else:                                                             │
+│    795 │   │   sonata_workflow.run(select=selection)                         │
+│    796                                                                       │
+│    797                                                                       │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:256 in run                                                       │
+│                                                                              │
+│   253 │   │   started_at = datetime.now(UTC)                                 │
+│   254 │   │   error: BaseException | None = None                             │
+│   255 │   │   try:                                                           │
+│ ❱ 256 │   │   │   return self._run_compiled(                                 │
+│   257 │   │   │   │   self.compile(select=select),                           │
+│   258 │   │   │   │   journal=journal,                                       │
+│   259 │   │   │   │   resume=resume,                                         │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:358 in _run_compiled                                             │
+│                                                                              │
+│   355 │   │   │   self._release_pending(                                     │
+│   356 │   │   │   │   pending, release_errors, state, jrnl,                  │
+│       retained_resources                                                     │
+│   357 │   │   │   )                                                          │
+│ ❱ 358 │   │   self._raise_final(main_error, release_errors)                  │
+│   359 │   │   return WorkflowResult(workflow_id=compiled.workflow_id,        │
+│       tasks=tuple(executions))                                               │
+│   360 │                                                                      │
+│   361 │   def _retained_resources(self, compiled: CompiledWorkflow) ->       │
+│       frozenset[int]:                                                        │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:456 in _raise_final                                              │
+│                                                                              │
+│   453 │   │   │   │   │   str(error) for error in release_errors             │
+│   454 │   │   │   │   )                                                      │
+│   455 │   │   │   │   raise RuntimeError(combined) from main_error           │
+│ ❱ 456 │   │   │   raise main_error                                           │
+│   457 │   │   if release_errors:                                             │
+│   458 │   │   │   raise RuntimeError(                                        │
+│   459 │   │   │   │   "Cleanup failed:\n" + "\n".join(str(error) for error   │
+│       in release_errors)                                                     │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:341 in _run_compiled                                             │
+│                                                                              │
+│   338 │   │   │   │   │   )                                                  │
+│   339 │   │   │   │   │   continue                                           │
+│   340 │   │   │   │   executions.append(                                     │
+│ ❱ 341 │   │   │   │   │   self._run_unit(                                    │
+│   342 │   │   │   │   │   │   compiled_task,                                 │
+│   343 │   │   │   │   │   │   jrnl,                                          │
+│   344 │   │   │   │   │   │   state,                                         │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:513 in _run_unit                                                 │
+│                                                                              │
+│   510 │   │   │   if on_executed is not None:                                │
+│   511 │   │   │   │   on_executed()                                          │
+│   512 │   │                                                                  │
+│ ❱ 513 │   │   return _execute_recorded(                                      │
+│   514 │   │   │   task=compiled_task.task,                                   │
+│   515 │   │   │   task_id=compiled_task.task_id,                             │
+│   516 │   │   │   make_inputs=make_inputs,                                   │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:119 in _execute_recorded                                         │
+│                                                                              │
+│   116 │   │   jrnl.record_started(task_id, attempt)                          │
+│   117 │   try:                                                               │
+│   118 │   │   with _task_lifecycle(task_id=task_id, title=task.title):       │
+│ ❱ 119 │   │   │   outcome = task.run(make_inputs())                          │
+│   120 │   │   │   if not isinstance(outcome, TaskOutcome):                   │
+│   121 │   │   │   │   raise InvalidTaskOutcomeError(                         │
+│   122 │   │   │   │   │   f"{task_id} returned {outcome!r}, expected         │
+│       TaskOutcome"                                                           │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ steps.py:81 in run                                                           │
+│                                                                              │
+│   78 │   │                                                                   │
+│   79 │   │   upstream: Any = inputs._upstream                                │
+│   80 │   │   for slug, step in zip(self._slugs, self._steps, strict=True):   │
+│ ❱ 81 │   │   │   execution = scope.run_step(step, slug, upstream)            │
+│   82 │   │   │   # A step that ran contributes its value, including a        │
+│      legitimate                                                              │
+│   83 │   │   │   # None; a skipped step contributes None, the only value a   │
+│      skippable                                                               │
+│   84 │   │   │   # ReusableTask may return.                                  │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:166 in run_step                                                  │
+│                                                                              │
+│   163 │   │   │   │   ),                                                     │
+│   164 │   │   │   )                                                          │
+│   165 │   │                                                                  │
+│ ❱ 166 │   │   return _execute_recorded(                                      │
+│   167 │   │   │   task=step,                                                 │
+│   168 │   │   │   task_id=step_id,                                           │
+│   169 │   │   │   make_inputs=make_inputs,                                   │
+│                                                                              │
+│ /tmp/nanolab-one-shot/.venv/lib/python3.12/site-packages/sonata_engine/core/ │
+│ workflow.py:119 in _execute_recorded                                         │
+│                                                                              │
+│   116 │   │   jrnl.record_started(task_id, attempt)                          │
+│   117 │   try:                                                               │
+│   118 │   │   with _task_lifecycle(task_id=task_id, title=task.title):       │
+│ ❱ 119 │   │   │   outcome = task.run(make_inputs())                          │
+│   120 │   │   │   if not isinstance(outcome, TaskOutcome):                   │
+│   121 │   │   │   │   raise InvalidTaskOutcomeError(                         │
+│   122 │   │   │   │   │   f"{task_id} returned {outcome!r}, expected         │
+│       TaskOutcome"                                                           │
+│                                                                              │
+│ /tmp/nanolab-one-shot/packages/nanolab/src/nanolab/tasks/one_shot/qualificat │
+│ ion.py:511 in run                                                            │
+│                                                                              │
+│   508 │   │   │   ),                                                         │
+│   509 │   │   )                                                              │
+│   510 │   │   if not result.qualified:                                       │
+│ ❱ 511 │   │   │   raise ValueError(result.reason)                            │
+│   512 │   │   return TaskOutcome(value=result)                               │
+│   513                                                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ValueError: NOT_QUALIFIED: a matrix cell failed

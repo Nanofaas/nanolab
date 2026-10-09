@@ -1,0 +1,15 @@
+{
+  "list": [
+    {
+      "ipv4": [
+        "10.83.80.138",
+        "172.17.0.1",
+        "10.42.0.0",
+        "10.42.0.1"
+      ],
+      "name": "nanofaas-stack",
+      "release": "Ubuntu 26.04 LTS",
+      "state": "Running"
+    }
+  ]
+}

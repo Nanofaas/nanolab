@@ -1,0 +1,3 @@
+# Preserved nonconforming attempts
+
+These diagnostics are deliberately not qualified comparisons. `real` failed before load (missing upstream input), `real2` exposed lost terminal execution identity, `real3` proved the source correction but retained 26 unresolved outcomes, and `real4` retained 22 unresolved outcomes because the sync-queue flag had no packaged module. The exact proxy admission refusals in `real3` and `real4` are known no-handler errors, not physical completions. All owned VM releases completed. Successful final CLI evidence is recorded separately. Original raw operator artifacts remain in `/tmp/oneshot-b5-{real,real2,real3,real4}`; these compact records retain identity, counts and failure reasons.

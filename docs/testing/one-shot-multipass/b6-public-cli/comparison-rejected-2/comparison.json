@@ -1,0 +1,3819 @@
+{
+  "validComparison": false,
+  "runs": [
+    {
+      "provider": "multipass",
+      "purpose": "workflow-validation",
+      "mode": "baseline",
+      "conforming": false,
+      "missingEvidence": false,
+      "manifest": {
+        "schema_version": 1,
+        "provider": "multipass",
+        "purpose": "workflow-validation",
+        "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+        "source_commit": "3958d488a46bf608f749d9c1f673c984447c08a7",
+        "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+        "qualification_sha256": "346a75a5657eeba3cd3446ff449d4f9888e14f2cfead383370dd51e1b9e3bf14",
+        "trace_sha256": "9e9d33d16241db6f223b1eb7bd032c4b5eab2fbcd82b20ea99b18429873a6da4",
+        "seed": 7,
+        "nodes": [
+          "edge-0",
+          "edge-1",
+          "cloud"
+        ],
+        "functions": [
+          "one-shot-workload"
+        ],
+        "period_seconds": 20.0,
+        "lead_seconds": 1.9000000000000001,
+        "flow_quantum": 1.0,
+        "modes": [
+          "ewma",
+          "baseline",
+          "oracle"
+        ],
+        "run_id": "9e9d33d16241:baseline:0",
+        "mode": "baseline",
+        "repetition": 0,
+        "anchor": "2026-10-09T18:44:34.627657+00:00",
+        "parameters": {
+          "baselinePolicy": {
+            "edgeMaxDepth": 2,
+            "edgeSyncQueue": true,
+            "mode": "pressure",
+            "replicas": {
+              "one-shot-workload": 2
+            }
+          },
+          "cloudMemoryCapacityMiB": 256,
+          "functions": {
+            "one-shot-workload": {
+              "alpha": 1,
+              "cpu": 1.0,
+              "delta": 0.9,
+              "gamma": 0.1,
+              "input": {
+                "iterations": 20000000,
+                "seed": 7,
+                "working_set_bytes": 4096
+              },
+              "maxReplicas": 2,
+              "memoryMiB": 128,
+              "utilization": 0.8
+            }
+          },
+          "generator": {
+            "failLoad": false,
+            "generatorVus": 64,
+            "location": "operator-host",
+            "maxArrivalLatenessSeconds": 0.25,
+            "repetitions": 1,
+            "retry": false,
+            "version": "k6 v2.2.0 (commit/00a9a1b7f5, go1.26.5, linux/arm64)",
+            "warmupRate": 4.0,
+            "warmupSeconds": 5,
+            "windows": [
+              {
+                "id": "balanced",
+                "network": "observed-local",
+                "rates": {
+                  "edge-0": {
+                    "one-shot-workload-rust": 4.0
+                  },
+                  "edge-1": {
+                    "one-shot-workload-rust": 4.0
+                  }
+                }
+              },
+              {
+                "id": "imbalanced",
+                "network": "observed-local",
+                "rates": {
+                  "edge-0": {
+                    "one-shot-workload-rust": 15.0
+                  },
+                  "edge-1": {
+                    "one-shot-workload-rust": 0.0
+                  }
+                }
+              }
+            ]
+          },
+          "images": {
+            "control-plane": "sha256:4737b976ceefd49a1dff840f7b67a10a2f0da60824a48e591f84acbf3d81d35f",
+            "one-shot-workload": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+          },
+          "nanolabPackageSha256": "52a56f2c3b7b344f2ae02fce771187eaa716e7783a38234fc7272a0c3968e538",
+          "nanolabVersion": "0.6.0",
+          "network": "observed-local; shared physical host",
+          "nodeEndpoints": {
+            "cloud": "http://10.83.80.212:8080",
+            "edge-0": "http://10.83.80.176:8080",
+            "edge-1": "http://10.83.80.198:8080"
+          },
+          "nodes": [
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "edge-0",
+              "kind": "edge",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            },
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "edge-1",
+              "kind": "edge",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            },
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "cloud",
+              "kind": "cloud",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            }
+          ],
+          "protocol": {
+            "auctionSeconds": 0.6,
+            "maxPeers": 16,
+            "maxRounds": 8,
+            "maxSolverBytes": 67108864,
+            "maxSolverStates": 2000000,
+            "parallelism": 4,
+            "peerSeconds": 0.15,
+            "preparationSeconds": 1.0,
+            "queueCapacity": 64,
+            "solverSeconds": 0.15
+          },
+          "source": {
+            "dirty": false,
+            "revision": "3958d488a46bf608f749d9c1f673c984447c08a7"
+          },
+          "terminalCloudQueueing": true,
+          "timing": {
+            "censored_count": 0,
+            "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+            "epsilon": 0.1,
+            "lead_seconds": 1.9000000000000001,
+            "margin_seconds": 0.2,
+            "matrix": [
+              {
+                "cell": {
+                  "id": "balanced",
+                  "network": "observed-local",
+                  "rates": {
+                    "edge-0": {
+                      "one-shot-workload-rust": 4.0
+                    },
+                    "edge-1": {
+                      "one-shot-workload-rust": 4.0
+                    }
+                  }
+                },
+                "result": {
+                  "censored_count": 0,
+                  "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+                  "epsilon": 0.1,
+                  "lead_seconds": 1.9000000000000001,
+                  "margin_seconds": 0.2,
+                  "matrix": [],
+                  "max_trace_resolution": 30.0,
+                  "minimum_samples": 10,
+                  "period_candidates": [
+                    20.0,
+                    30.0
+                  ],
+                  "period_seconds": 20.0,
+                  "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+                  "protocol": {},
+                  "provider": "multipass",
+                  "purpose": "workflow-validation",
+                  "qualified": true,
+                  "quantile": 0.9,
+                  "quantile_seconds": 0.07340456804377024,
+                  "ready_samples_seconds": [
+                    0.14053748501464725,
+                    0.047008730995003134,
+                    0.06594535504700616,
+                    0.05387225199956447,
+                    0.06346377200679854,
+                    0.06352398300077766,
+                    0.06453213997883722,
+                    0.0435259590158239,
+                    0.046255338995251805,
+                    0.056280170974787325
+                  ],
+                  "reason": null,
+                  "sample_count": 10,
+                  "samples_seconds": [
+                    0.14053748501464725,
+                    0.047008730995003134,
+                    0.06594535504700616,
+                    0.05387225199956447,
+                    0.06346377200679854,
+                    0.06352398300077766,
+                    0.06453213997883722,
+                    0.0435259590158239,
+                    0.046255338995251805,
+                    0.056280170974787325
+                  ],
+                  "schema_version": 1
+                }
+              },
+              {
+                "cell": {
+                  "id": "imbalanced",
+                  "network": "observed-local",
+                  "rates": {
+                    "edge-0": {
+                      "one-shot-workload-rust": 24.0
+                    },
+                    "edge-1": {
+                      "one-shot-workload-rust": 0.0
+                    }
+                  }
+                },
+                "result": {
+                  "censored_count": 0,
+                  "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+                  "epsilon": 0.1,
+                  "lead_seconds": 1.9000000000000001,
+                  "margin_seconds": 0.2,
+                  "matrix": [],
+                  "max_trace_resolution": 30.0,
+                  "minimum_samples": 10,
+                  "period_candidates": [
+                    20.0,
+                    30.0
+                  ],
+                  "period_seconds": 20.0,
+                  "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+                  "protocol": {},
+                  "provider": "multipass",
+                  "purpose": "workflow-validation",
+                  "qualified": true,
+                  "quantile": 0.9,
+                  "quantile_seconds": 0.1166796573728788,
+                  "ready_samples_seconds": [
+                    0.2876101449946873,
+                    0.0976873809704557,
+                    0.07836658001178876,
+                    0.05401671602157876,
+                    0.06357782299164683,
+                    0.04713620699476451,
+                    0.05284483701689169,
+                    0.058115324995014817,
+                    0.04964125499827787,
+                    0.08799880399601534
+                  ],
+                  "reason": null,
+                  "sample_count": 10,
+                  "samples_seconds": [
+                    0.2876101449946873,
+                    0.0976873809704557,
+                    0.07836658001178876,
+                    0.05401671602157876,
+                    0.06357782299164683,
+                    0.04713620699476451,
+                    0.05284483701689169,
+                    0.058115324995014817,
+                    0.04964125499827787,
+                    0.08799880399601534
+                  ],
+                  "schema_version": 1
+                }
+              }
+            ],
+            "max_trace_resolution": 30.0,
+            "minimum_samples": 10,
+            "period_candidates": [
+              20.0,
+              30.0
+            ],
+            "period_seconds": 20.0,
+            "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+            "protocol": {
+              "auctionSeconds": 0.6,
+              "maxPeers": 16,
+              "maxRounds": 8,
+              "maxSolverBytes": 67108864,
+              "maxSolverStates": 2000000,
+              "parallelism": 4,
+              "peerSeconds": 0.15,
+              "preparationSeconds": 1.0,
+              "queueCapacity": 64,
+              "solverSeconds": 0.15
+            },
+            "provider": "multipass",
+            "purpose": "workflow-validation",
+            "qualified": true,
+            "quantile": 0.9,
+            "quantile_seconds": 0.1166796573728788,
+            "ready_samples_seconds": [
+              0.14053748501464725,
+              0.047008730995003134,
+              0.06594535504700616,
+              0.05387225199956447,
+              0.06346377200679854,
+              0.06352398300077766,
+              0.06453213997883722,
+              0.0435259590158239,
+              0.046255338995251805,
+              0.056280170974787325,
+              0.2876101449946873,
+              0.0976873809704557,
+              0.07836658001178876,
+              0.05401671602157876,
+              0.06357782299164683,
+              0.04713620699476451,
+              0.05284483701689169,
+              0.058115324995014817,
+              0.04964125499827787,
+              0.08799880399601534
+            ],
+            "reason": null,
+            "sample_count": 20,
+            "samples_seconds": [
+              0.14053748501464725,
+              0.047008730995003134,
+              0.06594535504700616,
+              0.05387225199956447,
+              0.06346377200679854,
+              0.06352398300077766,
+              0.06453213997883722,
+              0.0435259590158239,
+              0.046255338995251805,
+              0.056280170974787325,
+              0.2876101449946873,
+              0.0976873809704557,
+              0.07836658001178876,
+              0.05401671602157876,
+              0.06357782299164683,
+              0.04713620699476451,
+              0.05284483701689169,
+              0.058115324995014817,
+              0.04964125499827787,
+              0.08799880399601534
+            ],
+            "schema_version": 1
+          }
+        }
+      },
+      "planned": 460,
+      "emitted": 460,
+      "received": 434,
+      "attempts": 434,
+      "completed": 434,
+      "errors": 26,
+      "censored": 0,
+      "generator_deficit": 0,
+      "violations": [
+        "terminal destination disagrees with physical proof"
+      ],
+      "throughputOriginalsPerSecond": 10.85,
+      "routing": {
+        "local": 434,
+        "peer": 0,
+        "cloud": 0
+      },
+      "latencySeconds": {
+        "p50": 0.1232144095,
+        "p95": 0.14748561304999996
+      },
+      "realizedUtility": null,
+      "utilityConvention": "(alpha*local + delta*peer - gamma*(cloud+errors))/planned originals; final solver zero-price convention, excludes bidding transfers",
+      "telemetry": {
+        "metricSamples": [
+          {
+            "at": "2026-10-09T18:44:15.583975+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:16.347643+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:17.002617+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:17.661881+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:18.371687+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:19.035335+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:19.085044+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 143619944.0,
+              "process_cpu_usage": 0.0
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:19.132752+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 156622152.0,
+              "process_cpu_usage": 0.0
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:19.156601+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 138413080.0,
+              "process_cpu_usage": 0.0
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:20.336966+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:21.078802+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:21.799085+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:22.427761+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:23.231184+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:23.915395+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:23.929887+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 147909080.0,
+              "process_cpu_usage": 0.01962809917355372
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:23.945406+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 144663856.0,
+              "process_cpu_usage": 0.014568158168574402
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:23.955739+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 141026368.0,
+              "process_cpu_usage": 0.0041797283176593526
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:25.152205+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:25.823312+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:26.548523+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:27.163484+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:27.876427+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:28.589205+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:28.597116+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 150039504.0,
+              "process_cpu_usage": 0.012875536480686695
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:28.609794+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 146729472.0,
+              "process_cpu_usage": 0.02912621359223301
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:28.618759+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 141883320.0,
+              "process_cpu_usage": 0.0021551724137931034
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:29.908410+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:30.593625+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.133095176
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:31.261625+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 6.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.6919823989999999
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:36.925182+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:37.641264+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:38.332865+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:38.347397+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 157737800.0,
+              "process_cpu_usage": 0.05604113110539846
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:38.371304+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 154718568.0,
+              "process_cpu_usage": 0.06529562982005141
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:38.379311+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 142781288.0,
+              "process_cpu_usage": 0.002568053415511043
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:39.609613+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 38.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.292238982999998
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:40.304273+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.133095176
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:40.951485+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 45.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 5.1035371419999995
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:41.634563+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:42.325686+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:43.087254+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:43.249898+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 165268024.0,
+              "process_cpu_usage": 0.043922369765066395
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:43.260955+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 161800488.0,
+              "process_cpu_usage": 0.04298874104401228
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:43.269599+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 143606680.0,
+              "process_cpu_usage": 0.00205761316872428
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:44.441568+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 58.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 6.565642293999999
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:45.129355+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.133095176
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:45.842817+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 64.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 7.265767625999999
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:46.503806+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:47.178375+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:47.877224+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:48.053529+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 155757968.0,
+              "process_cpu_usage": 0.03556485355648535
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:48.065322+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 152090848.0,
+              "process_cpu_usage": 0.04275286757038582
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:48.074667+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 144447216.0,
+              "process_cpu_usage": 0.0020920502092050207
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:49.257032+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 77.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 8.713458857999997
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:49.931519+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.133095176
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:50.594303+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 83.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 9.416519765999995
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:51.227109+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:51.901162+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:52.592236+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:52.769465+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 162570200.0,
+              "process_cpu_usage": 0.03829787234042553
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:52.778777+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 158989672.0,
+              "process_cpu_usage": 0.036055143160127257
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:52.789077+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 145336576.0,
+              "process_cpu_usage": 0.0031914893617021275
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:53.997384+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 96.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 10.873675280999999
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:54.750291+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.133095176
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:55.359457+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 100.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 11.325813076999996
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:56.093881+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:56.781875+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:57.459027+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:44:57.666979+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 161078880.0,
+              "process_cpu_usage": 0.07274590163934427
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:44:57.676934+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 162928032.0,
+              "process_cpu_usage": 0.020491803278688527
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:44:57.687250+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 146232760.0,
+              "process_cpu_usage": 0.003080082135523614
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:44:59.127744+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 129.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 14.794233948999999
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:44:59.862364+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 35.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.211301274000001
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:00.698603+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 100.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 11.325813076999996
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:01.357867+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:02.006701+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:02.737670+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:03.052404+00:00",
+            "metrics": {
+              "execution_in_flight_records": 2.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 164514856.0,
+              "process_cpu_usage": 0.09635173058933583
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:45:03.061852+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 164847664.0,
+              "process_cpu_usage": 0.008395522388059701
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:45:03.069401+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 147020776.0,
+              "process_cpu_usage": 0.0018656716417910447
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:45:04.304143+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 165.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 19.079468411
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:05.067814+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 69.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 8.304200239000002
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:05.756467+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 100.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 11.325813076999996
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:06.446865+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:07.163515+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:07.849228+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:08.239793+00:00",
+            "metrics": {
+              "execution_in_flight_records": 2.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 167955616.0,
+              "process_cpu_usage": 0.07640232108317214
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:45:08.247018+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 167097592.0,
+              "process_cpu_usage": 0.008729388942774006
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:45:08.259152+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 147978352.0,
+              "process_cpu_usage": 0.001937984496124031
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:45:09.545295+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 200.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 23.240023061000002
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:10.302854+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 105.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 12.641342367999998
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:11.089526+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 100.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 11.325813076999996
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:11.802680+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:12.479087+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:13.229571+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:13.644002+00:00",
+            "metrics": {
+              "execution_in_flight_records": 2.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 170569656.0,
+              "process_cpu_usage": 0.07434944237918216
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:45:13.653852+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 169027600.0,
+              "process_cpu_usage": 0.008372093023255815
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:45:13.671041+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 131971000.0,
+              "process_cpu_usage": 0.0037071362372567192
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:45:14.879722+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 237.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 27.590609334000003
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:15.522431+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 137.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 16.411395964999993
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:16.205678+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 100.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 11.325813076999996
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:16.920890+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:17.610051+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:18.323794+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:18.747482+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 176078056.0,
+              "process_cpu_usage": 0.018700787401574805
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:45:18.757051+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 153616144.0,
+              "process_cpu_usage": 0.009852216748768471
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:45:18.769391+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 133168160.0,
+              "process_cpu_usage": 0.0039447731755424065
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:45:19.557503+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 237.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 27.590609334000003
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:20.251223+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 137.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 16.411395964999993
+            },
+            "node": "edge-0",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:20.924092+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 100.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 11.325813076999996
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:21.540400+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:22.217630+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:45:22.895980+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:45:24.947432+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 178289040.0,
+              "process_cpu_usage": 0.007305194805194806
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:45:24.954954+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 156257264.0,
+              "process_cpu_usage": 0.008935824532900082
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:45:24.964177+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 134028552.0,
+              "process_cpu_usage": 0.0024330900243309003
+            },
+            "node": "cloud"
+          }
+        ],
+        "epochs": [],
+        "physicalServiceByNodeFunction": {
+          "edge-0/one-shot-workload": {
+            "drift": 0.05707568762430126,
+            "meanSeconds": 0.11785816887288136,
+            "samples": 354
+          },
+          "edge-1/one-shot-workload": {
+            "drift": 0.015437054174136211,
+            "meanSeconds": 0.1132156885375,
+            "samples": 80
+          }
+        }
+      },
+      "telemetryUnavailable": [
+        "epochs"
+      ],
+      "auctionEpochs": [],
+      "transitions": []
+    },
+    {
+      "provider": "multipass",
+      "purpose": "workflow-validation",
+      "mode": "ewma",
+      "conforming": true,
+      "missingEvidence": false,
+      "manifest": {
+        "schema_version": 1,
+        "provider": "multipass",
+        "purpose": "workflow-validation",
+        "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+        "source_commit": "3958d488a46bf608f749d9c1f673c984447c08a7",
+        "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+        "qualification_sha256": "346a75a5657eeba3cd3446ff449d4f9888e14f2cfead383370dd51e1b9e3bf14",
+        "trace_sha256": "9e9d33d16241db6f223b1eb7bd032c4b5eab2fbcd82b20ea99b18429873a6da4",
+        "seed": 7,
+        "nodes": [
+          "edge-0",
+          "edge-1",
+          "cloud"
+        ],
+        "functions": [
+          "one-shot-workload"
+        ],
+        "period_seconds": 20.0,
+        "lead_seconds": 1.9000000000000001,
+        "flow_quantum": 1.0,
+        "modes": [
+          "ewma",
+          "baseline",
+          "oracle"
+        ],
+        "run_id": "9e9d33d16241:ewma:0",
+        "mode": "ewma",
+        "repetition": 0,
+        "anchor": "2026-10-09T18:39:27.413907+00:00",
+        "parameters": {
+          "baselinePolicy": {
+            "edgeMaxDepth": 2,
+            "edgeSyncQueue": true,
+            "mode": "pressure",
+            "replicas": {
+              "one-shot-workload": 2
+            }
+          },
+          "cloudMemoryCapacityMiB": 256,
+          "functions": {
+            "one-shot-workload": {
+              "alpha": 1,
+              "cpu": 1.0,
+              "delta": 0.9,
+              "gamma": 0.1,
+              "input": {
+                "iterations": 20000000,
+                "seed": 7,
+                "working_set_bytes": 4096
+              },
+              "maxReplicas": 2,
+              "memoryMiB": 128,
+              "utilization": 0.8
+            }
+          },
+          "generator": {
+            "failLoad": false,
+            "generatorVus": 64,
+            "location": "operator-host",
+            "maxArrivalLatenessSeconds": 0.25,
+            "repetitions": 1,
+            "retry": false,
+            "version": "k6 v2.2.0 (commit/00a9a1b7f5, go1.26.5, linux/arm64)",
+            "warmupRate": 4.0,
+            "warmupSeconds": 5,
+            "windows": [
+              {
+                "id": "balanced",
+                "network": "observed-local",
+                "rates": {
+                  "edge-0": {
+                    "one-shot-workload-rust": 4.0
+                  },
+                  "edge-1": {
+                    "one-shot-workload-rust": 4.0
+                  }
+                }
+              },
+              {
+                "id": "imbalanced",
+                "network": "observed-local",
+                "rates": {
+                  "edge-0": {
+                    "one-shot-workload-rust": 15.0
+                  },
+                  "edge-1": {
+                    "one-shot-workload-rust": 0.0
+                  }
+                }
+              }
+            ]
+          },
+          "images": {
+            "control-plane": "sha256:4737b976ceefd49a1dff840f7b67a10a2f0da60824a48e591f84acbf3d81d35f",
+            "one-shot-workload": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+          },
+          "nanolabPackageSha256": "52a56f2c3b7b344f2ae02fce771187eaa716e7783a38234fc7272a0c3968e538",
+          "nanolabVersion": "0.6.0",
+          "network": "observed-local; shared physical host",
+          "nodeEndpoints": {
+            "cloud": "http://10.83.80.64:8080",
+            "edge-0": "http://10.83.80.112:8080",
+            "edge-1": "http://10.83.80.213:8080"
+          },
+          "nodes": [
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "edge-0",
+              "kind": "edge",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            },
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "edge-1",
+              "kind": "edge",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            },
+            {
+              "cpus": 2,
+              "diskGiB": 20,
+              "id": "cloud",
+              "kind": "cloud",
+              "memoryCapacityMiB": 256,
+              "memoryMiB": 4096
+            }
+          ],
+          "protocol": {
+            "auctionSeconds": 0.6,
+            "maxPeers": 16,
+            "maxRounds": 8,
+            "maxSolverBytes": 67108864,
+            "maxSolverStates": 2000000,
+            "parallelism": 4,
+            "peerSeconds": 0.15,
+            "preparationSeconds": 1.0,
+            "queueCapacity": 64,
+            "solverSeconds": 0.15
+          },
+          "source": {
+            "dirty": false,
+            "revision": "3958d488a46bf608f749d9c1f673c984447c08a7"
+          },
+          "terminalCloudQueueing": true,
+          "timing": {
+            "censored_count": 0,
+            "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+            "epsilon": 0.1,
+            "lead_seconds": 1.9000000000000001,
+            "margin_seconds": 0.2,
+            "matrix": [
+              {
+                "cell": {
+                  "id": "balanced",
+                  "network": "observed-local",
+                  "rates": {
+                    "edge-0": {
+                      "one-shot-workload-rust": 4.0
+                    },
+                    "edge-1": {
+                      "one-shot-workload-rust": 4.0
+                    }
+                  }
+                },
+                "result": {
+                  "censored_count": 0,
+                  "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+                  "epsilon": 0.1,
+                  "lead_seconds": 1.9000000000000001,
+                  "margin_seconds": 0.2,
+                  "matrix": [],
+                  "max_trace_resolution": 30.0,
+                  "minimum_samples": 10,
+                  "period_candidates": [
+                    20.0,
+                    30.0
+                  ],
+                  "period_seconds": 20.0,
+                  "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+                  "protocol": {},
+                  "provider": "multipass",
+                  "purpose": "workflow-validation",
+                  "qualified": true,
+                  "quantile": 0.9,
+                  "quantile_seconds": 0.07340456804377024,
+                  "ready_samples_seconds": [
+                    0.14053748501464725,
+                    0.047008730995003134,
+                    0.06594535504700616,
+                    0.05387225199956447,
+                    0.06346377200679854,
+                    0.06352398300077766,
+                    0.06453213997883722,
+                    0.0435259590158239,
+                    0.046255338995251805,
+                    0.056280170974787325
+                  ],
+                  "reason": null,
+                  "sample_count": 10,
+                  "samples_seconds": [
+                    0.14053748501464725,
+                    0.047008730995003134,
+                    0.06594535504700616,
+                    0.05387225199956447,
+                    0.06346377200679854,
+                    0.06352398300077766,
+                    0.06453213997883722,
+                    0.0435259590158239,
+                    0.046255338995251805,
+                    0.056280170974787325
+                  ],
+                  "schema_version": 1
+                }
+              },
+              {
+                "cell": {
+                  "id": "imbalanced",
+                  "network": "observed-local",
+                  "rates": {
+                    "edge-0": {
+                      "one-shot-workload-rust": 24.0
+                    },
+                    "edge-1": {
+                      "one-shot-workload-rust": 0.0
+                    }
+                  }
+                },
+                "result": {
+                  "censored_count": 0,
+                  "environment_fingerprint": "sha256:490fa8885cf7d5b2d96ffe9ab11a976a4752303ceaadf53e39a7b181b9f5c3f1",
+                  "epsilon": 0.1,
+                  "lead_seconds": 1.9000000000000001,
+                  "margin_seconds": 0.2,
+                  "matrix": [],
+                  "max_trace_resolution": 30.0,
+                  "minimum_samples": 10,
+                  "period_candidates": [
+                    20.0,
+                    30.0
+                  ],
+                  "period_seconds": 20.0,
+                  "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+                  "protocol": {},
+                  "provider": "multipass",
+                  "purpose": "workflow-validation",
+                  "qualified": true,
+                  "quantile": 0.9,
+                  "quantile_seconds": 0.1166796573728788,
+                  "ready_samples_seconds": [
+                    0.2876101449946873,
+                    0.0976873809704557,
+                    0.07836658001178876,
+                    0.05401671602157876,
+                    0.06357782299164683,
+                    0.04713620699476451,
+                    0.05284483701689169,
+                    0.058115324995014817,
+                    0.04964125499827787,
+                    0.08799880399601534
+                  ],
+                  "reason": null,
+                  "sample_count": 10,
+                  "samples_seconds": [
+                    0.2876101449946873,
+                    0.0976873809704557,
+                    0.07836658001178876,
+                    0.05401671602157876,
+                    0.06357782299164683,
+                    0.04713620699476451,
+                    0.05284483701689169,
+                    0.058115324995014817,
+                    0.04964125499827787,
+                    0.08799880399601534
+                  ],
+                  "schema_version": 1
+                }
+              }
+            ],
+            "max_trace_resolution": 30.0,
+            "minimum_samples": 10,
+            "period_candidates": [
+              20.0,
+              30.0
+            ],
+            "period_seconds": 20.0,
+            "profile_sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+            "protocol": {
+              "auctionSeconds": 0.6,
+              "maxPeers": 16,
+              "maxRounds": 8,
+              "maxSolverBytes": 67108864,
+              "maxSolverStates": 2000000,
+              "parallelism": 4,
+              "peerSeconds": 0.15,
+              "preparationSeconds": 1.0,
+              "queueCapacity": 64,
+              "solverSeconds": 0.15
+            },
+            "provider": "multipass",
+            "purpose": "workflow-validation",
+            "qualified": true,
+            "quantile": 0.9,
+            "quantile_seconds": 0.1166796573728788,
+            "ready_samples_seconds": [
+              0.14053748501464725,
+              0.047008730995003134,
+              0.06594535504700616,
+              0.05387225199956447,
+              0.06346377200679854,
+              0.06352398300077766,
+              0.06453213997883722,
+              0.0435259590158239,
+              0.046255338995251805,
+              0.056280170974787325,
+              0.2876101449946873,
+              0.0976873809704557,
+              0.07836658001178876,
+              0.05401671602157876,
+              0.06357782299164683,
+              0.04713620699476451,
+              0.05284483701689169,
+              0.058115324995014817,
+              0.04964125499827787,
+              0.08799880399601534
+            ],
+            "reason": null,
+            "sample_count": 20,
+            "samples_seconds": [
+              0.14053748501464725,
+              0.047008730995003134,
+              0.06594535504700616,
+              0.05387225199956447,
+              0.06346377200679854,
+              0.06352398300077766,
+              0.06453213997883722,
+              0.0435259590158239,
+              0.046255338995251805,
+              0.056280170974787325,
+              0.2876101449946873,
+              0.0976873809704557,
+              0.07836658001178876,
+              0.05401671602157876,
+              0.06357782299164683,
+              0.04713620699476451,
+              0.05284483701689169,
+              0.058115324995014817,
+              0.04964125499827787,
+              0.08799880399601534
+            ],
+            "schema_version": 1
+          }
+        }
+      },
+      "planned": 460,
+      "emitted": 460,
+      "received": 444,
+      "attempts": 444,
+      "completed": 444,
+      "errors": 16,
+      "censored": 0,
+      "generator_deficit": 0,
+      "violations": [],
+      "throughputOriginalsPerSecond": 11.1,
+      "routing": {
+        "local": 126,
+        "peer": 0,
+        "cloud": 318
+      },
+      "latencySeconds": {
+        "p50": 0.128628921,
+        "p95": 0.16082173334999997
+      },
+      "realizedUtility": 0.20130434782608697,
+      "utilityConvention": "(alpha*local + delta*peer - gamma*(cloud+errors))/planned originals; final solver zero-price convention, excludes bidding transfers",
+      "telemetry": {
+        "metricSamples": [
+          {
+            "at": "2026-10-09T18:39:05.561792+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:06.626949+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:07.715816+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:08.406499+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:08.441953+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 154557240.0,
+              "process_cpu_usage": 0.0
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:08.481662+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 152980800.0,
+              "process_cpu_usage": 0.0
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:08.504083+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 137200328.0,
+              "process_cpu_usage": 0.0
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:09.725768+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:10.834814+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:11.929129+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:12.655632+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:12.664914+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 158745648.0,
+              "process_cpu_usage": 0.02372479240806643
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:12.677380+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 156919560.0,
+              "process_cpu_usage": 0.022673031026252982
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:12.690270+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 140101776.0,
+              "process_cpu_usage": 0.011976047904191617
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:13.915064+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:15.017769+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:16.105411+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:16.800205+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:16.812689+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 143947616.0,
+              "process_cpu_usage": 0.01818181818181818
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:16.824986+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 158663688.0,
+              "process_cpu_usage": 0.013333333333333332
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:16.837964+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 141112512.0,
+              "process_cpu_usage": 0.0036407766990291263
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:17.999027+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:19.011966+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:20.048121+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:20.692704+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:20.701091+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 145811504.0,
+              "process_cpu_usage": 0.011612903225806452
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:20.712622+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 143751640.0,
+              "process_cpu_usage": 0.01421188630490956
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:20.725698+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 141975160.0,
+              "process_cpu_usage": 0.0025806451612903226
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:21.915899+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:23.043380+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:24.204602+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 5.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.615596714
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:24.933523+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 8.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 1.003301361
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:24.942967+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 155230984.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 10.0,
+              "process_cpu_usage": 0.0485781990521327
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:24.952348+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 152922768.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 10.0,
+              "process_cpu_usage": 0.05931198102016608
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:24.962903+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 149399952.0,
+              "process_cpu_usage": 0.08293838862559241
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:26.197510+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:27.240770+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.0
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:28.293874+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 20.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 2.434942638
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:28.975530+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 22.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 2.67203291
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:28.985677+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 161977488.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 23.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.090611958,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000542941,
+              "process_cpu_usage": 0.05084745762711864
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:28.996696+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 159692904.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 23.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.077891907,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002941695,
+              "process_cpu_usage": 0.05564142194744977
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:29.003993+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 141926848.0,
+              "process_cpu_usage": 0.05093167701863354
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:30.250902+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 5.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.578581755
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:31.270796+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 7.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 0.808267529
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:32.393148+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 29.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 3.524970026
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:33.063215+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 31.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 3.784641906
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:33.123870+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 167704352.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 32.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.090611958,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000542941,
+              "process_cpu_usage": 0.045949214026602174
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:33.140930+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 165570912.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 32.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.077891907,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002941695,
+              "process_cpu_usage": 0.04611650485436893
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:33.149572+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 148110224.0,
+              "process_cpu_usage": 0.032806804374240585
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:34.394796+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 13.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 1.4915892190000002
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:35.438764+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 15.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 1.7199676789999998
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:36.539860+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 38.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.675297898999999
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:37.226739+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 40.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.908291429
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:37.327156+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 157851152.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 41.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.090611958,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000542941,
+              "process_cpu_usage": 0.04420549581839904
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:37.342997+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 155015656.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 41.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.077891907,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002941695,
+              "process_cpu_usage": 0.0407185628742515
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:37.350813+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 153932960.0,
+              "process_cpu_usage": 0.04062126642771804
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:38.555738+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 21.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 2.399141794
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:39.606387+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 22.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 2.512333136
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:40.694439+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 47.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 5.726098780999999
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:41.460215+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 49.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 6.000969655999999
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:41.571227+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 163450896.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 50.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.090611958,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000542941,
+              "process_cpu_usage": 0.0498220640569395
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:41.581998+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 160575832.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 50.0,
+              "nanofaas_oneshot_auction_seconds_count": 1.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.077891907,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002941695,
+              "process_cpu_usage": 0.04038004750593824
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:41.596441+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 159553120.0,
+              "process_cpu_usage": 0.030769230769230767
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:42.787958+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 28.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 3.202124392
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:43.844283+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 30.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 3.437739867000001
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:44.841373+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 56.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 6.8244650569999985
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:45.562815+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 58.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 7.138365883999999
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:45.678057+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 171205440.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 59.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.119189854,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000577949,
+              "process_cpu_usage": 0.2727272727272727
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:45.684976+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 168402760.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 59.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.107253425,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002977695,
+              "process_cpu_usage": 0.2
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:45.691947+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 148082272.0,
+              "process_cpu_usage": 0.03799019607843137
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:46.909378+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 36.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.118958918
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:47.960387+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 37.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.250894523
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:49.047862+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 71.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 8.696468010999999
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:49.785310+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 72.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 8.843854119000001
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:49.885974+00:00",
+            "metrics": {
+              "execution_in_flight_records": 2.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 165007264.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 93.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.119189854,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000577949,
+              "process_cpu_usage": 0.07775119617224881
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:49.899267+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 172100280.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 63.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.107253425,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002977695,
+              "process_cpu_usage": 0.025089605734767026
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:49.908755+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 158926368.0,
+              "process_cpu_usage": 0.06205250596658711
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:39:51.209735+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 47.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 5.389308245999999
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:52.386546+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 37.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.250894523
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:58.511217+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 132.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 15.818977696
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:39:59.272904+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 122.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 14.743686173
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:39:59.482281+00:00",
+            "metrics": {
+              "execution_in_flight_records": 2.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 175229528.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 212.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.119189854,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000577949,
+              "process_cpu_usage": 0.08472803347280335
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:39:59.490470+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 157790096.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 63.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.107253425,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002977695,
+              "process_cpu_usage": 0.008891213389121338
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:39:59.500512+00:00",
+            "metrics": {
+              "execution_in_flight_records": 1.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 155724640.0,
+              "process_cpu_usage": 0.08010471204188481
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:40:00.707367+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 72.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 8.256148335
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:01.747023+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 37.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.250894523
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:02.867022+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 1.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 161.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 19.229735404999996
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:03.688660+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 145.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 17.501790368999995
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:40:04.134404+00:00",
+            "metrics": {
+              "execution_in_flight_records": 2.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 170800832.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 271.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.119189854,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000577949,
+              "process_cpu_usage": 0.07034632034632035
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:40:04.142219+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 159650720.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 63.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.107253425,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002977695,
+              "process_cpu_usage": 0.008676789587852495
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:40:04.153565+00:00",
+            "metrics": {
+              "execution_in_flight_records": 2.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 152252120.0,
+              "process_cpu_usage": 0.0603448275862069
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:40:05.341779+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 83.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 9.51809545
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:06.392896+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 37.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.250894523
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:07.475309+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 191.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 22.806020883999988
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:08.075979+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 165.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 19.852208235999996
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:40:08.329345+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 163217256.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 311.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.119189854,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000577949,
+              "process_cpu_usage": 0.05875299760191846
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:40:08.335878+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 161564944.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 63.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.107253425,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002977695,
+              "process_cpu_usage": 0.013189448441247004
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:40:08.345425+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 162702384.0,
+              "process_cpu_usage": 0.051682692307692304
+            },
+            "node": "cloud"
+          },
+          {
+            "at": "2026-10-09T18:40:09.067744+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 89.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 10.216129760000001
+            },
+            "node": "edge-0",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:10.049030+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 37.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 4.250894523
+            },
+            "node": "edge-1",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:11.163885+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 191.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 22.806020883999988
+            },
+            "node": "cloud",
+            "replica": 1
+          },
+          {
+            "at": "2026-10-09T18:40:11.830115+00:00",
+            "function": "one-shot-workload",
+            "metrics": {
+              "nanofaas_runtime_active_handlers": 0.0,
+              "nanofaas_runtime_replica_occupancy_seconds_count": 165.0,
+              "nanofaas_runtime_replica_occupancy_seconds_sum": 19.852208235999996
+            },
+            "node": "cloud",
+            "replica": 2
+          },
+          {
+            "at": "2026-10-09T18:40:13.056339+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 165182424.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 311.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.119189854,
+              "nanofaas_oneshot_solver_seconds_sum": 0.000577949,
+              "process_cpu_usage": 0.0064034151547491995
+            },
+            "node": "edge-0"
+          },
+          {
+            "at": "2026-10-09T18:40:13.068201+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 163542880.0,
+              "nanofaas_offload_failure_total": 1.0,
+              "nanofaas_offload_total": 63.0,
+              "nanofaas_oneshot_auction_seconds_count": 2.0,
+              "nanofaas_oneshot_auction_seconds_sum": 0.107253425,
+              "nanofaas_oneshot_solver_seconds_sum": 0.002977695,
+              "process_cpu_usage": 0.014909478168264111
+            },
+            "node": "edge-1"
+          },
+          {
+            "at": "2026-10-09T18:40:13.075199+00:00",
+            "metrics": {
+              "execution_in_flight_records": 0.0,
+              "executor_queued_tasks": 0.0,
+              "function_enqueue_total": 0.0,
+              "function_queue_rejected_total": 0.0,
+              "jvm_memory_used_bytes": 163566224.0,
+              "process_cpu_usage": 0.002127659574468085
+            },
+            "node": "cloud"
+          }
+        ],
+        "epochs": [
+          {
+            "auctionWallUpperBoundSeconds": 0.16769920097431168,
+            "censored": false,
+            "endsAt": "2026-10-09T18:39:47.413907+00:00",
+            "epoch": 0,
+            "globalReadyWallSeconds": 0.16769920097431168,
+            "method": "parallel-trigger-to-all-ready-conservative-auction-upper-bound",
+            "nodes": {
+              "edge-0": {
+                "auctionSeconds": 0.090611958,
+                "complete": true,
+                "eventPages": [
+                  {
+                    "contentHash": "sha256:7db140beca066e1406c809a41aafff801b73957d174a8591e56944ebbedbe22f",
+                    "entries": [
+                      {
+                        "cursor": 1,
+                        "event": {
+                          "at": "2026-10-09T18:39:25.701953603Z",
+                          "censored": false,
+                          "correlationId": "edge-0:0",
+                          "epoch": 0,
+                          "incarnation": "2e5eee8c-8cba-4dcd-815f-fe96ef44eee0",
+                          "monotonicOffsetNanos": 154247976,
+                          "nodeId": "edge-0",
+                          "round": 0,
+                          "schemaVersion": 1,
+                          "status": "PREPARED",
+                          "type": "epoch"
+                        },
+                        "operationalNanos": 154247976
+                      }
+                    ],
+                    "schemaVersion": 1
+                  }
+                ],
+                "readyOffsetSeconds": 0.16769920097431168,
+                "result": {
+                  "desiredReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "plan": {
+                    "endsAt": "2026-10-09T18:39:47.413907Z",
+                    "epoch": 0,
+                    "flowQuantum": 1.0,
+                    "functions": {
+                      "one-shot-workload": {
+                        "cloudRate": 0.25,
+                        "demandSeconds": 0.11149454126388889,
+                        "forecastRate": 3.25,
+                        "generation": 1,
+                        "inbound": [],
+                        "localRate": 3.0,
+                        "memoryMiB": 128,
+                        "outbound": [],
+                        "readyReplicas": 1,
+                        "utilization": 0.8,
+                        "version": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+                      }
+                    },
+                    "incarnation": "2e5eee8c-8cba-4dcd-815f-fe96ef44eee0",
+                    "nodeId": "edge-0",
+                    "revision": 1,
+                    "startsAt": "2026-10-09T18:39:27.413907Z"
+                  },
+                  "preparedAt": "2026-10-09T18:39:25.701919Z",
+                  "readyReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "reason": "ready subset; unacknowledged outbound goes to terminal cloud",
+                  "status": "PREPARED"
+                },
+                "solverCpuSeconds": 0.000542941,
+                "triggerOffsetSeconds": 0.0017360089696012437
+              },
+              "edge-1": {
+                "auctionSeconds": 0.077891907,
+                "complete": true,
+                "eventPages": [
+                  {
+                    "contentHash": "sha256:82b1bdf5b03d58205870b13c19c49ec17ed24ddea5e7f5e855ae26bdd4da19aa",
+                    "entries": [
+                      {
+                        "cursor": 1,
+                        "event": {
+                          "at": "2026-10-09T18:39:25.688146242Z",
+                          "censored": false,
+                          "correlationId": "edge-1:0",
+                          "epoch": 0,
+                          "incarnation": "c0f1dd34-64a5-4dd4-b3af-78e6fd100f7d",
+                          "monotonicOffsetNanos": 135307836,
+                          "nodeId": "edge-1",
+                          "round": 0,
+                          "schemaVersion": 1,
+                          "status": "PREPARED",
+                          "type": "epoch"
+                        },
+                        "operationalNanos": 135307836
+                      }
+                    ],
+                    "schemaVersion": 1
+                  }
+                ],
+                "readyOffsetSeconds": 0.16494532499928027,
+                "result": {
+                  "desiredReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "plan": {
+                    "endsAt": "2026-10-09T18:39:47.413907Z",
+                    "epoch": 0,
+                    "flowQuantum": 1.0,
+                    "functions": {
+                      "one-shot-workload": {
+                        "cloudRate": 0.25,
+                        "demandSeconds": 0.11149454126388889,
+                        "forecastRate": 3.25,
+                        "generation": 1,
+                        "inbound": [],
+                        "localRate": 3.0,
+                        "memoryMiB": 128,
+                        "outbound": [],
+                        "readyReplicas": 1,
+                        "utilization": 0.8,
+                        "version": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+                      }
+                    },
+                    "incarnation": "c0f1dd34-64a5-4dd4-b3af-78e6fd100f7d",
+                    "nodeId": "edge-1",
+                    "revision": 1,
+                    "startsAt": "2026-10-09T18:39:27.413907Z"
+                  },
+                  "preparedAt": "2026-10-09T18:39:25.688090Z",
+                  "readyReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "reason": "ready subset; unacknowledged outbound goes to terminal cloud",
+                  "status": "PREPARED"
+                },
+                "solverCpuSeconds": 0.002941695,
+                "triggerOffsetSeconds": 0.0005304460064508021
+              }
+            },
+            "startsAt": "2026-10-09T18:39:27.413907+00:00"
+          },
+          {
+            "auctionWallUpperBoundSeconds": 0.08115354098845273,
+            "censored": false,
+            "endsAt": "2026-10-09T18:40:07.413907+00:00",
+            "epoch": 1,
+            "globalReadyWallSeconds": 0.08115354098845273,
+            "method": "parallel-trigger-to-all-ready-conservative-auction-upper-bound",
+            "nodes": {
+              "edge-0": {
+                "auctionSeconds": 0.02857789599999999,
+                "complete": true,
+                "eventPages": [
+                  {
+                    "contentHash": "sha256:e94014ccbc0ec8365374daf58d4dc3fa4e9e2e1cc77786abc1a6b1e01d006650",
+                    "entries": [
+                      {
+                        "cursor": 2,
+                        "event": {
+                          "at": "2026-10-09T18:39:45.610928403Z",
+                          "censored": false,
+                          "correlationId": "edge-0:1",
+                          "epoch": 1,
+                          "incarnation": "2e5eee8c-8cba-4dcd-815f-fe96ef44eee0",
+                          "monotonicOffsetNanos": 73924267,
+                          "nodeId": "edge-0",
+                          "round": 0,
+                          "schemaVersion": 1,
+                          "status": "PREPARED",
+                          "type": "epoch"
+                        },
+                        "operationalNanos": 73924267
+                      }
+                    ],
+                    "schemaVersion": 1
+                  }
+                ],
+                "readyOffsetSeconds": 0.08115354098845273,
+                "result": {
+                  "desiredReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "plan": {
+                    "endsAt": "2026-10-09T18:40:07.413907Z",
+                    "epoch": 1,
+                    "flowQuantum": 1.0,
+                    "functions": {
+                      "one-shot-workload": {
+                        "cloudRate": 0.9999992847442627,
+                        "demandSeconds": 0.11149454126388889,
+                        "forecastRate": 3.9999992847442627,
+                        "generation": 1,
+                        "inbound": [],
+                        "localRate": 3.0,
+                        "memoryMiB": 128,
+                        "outbound": [],
+                        "readyReplicas": 1,
+                        "utilization": 0.8,
+                        "version": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+                      }
+                    },
+                    "incarnation": "2e5eee8c-8cba-4dcd-815f-fe96ef44eee0",
+                    "nodeId": "edge-0",
+                    "revision": 1,
+                    "startsAt": "2026-10-09T18:39:47.413907Z"
+                  },
+                  "preparedAt": "2026-10-09T18:39:45.610910Z",
+                  "readyReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "reason": "ready subset; unacknowledged outbound goes to terminal cloud",
+                  "status": "PREPARED"
+                },
+                "solverCpuSeconds": 3.5008e-05,
+                "triggerOffsetSeconds": 0.0008704449865035713
+              },
+              "edge-1": {
+                "auctionSeconds": 0.029361518000000003,
+                "complete": true,
+                "eventPages": [
+                  {
+                    "contentHash": "sha256:ce21e611b09cbe8f71099b8f34c283e5ded551aac6f15242ec27cc8526ab1488",
+                    "entries": [
+                      {
+                        "cursor": 2,
+                        "event": {
+                          "at": "2026-10-09T18:39:45.593847741Z",
+                          "censored": false,
+                          "correlationId": "edge-1:1",
+                          "epoch": 1,
+                          "incarnation": "c0f1dd34-64a5-4dd4-b3af-78e6fd100f7d",
+                          "monotonicOffsetNanos": 55721771,
+                          "nodeId": "edge-1",
+                          "round": 0,
+                          "schemaVersion": 1,
+                          "status": "PREPARED",
+                          "type": "epoch"
+                        },
+                        "operationalNanos": 55721771
+                      }
+                    ],
+                    "schemaVersion": 1
+                  }
+                ],
+                "readyOffsetSeconds": 0.06270952400518581,
+                "result": {
+                  "desiredReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "plan": {
+                    "endsAt": "2026-10-09T18:40:07.413907Z",
+                    "epoch": 1,
+                    "flowQuantum": 1.0,
+                    "functions": {
+                      "one-shot-workload": {
+                        "cloudRate": 0.9999992847442627,
+                        "demandSeconds": 0.11149454126388889,
+                        "forecastRate": 3.9999992847442627,
+                        "generation": 1,
+                        "inbound": [],
+                        "localRate": 3.0,
+                        "memoryMiB": 128,
+                        "outbound": [],
+                        "readyReplicas": 1,
+                        "utilization": 0.8,
+                        "version": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+                      }
+                    },
+                    "incarnation": "c0f1dd34-64a5-4dd4-b3af-78e6fd100f7d",
+                    "nodeId": "edge-1",
+                    "revision": 1,
+                    "startsAt": "2026-10-09T18:39:47.413907Z"
+                  },
+                  "preparedAt": "2026-10-09T18:39:45.593837Z",
+                  "readyReplicas": {
+                    "one-shot-workload": 1
+                  },
+                  "reason": "ready subset; unacknowledged outbound goes to terminal cloud",
+                  "status": "PREPARED"
+                },
+                "solverCpuSeconds": 3.600000000000001e-05,
+                "triggerOffsetSeconds": 0.0006006699986755848
+              }
+            },
+            "startsAt": "2026-10-09T18:39:47.413907+00:00"
+          }
+        ],
+        "physicalServiceByNodeFunction": {
+          "cloud/one-shot-workload": {
+            "drift": 0.07353898442605611,
+            "meanSeconds": 0.11969373659748428,
+            "samples": 318
+          },
+          "edge-0/one-shot-workload": {
+            "drift": 0.029538966932710853,
+            "meanSeconds": 0.11478797483146067,
+            "samples": 89
+          },
+          "edge-1/one-shot-workload": {
+            "drift": 0.030445435801552678,
+            "meanSeconds": 0.11488904116216217,
+            "samples": 37
+          }
+        }
+      },
+      "telemetryUnavailable": [],
+      "auctionEpochs": [
+        {
+          "epoch": 0,
+          "censored": false,
+          "readySeconds": 0.16769920097431168,
+          "auctionToPeriodRatio": 0.008384960048715584
+        },
+        {
+          "epoch": 1,
+          "censored": false,
+          "readySeconds": 0.08115354098845273,
+          "auctionToPeriodRatio": 0.004057677049422637
+        }
+      ],
+      "transitions": [
+        {
+          "epoch": 0,
+          "node": "edge-0",
+          "desiredReplicas": {
+            "one-shot-workload": 1
+          },
+          "readyReplicas": {
+            "one-shot-workload": 1
+          }
+        },
+        {
+          "epoch": 0,
+          "node": "edge-1",
+          "desiredReplicas": {
+            "one-shot-workload": 1
+          },
+          "readyReplicas": {
+            "one-shot-workload": 1
+          }
+        },
+        {
+          "epoch": 1,
+          "node": "edge-0",
+          "desiredReplicas": {
+            "one-shot-workload": 1
+          },
+          "readyReplicas": {
+            "one-shot-workload": 1
+          }
+        },
+        {
+          "epoch": 1,
+          "node": "edge-1",
+          "desiredReplicas": {
+            "one-shot-workload": 1
+          },
+          "readyReplicas": {
+            "one-shot-workload": 1
+          }
+        }
+      ]
+    }
+  ],
+  "betweenRepetitions": {
+    "baseline": {
+      "sampleCount": 0,
+      "mean": null,
+      "confidence95": null,
+      "method": "seeded-percentile-bootstrap"
+    },
+    "oracle": {
+      "sampleCount": 0,
+      "mean": null,
+      "confidence95": null,
+      "method": "seeded-percentile-bootstrap"
+    },
+    "ewma": {
+      "sampleCount": 1,
+      "mean": 11.1,
+      "confidence95": null,
+      "method": "seeded-percentile-bootstrap"
+    }
+  }
+}

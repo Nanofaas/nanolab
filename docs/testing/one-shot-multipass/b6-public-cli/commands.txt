@@ -1,0 +1,15 @@
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/calibration.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/calibration
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/qualification.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/qualification
+
+# Independent diagnostic qualification after censored scaling; same profile/protocol, fresh run directory.
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/qualification.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/qualification-2
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/experiment.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/experiment
+
+# Whole three-mode comparison after baseline immutable-PATCH correction.
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/experiment.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/experiment-2
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/experiment.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/experiment-3
+
+NANOFAAS_ROOT=/tmp/nanofaas-one-shot-correlation UV_CACHE_DIR=/tmp/nanolab-uv-cache ./nanolab.sh run /tmp/oneshot-b6-cli/load-failure.yaml --environment /tmp/oneshot-b6-cli/environment.yaml --run-dir /tmp/oneshot-b6-cli/load-failure

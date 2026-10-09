@@ -1,0 +1,74 @@
+[
+  {
+    "originalPath": "capacity-samples.jsonl",
+    "originalBytes": 138321,
+    "originalSha256": "10d92434908fca80e915950b7dd5c63c1eb931cecf5ae23c082b2bf78a2f85f4",
+    "storedPath": "capacity-samples.jsonl"
+  },
+  {
+    "originalPath": "capacity.jsonl",
+    "originalBytes": 1748,
+    "originalSha256": "9b88be2622a0eeb31ff2f0ffe475a4b32b2356c4195d5d7922ff963c746cd105",
+    "storedPath": "capacity.jsonl"
+  },
+  {
+    "originalPath": "clock.jsonl",
+    "originalBytes": 2158,
+    "originalSha256": "c3a2555138356d7d9e65195e515e78e8523940074468c64ad28d7b0c9d5e8a45",
+    "storedPath": "clock.jsonl"
+  },
+  {
+    "originalPath": "preflight.json",
+    "originalBytes": 2538,
+    "originalSha256": "10586719908c07de361a2af2352f87ba58e302bb77675f854db7a76c4b762b53",
+    "storedPath": "preflight.json"
+  },
+  {
+    "originalPath": "profile-reference.json",
+    "originalBytes": 131,
+    "originalSha256": "b39529c95296b6bed0fa87d8b9bbe09795b376b66f9cdfbecc8837d1b730f4c1",
+    "storedPath": "profile-reference.json"
+  },
+  {
+    "originalPath": "profile.json",
+    "originalBytes": 1262,
+    "originalSha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256",
+    "storedPath": "profile.json"
+  },
+  {
+    "originalPath": "readiness.jsonl",
+    "originalBytes": 574,
+    "originalSha256": "8272f4581421f43fc40997f111243611bc49c8e0999e7b726c3d744621f5899d",
+    "storedPath": "readiness.jsonl"
+  },
+  {
+    "originalPath": "run-metadata.json",
+    "originalBytes": 14928,
+    "originalSha256": "03abcdd0af7d3ad7f85368baedc59b321f582da309c06fb7d2f23797d1eb8260",
+    "storedPath": "run-metadata.json"
+  },
+  {
+    "originalPath": "runtime-distribution.json",
+    "originalBytes": 1273,
+    "originalSha256": "dba38b80ac9f58daa1134f5885f1a24fd40bfa278e3adf8500d56dc40604d2f4",
+    "storedPath": "runtime-distribution.json"
+  },
+  {
+    "originalPath": "samples.jsonl",
+    "originalBytes": 80553,
+    "originalSha256": "1745ebfe4ae8d6ceb1d3111311e550429e8e19acb23d87c23544d1ab741245a3",
+    "storedPath": "samples.jsonl"
+  },
+  {
+    "originalPath": "statistics.json",
+    "originalBytes": 1269,
+    "originalSha256": "8e7f5640af9ea18744b0d9134b746f5b4a48aa4b960b952fc822ceb0a402bde0",
+    "storedPath": "statistics.json"
+  },
+  {
+    "originalPath": "warmup.jsonl",
+    "originalBytes": 9228,
+    "originalSha256": "96b134534b44a41217dc989a13ad4bc39c0c7f2da86101649796c8c5507880bb",
+    "storedPath": "warmup.jsonl"
+  }
+]

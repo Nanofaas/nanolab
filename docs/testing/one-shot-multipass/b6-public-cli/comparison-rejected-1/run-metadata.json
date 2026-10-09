@@ -1,0 +1,899 @@
+{
+  "schema_version": 1,
+  "status": "failed",
+  "error": "Client error '400 Bad Request' for url 'http://10.83.80.61:8080/v1/functions/one-shot-workload'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+  "started_at": "2026-10-09T18:16:54.203479+00:00",
+  "ended_at": "2026-10-09T18:25:42.837294+00:00",
+  "git_commit": "3958d488a46bf608f749d9c1f673c984447c08a7",
+  "git_dirty": false,
+  "git_diff_sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+  "git_status": [],
+  "scenario": {
+    "source": "/tmp/oneshot-b6-cli/experiment.yaml",
+    "config": {
+      "workflow": "one-shot-experiment",
+      "oneShot": {
+        "schemaVersion": 1,
+        "provider": "multipass",
+        "purpose": "workflow-validation",
+        "nodes": [
+          {
+            "id": "edge-0",
+            "kind": "edge",
+            "cpus": 2,
+            "memoryMiB": 4096,
+            "diskGiB": 20,
+            "memoryCapacityMiB": 256
+          },
+          {
+            "id": "edge-1",
+            "kind": "edge",
+            "cpus": 2,
+            "memoryMiB": 4096,
+            "diskGiB": 20,
+            "memoryCapacityMiB": 256
+          },
+          {
+            "id": "cloud",
+            "kind": "cloud",
+            "cpus": 2,
+            "memoryMiB": 4096,
+            "diskGiB": 20,
+            "memoryCapacityMiB": 256
+          }
+        ],
+        "functions": {
+          "one-shot-workload-rust": {
+            "input": {
+              "iterations": 20000000,
+              "working_set_bytes": 4096,
+              "seed": 7
+            },
+            "cpu": 1.0,
+            "memoryMiB": 128,
+            "maxReplicas": 2,
+            "utilization": 0.8,
+            "alpha": 1.0,
+            "delta": 0.9,
+            "gamma": 0.1
+          }
+        },
+        "profile": {
+          "path": "/tmp/oneshot-b6-cli/calibration/profile.json",
+          "sha256": "965f8c450a8460d4bbe8be0fbc86fce5d023829e8ce6c64acb4ab30a6dfdf256"
+        },
+        "qualification": {
+          "path": "/tmp/oneshot-b6-cli/qualification-2/timing.json",
+          "sha256": "346a75a5657eeba3cd3446ff449d4f9888e14f2cfead383370dd51e1b9e3bf14"
+        },
+        "runtimeDistribution": {
+          "path": "/tmp/oneshot-runtime-build-v4/distribution/distribution.json",
+          "sha256": "dba38b80ac9f58daa1134f5885f1a24fd40bfa278e3adf8500d56dc40604d2f4"
+        },
+        "flowQuantum": 1.0,
+        "seed": 7,
+        "calibration": {
+          "minSamples": 24,
+          "maxSamples": 96,
+          "repetitions": 2,
+          "warmupInvocations": 3,
+          "relativeCI": 0.15,
+          "confidence": 0.95,
+          "capacityError": 0.35,
+          "capacitySeconds": 4.0,
+          "timeoutSeconds": 10.0,
+          "quantiles": [
+            0.5,
+            0.95
+          ]
+        },
+        "timing": null,
+        "experiment": {
+          "windows": [
+            {
+              "id": "balanced",
+              "rates": {
+                "edge-0": {
+                  "one-shot-workload-rust": 4.0
+                },
+                "edge-1": {
+                  "one-shot-workload-rust": 4.0
+                }
+              },
+              "network": "observed-local"
+            },
+            {
+              "id": "imbalanced",
+              "rates": {
+                "edge-0": {
+                  "one-shot-workload-rust": 15.0
+                },
+                "edge-1": {
+                  "one-shot-workload-rust": 0.0
+                }
+              },
+              "network": "observed-local"
+            }
+          ],
+          "repetitions": 1,
+          "warmupSeconds": 5,
+          "warmupRate": 4.0,
+          "generatorVus": 64,
+          "maxArrivalLatenessSeconds": 0.25,
+          "failLoad": false
+        }
+      },
+      "contract": null,
+      "backend": "container",
+      "build": "docker",
+      "recipeProfile": null,
+      "cliRuntime": "jvm",
+      "functions": [
+        "one-shot-workload-rust"
+      ],
+      "resources": {},
+      "payloadProfile": null,
+      "handlerEnvelope": false,
+      "asyncLoad": false,
+      "persistentRecovery": false,
+      "retryBackoffBurst": false,
+      "autoscaling": false,
+      "concurrencyControl": false,
+      "concurrencyMode": "ADAPTIVE_PER_POD",
+      "loadProfile": "cycle",
+      "soakMinutes": null,
+      "drainMinutes": null,
+      "asyncShare": null,
+      "idemShare": null,
+      "controlPlaneRuntime": "jvm",
+      "autoscalingStrategy": "INTERNAL",
+      "hpaScaleToZero": false,
+      "functionImages": {},
+      "controlPlaneImage": null,
+      "controlPlaneVariant": null,
+      "loadScale": 1.0,
+      "loadVus": null,
+      "release": null,
+      "soak": null,
+      "heapAnalysis": null
+    }
+  },
+  "environment": {
+    "source": "/tmp/oneshot-b6-cli/environment.yaml",
+    "config": {
+      "provider": "multipass",
+      "roles": {
+        "stack": {
+          "name": "one-shot",
+          "host": null,
+          "user": "ubuntu",
+          "home": null,
+          "kubeconfig": null,
+          "cpus": 4,
+          "memory": "12G",
+          "disk": "30G",
+          "hpaScaleToZero": false
+        }
+      },
+      "azure": null,
+      "proxmox": null,
+      "containerdMavenRepository": null
+    }
+  },
+  "tasks": [
+    {
+      "task_id": "001.acquire-edge-0-vm",
+      "title": "Acquire edge-0 VM",
+      "status": "passed",
+      "duration_seconds": 32.231,
+      "detail": ""
+    },
+    {
+      "task_id": "002.acquire-edge-1-vm",
+      "title": "Acquire edge-1 VM",
+      "status": "passed",
+      "duration_seconds": 30.963,
+      "detail": ""
+    },
+    {
+      "task_id": "003.acquire-cloud-vm",
+      "title": "Acquire cloud VM",
+      "status": "passed",
+      "duration_seconds": 30.997,
+      "detail": ""
+    },
+    {
+      "task_id": "004.acquire-bf3fb6ea32e6-operator-host-generator",
+      "title": "Acquire bf3fb6ea32e6 operator-host generator",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "provision.edge-0.vm.provision_base",
+      "title": "Provision base VM dependencies",
+      "status": "passed",
+      "duration_seconds": 22.63,
+      "detail": ""
+    },
+    {
+      "task_id": "005.bootstrap-edge-0-container-vm",
+      "title": "Bootstrap edge-0 container VM",
+      "status": "passed",
+      "duration_seconds": 22.631,
+      "detail": ""
+    },
+    {
+      "task_id": "006.reuse-immutable-one-shot-runtime-distribution",
+      "title": "Reuse immutable one-shot runtime distribution",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "007.archive-digest-pinned-one-shot-runtime-images",
+      "title": "Archive digest-pinned one-shot runtime images",
+      "status": "passed",
+      "duration_seconds": 1.117,
+      "detail": ""
+    },
+    {
+      "task_id": "008.acquire-edge-0-control-plane",
+      "title": "Acquire edge-0 control plane",
+      "status": "passed",
+      "duration_seconds": 11.516,
+      "detail": ""
+    },
+    {
+      "task_id": "provision.edge-1.vm.provision_base",
+      "title": "Provision base VM dependencies",
+      "status": "passed",
+      "duration_seconds": 24.138,
+      "detail": ""
+    },
+    {
+      "task_id": "009.bootstrap-edge-1-container-vm",
+      "title": "Bootstrap edge-1 container VM",
+      "status": "passed",
+      "duration_seconds": 24.138,
+      "detail": ""
+    },
+    {
+      "task_id": "010.acquire-edge-1-control-plane",
+      "title": "Acquire edge-1 control plane",
+      "status": "passed",
+      "duration_seconds": 7.97,
+      "detail": ""
+    },
+    {
+      "task_id": "provision.cloud.vm.provision_base",
+      "title": "Provision base VM dependencies",
+      "status": "passed",
+      "duration_seconds": 27.257,
+      "detail": ""
+    },
+    {
+      "task_id": "011.bootstrap-cloud-container-vm",
+      "title": "Bootstrap cloud container VM",
+      "status": "passed",
+      "duration_seconds": 27.257,
+      "detail": ""
+    },
+    {
+      "task_id": "012.acquire-cloud-control-plane",
+      "title": "Acquire cloud control plane",
+      "status": "passed",
+      "duration_seconds": 10.966,
+      "detail": ""
+    },
+    {
+      "task_id": "013.acquire-edge-0-clock-network-probe",
+      "title": "Acquire edge-0 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.943,
+      "detail": ""
+    },
+    {
+      "task_id": "014.acquire-edge-1-clock-network-probe",
+      "title": "Acquire edge-1 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.977,
+      "detail": ""
+    },
+    {
+      "task_id": "015.acquire-cloud-clock-network-probe",
+      "title": "Acquire cloud clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.806,
+      "detail": ""
+    },
+    {
+      "task_id": "016.pin-function-registrations-to-immutable-target-image-ids",
+      "title": "Pin function registrations to immutable target image IDs",
+      "status": "passed",
+      "duration_seconds": 2.104,
+      "detail": ""
+    },
+    {
+      "task_id": "017.acquire-one-shot-workload-on-the-edge-0",
+      "title": "Acquire one-shot-workload on the edge-0",
+      "status": "passed",
+      "duration_seconds": 0.774,
+      "detail": ""
+    },
+    {
+      "task_id": "018.acquire-one-shot-workload-on-the-edge-1",
+      "title": "Acquire one-shot-workload on the edge-1",
+      "status": "passed",
+      "duration_seconds": 0.791,
+      "detail": ""
+    },
+    {
+      "task_id": "019.acquire-one-shot-workload-on-the-cloud",
+      "title": "Acquire one-shot-workload on the cloud",
+      "status": "passed",
+      "duration_seconds": 0.791,
+      "detail": ""
+    },
+    {
+      "task_id": "020.acquire-measured-periodic-one-shot-clock-health",
+      "title": "Acquire measured periodic one-shot clock health",
+      "status": "passed",
+      "duration_seconds": 0.208,
+      "detail": ""
+    },
+    {
+      "task_id": "021.verify-and-freeze-ewma-comparison/measure-and-validate-deployed-one-shot-topology",
+      "title": "Measure and validate deployed one-shot topology",
+      "status": "passed",
+      "duration_seconds": 5.5,
+      "detail": ""
+    },
+    {
+      "task_id": "021.verify-and-freeze-ewma-comparison/freeze-verified-one-shot-comparison-manifest",
+      "title": "Freeze verified one-shot comparison manifest",
+      "status": "passed",
+      "duration_seconds": 0.053,
+      "detail": ""
+    },
+    {
+      "task_id": "021.verify-and-freeze-ewma-comparison",
+      "title": "Verify and freeze ewma comparison",
+      "status": "passed",
+      "duration_seconds": 5.553,
+      "detail": ""
+    },
+    {
+      "task_id": "022.configure-comparison-mode-and-confirm-forecast-upload",
+      "title": "Configure comparison mode and confirm forecast upload",
+      "status": "passed",
+      "duration_seconds": 1.696,
+      "detail": ""
+    },
+    {
+      "task_id": "023.own-bounded-one-shot-k6-generator",
+      "title": "Own bounded one-shot k6 generator",
+      "status": "passed",
+      "duration_seconds": 0.001,
+      "detail": ""
+    },
+    {
+      "task_id": "024.own-live-physical-evidence-collector",
+      "title": "Own live physical evidence collector",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "025.run-original-load-and-collect-best-effort-physical-evidence",
+      "title": "Run original load and collect best-effort physical evidence",
+      "status": "passed",
+      "duration_seconds": 71.839,
+      "detail": ""
+    },
+    {
+      "task_id": "026.release-own-live-physical-evidence-collector",
+      "title": "Release Own live physical evidence collector",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "027.release-own-bounded-one-shot-k6-generator",
+      "title": "Release Own bounded one-shot k6 generator",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "028.evaluate-ewma-evidence/correlate-original-ids-and-physical-completions",
+      "title": "Correlate original IDs and physical completions",
+      "status": "passed",
+      "duration_seconds": 3.832,
+      "detail": ""
+    },
+    {
+      "task_id": "028.evaluate-ewma-evidence/verify-one-shot-comparison-assumptions-and-conservation",
+      "title": "Verify one-shot comparison assumptions and conservation",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "028.evaluate-ewma-evidence",
+      "title": "Evaluate ewma evidence",
+      "status": "passed",
+      "duration_seconds": 3.833,
+      "detail": ""
+    },
+    {
+      "task_id": "029.release-measured-periodic-one-shot-clock-health",
+      "title": "Release measured periodic one-shot clock health",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "030.release-one-shot-workload-on-the-cloud",
+      "title": "Release one-shot-workload on the cloud",
+      "status": "passed",
+      "duration_seconds": 0.585,
+      "detail": ""
+    },
+    {
+      "task_id": "031.release-one-shot-workload-on-the-edge-1",
+      "title": "Release one-shot-workload on the edge-1",
+      "status": "passed",
+      "duration_seconds": 0.483,
+      "detail": ""
+    },
+    {
+      "task_id": "032.release-one-shot-workload-on-the-edge-0",
+      "title": "Release one-shot-workload on the edge-0",
+      "status": "passed",
+      "duration_seconds": 0.52,
+      "detail": ""
+    },
+    {
+      "task_id": "033.release-pin-function-registrations-to-immutable-target-image-ids",
+      "title": "Release Pin function registrations to immutable target image IDs",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "034.release-cloud-clock-network-probe",
+      "title": "Release cloud clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.316,
+      "detail": ""
+    },
+    {
+      "task_id": "035.release-edge-1-clock-network-probe",
+      "title": "Release edge-1 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.355,
+      "detail": ""
+    },
+    {
+      "task_id": "036.release-edge-0-clock-network-probe",
+      "title": "Release edge-0 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.344,
+      "detail": ""
+    },
+    {
+      "task_id": "037.release-cloud-control-plane",
+      "title": "Release cloud control plane",
+      "status": "passed",
+      "duration_seconds": 0.709,
+      "detail": ""
+    },
+    {
+      "task_id": "038.release-bootstrap-cloud-container-vm",
+      "title": "Release Bootstrap cloud container VM",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "039.release-edge-1-control-plane",
+      "title": "Release edge-1 control plane",
+      "status": "passed",
+      "duration_seconds": 0.819,
+      "detail": ""
+    },
+    {
+      "task_id": "040.release-bootstrap-edge-1-container-vm",
+      "title": "Release Bootstrap edge-1 container VM",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "041.release-edge-0-control-plane",
+      "title": "Release edge-0 control plane",
+      "status": "passed",
+      "duration_seconds": 0.755,
+      "detail": ""
+    },
+    {
+      "task_id": "042.release-archive-digest-pinned-one-shot-runtime-images",
+      "title": "Release Archive digest-pinned one-shot runtime images",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "043.release-reuse-immutable-one-shot-runtime-distribution",
+      "title": "Release Reuse immutable one-shot runtime distribution",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "044.release-bootstrap-edge-0-container-vm",
+      "title": "Release Bootstrap edge-0 container VM",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "045.release-bf3fb6ea32e6-operator-host-generator",
+      "title": "Release bf3fb6ea32e6 operator-host generator",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "046.release-cloud-vm",
+      "title": "Release cloud VM",
+      "status": "passed",
+      "duration_seconds": 0.416,
+      "detail": ""
+    },
+    {
+      "task_id": "047.release-edge-1-vm",
+      "title": "Release edge-1 VM",
+      "status": "passed",
+      "duration_seconds": 0.448,
+      "detail": ""
+    },
+    {
+      "task_id": "048.release-edge-0-vm",
+      "title": "Release edge-0 VM",
+      "status": "passed",
+      "duration_seconds": 0.434,
+      "detail": ""
+    },
+    {
+      "task_id": "049.acquire-edge-0-vm",
+      "title": "Acquire edge-0 VM",
+      "status": "passed",
+      "duration_seconds": 33.65,
+      "detail": ""
+    },
+    {
+      "task_id": "050.acquire-edge-1-vm",
+      "title": "Acquire edge-1 VM",
+      "status": "passed",
+      "duration_seconds": 33.198,
+      "detail": ""
+    },
+    {
+      "task_id": "051.acquire-cloud-vm",
+      "title": "Acquire cloud VM",
+      "status": "passed",
+      "duration_seconds": 33.993,
+      "detail": ""
+    },
+    {
+      "task_id": "052.acquire-f8383fa9ef92-operator-host-generator",
+      "title": "Acquire f8383fa9ef92 operator-host generator",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "provision.edge-0.vm.provision_base",
+      "title": "Provision base VM dependencies",
+      "status": "passed",
+      "duration_seconds": 29.336,
+      "detail": ""
+    },
+    {
+      "task_id": "053.bootstrap-edge-0-container-vm",
+      "title": "Bootstrap edge-0 container VM",
+      "status": "passed",
+      "duration_seconds": 29.336,
+      "detail": ""
+    },
+    {
+      "task_id": "054.reuse-immutable-one-shot-runtime-distribution",
+      "title": "Reuse immutable one-shot runtime distribution",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "055.archive-digest-pinned-one-shot-runtime-images",
+      "title": "Archive digest-pinned one-shot runtime images",
+      "status": "passed",
+      "duration_seconds": 0.755,
+      "detail": ""
+    },
+    {
+      "task_id": "056.acquire-edge-0-control-plane",
+      "title": "Acquire edge-0 control plane",
+      "status": "passed",
+      "duration_seconds": 8.242,
+      "detail": ""
+    },
+    {
+      "task_id": "provision.edge-1.vm.provision_base",
+      "title": "Provision base VM dependencies",
+      "status": "passed",
+      "duration_seconds": 24.076,
+      "detail": ""
+    },
+    {
+      "task_id": "057.bootstrap-edge-1-container-vm",
+      "title": "Bootstrap edge-1 container VM",
+      "status": "passed",
+      "duration_seconds": 24.077,
+      "detail": ""
+    },
+    {
+      "task_id": "058.acquire-edge-1-control-plane",
+      "title": "Acquire edge-1 control plane",
+      "status": "passed",
+      "duration_seconds": 8.079,
+      "detail": ""
+    },
+    {
+      "task_id": "provision.cloud.vm.provision_base",
+      "title": "Provision base VM dependencies",
+      "status": "passed",
+      "duration_seconds": 32.347,
+      "detail": ""
+    },
+    {
+      "task_id": "059.bootstrap-cloud-container-vm",
+      "title": "Bootstrap cloud container VM",
+      "status": "passed",
+      "duration_seconds": 32.347,
+      "detail": ""
+    },
+    {
+      "task_id": "060.acquire-cloud-control-plane",
+      "title": "Acquire cloud control plane",
+      "status": "passed",
+      "duration_seconds": 7.411,
+      "detail": ""
+    },
+    {
+      "task_id": "061.acquire-edge-0-clock-network-probe",
+      "title": "Acquire edge-0 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.94,
+      "detail": ""
+    },
+    {
+      "task_id": "062.acquire-edge-1-clock-network-probe",
+      "title": "Acquire edge-1 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.967,
+      "detail": ""
+    },
+    {
+      "task_id": "063.acquire-cloud-clock-network-probe",
+      "title": "Acquire cloud clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.81,
+      "detail": ""
+    },
+    {
+      "task_id": "064.pin-function-registrations-to-immutable-target-image-ids",
+      "title": "Pin function registrations to immutable target image IDs",
+      "status": "passed",
+      "duration_seconds": 2.122,
+      "detail": ""
+    },
+    {
+      "task_id": "065.acquire-one-shot-workload-on-the-edge-0",
+      "title": "Acquire one-shot-workload on the edge-0",
+      "status": "passed",
+      "duration_seconds": 0.802,
+      "detail": ""
+    },
+    {
+      "task_id": "066.acquire-one-shot-workload-on-the-edge-1",
+      "title": "Acquire one-shot-workload on the edge-1",
+      "status": "passed",
+      "duration_seconds": 0.739,
+      "detail": ""
+    },
+    {
+      "task_id": "067.acquire-one-shot-workload-on-the-cloud",
+      "title": "Acquire one-shot-workload on the cloud",
+      "status": "passed",
+      "duration_seconds": 0.775,
+      "detail": ""
+    },
+    {
+      "task_id": "068.acquire-measured-periodic-one-shot-clock-health",
+      "title": "Acquire measured periodic one-shot clock health",
+      "status": "passed",
+      "duration_seconds": 0.208,
+      "detail": ""
+    },
+    {
+      "task_id": "069.verify-and-freeze-baseline-comparison/measure-and-validate-deployed-one-shot-topology",
+      "title": "Measure and validate deployed one-shot topology",
+      "status": "passed",
+      "duration_seconds": 5.613,
+      "detail": ""
+    },
+    {
+      "task_id": "069.verify-and-freeze-baseline-comparison/freeze-verified-one-shot-comparison-manifest",
+      "title": "Freeze verified one-shot comparison manifest",
+      "status": "passed",
+      "duration_seconds": 0.058,
+      "detail": ""
+    },
+    {
+      "task_id": "069.verify-and-freeze-baseline-comparison",
+      "title": "Verify and freeze baseline comparison",
+      "status": "passed",
+      "duration_seconds": 5.672,
+      "detail": ""
+    },
+    {
+      "task_id": "070.configure-comparison-mode-and-confirm-forecast-upload",
+      "title": "Configure comparison mode and confirm forecast upload",
+      "status": "failed",
+      "duration_seconds": 1.604,
+      "detail": "Client error '400 Bad Request' for url 'http://10.83.80.61:8080/v1/functions/one-shot-workload'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400"
+    },
+    {
+      "task_id": "077.release-measured-periodic-one-shot-clock-health",
+      "title": "Release measured periodic one-shot clock health",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "078.release-one-shot-workload-on-the-cloud",
+      "title": "Release one-shot-workload on the cloud",
+      "status": "passed",
+      "duration_seconds": 0.48,
+      "detail": ""
+    },
+    {
+      "task_id": "079.release-one-shot-workload-on-the-edge-1",
+      "title": "Release one-shot-workload on the edge-1",
+      "status": "passed",
+      "duration_seconds": 0.608,
+      "detail": ""
+    },
+    {
+      "task_id": "080.release-one-shot-workload-on-the-edge-0",
+      "title": "Release one-shot-workload on the edge-0",
+      "status": "passed",
+      "duration_seconds": 0.577,
+      "detail": ""
+    },
+    {
+      "task_id": "081.release-pin-function-registrations-to-immutable-target-image-ids",
+      "title": "Release Pin function registrations to immutable target image IDs",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "082.release-cloud-clock-network-probe",
+      "title": "Release cloud clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.35,
+      "detail": ""
+    },
+    {
+      "task_id": "083.release-edge-1-clock-network-probe",
+      "title": "Release edge-1 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.354,
+      "detail": ""
+    },
+    {
+      "task_id": "084.release-edge-0-clock-network-probe",
+      "title": "Release edge-0 clock/network probe",
+      "status": "passed",
+      "duration_seconds": 0.302,
+      "detail": ""
+    },
+    {
+      "task_id": "085.release-cloud-control-plane",
+      "title": "Release cloud control plane",
+      "status": "passed",
+      "duration_seconds": 0.685,
+      "detail": ""
+    },
+    {
+      "task_id": "086.release-bootstrap-cloud-container-vm",
+      "title": "Release Bootstrap cloud container VM",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "087.release-edge-1-control-plane",
+      "title": "Release edge-1 control plane",
+      "status": "passed",
+      "duration_seconds": 0.802,
+      "detail": ""
+    },
+    {
+      "task_id": "088.release-bootstrap-edge-1-container-vm",
+      "title": "Release Bootstrap edge-1 container VM",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "089.release-edge-0-control-plane",
+      "title": "Release edge-0 control plane",
+      "status": "passed",
+      "duration_seconds": 0.774,
+      "detail": ""
+    },
+    {
+      "task_id": "090.release-archive-digest-pinned-one-shot-runtime-images",
+      "title": "Release Archive digest-pinned one-shot runtime images",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "091.release-reuse-immutable-one-shot-runtime-distribution",
+      "title": "Release Reuse immutable one-shot runtime distribution",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "092.release-bootstrap-edge-0-container-vm",
+      "title": "Release Bootstrap edge-0 container VM",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "093.release-f8383fa9ef92-operator-host-generator",
+      "title": "Release f8383fa9ef92 operator-host generator",
+      "status": "passed",
+      "duration_seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "task_id": "094.release-cloud-vm",
+      "title": "Release cloud VM",
+      "status": "passed",
+      "duration_seconds": 0.485,
+      "detail": ""
+    },
+    {
+      "task_id": "095.release-edge-1-vm",
+      "title": "Release edge-1 VM",
+      "status": "passed",
+      "duration_seconds": 0.484,
+      "detail": ""
+    },
+    {
+      "task_id": "096.release-edge-0-vm",
+      "title": "Release edge-0 VM",
+      "status": "passed",
+      "duration_seconds": 0.443,
+      "detail": ""
+    }
+  ]
+}

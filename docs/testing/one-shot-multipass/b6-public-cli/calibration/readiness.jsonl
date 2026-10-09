@@ -1,0 +1,3 @@
+{"containerCreatedAt":"2026-10-09T17:42:22.72739114Z","containerStartedAt":"2026-10-09T17:42:22.918126651Z","function":"one-shot-workload","lookupSeconds":0.6803971760091372,"node":"edge-0"}
+{"containerCreatedAt":"2026-10-09T17:42:23.659764627Z","containerStartedAt":"2026-10-09T17:42:23.838790402Z","function":"one-shot-workload","lookupSeconds":0.7411469210055657,"node":"edge-1"}
+{"containerCreatedAt":"2026-10-09T17:42:24.650055878Z","containerStartedAt":"2026-10-09T17:42:24.830520705Z","function":"one-shot-workload","lookupSeconds":0.6712263619992882,"node":"cloud"}
