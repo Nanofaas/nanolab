@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -72,7 +73,32 @@ class RecordingExecutor:
         self.seen.append(task)
         rendered = " ".join(task.argv)
         stdout = '{"status":"success","output":"ok"}'
-        if "get service control-plane" in rendered:
+        if task.argv[:2] == ("docker", "ps"):
+            stdout = "a" * 64
+        elif task.argv[:3] == ("docker", "inspect", "--format={{json .}}"):
+            query = next(
+                e for e in reversed(self.seen) if e.argv[:2] == ("docker", "ps")
+            )
+            function = next(
+                a.removeprefix("label=io.nanofaas.function=")
+                for a in query.argv
+                if a.startswith("label=io.nanofaas.function=")
+            )
+            stdout = json.dumps(
+                {
+                    "Id": "a" * 64,
+                    "State": {"Running": True},
+                    "Config": {
+                        "Labels": {
+                            "io.nanofaas.managed": "true",
+                            "io.nanofaas.function": function,
+                            "io.nanofaas.replica": "1",
+                        }
+                    },
+                    "HostConfig": {},
+                }
+            )
+        elif "get service control-plane" in rendered:
             stdout = "10.43.0.7"
         elif "get deployment" in rendered:
             stdout = DEPLOYMENT_PAYLOAD
@@ -470,7 +496,7 @@ def test_container_validation_builds_and_deploys_the_control_plane_with_compose(
         "005.push-image-127-0-0-1-5000-nanofaas-java-word-stats-e2e",
         "006.acquire-word-stats-java",
         "007.invoke-word-stats-java",
-        "008.inspect-resources-of-nanofaas-word-stats-java-r1",
+        "008.inspect-resources-of-word-stats-java-replica-1",
         "009.release-word-stats-java",
         "010.release-docker-compose-project-nanofaas-validate",
         "011.release-local-registry",

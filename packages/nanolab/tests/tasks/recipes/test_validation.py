@@ -483,11 +483,29 @@ def test_recipe_failure_releases_acquired_resources(
                 )
             elif " ps -q control-plane" in command:
                 output = "container-1"
+            elif task.argv[:2] == ("docker", "ps"):
+                output = "a" * 64
+            elif "docker inspect --format={{json .}}" in command:
+                output = json.dumps(
+                    {
+                        "Id": "a" * 64,
+                        "State": {"Running": True},
+                        "Image": "sha256:unexpected"
+                        if failure == "function-image"
+                        else "sha256:fn",
+                        "Config": {
+                            "Labels": {
+                                "io.nanofaas.managed": "true",
+                                "io.nanofaas.function": "word-stats-java",
+                                "io.nanofaas.replica": "1",
+                            }
+                        },
+                    }
+                )
             elif "docker inspect --format {{.Image}}" in command:
-                is_function = "nanofaas-word-stats-java-r1" in command
-                output = "sha256:fn" if is_function else "sha256:cp"
-                if failure == ("function-image" if is_function else "control-image"):
-                    output = "sha256:unexpected"
+                output = (
+                    "sha256:unexpected" if failure == "control-image" else "sha256:cp"
+                )
             elif ":invoke" in command:
                 status = "error" if failure == "invoke" else "success"
                 output = json.dumps({"status": status, "output": "ok"})
@@ -661,7 +679,27 @@ def test_recipe_service_selection_and_registration_keep_component_kind(
     class ImageExecutor(RecordingExecutor):
         def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
             return TaskResult(
-                task_id="", status="passed", return_code=0, stdout="sha256:service"
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout=(
+                    "a" * 64
+                    if task.argv[:2] == ("docker", "ps")
+                    else json.dumps(
+                        {
+                            "Id": "a" * 64,
+                            "State": {"Running": True},
+                            "Image": "sha256:service",
+                            "Config": {
+                                "Labels": {
+                                    "io.nanofaas.managed": "true",
+                                    "io.nanofaas.function": "service-echo",
+                                    "io.nanofaas.replica": "1",
+                                }
+                            },
+                        }
+                    )
+                ),
             )
 
     service_value = replace(
@@ -685,7 +723,7 @@ def test_recipe_service_selection_and_registration_keep_component_kind(
     )
     check.run(TaskInputs._for_resources({resource: service_value}, {resource}))
     evidence = json.loads((tmp_path / "image-service-word-stats.json").read_text())
-    assert evidence["container"] == "nanofaas-service-echo-r1"
+    assert evidence["container"] == "a" * 64
     assert evidence["reference"] == "127.0.0.1:5000/nanofaas/service:run-1"
     with pytest.raises(RuntimeError, match="Running image"):
         check.run(TaskInputs._for_resources({resource: value}, {resource}))

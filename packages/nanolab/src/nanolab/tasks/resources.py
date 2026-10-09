@@ -11,7 +11,6 @@ from typing import Any
 from sonata_engine import Task, TaskInputs, TaskOutcome
 from sonata_tasks.command import CommandTask
 from sonata_tasks.core.fingerprint import fingerprint_digest
-from sonata_tasks.docker import DockerInspectTask
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
@@ -19,6 +18,7 @@ from sonata_tasks.tasks.models import TaskResult
 from nanolab.tasks.containerd_rootless import RootlessRun
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.kubectl import KubectlTask
+from nanolab.tasks.managed_containers import inspect_managed_container
 
 ResourceSpec = Mapping[str, Any]
 
@@ -138,21 +138,21 @@ def _halves(resources: ResourceSpec) -> tuple[Mapping[str, Any], Mapping[str, An
     return requests, limits
 
 
-class ContainerResourceCheckTask(DockerInspectTask):
+class ContainerResourceCheckTask(Task[None]):
     """Read a container's host config and assert the declared limits landed on it.
 
     `role` has no default on purpose: running this on the host and running it
     inside a VM are different checks against different daemons, and a default
     would hide that decision at the call site.
 
-    With no spec the task only reads, which is what the workflow wants when the
-    scenario declares no resources: proof the container exists, nothing more.
+    With no resource spec the task still verifies the selected running replica.
     """
 
     def __init__(
         self,
         *,
-        container: str,
+        function: str,
+        replica: int,
         resources: ResourceSpec | None,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
@@ -160,13 +160,15 @@ class ContainerResourceCheckTask(DockerInspectTask):
     ) -> None:
         """Translate the spec into Docker host-config fields and compare against them.
 
-        With no spec the task only checks that the container exists.
+        With no spec the task checks the running replica identity.
         """
-        verify: Callable[[TaskResult], None] | None = None
-        # Both the check and its identity come from the same spec, so they are
-        # set together: a key for a check that is not run would collapse two
-        # different tasks onto one journal entry.
-        semantic_key: str | None = None
+        self.title = f"Inspect resources of {function} replica {replica}"
+        self._function = function
+        self._replica = replica
+        self._executor = executor
+        self._role: ExecutionRole = role
+        self._cwd = cwd
+        self._expected: dict[str, int] | None = None
         if resources is not None:
             requests, limits = _halves(resources)
             # `requests` is the spec's resource-request dict, not the HTTP library.
@@ -189,24 +191,35 @@ class ContainerResourceCheckTask(DockerInspectTask):
                 "Memory": limit_memory * 1024 * 1024,
             }
 
-            def check_container(result: TaskResult) -> None:
-                _compare(_payload(result, "container host config"), expected, container)
+            self._expected = expected
 
-            verify = check_container
-            semantic_key = (
-                "nanolab.container-resources:v2:"
-                f"{fingerprint_digest({'expected': expected})}"
-            )
+    def _fingerprint_payload(self) -> object:
+        return {
+            "version": "nanolab.container-resources:v3",
+            "function": self._function,
+            "replica": self._replica,
+            "expected": self._expected,
+            "role": self._role,
+            "binding_key": self._executor.binding_key(self._role),
+            "cwd": str(self._cwd) if self._cwd else None,
+        }
 
-        super().__init__(
-            container=container,
-            executor=executor,
-            role=role,
-            title=f"Inspect resources of {container}",
-            options=CommandOptions(cwd=cwd),
-            verify=verify,
-            semantic_key=semantic_key,
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Check the running replica's identity and its declared resource limits."""
+        observed = inspect_managed_container(
+            function=self._function,
+            replica=self._replica,
+            executor=self._executor,
+            role=self._role,
+            inputs=inputs,
+            cwd=self._cwd,
         )
+        if self._expected is not None:
+            actual = observed.get("HostConfig")
+            if not isinstance(actual, dict):
+                raise RuntimeError(f"{observed['Id']}: no container host config")
+            _compare(actual, self._expected, observed["Id"])
+        return TaskOutcome(value=None)
 
 
 def _k8s_cpu(value: object) -> str:
@@ -217,8 +230,7 @@ def _k8s_cpu(value: object) -> str:
 class K8sResourceCheckTask(KubectlTask):
     """Read a Deployment and assert the declared limits reached its container.
 
-    Both halves of the check now sit on a primitive: the container one on
-    DockerInspectTask, this one on KubectlTask.
+    Kubernetes inspection uses the common KubectlTask primitive.
     """
 
     def __init__(

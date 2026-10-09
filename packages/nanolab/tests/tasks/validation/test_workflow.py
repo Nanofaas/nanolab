@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -91,8 +92,41 @@ class ScriptedExecutor:
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
         rendered = " ".join(task.argv)
+        if task.argv[:2] == ("docker", "ps"):
+            return TaskResult(
+                task_id="", status="passed", return_code=0, stdout="a" * 64
+            )
         for fragment, response in self.responses.items():
             if fragment in rendered:
+                if (
+                    task.argv[:2] == ("docker", "inspect")
+                    and response.status == "passed"
+                ):
+                    query = next(
+                        e for e in reversed(self.seen) if e.argv[:2] == ("docker", "ps")
+                    )
+                    function = next(
+                        a.removeprefix("label=io.nanofaas.function=")
+                        for a in query.argv
+                        if a.startswith("label=io.nanofaas.function=")
+                    )
+                    return replace(
+                        response,
+                        stdout=json.dumps(
+                            {
+                                "Id": "a" * 64,
+                                "State": {"Running": True},
+                                "Config": {
+                                    "Labels": {
+                                        "io.nanofaas.managed": "true",
+                                        "io.nanofaas.function": function,
+                                        "io.nanofaas.replica": "1",
+                                    }
+                                },
+                                "HostConfig": json.loads(response.stdout),
+                            }
+                        ),
+                    )
                 return response
         return TaskResult(
             task_id="", status="passed", return_code=0, stdout=self.default_stdout
@@ -211,7 +245,7 @@ def test_container_compiles_build_register_invoke_inspect_and_a_release() -> Non
         "002.build-image-word-stats-java",
         "003.acquire-word-stats-java",
         "004.invoke-word-stats-java",
-        "005.inspect-resources-of-nanofaas-word-stats-java-r1",
+        "005.inspect-resources-of-word-stats-java-replica-1",
         "006.release-word-stats-java",
     ]
 
@@ -609,7 +643,10 @@ def test_the_inspection_asks_the_backend_not_the_control_plane() -> None:
 
     build_validate_workflow(_request(), _bindings(executor)).run()
 
-    assert executor.argv_for("docker inspect")[-1] == "nanofaas-word-stats-java-r1"
+    assert executor.argv_for("docker inspect")[-1] == "a" * 64
+    assert "label=io.nanofaas.function=word-stats-java" in executor.argv_for(
+        "docker ps"
+    )
 
 
 def test_a_container_that_ignored_the_limits_fails_the_run() -> None:
@@ -665,11 +702,11 @@ def test_every_function_gets_its_own_resource_so_a_slice_keeps_its_own() -> None
         "003.build-image-roman-numeral",
         "004.acquire-word-stats-java",
         "005.invoke-word-stats-java",
-        "006.inspect-resources-of-nanofaas-word-stats-java-r1",
+        "006.inspect-resources-of-word-stats-java-replica-1",
         "007.release-word-stats-java",
         "008.acquire-roman-numeral",
         "009.invoke-roman-numeral",
-        "010.inspect-resources-of-nanofaas-roman-numeral-r1",
+        "010.inspect-resources-of-roman-numeral-replica-1",
         "011.release-roman-numeral",
     ]
 
