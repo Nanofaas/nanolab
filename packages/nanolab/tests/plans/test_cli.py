@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 import yaml
-from sonata_engine import Selection
+from sonata_engine import Resource, Selection
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
@@ -657,3 +657,211 @@ def test_provisioned_k8s_keep_preserves_the_vm_and_helm_but_not_the_function() -
     assert "Uninstall Helm release control-plane" not in summaries
     assert "Delete word-stats-java" in summaries
     assert orchestrator.torn_down == []
+
+
+def _cli_recipe_profile(tmp_path):
+    profile = tmp_path / "cli.yaml"
+    profile.write_text(
+        "schemaVersion: 2\nname: cli\n"
+        "registry: {repository: '127.0.0.1:5000/nanofaas', tag: cli}\n"
+        "controlPlane:\n"
+        "  modules: [k8s-deployment-provider, build-metadata, runtime-config]\n"
+        "  build: {mode: jvm, variant: recipe-v2-cli-k8s-jvm}\n"
+        "  container: {image: control-plane}\nfunctions:\n"
+        "  - {name: word-stats, sdk: java, build: {mode: jvm},\n"
+        "     container: {image: word-stats-java}}\n"
+    )
+    return profile
+
+
+@pytest.mark.parametrize("runtime", ["jvm", "native", "parity"])
+def test_recipe_cli_compiles_frozen_artifacts_and_owned_platform(tmp_path, runtime):
+    from nanolab.tasks.validation.cli_parity import CliParityTask
+
+    profile = _cli_recipe_profile(tmp_path)
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "cli",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "cliRuntime": runtime,
+            "recipeProfile": profile,
+            "resources": {
+                "word-stats-java": {"requests": {"cpu": 0.1}},
+                "control-plane": {"limits": {"memoryMiB": 512}},
+            },
+        }
+    )
+    executor = RecordingExecutor()
+    run_dir = tmp_path / "run"
+    plan = build_cli_plan(
+        config,
+        RoleBindings({"host": executor, "stack": executor}),
+        repo_root=tmp_path / "operator-source",
+        run_dir=run_dir,
+    )
+    compiled = plan.compile()
+    gate = next(
+        item.task for item in compiled.tasks if isinstance(item.task, CliParityTask)
+    )
+    assert gate.runtime == runtime
+    assert gate.function_resources == {"requests": {"cpu": 0.1}}
+    assert isinstance(gate.endpoint, Resource)
+    assert gate.namespace.startswith("nanofaas-cli-")
+    assert gate.evidence_dir.is_relative_to(run_dir / "cli-attempts")
+    assert [resource.title for resource in gate.artifacts] == (
+        ["Build and verify jvm CLI", "Build and verify native CLI"]
+        if runtime == "parity"
+        else [f"Build and verify {runtime} CLI"]
+    )
+    titles = [item.task.title for item in compiled.tasks]
+    assert any("Helm release" in title for title in titles)
+    assert any("Forward recipe API" in title for title in titles)
+    assert not any(
+        "queue probe" in title or "Register " in title or "registry" in title
+        for title in titles
+    )
+    assert executor.seen == []
+    assert not run_dir.exists()
+    second = build_cli_plan(
+        config,
+        RoleBindings({"host": executor, "stack": executor}),
+        repo_root=tmp_path / "operator-source",
+        run_dir=run_dir,
+    )
+    second_gate = next(
+        item.task
+        for item in second.compile().tasks
+        if isinstance(item.task, CliParityTask)
+    )
+    assert gate.namespace != second_gate.namespace
+    assert gate.evidence_dir != second_gate.evidence_dir
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "runtime",
+        "non-cli",
+        "backend",
+        "missing-recipe",
+        "remote",
+        "endpoint",
+        "function",
+        "recipe-mode",
+        "recipe-modules",
+    ],
+)
+def test_cli_runtime_and_recipe_guards_fail_before_commands(tmp_path, fault):
+    profile = _cli_recipe_profile(tmp_path)
+    if fault == "recipe-mode":
+        profile.write_text(profile.read_text().replace("mode: jvm", "mode: native"))
+    if fault == "recipe-modules":
+        profile.write_text(profile.read_text().replace("runtime-config", "async-queue"))
+    config = ScenarioConfig.model_construct(
+        workflow="validate" if fault == "non-cli" else "cli",
+        backend="container" if fault == "backend" else "k8s",
+        functions=["json-transform-python"]
+        if fault == "function"
+        else ["word-stats-java"],
+        recipe_profile=None if fault == "missing-recipe" else profile,
+        cli_runtime="unknown" if fault == "runtime" else "parity",
+    )
+    executor = RecordingExecutor()
+    with pytest.raises(ValueError, match=r"CLI|cli|recipe"):
+        build_cli_plan(
+            config,
+            RoleBindings({"host": executor, "stack": executor}),
+            repo_root=tmp_path,
+            run_dir=tmp_path / "run",
+            environment=_multipass_environment() if fault == "remote" else None,
+            endpoint="http://foreign:8080" if fault == "endpoint" else None,
+        )
+    assert executor.seen == []
+    assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize(
+    "fault", ["runtime", "non-cli", "backend", "missing-recipe", "remote", "function"]
+)
+def test_direct_recipe_cli_guards_have_no_effects(tmp_path, fault):
+    from nanolab.plans.cli_recipe import build_recipe_cli_plan
+
+    config = ScenarioConfig.model_construct(
+        workflow="validate" if fault == "non-cli" else "cli",
+        backend="container" if fault == "backend" else "k8s",
+        functions=["json-transform-python"]
+        if fault == "function"
+        else ["word-stats-java"],
+        recipe_profile=None
+        if fault == "missing-recipe"
+        else _cli_recipe_profile(tmp_path),
+        cli_runtime="unknown" if fault == "runtime" else "parity",
+    )
+    executor = RecordingExecutor()
+    with pytest.raises(ValueError, match=r"CLI|cli|recipe"):
+        build_recipe_cli_plan(
+            config,
+            RoleBindings({"host": executor, "stack": executor}),
+            repo_root=tmp_path,
+            environment=_multipass_environment() if fault == "remote" else None,
+            run_dir=tmp_path / "run",
+        )
+    assert executor.seen == []
+    assert not (tmp_path / "run").exists()
+
+
+def test_recipe_cli_build_only_slice_never_acquires_cluster(tmp_path):
+    import subprocess
+
+    from tests.tasks.validation.test_cli_artifacts import BuildExecutor
+
+    source = tmp_path / "operator-source"
+    source.mkdir()
+    (source / "build.gradle").write_text("version = '0.22.0'\n")
+    for args in (
+        ("init", "-q"),
+        ("add", "."),
+        (
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ),
+    ):
+        subprocess.run(("git", *args), cwd=source, check=True)
+
+    class FrozenBuildBoundary(BuildExecutor):
+        def run(self, task, *, dry_run=False):
+            assert task.options.cwd is not None
+            assert task.options.cwd != source
+            assert task.options.cwd.is_relative_to(tmp_path / "run")
+            self.source = task.options.cwd
+            return super().run(task, dry_run=dry_run)
+
+    executor = FrozenBuildBoundary(source, "jvm")
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "cli",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "recipeProfile": _cli_recipe_profile(tmp_path),
+            "cliRuntime": "parity",
+        }
+    )
+    plan = build_cli_plan(
+        config,
+        RoleBindings({"host": executor, "stack": executor}),
+        repo_root=source,
+        run_dir=tmp_path / "run",
+    )
+    plan.run(select=Selection(only="build-and-verify-jvm-cli"))
+    assert len(executor.specs) == 3
+    assert executor.specs[0].argv[1] == ":nanofaas-cli:installDist"
+    assert not list((tmp_path / "run").rglob("selected-kubeconfig.json"))
+    assert not list((tmp_path / "run").rglob("parity.json"))
+    assert (source / "build.gradle").read_text() == "version = '0.22.0'\n"
+    assert not (source / "clients").exists()

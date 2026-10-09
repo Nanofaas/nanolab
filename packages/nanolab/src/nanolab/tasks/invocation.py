@@ -35,6 +35,8 @@ def verify_invocation(result: TaskResult) -> None:
         )
     if "output" not in response:
         raise RuntimeError("invocation carried no output")
+    if response.get("error") is not None:
+        raise RuntimeError(f"invocation reported an error: {response['error']!r}")
 
 
 def _reason(error: object) -> str:

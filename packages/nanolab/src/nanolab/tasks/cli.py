@@ -20,11 +20,15 @@ from sonata_tasks.gradle import GradleTask
 from nanolab.tasks.cli_function import (
     CliFunctionApplyTask,
     CliFunctionDeleteTask,
+    CliFunctionGetTask,
     CliFunctionInvokeTask,
+    CliFunctionListTask,
+    cli_config_file_task,
     control_plane_contract_tasks,
     function_replace_tasks,
     function_replicas_tasks,
     function_update_task,
+    runtime_config_readback_task,
     runtime_config_tasks,
 )
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE
@@ -57,6 +61,7 @@ class CliFunction:
     resources: dict[str, object] | None = None
     build_argv: tuple[str, ...] | None = None
     image_build_argv: tuple[str, ...] | None = None
+    expected_output: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +81,7 @@ class CliWorkflowRequest:
     # that silently skipped the check would look exactly like one that passed it.
     runtime_config_namespace: str | None = None
     replicas: int = 2
+    config_file: Path | None = None
 
     def __post_init__(self) -> None:
         """Reject a role other than host/stack, or an empty function list."""
@@ -89,7 +95,8 @@ class CliWorkflowRequest:
 
 def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
     # The CLI has no --namespace flag; the namespace only serves k8s readiness checks.
-    return (request.binary, "--endpoint", request.endpoint, *arguments)
+    config = ("--config", str(request.config_file)) if request.config_file else ()
+    return (request.binary, *config, "--endpoint", request.endpoint, *arguments)
 
 
 def _manifest(function: CliFunction) -> FunctionManifest:
@@ -106,6 +113,7 @@ def _function_resource(
     *,
     readiness_timeout_seconds: int | None = None,
     requires: tuple[Resource[Any], ...] = (),
+    strict: bool = False,
 ) -> Resource[None]:
     """Build the registered function as an acquire/release pair.
 
@@ -121,6 +129,7 @@ def _function_resource(
     )
     delete_task = CliFunctionDeleteTask(
         function.name,
+        verify_absence=strict,
         cli_argv=prefix,
         executor=executor,
         role=request.cli_role,
@@ -132,6 +141,7 @@ def _function_resource(
             namespace=request.namespace,
             executor=executor,
             role=request.cli_role,
+            timeout_seconds=(readiness_timeout_seconds or 45) if strict else 120,
             options=CommandOptions(timeout_seconds=readiness_timeout_seconds, cwd=cwd),
         )
         if readiness_timeout_seconds is not None
@@ -232,6 +242,31 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
             )
     for bootstrap_task in bootstrap:
         workflow.add(bootstrap_task, requires=bootstrap_requires)
+    add_cli_contract(
+        workflow,
+        request,
+        executor=executor,
+        cwd=cwd,
+        requires=requires,
+        function_requires=function_requires,
+        readiness_timeout_seconds=readiness_timeout_seconds,
+    )
+    return workflow
+
+
+def add_cli_contract(
+    workflow: Workflow,
+    request: CliWorkflowRequest,
+    *,
+    executor: CommandTaskExecutor,
+    cwd: Path | None = None,
+    requires: tuple[Resource[Any], ...] = (),
+    function_requires: tuple[Resource[Any], ...] = (),
+    readiness_timeout_seconds: int | None = None,
+    strict: bool = False,
+    runtime_config_patch: dict[str, Any] | None = None,
+) -> tuple[Resource[None], ...]:
+    """Assemble only the shared API contract, without building or deploying it."""
     resources = tuple(
         _function_resource(
             request,
@@ -240,19 +275,28 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
             cwd,
             readiness_timeout_seconds=readiness_timeout_seconds,
             requires=function_requires,
+            strict=strict,
         )
         for function in request.functions
     )
-    workflow.add(
-        CommandTask(
+    list_task = (
+        CliFunctionListTask(
+            {fn.name: fn.image for fn in request.functions},
+            cli_argv=_cli_argv(request),
+            executor=executor,
+            role=request.cli_role,
+            cwd=cwd,
+        )
+        if strict
+        else CommandTask(
             title="List functions",
             argv=_cli_argv(request, "fn", "list"),
             executor=executor,
             role=request.cli_role,
             options=CommandOptions(cwd=cwd),
-        ),
-        requires=(*requires, *resources),
+        )
     )
+    workflow.add(list_task, requires=(*requires, *resources))
     prefix = _cli_argv(request)
     role = request.cli_role
     for task in control_plane_contract_tasks(
@@ -262,7 +306,9 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
     if request.runtime_config_namespace is not None:
         for task in runtime_config_tasks(
             request.runtime_config_namespace,
-            patch=RUNTIME_CONFIG_PATCH,
+            patch=runtime_config_patch
+            if runtime_config_patch is not None
+            else RUNTIME_CONFIG_PATCH,
             invalid_patch=INVALID_RUNTIME_CONFIG_PATCH,
             cli_argv=prefix,
             executor=executor,
@@ -270,19 +316,55 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
             cwd=cwd,
         ):
             workflow.add(task, requires=requires)
+        if strict:
+            workflow.add(
+                runtime_config_readback_task(
+                    request.runtime_config_namespace,
+                    runtime_config_patch
+                    if runtime_config_patch is not None
+                    else RUNTIME_CONFIG_PATCH,
+                    cli_argv=prefix,
+                    executor=executor,
+                    role=role,
+                    cwd=cwd,
+                ),
+                requires=requires,
+            )
     for function, resource in zip(request.functions, resources, strict=False):
         function_requires_resource = (*requires, resource)
-        workflow.add(
-            CliFunctionInvokeTask(
-                function.name,
-                payload=function.payload,
-                cli_argv=prefix,
-                executor=executor,
-                role=request.cli_role,
-                cwd=cwd,
-            ),
-            requires=function_requires_resource,
+        invoke = CliFunctionInvokeTask(
+            function.name,
+            payload=function.payload,
+            expected_output=function.expected_output,
+            cli_argv=prefix,
+            executor=executor,
+            role=role,
+            cwd=cwd,
         )
+        if strict:
+            workflow.add(
+                CliFunctionGetTask(
+                    _manifest(function),
+                    cli_argv=prefix,
+                    executor=executor,
+                    role=role,
+                    cwd=cwd,
+                ),
+                requires=function_requires_resource,
+            )
+            workflow.add(
+                cli_config_file_task(
+                    _manifest(function),
+                    binary=Path(request.binary),
+                    endpoint=request.endpoint,
+                    executor=executor,
+                    role=role,
+                    cwd=cwd,
+                ),
+                requires=function_requires_resource,
+            )
+        else:
+            workflow.add(invoke, requires=function_requires_resource)
         workflow.add(
             function_update_task(
                 function.name,
@@ -294,15 +376,43 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
             ),
             requires=function_requires_resource,
         )
-        for task in function_replicas_tasks(
+        if strict:
+            updated = CliFunctionGetTask(
+                _manifest(function),
+                patch=FUNCTION_PATCH,
+                cli_argv=prefix,
+                executor=executor,
+                role=role,
+                cwd=cwd,
+            )
+            updated.title = f"Get updated {function.name}"
+            workflow.add(updated, requires=function_requires_resource)
+        scale, get_replicas = function_replicas_tasks(
             function.name,
             replicas=request.replicas,
+            require_ready=strict,
             cli_argv=prefix,
             executor=executor,
             role=role,
             cwd=cwd,
-        ):
-            workflow.add(task, requires=function_requires_resource)
+        )
+        workflow.add(scale, requires=function_requires_resource)
+        if strict:
+            for task in k8s_deployment_readiness(
+                deployment=f"fn-{function.name}",
+                namespace=request.namespace,
+                executor=executor,
+                role=role,
+                timeout_seconds=readiness_timeout_seconds or 45,
+                options=CommandOptions(
+                    cwd=cwd, timeout_seconds=readiness_timeout_seconds or 45
+                ),
+            ):
+                task.title = f"Scaled {task.title}"
+                workflow.add(task, requires=function_requires_resource)
+        workflow.add(get_replicas, requires=function_requires_resource)
+        if strict:
+            workflow.add(invoke, requires=function_requires_resource)
         # Last of the three: replacing re-registers the function from its manifest,
         # which discards the patch and the replica count the two steps above set.
         for task in function_replace_tasks(
@@ -313,4 +423,15 @@ def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource l
             cwd=cwd,
         ):
             workflow.add(task, requires=function_requires_resource)
-    return workflow
+        if strict:
+            replaced = CliFunctionGetTask(
+                _manifest(function),
+                patch={"queueSize": _manifest(function).queue_size + 1},
+                cli_argv=prefix,
+                executor=executor,
+                role=role,
+                cwd=cwd,
+            )
+            replaced.title = f"Get replaced {function.name}"
+            workflow.add(replaced, requires=function_requires_resource)
+    return resources

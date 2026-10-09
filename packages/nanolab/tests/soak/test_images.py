@@ -73,7 +73,13 @@ def test_native_function_is_compiled_not_replaced_with_jvm():
     java = recipes["word-stats-java"]
     target = next(iter(java.bake["target"].values()))  # pyright: ignore[reportOptionalSubscript]
     assert java.prerequisite_argv is None
-    assert target["dockerfile"] == "deploy/native-java/Dockerfile"
+    assert target["dockerfile"] == (
+        "tools/native-java/Dockerfile"
+        if (
+            default_tool_paths().nanofaas_root / "tools/native-java/Dockerfile"
+        ).is_file()
+        else "deploy/native-java/Dockerfile"
+    )
     assert target["args"]["NATIVE_TASK"] == ":functions:java:word-stats:nativeCompile"
     assert target["args"]["GRAALVM_DISTRIBUTION"] == "community"
     assert "-PnativeOptimization=3" in target["args"]["GRADLE_ARGS"]

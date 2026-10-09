@@ -6,6 +6,7 @@ this directory.
 
 | Profile | Control plane | Function | Purpose |
 | --- | --- | --- | --- |
+| `cli-contract-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, runtime config | Java JVM word-stats | Local JVM/native CLI contract and parity qualification |
 | `validate-container-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats | JVM container lifecycle validation |
 | `validate-container-bash.yaml` | JVM, container provider, build metadata | Bash word-stats | Bash container lifecycle validation |
 | `validate-container-services-jvm.yaml` | JVM, container provider, build metadata | Java JVM word-stats and warm-echo service | Managed Java service lifecycle validation |
@@ -14,6 +15,7 @@ this directory.
 | `validate-container-watchdog.yaml` | JVM, container provider, build metadata | Java JVM word-stats and Dockerfile watchdog | Published watchdog artifact validation |
 | `validate-container-native.yaml` | Native container builder, container provider, build metadata | Java native word-stats | Native container lifecycle validation |
 | `validate-k8s-jvm.yaml` | JVM, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Kubernetes lifecycle validation on Minikube or Multipass |
+| `validate-k8s-native.yaml` | Native, Kubernetes provider, build metadata, sync queue | Java JVM word-stats | Native Kubernetes API, quota, log and thread validation |
 | `validate-containerd-jvm.yaml` | JVM, containerd provider, build metadata | Java JVM word-stats | Rootless containerd lifecycle validation on Multipass |
 | `loadtest-container-jvm.yaml` | JVM, container provider, autoscaler, async queue, build metadata | Java JVM word-stats | Container autoscaling load test |
 | `soak-container-p24-jvm.yaml` | JVM Serial GC/C1, container provider, async queue, build metadata | Java JVM and JavaScript word-stats | Canonical ARM64 P24 image preparation; qualification pending |
@@ -62,6 +64,25 @@ read-only, including Gradle build/cache files, hence the disposable working copy
 
 ## NanoLab integration
 
+`cli-contract-k8s-native-parity.yaml` uses the same frozen source to build the JVM
+and native CLI, then qualifies both against one owned JVM Kubernetes deployment.
+It requires a running local Docker-driver Minikube profile and a host GraalVM
+toolchain for `nativeCompile`. `cliRuntime` also accepts `jvm` and `native` for
+independent contract qualification. Each attempt retains artifact hashes, raw
+command receipts, parsed observations and the contract/parity proof under
+`--run-dir/cli-attempts/<id>/`. Final run metadata must also show successful cleanup.
+
+```bash
+./nanolab.sh run cli-contract-k8s-native-parity.yaml --run-dir /tmp/nanolab-cli-parity
+./nanolab.sh run cli-contract-k8s-native-parity.yaml --only build-and-verify-jvm-cli \
+  --run-dir /tmp/nanolab-cli-build
+```
+
+Build-only selection needs no cluster and produces no qualification proof.
+The full workflow imports images without publication, owns its namespace and
+restores runtime configuration before releasing the platform. Function and
+watchdog runtime contracts remain a separate qualification lot.
+
 `deployment-lifecycle-container.yaml` and
 `deployment-lifecycle-container-native.yaml` select the JVM and native profiles.
 Each validation workflow runs NanoLab's `PublishRecipeTask`, which calls Gradle
@@ -74,8 +95,11 @@ The recipe task stores the copied profile, staged source, Gradle log and
 metadata response and inspected image IDs are saved in `runs/recipe-<id>/`.
 `--run-dir` chooses that run directory directly.
 
-The single `deployment-lifecycle-k8s.yaml` scenario selects the Kubernetes
-profile. With the default local environment, NanoLab checks the active Docker
+`deployment-lifecycle-k8s.yaml` selects the JVM Kubernetes profile;
+`deployment-lifecycle-k8s-native.yaml` selects a native control plane with the
+same JVM function. Native selection belongs to the recipe; legacy validate
+`controlPlaneRuntime: native` requests are rejected before provisioning.
+With the default local environment, NanoLab checks the active Docker
 driver Minikube profile, runs `assembleRecipe` in a staged checkout, loads the
 recipe and queue-probe images, and forwards the control-plane API to host
 loopback. It creates a namespace for the run and removes it after validation;

@@ -19,6 +19,41 @@ from nanolab.tasks.http_function import (
 from nanolab.tasks.manifest import FunctionManifest
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "not-json",
+        "[]",
+        '{"function":"other","replicas":1}',
+        '{"function":"fn","replicas":2}',
+        '{"function":"fn","replicas":true}',
+    ],
+)
+def test_set_replicas_rejects_invalid_response_contract(body):
+    from nanolab.tasks.http_function import HttpFunctionSetReplicasTask
+
+    executor = RecordingExecutor(results=[_result(0, stdout=body)])
+    task = HttpFunctionSetReplicasTask(
+        "fn", replicas=1, endpoint="http://cp", executor=executor, role="stack"
+    )
+    with pytest.raises(RuntimeError, match="replica"):
+        task.run(TaskInputs.empty())
+
+
+def test_set_replicas_accepts_the_actual_put_record():
+    from nanolab.tasks.http_function import HttpFunctionSetReplicasTask
+
+    executor = RecordingExecutor(
+        results=[_result(0, stdout='{"function":"fn","replicas":1}')]
+    )
+    task = HttpFunctionSetReplicasTask(
+        "fn", replicas=1, endpoint="http://cp", executor=executor, role="stack"
+    )
+    outcome = task.run(TaskInputs.empty())
+    assert outcome.value is not None and outcome.value.return_code == 0
+
+
 def _result(code: int, *, stdout: str = "", stderr: str = "") -> TaskResult:
     return TaskResult(
         task_id="",

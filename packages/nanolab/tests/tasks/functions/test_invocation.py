@@ -554,3 +554,37 @@ def test_http_contract_accepts_parameters_on_the_outer_json_content_type() -> No
     )
 
     _ = task.run(TaskInputs.empty())
+
+
+@pytest.mark.parametrize("error", ['"boom"', "{}", "false"])
+def test_success_status_with_nonnull_error_is_not_success(error):
+    with pytest.raises(RuntimeError, match="error"):
+        verify_invocation(
+            _result('{"status":"success","output":"ok","error":' + error + "}")
+        )
+
+
+def test_cli_invocation_compares_exact_expected_output():
+    executor = RecordingExecutor(stdout='{"status":"success","output":{"words":99}}')
+    with pytest.raises(RuntimeError, match="output"):
+        CliFunctionInvokeTask(
+            "fn",
+            payload="{}",
+            expected_output={"words": 2},
+            cli_argv=("cli",),
+            executor=executor,
+            role="host",
+        ).run(TaskInputs.empty())
+
+
+def test_exact_cli_output_does_not_treat_boolean_as_word_count():
+    executor = RecordingExecutor(stdout='{"status":"success","output":{"words":true}}')
+    with pytest.raises(RuntimeError, match="output"):
+        CliFunctionInvokeTask(
+            "fn",
+            payload="{}",
+            expected_output={"words": 1},
+            cli_argv=("cli",),
+            executor=executor,
+            role="host",
+        ).run(TaskInputs.empty())

@@ -242,3 +242,6 @@ and verifies images and scheduling before load. See the [usage and resume
 contract](packages/nanolab/README.md#recipe-runtime-comparison),
 [profiles](packages/nanolab/src/nanolab/assets/presets/recipes/README.md) and
 [migration roadmap](docs/recipes-roadmap.md).
+
+Packaged function body/status/callback and watchdog qualification is documented
+in [artifact contracts](docs/artifact-contracts.md).

@@ -229,12 +229,19 @@ def _compose_argv(project: DockerComposeProject) -> tuple[str, ...]:
     )
 
 
-def verify_function_owner(ownership: FunctionOwnership, *, command: Command) -> None:
-    """Prove the exact continuously running CP before accepting API absence.
+def verify_function_owner(
+    ownership: FunctionOwnership,
+    *,
+    command: Command,
+    require_catalog: bool = True,
+) -> None:
+    """Prove container ownership and, for function cleanup, catalog continuity.
 
     The runtime must capture ID and StartedAt after deployment and catalog
     readiness, before registration. A restart requires authoritative recovery;
     this verifier deliberately cannot certify a restored/replaced catalog.
+    After all functions are released, Compose cleanup only requires the same
+    owned container and configured endpoint, allowing it to be stopped.
     """
     inspected = _json(
         command(
@@ -250,16 +257,28 @@ def verify_function_owner(ownership: FunctionOwnership, *, command: Command) -> 
     state = target.get("State", {})
     if (
         target.get("Id") != ownership.control_plane_container_id
-        or state.get("StartedAt") != ownership.control_plane_started_at
-        or state.get("Running") is not True
-        or state.get("Restarting") is True
+        or (
+            require_catalog
+            and (
+                state.get("StartedAt") != ownership.control_plane_started_at
+                or state.get("Running") is not True
+                or state.get("Restarting") is True
+            )
+        )
         or labels.get("com.docker.compose.project") != ownership.project_name
         or labels.get("com.docker.compose.service") != "control-plane"
         or target.get("Config", {}).get("Image") != ownership.control_plane_image
     ):
         raise ValueError("control-plane identity or catalog continuity is unconfirmed")
     endpoint = urlsplit(ownership.api_endpoint)
-    ports = target.get("NetworkSettings", {}).get("Ports", {}).get("8080/tcp", []) or []
+    bindings = (
+        target.get("NetworkSettings", {}).get("Ports", {})
+        if require_catalog
+        else target.get("HostConfig", {}).get(
+            "PortBindings", target.get("NetworkSettings", {}).get("Ports", {})
+        )
+    )
+    ports = bindings.get("8080/tcp", []) or []
     if not any(
         port.get("HostIp") == endpoint.hostname
         and port.get("HostPort") == str(endpoint.port)
@@ -273,13 +292,25 @@ def _guard_platform(
     project: DockerComposeProject,
     cwd: Path,
     identities: tuple[FunctionOwnership, ...],
+    *,
+    require_catalog: bool = True,
 ) -> None:
     if not identities:
         return
     raw = command(
-        (*_compose_argv(project), "ps", "-q", "control-plane"), cwd, project.env
+        (
+            *_compose_argv(project),
+            "ps",
+            *(() if require_catalog else ("--all",)),
+            "-q",
+            "control-plane",
+        ),
+        cwd,
+        project.env,
     )
     identifiers = raw.decode().split()
+    if not identifiers and not require_catalog:
+        return
     if (
         len(identifiers) != 1
         or re.fullmatch(r"[a-f0-9]{12,64}", identifiers[0]) is None
@@ -293,18 +324,20 @@ def _guard_platform(
     if (
         labels.get("com.docker.compose.project") != project.name
         or labels.get("com.docker.compose.service") != "control-plane"
-        or target.get("State", {}).get("Running") is not True
+        or (require_catalog and target.get("State", {}).get("Running") is not True)
     ):
         raise ValueError("control plane no longer matches retained ownership")
     ports = target.get("NetworkSettings", {}).get("Ports", {}).get("8080/tcp", []) or []
     for identity in identities:
         if not identity.control_plane_container_id.startswith(identifiers[0]):
             raise ValueError("Compose selected a different control-plane container")
-        verify_function_owner(identity, command=command)
+        verify_function_owner(
+            identity, command=command, require_catalog=require_catalog
+        )
         endpoint = urlsplit(identity.api_endpoint)
         if target.get("Config", {}).get("Image") != identity.control_plane_image:
             raise ValueError("control-plane image differs from retained function owner")
-        if not any(
+        if require_catalog and not any(
             port.get("HostIp") == endpoint.hostname
             and port.get("HostPort") == str(endpoint.port)
             for port in ports
@@ -370,8 +403,8 @@ class TeardownSoakTask(Task[tuple[str, ...]]):
         compose_record = compose_records[0]
         project, cwd = _compose(compose_record["value"], self.run_dir)
         identities = {}
-        for item in records:
-            if item is compose_record:
+        for item in read_cleanup_records(journal.path, include_released=True):
+            if item["resource"] == compose_record["resource"]:
                 continue
             identity = FunctionOwnership.from_record(item.get("value"))
             if identity.project_name != project.name or identity.cwd != str(cwd):
@@ -381,10 +414,19 @@ class TeardownSoakTask(Task[tuple[str, ...]]):
             identities[item["resource"]] = identity
         if len({identity.name for identity in identities.values()}) != len(identities):
             raise ValueError("duplicate retained function identity")
-        _guard_platform(self.command, project, cwd, tuple(identities.values()))
+        outstanding = {item["resource"] for item in records}
+        _guard_platform(
+            self.command,
+            project,
+            cwd,
+            tuple(identities.values()),
+            require_catalog=bool(outstanding & identities.keys()),
+        )
         failures = []
         resources = {}
         for title, identity in identities.items():
+            if title not in outstanding:
+                continue
 
             def release_function(_inputs, value, identity=identity):
                 try:
@@ -418,6 +460,13 @@ class TeardownSoakTask(Task[tuple[str, ...]]):
             current, current_cwd = _compose(value, self.run_dir)
             if current != project or current_cwd != cwd:
                 raise ValueError("Compose ownership changed during teardown")
+            _guard_platform(
+                self.command,
+                project,
+                cwd,
+                tuple(identities.values()),
+                require_catalog=False,
+            )
             self.command(
                 (*_compose_argv(project), "down", "--volumes"),
                 cwd,

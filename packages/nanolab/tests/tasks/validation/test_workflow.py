@@ -158,6 +158,51 @@ def _request(**changes: object) -> ValidateWorkflowRequest:
     return ValidateWorkflowRequest(**{**base, **changes})  # pyright: ignore[reportArgumentType]
 
 
+def test_recipe_k8s_native_gate_is_after_queue_and_declares_its_resources(tmp_path):
+    from nanolab.tasks.recipes.workflow import RecipeBinding, RecipeDistribution
+    from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
+
+    def unavailable(_inputs) -> RecipeDistribution:
+        raise AssertionError("Compilation must not acquire a distribution")
+
+    distribution = Resource(
+        title="Runtime distribution",
+        acquire=unavailable,
+        release=lambda *_args: None,
+    )
+    target = Resource(
+        title="Selected target",
+        acquire=lambda _inputs: None,
+        release=lambda *_args: None,
+    )
+    request = _request(
+        backend="k8s",
+        queue_probe=QUEUE_PROBE,
+        queue_burst_script=tmp_path / "queue.js",
+        recipe=RecipeBinding(
+            distribution=distribution,
+            functions={FUNCTION.name: ("word-stats", "java")},
+            run_dir=tmp_path,
+            target=target,
+        ),
+    )
+    compiled = build_validate_workflow(request, _bindings(ScriptedExecutor())).compile()
+    tasks = [step.task for step in compiled.tasks]
+    native = next(
+        task for task in tasks if isinstance(task, NativeKubernetesLifecycleTask)
+    )
+    titles = [task.title for task in tasks]
+    assert titles.index("Burst the synchronous queue") < titles.index(native.title)
+    assert native.distribution is distribution and native.target is target
+    assert any(task.title == "Release word-stats-java" for task in tasks)
+    assert tasks.index(native) < next(
+        index
+        for index, task in enumerate(tasks)
+        if task.title == "Release word-stats-java"
+    )
+    assert native.idempotent is False
+
+
 def test_container_compiles_build_register_invoke_inspect_and_a_release() -> None:
     workflow = build_validate_workflow(_request(), _bindings(ScriptedExecutor()))
 

@@ -55,7 +55,8 @@ for task in (':control-plane:compileJava',':functions:java:word-stats:compileJav
                output='openjdk version "25.0.2"\n',compiler='/jdk/bin/javac',compiler_sha256='a'*64,task=task))
 rows=[]
 if mutation=='gradle-outputs':
-    cache=Path.cwd()/'platform/gradle-plugin/.gradle/buildOutputCleanup/cache.properties'
+    plugin='tools/gradle-plugin' if (Path.cwd()/'tools/gradle-plugin').is_dir() else 'platform/gradle-plugin'
+    cache=Path.cwd()/plugin/'.gradle/buildOutputCleanup/cache.properties'
     cache.parent.mkdir(parents=True,exist_ok=True); cache.write_text('gradle.version=9.7.1')
 if mutation=='added-source':
     extra=Path.cwd()/'platform/control-plane/src/main/java/Uncaptured.java'
@@ -68,7 +69,8 @@ for index,(kind,item) in enumerate([('control-plane',profile['controlPlane']),*[
     name='control-plane' if kind=='control-plane' else item['name']
     reference=profile['registry']['repository']+'/'+item['container']['image']+':'+option('-PrecipeTag')
     source=Path.cwd()
-    file=source/'functions/javascript/word-stats/Dockerfile' if sdk=='javascript' else source/'deploy/recipes/Dockerfile.jvm'
+    template='tools/gradle-plugin/dockerfiles/Dockerfile.jvm' if (source/'tools/gradle-plugin').is_dir() else 'deploy/recipes/Dockerfile.jvm'
+    file=source/'functions/javascript/word-stats/Dockerfile' if sdk=='javascript' else source/template
     common=['buildx','build','--builder',option('-PrecipeBuilder'),'--platform','linux/arm64','--provenance=mode=max','-t',reference,'-f',str(file),str(source)]
     subprocess.run([docker,*common],check=True)
     metadata=output/('plugin-metadata-'+str(index)+'.json')
@@ -137,7 +139,13 @@ def executable(path, body):
 
 
 def publication_inputs(
-    tmp_path, monkeypatch, mutation=None, cancelled=False, *, purpose="smoke"
+    tmp_path,
+    monkeypatch,
+    mutation=None,
+    cancelled=False,
+    *,
+    purpose="smoke",
+    layout="legacy",
 ):
     monkeypatch.delenv("NANOLAB_TEST_ROLE_IMAGES", raising=False)
     distribution, fetch, _ = artifact_fixture(tmp_path)
@@ -164,11 +172,19 @@ def publication_inputs(
     node.write_text(
         "FROM node:20-alpine AS build\nWORKDIR /src\nRUN npm run build\nFROM node:20-alpine\n"
     )
-    jvm = source / "deploy/recipes/Dockerfile.jvm"
+    jvm = source / (
+        "tools/gradle-plugin/dockerfiles/Dockerfile.jvm"
+        if layout == "current"
+        else "deploy/recipes/Dockerfile.jvm"
+    )
     jvm.parent.mkdir(parents=True)
     jvm.write_text("FROM scratch\n")
-    build = source / "platform/gradle-plugin/build.gradle"
-    build.parent.mkdir(parents=True)
+    build = source / (
+        "tools/gradle-plugin/build.gradle"
+        if layout == "current"
+        else "platform/gradle-plugin/build.gradle"
+    )
+    build.parent.mkdir(parents=True, exist_ok=True)
     build.write_text("plugins {}\n")
     subprocess.run(["git", "init", "-q"], cwd=source, check=True)
     subprocess.run(["git", "add", "."], cwd=source, check=True)
@@ -227,11 +243,12 @@ def publication_inputs(
     )
 
 
-def test_one_snapshot_one_publication_all_receipts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("layout", ["legacy", "current"])
+def test_one_snapshot_one_publication_all_receipts(tmp_path, monkeypatch, layout):
     from nanolab.tasks.soak import recipe as module
 
     snapshot, profile, config, executor, fetch = publication_inputs(
-        tmp_path, monkeypatch
+        tmp_path, monkeypatch, layout=layout
     )
     calls = []
     run = executor.run

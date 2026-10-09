@@ -51,6 +51,7 @@ from nanolab.tasks.resources import (
     ContainerResourceCheckTask,
     K8sResourceCheckTask,
 )
+from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
 from nanolab.tasks.validation.recovery import (
     ContainerdPersistentRecoveryTask,
     ContainerPersistentRecoveryTask,
@@ -99,6 +100,7 @@ class ValidateWorkflowRequest(PlatformRequest):
     persistent_recovery: bool = False
     recovery_project: DockerComposeProject | None = None
     rootless_run: RootlessRun | None = None
+    native_assets: Path | None = None
 
 
 def _queue_summary_path(request: ValidateWorkflowRequest, run_id: str) -> Path:
@@ -179,6 +181,7 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
     run_id = uuid4().hex
+    endpoint_overrides: dict[str, str] = {}
     platform_request = (
         replace(request, functions=(*request.functions, request.queue_probe))
         if request.queue_probe is not None
@@ -192,6 +195,9 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
         control_plane_process=control_plane_process,
         local_endpoint=local_endpoint,
         requires=requires,
+        endpoint_overrides=endpoint_overrides
+        if request.recipe is not None and request.backend == "k8s"
+        else None,
     )
 
     if request.recipe is not None:
@@ -558,5 +564,31 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                 options=CommandOptions(cwd=cwd),
             ),
             requires=(*requires, *platform.resources, platform.functions[0]),
+        )
+    if request.backend == "k8s" and request.recipe is not None:
+        binding = request.recipe
+        function = request.functions[0]
+        workflow.add(
+            NativeKubernetesLifecycleTask(
+                binding.distribution,
+                namespace=request.namespace,
+                function=function,
+                endpoint=platform.endpoint,
+                executor=executor,
+                role=request.role,
+                run_dir=binding.run_dir,
+                function_component=binding.functions[function.name],
+                target=cast(Resource[MinikubeTarget] | None, binding.target),
+                assets=request.native_assets,
+                remote_root=binding.remote_root,
+                endpoint_overrides=endpoint_overrides,
+            ),
+            requires=(
+                *requires,
+                *platform.resources,
+                platform.functions[0],
+                binding.distribution,
+                *((binding.target,) if binding.target is not None else ()),
+            ),
         )
     return workflow

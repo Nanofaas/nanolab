@@ -5,6 +5,7 @@
   "autoscaling_strategy": "INTERNAL",
   "backend": "container",
   "build": "docker",
+  "cli_runtime": "jvm",
   "concurrency_control": false,
   "concurrency_mode": "ADAPTIVE_PER_POD",
   "control_plane_image": null,

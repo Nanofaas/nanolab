@@ -456,6 +456,7 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     repo_root: Path | None = None,
     environment: EnvironmentConfig | None = None,
     orchestrator_factory: Callable[[Path], Any] | None = None,
+    run_dir: Path | None = None,
 ) -> Workflow:
     """Compile the CLI scenario into a Sonata workflow.
 
@@ -467,6 +468,24 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     if config.workflow != "cli":
         raise ValueError("CLI plan requires a cli scenario")
     root = repo_root or Path.cwd()
+    from nanolab.tasks.cli_artifacts import cli_modes
+
+    cli_modes(config.cli_runtime)
+    if config.recipe_profile is not None:
+        from nanolab.plans.cli_recipe import build_recipe_cli_plan
+        from nanolab.workspace.paths import operator_workspace_root
+
+        if endpoint is not None or cli_role != "host":
+            raise ValueError("recipe CLI requires its owned endpoint and the host role")
+        return build_recipe_cli_plan(
+            config,
+            bindings,
+            repo_root=root,
+            environment=environment,
+            run_dir=run_dir or operator_workspace_root() / "runs/cli-preview",
+        )
+    if config.cli_runtime != "jvm":
+        raise ValueError("native/parity CLI requires a local Kubernetes recipe")
     if config.backend == "containerd":
         return _build_containerd_plan(
             config,

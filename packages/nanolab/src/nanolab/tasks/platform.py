@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from sonata_engine import Resource, Steps, TaskInputs, Workflow
+from sonata_engine import Resource, Steps, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.docker import DockerBuildTask, DockerPushTask
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
 )
-from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.execution.models import CommandOptions, TaskResult
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.helm import HelmInstallTask, HelmReleaseSpec, HelmUninstallTask
 
@@ -244,7 +244,8 @@ def _helm_release_with_endpoint(
         distribution = request.recipe.distribution
 
         def resolved_spec(inputs: TaskInputs) -> HelmReleaseSpec:
-            image = inputs.resource(distribution).control_plane().image.reference
+            component = inputs.resource(distribution).control_plane()
+            image = component.image.reference
             repository, tag = image.rsplit(":", 1)
             values = list(request.helm_values)
             for index, value in enumerate(values):
@@ -252,6 +253,17 @@ def _helm_release_with_endpoint(
                     values[index] = f"controlPlane.image.repository={repository}"
                 elif value.startswith("controlPlane.image.tag="):
                     values[index] = f"controlPlane.image.tag={tag}"
+            if component.mode == "native":
+                for key, value in (
+                    ("controlPlane.resources.limits.cpu", "1"),
+                    ("controlPlane.jvm.ioWorkerCount", ""),
+                ):
+                    for index, item in enumerate(values):
+                        if item.startswith(key + "="):
+                            values[index] = f"{key}={value}"
+                            break
+                    else:
+                        values.extend(("--set", f"{key}={value}"))
             return HelmReleaseSpec(
                 release=request.helm_release,
                 chart=request.helm_chart,
@@ -500,6 +512,44 @@ def _resolve_platform_endpoint(
     return resources, endpoint
 
 
+class _ReroutedDeleteTask(HttpFunctionDeleteTask):
+    """Use the current run-owned API endpoint when a rollout replaced its tunnel."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        endpoint: Endpoint,
+        overrides: dict[str, str],
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None,
+    ) -> None:
+        """Retain the shared delete contract and the run's endpoint updates."""
+        super().__init__(name, endpoint=endpoint, executor=executor, role=role, cwd=cwd)
+        self._function_name = name
+        self._endpoint = endpoint
+        self._overrides = overrides
+        self._delete_executor = executor
+        self._delete_role: ExecutionRole = role
+        self._delete_cwd = cwd
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[TaskResult]:
+        """Delegate cleanup to the shared task using the reopened endpoint."""
+        url = (
+            self._endpoint
+            if isinstance(self._endpoint, str)
+            else inputs.resource(self._endpoint)
+        )
+        return HttpFunctionDeleteTask(
+            self._function_name,
+            endpoint=self._overrides.get(url, url),
+            executor=self._delete_executor,
+            role=self._delete_role,
+            cwd=self._delete_cwd,
+        ).run(inputs)
+
+
 def _function_resource(
     request: PlatformRequest,
     function: PlatformFunction,
@@ -508,6 +558,7 @@ def _function_resource(
     resources: tuple[Resource[Any], ...],
     executor: CommandTaskExecutor,
     cwd: Path | None,
+    endpoint_overrides: dict[str, str] | None = None,
 ) -> Resource[None]:
     return function_resource(
         name=request.titled(function.name),
@@ -549,7 +600,16 @@ def _function_resource(
                 cwd=cwd,
             )
         ),
-        delete=HttpFunctionDeleteTask(
+        delete=_ReroutedDeleteTask(
+            function.name,
+            endpoint=endpoint,
+            overrides=endpoint_overrides,
+            executor=executor,
+            role=request.role,
+            cwd=cwd,
+        )
+        if endpoint_overrides is not None
+        else HttpFunctionDeleteTask(
             function.name,
             endpoint=endpoint,
             executor=executor,
@@ -573,6 +633,7 @@ def add_platform(
     control_plane_process: Callable[[], Resource[Any]] | None = None,
     local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
     requires: tuple[Resource[Any], ...] = (),
+    endpoint_overrides: dict[str, str] | None = None,
 ) -> Platform:
     """Add everything up to and including registered functions.
 
@@ -592,7 +653,14 @@ def add_platform(
 
     functions = tuple(
         _function_resource(
-            request, function, endpoint, requires, resources, executor, cwd
+            request,
+            function,
+            endpoint,
+            requires,
+            resources,
+            executor,
+            cwd,
+            endpoint_overrides,
         )
         for function in request.functions
     )

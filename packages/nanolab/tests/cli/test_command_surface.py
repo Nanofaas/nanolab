@@ -95,7 +95,7 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
     }
 
 
-@pytest.mark.parametrize("workflow", ["validate", "loadtest"])
+@pytest.mark.parametrize("workflow", ["validate", "loadtest", "cli"])
 def test_recipe_workflows_get_unique_default_run_directory(
     tmp_path: Path, workflow: str
 ) -> None:
@@ -109,6 +109,32 @@ def test_recipe_workflows_get_unique_default_run_directory(
     assert product_module._default_run_dir(None, workflow, tmp_path) == (
         tmp_path / "latest" if workflow == "loadtest" else None
     )
+
+
+@pytest.mark.nanofaas
+@pytest.mark.parametrize("command", ["plan", "run"])
+def test_recipe_cli_uses_its_owned_endpoint_at_product_entry(
+    command, tmp_path, monkeypatch
+):
+    from nanolab.config.environment import EnvironmentConfig
+
+    scenario = product_module._scenario(Path("cli-contract-k8s-native-parity.yaml"))
+    product_module._require_cli_endpoint(
+        scenario, EnvironmentConfig(provider="local"), None
+    )
+    monkeypatch.setattr(
+        product_module, "build_cli_plan", lambda *args, **kwargs: _sonata_workflow()
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            command,
+            "cli-contract-k8s-native-parity.yaml",
+            "--run-dir",
+            str(tmp_path / "run"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
 
 
 def test_list_does_not_require_nanofaas_root(monkeypatch: pytest.MonkeyPatch) -> None:

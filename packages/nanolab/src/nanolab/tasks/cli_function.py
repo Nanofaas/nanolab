@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import yaml
 from sonata_tasks.command import CommandTask
 from sonata_tasks.core.fingerprint import fingerprint_digest
 from sonata_tasks.execution.bindings import CommandTaskExecutor
@@ -72,8 +73,157 @@ def _json_stdout(result: TaskResult) -> dict[str, Any]:
 
 
 def _expect(payload: dict[str, Any], field: str, expected: object) -> None:
-    if payload.get(field) != expected:
+    actual = payload.get(field)
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        try:
+            for key, value in expected.items():
+                _expect(actual, key, value)
+        except RuntimeError as error:
+            raise RuntimeError(f"{field}: {error}") from error
+        return
+    if (
+        actual != expected
+        or (type(expected) is int and type(actual) is not int)
+        or (isinstance(expected, float) and isinstance(actual, bool))
+    ):
         raise RuntimeError(f"{field} is {payload.get(field)!r}, expected {expected!r}")
+
+
+def parse_cli_list(stdout: str) -> dict[str, str]:
+    """Read the actual name/image TSV, rejecting ambiguous or partial rows."""
+    rows: dict[str, str] = {}
+    for line in stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 2 or not all(parts) or parts[0] in rows:
+            raise RuntimeError(f"CLI list has an invalid or duplicate row: {line!r}")
+        rows[parts[0]] = parts[1]
+    return rows
+
+
+class CliFunctionListTask(CommandTask):
+    """Verify registered name/image pairs or absence after deletion."""
+
+    def __init__(
+        self,
+        expected: dict[str, str],
+        *,
+        absent: tuple[str, ...] = (),
+        cli_argv: tuple[str, ...],
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None = None,
+    ) -> None:
+        """Configure the command and its independent expected-state proof."""
+
+        def verify(result: TaskResult) -> None:
+            rows = parse_cli_list(result.stdout)
+            for name, image in expected.items():
+                _expect(rows, name, image)
+            for name in absent:
+                if name in rows:
+                    raise RuntimeError(f"CLI list still contains deleted {name}")
+
+        super().__init__(
+            title="List functions",
+            argv=(*cli_argv, "fn", "list"),
+            executor=executor,
+            role=role,
+            options=CommandOptions(cwd=cwd),
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.list:v1", expected=expected, absent=absent
+            ),
+            verify=verify,
+        )
+
+
+class CliFunctionGetTask(CommandTask):
+    """Prove the function's manifest, controlled changes and deployment mode."""
+
+    def __init__(
+        self,
+        manifest: FunctionManifest,
+        *,
+        patch: dict[str, Any] | None = None,
+        cli_argv: tuple[str, ...],
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None = None,
+    ) -> None:
+        """Configure a get command using the complete selected manifest."""
+        expected = {**manifest.body(), **(patch or {})}
+        expected.pop("executionMode")
+        expected.update(
+            requestedExecutionMode=manifest.execution_mode,
+            effectiveExecutionMode=manifest.execution_mode,
+            deploymentBackend="k8s",
+        )
+
+        def verify(result: TaskResult) -> None:
+            details = _json_stdout(result)
+            for key, value in expected.items():
+                _expect(details, key, value)
+
+        super().__init__(
+            title=f"Get {manifest.name}",
+            argv=(*cli_argv, "fn", "get", manifest.name),
+            executor=executor,
+            role=role,
+            options=CommandOptions(cwd=cwd),
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.get:v2", expected=expected
+            ),
+            verify=verify,
+        )
+
+
+def cli_config_file_task(
+    manifest: FunctionManifest,
+    *,
+    binary: Path,
+    endpoint: str,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    cwd: Path | None = None,
+) -> CommandTask:
+    """Exercise YAML config loading with endpoint/context environment removed."""
+    config = yaml.safe_dump(
+        {"currentContext": "owned", "contexts": {"owned": {"endpoint": endpoint}}}
+    )
+    probe = CliFunctionGetTask(
+        manifest, cli_argv=(str(binary),), executor=executor, role=role, cwd=cwd
+    )
+    return CommandTask(
+        title=f"CLI config file for {manifest.name}",
+        argv=(
+            "bash",
+            "-lc",
+            _script_with_file(
+                config,
+                (
+                    "env",
+                    "-u",
+                    "NANOFAAS_ENDPOINT",
+                    "-u",
+                    "NANOFAAS_CONTEXT",
+                    str(binary),
+                    "--config",
+                    FILE,
+                    "fn",
+                    "get",
+                    manifest.name,
+                ),
+            ),
+        ),
+        executor=executor,
+        role=role,
+        options=CommandOptions(cwd=cwd),
+        semantic_key=_semantic_key(
+            "nanolab.cli-function.config-file:v1",
+            manifest=manifest.body(),
+            endpoint=endpoint,
+        ),
+        verify=probe.verify,
+    )
 
 
 class CliFunctionApplyTask(CommandTask):
@@ -121,14 +271,36 @@ class CliFunctionDeleteTask(CommandTask):
         executor: CommandTaskExecutor,
         role: ExecutionRole,
         cwd: Path | None = None,
+        verify_absence: bool = False,
     ) -> None:
         """Build the `fn delete` command that removes `name`."""
+
+        def verify(result: TaskResult) -> None:
+            if name in parse_cli_list(result.stdout):
+                raise RuntimeError(f"CLI list still contains deleted {name}")
+
+        command = (*cli_argv, "fn", "delete", name)
+        argv = (
+            (
+                "bash",
+                "-lc",
+                shlex.join(command) + " && " + shlex.join((*cli_argv, "fn", "list")),
+            )
+            if verify_absence
+            else command
+        )
         super().__init__(
             title=f"Delete {name}",
-            argv=(*cli_argv, "fn", "delete", name),
+            argv=argv,
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
+            verify=verify if verify_absence else None,
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.delete-absence:v1", name=name
+            )
+            if verify_absence
+            else None,
         )
 
 
@@ -148,8 +320,21 @@ class CliFunctionInvokeTask(CommandTask):
         executor: CommandTaskExecutor,
         role: ExecutionRole,
         cwd: Path | None = None,
+        expected_output: object | None = None,
     ) -> None:
         """Build the `fn invoke` command, checking the response on the way back."""
+
+        def verify(result: TaskResult) -> None:
+            verify_invocation(result)
+            if expected_output is not None:
+                actual = _json_stdout(result)["output"]
+                if json.dumps(actual, sort_keys=True) != json.dumps(
+                    expected_output, sort_keys=True
+                ):
+                    raise RuntimeError(
+                        f"CLI output is {actual!r}, expected {expected_output!r}"
+                    )
+
         super().__init__(
             title=f"Invoke {name}",
             argv=(*cli_argv, "invoke", name, "--data", payload),
@@ -157,9 +342,12 @@ class CliFunctionInvokeTask(CommandTask):
             role=role,
             options=CommandOptions(cwd=cwd),
             semantic_key=_semantic_key(
-                "nanolab.cli-function.invoke:v2", name=name, payload=payload
+                "nanolab.cli-function.invoke:v3",
+                name=name,
+                payload=payload,
+                expected_output=expected_output,
             ),
-            verify=verify_invocation,
+            verify=verify,
         )
 
 
@@ -248,7 +436,7 @@ def function_update_task(
             "bash",
             "-lc",
             _script_with_file(
-                json.dumps(patch, separators=(",", ":")),
+                yaml.safe_dump(patch),
                 (*cli_argv, "fn", "update", name, "--file", FILE),
                 (*cli_argv, "fn", "get", name),
             ),
@@ -257,7 +445,7 @@ def function_update_task(
         role=role,
         options=CommandOptions(cwd=cwd),
         semantic_key=_semantic_key(
-            "nanolab.cli-function.update:v2", name=name, patch=patch
+            "nanolab.cli-function.update:v3", name=name, patch=patch
         ),
         verify=verify,
     )
@@ -267,6 +455,7 @@ def function_replicas_tasks(
     name: str,
     *,
     replicas: int,
+    require_ready: bool = False,
     cli_argv: tuple[str, ...],
     executor: CommandTaskExecutor,
     role: ExecutionRole,
@@ -279,10 +468,19 @@ def function_replicas_tasks(
     """
 
     def verify_set(result: TaskResult) -> None:
-        _expect(_json_stdout(result), "replicas", replicas)
+        payload = _json_stdout(result)
+        _expect(payload, "function", name)
+        _expect(payload, "replicas", replicas)
 
     def verify_get(result: TaskResult) -> None:
-        _expect(_json_stdout(result), "desiredReplicas", replicas)
+        payload = _json_stdout(result)
+        _expect(payload, "name", name)
+        _expect(payload, "desiredReplicas", replicas)
+        ready = payload.get("readyReplicas")
+        if type(ready) is not int or not 0 <= ready <= replicas:
+            raise RuntimeError(f"readyReplicas is not a valid count: {ready!r}")
+        if require_ready:
+            _expect(payload, "readyReplicas", replicas)
 
     return (
         CommandTask(
@@ -292,7 +490,7 @@ def function_replicas_tasks(
             role=role,
             options=CommandOptions(cwd=cwd),
             semantic_key=_semantic_key(
-                "nanolab.cli-function.scale:v2", name=name, replicas=replicas
+                "nanolab.cli-function.scale:v3", name=name, replicas=replicas
             ),
             verify=verify_set,
         ),
@@ -303,7 +501,10 @@ def function_replicas_tasks(
             role=role,
             options=CommandOptions(cwd=cwd),
             semantic_key=_semantic_key(
-                "nanolab.cli-function.replicas:v2", name=name, replicas=replicas
+                "nanolab.cli-function.replicas:v3",
+                name=name,
+                replicas=replicas,
+                require_ready=require_ready,
             ),
             verify=verify_get,
         ),
@@ -344,6 +545,8 @@ def function_replace_tasks(
                 "apply of a changed immutable field failed without asking "
                 f"for --replace: {(result.stderr or result.stdout)[:200]!r}"
             )
+        if result.return_code == 0:
+            raise RuntimeError("unreplaced immutable change exited successfully")
 
     def verify_replaced(result: TaskResult) -> None:
         _expect(_json_stdout(result), "queueSize", changed.queue_size)
@@ -356,7 +559,7 @@ def function_replace_tasks(
             role=role,
             options=CommandOptions(cwd=cwd, expected_exit_codes=frozenset({0, 1})),
             semantic_key=_semantic_key(
-                "nanolab.cli-function.replace-refusal:v2", manifest=changed.body()
+                "nanolab.cli-function.replace-refusal:v3", manifest=changed.body()
             ),
             verify=verify_refusal,
         ),
@@ -371,6 +574,101 @@ def function_replace_tasks(
             ),
             verify=verify_replaced,
         ),
+    )
+
+
+def runtime_config_patch_task(
+    namespace: str,
+    values: dict[str, Any],
+    *,
+    expected_revision: int | None = None,
+    cli_argv: tuple[str, ...],
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    cwd: Path | None = None,
+) -> CommandTask:
+    """Patch controlled values, optionally guarding a baseline restoration revision."""
+    content = (
+        {"expectedRevision": expected_revision, "values": values}
+        if expected_revision is not None
+        else values
+    )
+
+    def verify(result: TaskResult) -> None:
+        payload = _json_stdout(result)
+        revision = payload.get("revision")
+        if type(revision) is not int or (
+            expected_revision is not None and revision != expected_revision + 1
+        ):
+            raise RuntimeError("runtime config patch returned an invalid revision")
+        applied = (
+            payload.get("effectiveConfig", {}).get("namespaces", {}).get(namespace, {})
+        )
+        for key, value in values.items():
+            _expect(applied, key, value)
+
+    return CommandTask(
+        title="Patch runtime config",
+        argv=(
+            "bash",
+            "-lc",
+            _script_with_file(
+                json.dumps(content, separators=(",", ":")),
+                (
+                    *cli_argv,
+                    "control-plane",
+                    "config",
+                    "patch",
+                    namespace,
+                    "--file",
+                    FILE,
+                ),
+            ),
+        ),
+        executor=executor,
+        role=role,
+        options=CommandOptions(cwd=cwd),
+        semantic_key=_semantic_key(
+            "nanolab.cli-function.runtime-patch:v1",
+            namespace=namespace,
+            values=values,
+            expected_revision=expected_revision,
+        ),
+        verify=verify,
+    )
+
+
+def runtime_config_readback_task(
+    namespace: str,
+    values: dict[str, Any],
+    *,
+    cli_argv: tuple[str, ...],
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    cwd: Path | None = None,
+) -> CommandTask:
+    """Read effective values independently of the mutation response."""
+
+    def verify(result: TaskResult) -> None:
+        payload = _json_stdout(result)
+        if type(payload.get("revision")) is not int:
+            raise RuntimeError("runtime config readback returned no integer revision")
+        applied = payload.get("namespaces", {}).get(namespace, {})
+        for key, value in values.items():
+            _expect(applied, key, value)
+
+    return CommandTask(
+        title="Runtime config readback",
+        argv=(*cli_argv, "control-plane", "config", "get"),
+        executor=executor,
+        role=role,
+        options=CommandOptions(cwd=cwd),
+        semantic_key=_semantic_key(
+            "nanolab.cli-function.runtime-readback:v1",
+            namespace=namespace,
+            values=values,
+        ),
+        verify=verify,
     )
 
 
@@ -393,7 +691,7 @@ def runtime_config_tasks(
 
     def verify_snapshot(result: TaskResult) -> None:
         snapshot = _json_stdout(result)
-        if not isinstance(snapshot.get("revision"), int):
+        if type(snapshot.get("revision")) is not int:
             raise RuntimeError(
                 f"runtime config carried no revision: {result.stdout[:200]!r}"
             )
@@ -409,16 +707,8 @@ def runtime_config_tasks(
                 "invalid runtime config was not reported as invalid: "
                 f"{(result.stderr or result.stdout)[:200]!r}"
             )
-
-    def verify_patched(result: TaskResult) -> None:
-        applied = (
-            _json_stdout(result)
-            .get("effectiveConfig", {})
-            .get("namespaces", {})
-            .get(namespace, {})
-        )
-        for field, expected in patch.items():
-            _expect(applied, field, expected)
+        if result.return_code == 0:
+            raise RuntimeError("invalid runtime config exited successfully")
 
     def config_task(
         title: str,
@@ -446,7 +736,7 @@ def runtime_config_tasks(
             role=role,
             options=CommandOptions(cwd=cwd, expected_exit_codes=exit_codes),
             semantic_key=_semantic_key(
-                "nanolab.cli-function.runtime-config:v2",
+                "nanolab.cli-function.runtime-config:v3",
                 title=title,
                 namespace=namespace,
                 content=content,
@@ -474,11 +764,12 @@ def runtime_config_tasks(
             verify=verify_rejected,
             exit_codes=frozenset({0, 1}),
         ),
-        config_task(
-            "Patch runtime config",
-            "patch",
+        runtime_config_patch_task(
             namespace,
-            content=patch,
-            verify=verify_patched,
+            patch,
+            cli_argv=cli_argv,
+            executor=executor,
+            role=role,
+            cwd=cwd,
         ),
     )

@@ -130,6 +130,66 @@ def distribution(tmp_path: Path) -> RecipeDistribution:
     )
 
 
+@pytest.mark.parametrize("mode", ["native", "jvm"])
+def test_helm_runtime_limits_follow_the_acquired_recipe(tmp_path, mode):
+    from nanolab.tasks.platform import _helm_release_with_endpoint
+
+    original = distribution(tmp_path)
+    value = replace(
+        original,
+        components=(replace(original.components[0], mode=mode), original.components[1]),
+    )
+    resource = Resource(
+        title="distribution", acquire=lambda _: value, release=lambda *_: None
+    )
+    binding = RecipeBinding(distribution=resource, functions={}, run_dir=tmp_path)
+    request = ValidateWorkflowRequest(
+        backend="k8s",
+        functions=(
+            PlatformFunction(
+                name="fn", image="image", payload="{}", build_argv=("true",)
+            ),
+        ),
+        recipe=binding,
+        helm_values=(
+            "--set",
+            "controlPlane.image.repository=unused",
+            "--set",
+            "controlPlane.image.tag=unused",
+            "--set",
+            "controlPlane.resources.limits.cpu=4",
+            "--set",
+            "controlPlane.jvm.ioWorkerCount=4",
+        ),
+    )
+
+    class HelmExecutor(RecordingExecutor):
+        def run(self, task, *, dry_run=False):
+            self.specs.append(task)
+            return TaskResult(
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout="10.1.2.3" if task.argv[0] == "kubectl" else "ok",
+            )
+
+    executor = HelmExecutor()
+    release = _helm_release_with_endpoint(request, executor, tmp_path, ())
+    result = release.acquire(TaskInputs._for_resources({resource: value}, {resource}))
+    assert result == "http://10.1.2.3:8080"
+    args = executor.specs[0].argv
+    assert "controlPlane.image.repository=registry/control-plane" in args
+    assert "controlPlane.image.tag=run-1" in args
+    if mode == "native":
+        assert "controlPlane.resources.limits.cpu=1" in args
+        assert "controlPlane.jvm.ioWorkerCount=" in args
+        assert "controlPlane.resources.limits.cpu=4" not in args
+        assert "controlPlane.jvm.ioWorkerCount=4" not in args
+    else:
+        assert "controlPlane.resources.limits.cpu=4" in args
+        assert "controlPlane.jvm.ioWorkerCount=4" in args
+
+
 def test_recipe_registers_report_image(tmp_path: Path) -> None:
     from sonata_engine import Resource
 
