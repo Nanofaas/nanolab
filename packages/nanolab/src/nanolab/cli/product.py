@@ -159,6 +159,8 @@ def _workflow(
     scenario_path: Path | None = None,
 ):
     paths = default_tool_paths()
+    if scenario.workflow.startswith("one-shot-"):
+        raise ValueError("one-shot execution requires its dedicated plan builder")
     if (
         scenario.workflow in {"validate", "loadtest"}
         and scenario.recipe_profile is not None

@@ -15,9 +15,13 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from nanolab.config.contract import ContractConfig
 from nanolab.config.heap_analysis import HeapAnalysisConfig
+from nanolab.config.one_shot import OneShotConfig
 from nanolab.config.soak import SoakConfig
 
 WorkflowName = Literal[
+    "one-shot-calibration",
+    "one-shot-qualification",
+    "one-shot-experiment",
     "contract",
     "validate",
     "cli",
@@ -145,6 +149,7 @@ class ScenarioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow: WorkflowName
+    one_shot: OneShotConfig | None = Field(default=None, alias="oneShot")
     contract: ContractConfig | None = None
     backend: BackendName | None = None
     build: BuildStrategy = "docker"
@@ -260,6 +265,24 @@ class ScenarioConfig(BaseModel):
         concurrency governor and the load profile against what each supports,
         and returns the instance unchanged once every rule holds.
         """
+        if self.workflow.startswith("one-shot-"):
+            if self.one_shot is None or self.backend != "container":
+                raise ValueError("one-shot requires container backend and oneShot settings")
+            unexpected = self.model_fields_set - {
+                "workflow", "backend", "functions", "one_shot", "recipe_profile",
+                "control_plane_runtime", "control_plane_image", "function_images",
+            }
+            if unexpected:
+                raise ValueError("one-shot does not consume these scenario options")
+            if set(self.functions) != set(self.one_shot.functions):
+                raise ValueError("oneShot functions must match the scenario")
+            if self.workflow != "one-shot-calibration" and self.one_shot.profile is None:
+                raise ValueError("one-shot qualification/experiment requires a profile")
+            if self.workflow == "one-shot-experiment" and self.one_shot.qualification is None:
+                raise ValueError("one-shot experiment requires timing qualification")
+            return self
+        if self.one_shot is not None:
+            raise ValueError("oneShot settings require a one-shot workflow")
         if self.workflow == "contract":
             if self.backend != "container" or self.contract is None:
                 raise ValueError(

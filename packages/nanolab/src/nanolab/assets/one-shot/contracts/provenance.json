@@ -1,0 +1,11 @@
+{
+  "sourceRepository": "https://github.com/Nanofaas/nanofaas",
+  "sourceCommit": "b1aa7f65c7ed0a70c2b94f37092fe62b7e877934",
+  "files": {
+    "service-profile.schema.json": "442751374049c2173438ad1766453216954168c9fe4c41ba66a87ccd78254bfe",
+    "forecast.schema.json": "59fffb92f1fb0a6bce0535b083b6edbb2ccb8ec74b6bb0720d3d82ee111c7e85",
+    "run-events.schema.json": "1e2742474862c62c0a6607b074cbeb5e3b5773cbd22aceed57d3313e97f72613",
+    "examples/workflow-test-config.json": "d3fbaa3bd44928d081f8b98a553adfbd2aec2ae42509f8f067073697fb06a60a",
+    "examples/synthetic-profile.json": "339eca4235c01f352ee6a6c31950de6658d8a546f702bc69482417022058256e"
+  }
+}

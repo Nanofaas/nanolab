@@ -22,6 +22,7 @@ dependencies = [
     "sonata-engine==0.6.14",
     "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.14",
     "tui-toolkit>=0.6.0,<0.7",
+    "jsonschema>=4.23",
 ]
 
 [project.scripts]
@@ -39,6 +40,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 nanolab = [
+    "assets/one-shot/contracts/*.json",
+    "assets/one-shot/contracts/examples/*.json",
     "py.typed",
     "tasks/infra/ansible_assets/ansible.cfg",
     "tasks/infra/ansible_assets/requirements.txt",
@@ -71,6 +74,7 @@ dev = [
     "ruff==0.16.6",
     "bandit>=1.8",
     "pre-commit>=4.0",
+    "types-jsonschema>=4.26.0.20261006",
 ]
 
 [tool.uv.sources]
