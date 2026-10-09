@@ -3,5 +3,5 @@
 from typing import Literal
 
 FunctionRuntimeKind = Literal[
-    "java", "java-lite", "go", "python", "exec", "javascript", "fixture"
+    "java", "java-lite", "go", "rust", "python", "exec", "javascript", "fixture"
 ]

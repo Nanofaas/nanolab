@@ -11,23 +11,27 @@ functions:
   - json-transform-java-lite
   - json-transform-javascript
   - json-transform-python
+  - json-transform-rust
   - qr-code-exec
   - qr-code-go
   - qr-code-java
   - qr-code-javascript
   - qr-code-python
+  - qr-code-rust
   - roman-numeral-exec
   - roman-numeral-go
   - roman-numeral-java
   - roman-numeral-java-lite
   - roman-numeral-javascript
   - roman-numeral-python
+  - roman-numeral-rust
   - word-stats-exec
   - word-stats-go
   - word-stats-java
   - word-stats-java-lite
   - word-stats-javascript
   - word-stats-python
+  - word-stats-rust
   - handler-envelope-java
   - handler-envelope-exec
   - handler-envelope-go

@@ -328,7 +328,7 @@ def _run(
 def test_complete_reports_match_independent_daemon_inspection(staged, tmp_path):
     evidence, provider, executor = _run(staged, tmp_path)
     images = [e for e in evidence if e.kind == "local-image-digest"]
-    assert len(images) == 44
+    assert len(images) == 48
     assert all(
         e.reference.startswith("docker-daemon:127.0.0.1:5000/nanofaas/") for e in images
     )
@@ -1070,7 +1070,7 @@ def test_arm_recipe_reports_match_independent_daemon(staged, tmp_path, host):
         staged, tmp_path, architecture="arm64", host=host
     )
     images = [e for e in evidence if e.kind == "local-image-digest"]
-    assert len(images) == len({e.reference for e in images}) == 44
+    assert len(images) == len({e.reference for e in images}) == 48
     assert all("-arm64" in e.reference for e in images)
     assert {c.role for c in executor.commands} == {"arm-builder"}
     assert len([e for e in evidence if e.reference.endswith("distribution.json")]) == 3
@@ -1480,8 +1480,8 @@ def test_both_architecture_resume_performs_no_build_or_push(tmp_path):
     assert initial == {
         "amd64-build": 3,
         "arm64-build": 3,
-        "amd64-push": 44,
-        "arm64-push": 44,
+        "amd64-push": 48,
+        "arm64-push": 48,
         "benchmark": 3,
         "smoke": 1,
         "publish": 1,
@@ -1532,8 +1532,8 @@ def test_arm_evidence_invalidation_preserves_verified_amd64_phase(tmp_path, muta
     assert case["counts"] == {
         "amd64-build": 3,
         "arm64-build": 6,
-        "amd64-push": 44,
-        "arm64-push": 88,
+        "amd64-push": 48,
+        "arm64-push": 96,
         "benchmark": 3,
         "smoke": 2,
         "publish": 2,
@@ -1554,9 +1554,9 @@ def test_arm_failed_resume_invalidates_prior_receipts_and_preserves_amd64(tmp_pa
     with pytest.raises(RuntimeError, match="assembly failed"):
         _run_both_recipes(case, resume=True)
     assert not arm["build"].receipt.exists()
-    assert case["counts"]["amd64-build"] == 3 and case["counts"]["amd64-push"] == 44
+    assert case["counts"]["amd64-build"] == 3 and case["counts"]["amd64-push"] == 48
     assert (
-        case["counts"]["arm64-push"] == 44
+        case["counts"]["arm64-push"] == 48
         and case["counts"]["smoke"] == 1
         and case["counts"]["publish"] == 1
     )
@@ -1592,7 +1592,7 @@ def test_legacy_arm_journal_requires_recipe_assembly_and_new_push(tmp_path):
     assert case["counts"]["arm64-build"] == 0 and case["counts"]["arm64-push"] == 0
     case["journal"] = JournalConfig(tmp_path / "recipe-contract-2.jsonl")
     _run_both_recipes(case)
-    assert case["counts"]["arm64-build"] == 3 and case["counts"]["arm64-push"] == 44
+    assert case["counts"]["arm64-build"] == 3 and case["counts"]["arm64-push"] == 48
     assert case["counts"]["smoke"] == 1 and case["counts"]["publish"] == 1
 
 

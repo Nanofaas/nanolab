@@ -1,4 +1,4 @@
-# Every deterministic JSON-output function across all six runtimes, driven through
+# Every deterministic JSON-output function across all seven runtimes, driven through
 # the async (enqueue -> execution) path and checked against each function's own
 # payload set under functions/<runtime>/<family>/payloads/. qr-code (binary
 # envelope) and the handler/binary-envelope test functions stay in
@@ -14,15 +14,18 @@ functions:
   - word-stats-java-lite
   - word-stats-javascript
   - word-stats-python
+  - word-stats-rust
   - json-transform-exec
   - json-transform-go
   - json-transform-java
   - json-transform-java-lite
   - json-transform-javascript
   - json-transform-python
+  - json-transform-rust
   - roman-numeral-exec
   - roman-numeral-go
   - roman-numeral-java
   - roman-numeral-java-lite
   - roman-numeral-javascript
   - roman-numeral-python
+  - roman-numeral-rust

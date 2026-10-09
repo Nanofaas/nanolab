@@ -9,9 +9,9 @@ from nanolab.workspace.paths import ToolPaths
 
 def test_unsupported_runtime_fails_before_provisioning(tmp_path, monkeypatch):
     source = tmp_path / "source"
-    (source / "functions/rust/echo").mkdir(parents=True)
+    (source / "functions/swift/echo").mkdir(parents=True)
     scenario = tmp_path / "scenario.yaml"
-    scenario.write_text("workflow: validate\nbackend: k8s\nfunctions: [echo-rust]\n")
+    scenario.write_text("workflow: validate\nbackend: k8s\nfunctions: [echo-swift]\n")
     environment = tmp_path / "environment.yaml"
     environment.write_text(
         "provider: external\nroles:\n  stack:\n    host: vm.example\n"
@@ -38,5 +38,5 @@ def test_unsupported_runtime_fails_before_provisioning(tmp_path, monkeypatch):
         ],
     )
     assert result.exit_code != 0
-    assert "Unsupported function runtime: rust" in result.output
+    assert "Unsupported function runtime: swift" in result.output
     assert calls == []

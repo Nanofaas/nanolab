@@ -1067,7 +1067,7 @@ def test_arm_assembly_and_push_have_distinct_receipts(tmp_path):
                 build.receipt, "arm64-build", "local-image-digest", images
             )
         )
-        == 44
+        == 48
     )
     assert not receipt_artifacts(build.receipt, "arm64-build", "local-registry-digest")
     workflow = Workflow("arm-push")
@@ -1082,12 +1082,12 @@ def test_arm_assembly_and_push_have_distinct_receipts(tmp_path):
                 push.receipt, push.phase, "local-registry-digest", refs
             )
         )
-        == 44
+        == 48
     )
     assert not receipt_artifacts(push.receipt, push.phase, "local-image-digest")
     assert (
         len([task for task in executor.commands if task.argv[:2] == ("docker", "push")])
-        == 44
+        == 48
     )
     assert executor.commands[0].role == "arm-builder"
     assert executor.commands[-1].role == "stack"

@@ -34,8 +34,7 @@ from nanolab.tasks.validation.function_contracts import (
 
 EXCLUSIONS = (
     "Other families, fixtures and service images have no approved independent corpus.",
-    "Rust, cross-architecture execution and watchdog FILE/HTTP supervision "
-    "are excluded.",
+    "Cross-architecture execution and watchdog FILE/HTTP supervision are excluded.",
     "QR qualification checks PNG structure and dimensions, not decoded QR text.",
     "Control-plane and CLI qualification are separate workflows.",
 )

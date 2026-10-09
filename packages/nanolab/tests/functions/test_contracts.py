@@ -111,7 +111,7 @@ def test_missing_and_ambiguous_oracles_rejected(frozen_fixture, cases):
 
 
 @pytest.mark.parametrize("selector", ["unknown", "word-stats-rust"])
-def test_unknown_and_rust_selectors_rejected(frozen_fixture, selector):
+def test_unknown_and_missing_selectors_rejected(frozen_fixture, selector):
     with pytest.raises(ValueError, match="selector"):
         resolve(frozen_fixture, (selector,))
 
@@ -135,6 +135,19 @@ def test_catalog_addition_changes_matrix(frozen_fixture):
         "go-word-stats",
         "python-word-stats",
     }
+
+
+def test_rust_catalog_addition_joins_family_and_explicit_contracts(frozen_fixture):
+    added = frozen_fixture / "functions/rust/word-stats"
+    added.mkdir(parents=True)
+    (added / "Dockerfile").write_text("FROM scratch\n")
+    family = resolve(frozen_fixture)
+    assert {cell.target.name for cell in family.images.cells} == {
+        "rust-word-stats",
+        "python-word-stats",
+    }
+    selected = resolve(frozen_fixture, ("word-stats-rust",))
+    assert [cell.target.name for cell in selected.images.cells] == ["rust-word-stats"]
 
 
 @pytest.mark.parametrize("target", ["corpus", "payload"])
@@ -163,7 +176,7 @@ def test_current_catalog_matrix(nanofaas_checkout):
         architecture="arm64",
         tag="attempt",
     )
-    assert len(matrix.images.cells) == 27
+    assert len(matrix.images.cells) == 31
     counts = {"word-stats": 3, "json-transform": 3, "roman-numeral": 5, "qr-code": 7}
     assert {family: len(cases) for family, cases in matrix.cases.items()} == counts
     assert (
@@ -171,7 +184,7 @@ def test_current_catalog_matrix(nanofaas_checkout):
             counts[cell.target.name.split("-", 1)[1].removeprefix("lite-")]
             for cell in matrix.images.cells
         )
-        == 119
+        == 137
     )
 
 
