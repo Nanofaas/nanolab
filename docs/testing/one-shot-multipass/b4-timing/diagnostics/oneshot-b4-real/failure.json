@@ -1,0 +1,5 @@
+{
+  "status": "NOT_QUALIFIED",
+  "reason": "Client error '400 Bad Request' for url 'http://10.83.80.167:8080/v1/admin/offload/one-shot/clock-health'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+  "notes": []
+}

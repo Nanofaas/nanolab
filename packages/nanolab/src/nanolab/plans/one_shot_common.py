@@ -59,6 +59,7 @@ class OneShotTopology:
     probes: dict[str, Resource[str]]
     distribution: Resource[RecipeDistribution]
     function_settings: dict[str, OneShotFunction]
+    function_aliases: dict[str, str]
 
     @property
     def requires(self) -> tuple[Resource[Any], ...]:
@@ -440,6 +441,7 @@ def add_one_shot_platforms(
                 queue_size=100,
                 timeout_ms=30000,
                 max_retries=0,
+                runtime_mode="HTTP",
                 env={
                     "NANOFAAS_ONE_SHOT_PROFILE": "true",
                     "NANOFAAS_MAX_CONCURRENT_HANDLERS": "1",
@@ -457,4 +459,12 @@ def add_one_shot_platforms(
             requires=(endpoint,),
             local_endpoint="http://127.0.0.1:8080",
         )
-    return OneShotTopology(resources, platforms, endpoints, probes, pinned, functions)
+    return OneShotTopology(
+        resources,
+        platforms,
+        endpoints,
+        probes,
+        pinned,
+        functions,
+        {key: definition.family for key, definition in definitions.items()},
+    )

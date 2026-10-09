@@ -67,6 +67,13 @@ def test_one_shot_rejects_duplicate_nodes_unknown_options_and_other_providers() 
         ScenarioConfig.model_validate(data)
 
 
+def test_optimizer_pool_must_fit_at_least_one_replica_per_function():
+    data = scenario("one-shot-calibration")
+    data["oneShot"]["functions"]["one-shot-workload-rust"]["memoryMiB"] = 1024
+    with pytest.raises(ValidationError, match="one replica"):
+        ScenarioConfig.model_validate(data)
+
+
 def test_declared_replica_cap_covers_the_entire_optimizer_memory_pool():
     data = scenario("one-shot-calibration")
     data["oneShot"]["nodes"][0]["memoryCapacityMiB"] = 512

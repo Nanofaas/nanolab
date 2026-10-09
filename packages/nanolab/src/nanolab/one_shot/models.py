@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+import math
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -50,7 +51,7 @@ def verify_calibration(
 class TimingQualification(BaseModel):
     """Measured wall time and explicit period/lead-time selection."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     schema_version: Literal[1] = 1
     provider: str
     purpose: Purpose
@@ -65,7 +66,16 @@ class TimingQualification(BaseModel):
     epsilon: float = Field(gt=0, lt=1)
     sample_count: int = Field(gt=0)
     censored_count: int = Field(ge=0)
-    samples_seconds: list[float]
+    samples_seconds: list[Annotated[float, Field(ge=0)] | None]
+    minimum_samples: int = Field(default=1, ge=1)
+    period_candidates: list[float] = Field(default_factory=list)
+    max_trace_resolution: float | None = None
+    ready_samples_seconds: list[Annotated[float, Field(ge=0)] | None] = Field(
+        default_factory=list
+    )
+    protocol: dict[str, JsonValue] = Field(default_factory=dict)
+    matrix: list[dict[str, JsonValue]] = Field(default_factory=list)
+    reason: str | None = None
 
     @model_validator(mode="after")
     def validate_budget(self) -> Self:
@@ -77,6 +87,37 @@ class TimingQualification(BaseModel):
             raise ValueError("qualified period exceeds the declared auction budget")
         if len(self.samples_seconds) != self.sample_count:
             raise ValueError("timing sample count mismatch")
+        if self.censored_count > self.sample_count:
+            raise ValueError("timing censor count mismatch")
+        if self.qualified and (
+            self.censored_count
+            or self.sample_count < self.minimum_samples
+            or self.lead_seconds >= self.period_seconds
+            or any(value is None for value in self.samples_seconds)
+        ):
+            raise ValueError("qualified timing has insufficient or censored evidence")
+        if self.qualified:
+            from nanolab.tasks.one_shot.statistics import quantile
+
+            if self.quantile == 1 or self.sample_count < math.ceil(
+                1 / (1 - self.quantile) - 1e-9
+            ):
+                raise ValueError("too few samples for the declared tail quantile")
+            observed = [value for value in self.samples_seconds if value is not None]
+            if self.quantile_seconds + 1e-9 < quantile(observed, self.quantile):
+                raise ValueError("qualification understates measured auction wall time")
+            if self.ready_samples_seconds:
+                if len(self.ready_samples_seconds) != self.sample_count or any(
+                    value is None for value in self.ready_samples_seconds
+                ):
+                    raise ValueError("qualified readiness has insufficient evidence")
+                ready = [
+                    value for value in self.ready_samples_seconds if value is not None
+                ]
+                if self.lead_seconds + 1e-9 < quantile(ready, self.quantile):
+                    raise ValueError(
+                        "qualification understates measured readiness time"
+                    )
         return self
 
 

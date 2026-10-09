@@ -1,0 +1,57 @@
+{
+  "status": 201,
+  "response": {
+    "name": "one-shot-workload",
+    "image": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df",
+    "command": [],
+    "env": {
+      "NANOFAAS_ONE_SHOT_PROFILE": "true",
+      "NANOFAAS_MAX_CONCURRENT_HANDLERS": "1"
+    },
+    "resources": {
+      "requests": null,
+      "limits": {
+        "cpu": 1,
+        "memoryMiB": 128
+      }
+    },
+    "timeoutMs": 30000,
+    "concurrency": 2,
+    "queueSize": 100,
+    "maxRetries": 0,
+    "endpointUrl": "http://0.0.0.0:46475/invoke",
+    "requestedExecutionMode": "DEPLOYMENT",
+    "effectiveExecutionMode": "DEPLOYMENT",
+    "deploymentBackend": "container-local",
+    "runtimeMode": "HTTP",
+    "scalingConfig": {
+      "strategy": "NONE",
+      "minReplicas": 1,
+      "maxReplicas": 2,
+      "metrics": [
+        {
+          "type": "queue_depth",
+          "target": "5",
+          "query": null
+        }
+      ],
+      "concurrencyControl": {
+        "mode": "STATIC_PER_POD",
+        "targetInFlightPerPod": 1,
+        "minTargetInFlightPerPod": 1,
+        "maxTargetInFlightPerPod": 8,
+        "upscaleCooldownMs": 30000,
+        "downscaleCooldownMs": 60000,
+        "highLoadThreshold": 0.5,
+        "lowLoadThreshold": 0.15,
+        "targetLatencyMs": null,
+        "weight": null
+      }
+    },
+    "deploymentObjects": {
+      "containerNamePrefix": "nl-os-config-diagnostic-edge-0-nanofaas-one-shot-workload-42592edc03af7ab4"
+    }
+  },
+  "containers": "{\"Command\":\"\\\"/app/one-shot-workl\u2026\\\"\",\"CreatedAt\":\"2026-10-09 17:45:01 +0200 CEST\",\"ID\":\"1be07652b7d0\",\"Image\":\"d9659fbd92fa\",\"Labels\":\"io.nanofaas.function=nl-os-config-diagnostic-edge-0/one-shot-workload,io.nanofaas.managed=true,io.nanofaas.replica=1\",\"LocalVolumes\":\"0\",\"Mounts\":\"\",\"Names\":\"nl-os-config-diagnostic-edge-0-nanofaas-one-shot-workload-42592edc03af7ab4-r1\",\"Networks\":\"bridge\",\"Platform\":{\"architecture\":\"arm64\",\"os\":\"linux\"},\"Ports\":\"0.0.0.0:46839-\\u003e8080/tcp, [::]:46839-\\u003e8080/tcp\",\"RunningFor\":\"1 second ago\",\"Size\":\"4.1kB (virtual 4.64MB)\",\"State\":\"running\",\"Status\":\"Up Less than a second\"}\n{\"Command\":\"\\\"/opt/jre/bin/java @\u2026\\\"\",\"CreatedAt\":\"2026-10-09 17:44:56 +0200 CEST\",\"ID\":\"8e854319ec39\",\"Image\":\"89c4cda18335\",\"Labels\":\"\",\"LocalVolumes\":\"0\",\"Mounts\":\"/var/run/docke\u2026\",\"Names\":\"nanolab-one-shot-control-plane\",\"Networks\":\"host\",\"Platform\":{\"architecture\":\"arm64\",\"os\":\"linux\"},\"Ports\":\"\",\"RunningFor\":\"6 seconds ago\",\"Size\":\"61.4kB (virtual 161MB)\",\"State\":\"running\",\"Status\":\"Up 4 seconds\"}\n",
+  "dockerVersion": "{\"Platform\":{\"Name\":\"\"},\"Version\":\"29.1.3\",\"ApiVersion\":\"1.52\",\"MinAPIVersion\":\"1.44\",\"Os\":\"linux\",\"Arch\":\"arm64\",\"Components\":[{\"Name\":\"Engine\",\"Version\":\"29.1.3\",\"Details\":{\"ApiVersion\":\"1.52\",\"Arch\":\"arm64\",\"BuildTime\":\"Wed Apr 29 16:40:20 2026\",\"Experimental\":\"false\",\"GitCommit\":\"29.1.3-0ubuntu4.1\",\"GoVersion\":\"go1.24.13\",\"KernelVersion\":\"7.0.0-34-generic\",\"MinAPIVersion\":\"1.44\",\"Os\":\"linux\"}},{\"Name\":\"containerd\",\"Version\":\"2.2.2\",\"Details\":{\"GitCommit\":\"\"}},{\"Name\":\"runc\",\"Version\":\"1.4.0-0ubuntu1\",\"Details\":{\"GitCommit\":\"\"}},{\"Name\":\"docker-init\",\"Version\":\"0.19.0\",\"Details\":{\"GitCommit\":\"\"}}],\"GitCommit\":\"29.1.3-0ubuntu4.1\",\"GoVersion\":\"go1.24.13\",\"KernelVersion\":\"7.0.0-34-generic\",\"BuildTime\":\"2026-04-29T16:40:20.000000000+00:00\"}\n"
+}

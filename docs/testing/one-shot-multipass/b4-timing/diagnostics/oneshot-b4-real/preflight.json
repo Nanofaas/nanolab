@@ -1,0 +1,76 @@
+{
+  "status": "FAIL",
+  "provider": "multipass",
+  "purpose": "workflow-validation",
+  "observations": {
+    "edge-0": {
+      "inventory": {
+        "cpus": 2,
+        "architecture": "aarch64",
+        "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43",
+        "memoryMiB": 3891,
+        "hostname": "nl-os-2c95576434d2-edge-0"
+      },
+      "functions": [
+        {
+          "name": "one-shot-workload",
+          "image": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df",
+          "command": [],
+          "resources": {
+            "requests": null,
+            "limits": {
+              "cpu": 1.0,
+              "memoryMiB": 128
+            }
+          },
+          "timeoutMs": 30000,
+          "concurrency": 2,
+          "queueSize": 100,
+          "maxRetries": 0,
+          "endpointUrl": "http://0.0.0.0:43335/invoke",
+          "requestedExecutionMode": "DEPLOYMENT",
+          "effectiveExecutionMode": "DEPLOYMENT",
+          "deploymentBackend": "container-local",
+          "scalingConfig": {
+            "strategy": "NONE",
+            "minReplicas": 1,
+            "maxReplicas": 2,
+            "metrics": [
+              {
+                "type": "queue_depth",
+                "target": "5",
+                "query": null
+              }
+            ],
+            "concurrencyControl": {
+              "mode": "STATIC_PER_POD",
+              "targetInFlightPerPod": 1,
+              "minTargetInFlightPerPod": 1,
+              "maxTargetInFlightPerPod": 8,
+              "upscaleCooldownMs": 30000,
+              "downscaleCooldownMs": 60000,
+              "highLoadThreshold": 0.5,
+              "lowLoadThreshold": 0.15,
+              "targetLatencyMs": null,
+              "weight": null
+            }
+          },
+          "deploymentObjects": {
+            "containerNamePrefix": "nl-os-2c95576434d2-edge-0-nanofaas-one-shot-workload-42592edc03af7ab4"
+          }
+        }
+      ],
+      "containers": "{\"Command\":\"\\\"/app/one-shot-workl\u2026\\\"\",\"CreatedAt\":\"2026-10-09 17:25:24 +0200 CEST\",\"ID\":\"8bea0b15a77d\",\"Image\":\"d9659fbd92fa\",\"Labels\":\"io.nanofaas.function=nl-os-2c95576434d2-edge-0/one-shot-workload,io.nanofaas.managed=true,io.nanofaas.replica=1\",\"LocalVolumes\":\"0\",\"Mounts\":\"\",\"Names\":\"nl-os-2c95576434d2-edge-0-nanofaas-one-shot-workload-42592edc03af7ab4-r1\",\"Networks\":\"bridge\",\"Platform\":{\"architecture\":\"arm64\",\"os\":\"linux\"},\"Ports\":\"0.0.0.0:39433-\\u003e8080/tcp, [::]:39433-\\u003e8080/tcp\",\"RunningFor\":\"3 seconds ago\",\"Size\":\"4.1kB (virtual 4.64MB)\",\"State\":\"running\",\"Status\":\"Up 2 seconds\"}\n{\"Command\":\"\\\"/opt/jre/bin/java @\u2026\\\"\",\"CreatedAt\":\"2026-10-09 17:23:49 +0200 CEST\",\"ID\":\"f4be40d65f1e\",\"Image\":\"89c4cda18335\",\"Labels\":\"\",\"LocalVolumes\":\"0\",\"Mounts\":\"/var/run/docke\u2026\",\"Names\":\"nanolab-one-shot-control-plane\",\"Networks\":\"host\",\"Platform\":{\"architecture\":\"arm64\",\"os\":\"linux\"},\"Ports\":\"\",\"RunningFor\":\"About a minute ago\",\"Size\":\"61.4kB (virtual 161MB)\",\"State\":\"running\",\"Status\":\"Up About a minute\"}\n"
+    },
+    "edge-1": {
+      "inventory": {
+        "cpus": 2,
+        "architecture": "aarch64",
+        "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43",
+        "memoryMiB": 3891,
+        "hostname": "nl-os-2c95576434d2-edge-1"
+      }
+    }
+  },
+  "reason": "Client error '400 Bad Request' for url 'http://10.83.80.167:8080/v1/admin/offload/one-shot/clock-health'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400"
+}

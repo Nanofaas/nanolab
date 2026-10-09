@@ -52,3 +52,28 @@ B2 immutable runtime distribution, Sonata journal in `/tmp/oneshot-b3-real2`.
 The initial attempt's SDK response-envelope mismatch and complete VM cleanup
 are retained in `prior-failure.json`; its regression reproduces the raw integer
 HTTP response. No NanoFaaS runtime change or implicit synthetic sample was used.
+
+## B4: independent auction timing
+
+`b4-timing/success` retains the independent B3 profile reference, measured
+preflight/clock samples, exact API configuration, 20 raw epochs and per-node
+auction timers/events. Both local forecast cells (4/4 and 24/0 requests/s) passed
+with ten complete observations each and no censoring. These qualification runs
+exercise forecast-driven auctions on the shared local host; they do not constitute
+an end-user load campaign or a scientific tail estimate.
+The conservative parallel-trigger-to-all-ready p90 is approximately 107ms.
+The selected period is 20s, epsilon 0.1, readiness lead 1.9s, auction margin 0.2s,
+and readiness margin 0.3s. Declared protocol budgets remain binding even when the
+observed auction is faster. Independent per-node timers are retained; parallel
+CPU times are never summed to select the period. Scheduled runtime mode remains
+disabled; B5 must trigger and verify each epoch through the public API.
+
+Run: `NANOFAAS_ROOT=/tmp/nanofaas-one-shot-source UV_CACHE_DIR=/tmp/nanolab-uv-cache
+uv run --frozen --all-packages --all-groups python /tmp/oneshot-b4-qualification.py`.
+Builder: `build_one_shot_qualification_plan`, bundled qualification preset,
+`/tmp/oneshot-b3-real2/profile.json` and the immutable runtime distribution.
+Run directory: `/tmp/oneshot-b4-real3`. Source remains b1aa7f65.
+Earlier failures and isolated API diagnostics are retained under `diagnostics`:
+clock samples must preserve their original VM timestamp; one-shot function
+registration must explicitly declare `runtimeMode: HTTP`. Regression tests cover
+both. No NanoFaaS runtime change was necessary.

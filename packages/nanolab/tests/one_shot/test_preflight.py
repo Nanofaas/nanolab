@@ -68,11 +68,12 @@ def test_http_clock_uses_server_timestamp_and_measured_uncertainty(monkeypatch):
             lambda _: httpx.Response(200, json={"timestamp": 100.001})
         )
     ) as http:
-        offset, uncertainty, _ = measure_http_clock(
+        offset, uncertainty, measured_at = measure_http_clock(
             "http://node:17111", http=http, repetitions=2
         )
     assert abs(offset) < 1e-8
     assert uncertainty == pytest.approx(0.001)
+    assert measured_at.timestamp() == 100.001
 
 
 def test_failed_collection_preserves_partial_evidence(tmp_path, monkeypatch):

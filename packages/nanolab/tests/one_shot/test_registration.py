@@ -15,3 +15,14 @@ def test_platform_function_preserves_runtime_environment():
         },
     )
     assert function.manifest().body()["env"] == function.env
+
+
+def test_platform_manifest_can_declare_required_http_runtime_explicitly():
+    function = PlatformFunction(
+        name="one-shot-workload",
+        image="sha256:" + "a" * 64,
+        payload="{}",
+        build_argv=(),
+        runtime_mode="HTTP",
+    )
+    assert function.manifest().body()["runtimeMode"] == "HTTP"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 from typing import Literal, Self
 
@@ -75,6 +76,78 @@ class CalibrationSettings(BaseModel):
         return self
 
 
+class ProtocolSettings(BaseModel):
+    """Explicit wall-time limits passed to the NanoFaaS negotiation contract."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    auction_seconds: float = Field(default=0.6, alias="auctionSeconds", gt=0)
+    peer_seconds: float = Field(default=0.15, alias="peerSeconds", gt=0)
+    solver_seconds: float = Field(default=0.15, alias="solverSeconds", gt=0)
+    preparation_seconds: float = Field(default=0.3, alias="preparationSeconds", gt=0)
+    max_rounds: int = Field(default=8, alias="maxRounds", ge=1, le=1000)
+    parallelism: int = Field(default=4, ge=1, le=64)
+    max_peers: int = Field(default=16, alias="maxPeers", ge=1, le=64)
+    queue_capacity: int = Field(default=64, alias="queueCapacity", ge=4, le=256)
+    max_solver_states: int = Field(default=2000000, alias="maxSolverStates", ge=1)
+    max_solver_bytes: int = Field(default=67108864, alias="maxSolverBytes", ge=1)
+
+    @model_validator(mode="after")
+    def validate_queue_bound(self) -> Self:
+        """Preserve the protocol's four-phase peer queue bound."""
+        if self.queue_capacity < 4 * self.max_peers:
+            raise ValueError("queueCapacity must cover four phases per peer")
+        return self
+
+
+class TimingCell(BaseModel):
+    """A reproducible workload cell on the declared measured local network."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
+    rates: dict[str, dict[str, float]] = Field(min_length=1)
+    network: Literal["observed-local"] = "observed-local"
+
+    @model_validator(mode="after")
+    def validate_rates(self) -> Self:
+        """Reject undefined rates and empty/no-load qualification cells."""
+        values = [
+            rate for functions in self.rates.values() for rate in functions.values()
+        ]
+        if not values or any(rate < 0 for rate in values) or not any(values):
+            raise ValueError("timing cell needs positive load and nonnegative rates")
+        return self
+
+
+class TimingSettings(BaseModel):
+    """Independent timing experiment; no implicit period or trace resolution."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    period_candidates: list[float] = Field(
+        alias="periodCandidatesSeconds", min_length=1
+    )
+    max_trace_resolution: float = Field(alias="maxTraceResolutionSeconds", gt=0)
+    minimum_samples: int = Field(default=10, alias="minSamples", ge=10, le=10000)
+    quantile: float = Field(default=0.9, gt=0, lt=1)
+    margin_seconds: float = Field(default=0.2, alias="marginSeconds", ge=0)
+    ready_margin_seconds: float = Field(default=0.3, alias="readyMarginSeconds", gt=0)
+    epsilon: float = Field(default=0.1, gt=0, le=0.2)
+    lead_seconds: float = Field(default=2, alias="measurementLeadSeconds", gt=0)
+    max_censored_fraction: Literal[0] = Field(default=0, alias="maxCensoredFraction")
+    protocol: ProtocolSettings = Field(default_factory=ProtocolSettings)
+    matrix: list[TimingCell] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_candidates(self) -> Self:
+        """Require enough observations to resolve the declared empirical quantile."""
+        if any(not value > 0 for value in self.period_candidates):
+            raise ValueError("period candidates must be positive")
+        if self.minimum_samples < math.ceil(1 / (1 - self.quantile) - 1e-9):
+            raise ValueError("too few samples to resolve declared timing quantile")
+        if len({cell.id for cell in self.matrix}) != len(self.matrix):
+            raise ValueError("duplicate timing matrix cell")
+        return self
+
+
 class OneShotConfig(BaseModel):
     """Provider/purpose boundaries and prerequisites checked before provisioning."""
 
@@ -92,6 +165,7 @@ class OneShotConfig(BaseModel):
     flow_quantum: float = Field(default=1, alias="flowQuantum", gt=0)
     seed: int = 7
     calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
+    timing: TimingSettings | None = None
 
     @model_validator(mode="after")
     def validate_topology(self) -> Self:
@@ -106,6 +180,8 @@ class OneShotConfig(BaseModel):
             raise ValueError("replica memory must leave room for the node runtime")
         for node in self.nodes:
             for function in self.functions.values():
+                if node.memory_capacity_mib < function.memory_mib:
+                    raise ValueError("optimizer memory pool must fit one replica")
                 if (
                     node.memory_capacity_mib // function.memory_mib
                     > function.max_replicas

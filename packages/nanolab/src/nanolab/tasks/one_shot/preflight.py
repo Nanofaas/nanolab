@@ -87,9 +87,9 @@ def measure_clock(
             ).stdout.strip()
         )
         after = time.time()
-        samples.append((after - before, remote - (before + after) / 2))
-    rtt, offset = min(samples)
-    return offset, rtt / 2, datetime.now(UTC)
+        samples.append((after - before, remote - (before + after) / 2, remote))
+    rtt, offset, measured = min(samples)
+    return offset, rtt / 2, datetime.fromtimestamp(measured, UTC)
 
 
 class PreflightTask(Task[TopologyEvidence]):
@@ -136,9 +136,9 @@ def measure_http_clock(
         after = time.time()
         response.raise_for_status()
         remote = float(response.json()["timestamp"])
-        samples.append((after - before, remote - (before + after) / 2))
-    rtt, offset = min(samples)
-    return offset, rtt / 2, datetime.now(UTC)
+        samples.append((after - before, remote - (before + after) / 2, remote))
+    rtt, offset, measured = min(samples)
+    return offset, rtt / 2, datetime.fromtimestamp(measured, UTC)
 
 
 def runtime_endpoint(
@@ -299,6 +299,8 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     spec_response = http.get(url + "/v1/functions/" + function)
                     spec_response.raise_for_status()
                     spec = spec_response.json()
+                    if spec.get("runtimeMode") != "HTTP":
+                        raise ValueError("explicit HTTP runtime identity is required")
                     if (
                         spec["scalingConfig"]["strategy"] != "NONE"
                         or spec["scalingConfig"]["concurrencyControl"][

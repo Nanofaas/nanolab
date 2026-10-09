@@ -1,0 +1,161 @@
+{
+  "workflow": "one-shot-qualification",
+  "oneShot": {
+    "schemaVersion": 1,
+    "provider": "multipass",
+    "purpose": "workflow-validation",
+    "nodes": [
+      {
+        "id": "edge-0",
+        "kind": "edge",
+        "cpus": 2,
+        "memoryMiB": 4096,
+        "diskGiB": 20,
+        "memoryCapacityMiB": 256
+      },
+      {
+        "id": "edge-1",
+        "kind": "edge",
+        "cpus": 2,
+        "memoryMiB": 4096,
+        "diskGiB": 20,
+        "memoryCapacityMiB": 256
+      },
+      {
+        "id": "cloud",
+        "kind": "cloud",
+        "cpus": 2,
+        "memoryMiB": 4096,
+        "diskGiB": 20,
+        "memoryCapacityMiB": 256
+      }
+    ],
+    "functions": {
+      "one-shot-workload-rust": {
+        "input": {
+          "iterations": 20000000,
+          "working_set_bytes": 4096,
+          "seed": 7
+        },
+        "cpu": 1.0,
+        "memoryMiB": 128,
+        "maxReplicas": 2,
+        "utilization": 0.8,
+        "alpha": 1.0,
+        "delta": 0.9,
+        "gamma": 0.1
+      }
+    },
+    "profile": {
+      "path": "/tmp/oneshot-b3-real2/profile.json",
+      "sha256": "39bc4b36113d50f61bfef6617bf4b8a6f2a2ecfa34f8dae0a70c858c1da3e482"
+    },
+    "qualification": null,
+    "runtimeDistribution": {
+      "path": "/tmp/oneshot-runtime-build-v2/distribution/distribution.json",
+      "sha256": "e7bbeaf573f8334d30b1f85fdea244cdc50ae3e3e3738eeb4984048ddd0732d8"
+    },
+    "flowQuantum": 1.0,
+    "seed": 7,
+    "calibration": {
+      "minSamples": 24,
+      "maxSamples": 96,
+      "repetitions": 2,
+      "warmupInvocations": 3,
+      "relativeCI": 0.15,
+      "confidence": 0.95,
+      "capacityError": 0.35,
+      "capacitySeconds": 4.0,
+      "timeoutSeconds": 10.0,
+      "quantiles": [
+        0.5,
+        0.95
+      ]
+    },
+    "timing": {
+      "periodCandidatesSeconds": [
+        20.0,
+        30.0
+      ],
+      "maxTraceResolutionSeconds": 30.0,
+      "minSamples": 10,
+      "quantile": 0.9,
+      "marginSeconds": 0.2,
+      "readyMarginSeconds": 0.3,
+      "epsilon": 0.1,
+      "measurementLeadSeconds": 3.0,
+      "maxCensoredFraction": 0,
+      "protocol": {
+        "auctionSeconds": 0.6,
+        "peerSeconds": 0.15,
+        "solverSeconds": 0.15,
+        "preparationSeconds": 1.0,
+        "maxRounds": 8,
+        "parallelism": 4,
+        "maxPeers": 16,
+        "queueCapacity": 64,
+        "maxSolverStates": 2000000,
+        "maxSolverBytes": 67108864
+      },
+      "matrix": [
+        {
+          "id": "balanced",
+          "rates": {
+            "edge-0": {
+              "one-shot-workload-rust": 4.0
+            },
+            "edge-1": {
+              "one-shot-workload-rust": 4.0
+            }
+          },
+          "network": "observed-local"
+        },
+        {
+          "id": "imbalanced",
+          "rates": {
+            "edge-0": {
+              "one-shot-workload-rust": 24.0
+            },
+            "edge-1": {
+              "one-shot-workload-rust": 0.0
+            }
+          },
+          "network": "observed-local"
+        }
+      ]
+    }
+  },
+  "contract": null,
+  "backend": "container",
+  "build": "docker",
+  "recipeProfile": null,
+  "cliRuntime": "jvm",
+  "functions": [
+    "one-shot-workload-rust"
+  ],
+  "resources": {},
+  "payloadProfile": null,
+  "handlerEnvelope": false,
+  "asyncLoad": false,
+  "persistentRecovery": false,
+  "retryBackoffBurst": false,
+  "autoscaling": false,
+  "concurrencyControl": false,
+  "concurrencyMode": "ADAPTIVE_PER_POD",
+  "loadProfile": "cycle",
+  "soakMinutes": null,
+  "drainMinutes": null,
+  "asyncShare": null,
+  "idemShare": null,
+  "controlPlaneRuntime": "jvm",
+  "autoscalingStrategy": "INTERNAL",
+  "hpaScaleToZero": false,
+  "functionImages": {},
+  "controlPlaneImage": null,
+  "controlPlaneVariant": null,
+  "loadScale": 1.0,
+  "loadVus": null,
+  "release": null,
+  "soak": null,
+  "heapAnalysis": null
+}

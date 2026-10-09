@@ -28,6 +28,7 @@ class FunctionManifest:
     scaling_config: dict[str, Any] | None = None
     offload: dict[str, Any] | None = None
     env: dict[str, str] | None = None
+    runtime_mode: str | None = None
 
     def body(self) -> dict[str, Any]:
         """Return the registration payload the control plane expects."""
@@ -48,6 +49,8 @@ class FunctionManifest:
             body["offload"] = self.offload
         if self.env is not None:
             body["env"] = self.env
+        if self.runtime_mode is not None:
+            body["runtimeMode"] = self.runtime_mode
         return body
 
     def json(self) -> str:
