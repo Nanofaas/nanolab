@@ -64,11 +64,16 @@ their sibling recipe/payload files remain ordinary operator-owned inputs.
 
 ## Tests and supported NanoFaaS source
 
-The supported, CI-tested NanoFaaS revision is
-`e7914be065e844776af57fe9e449bce7f12e03c5`. Newer revisions can be used when they
-preserve the CLI and recipe v2 contracts. Unsupported runtime directories do not
+The CI-tested NanoFaaS source revision is
+`6570aaf0c2287201013bd09406c2d7905c2666c5`. Rust control-plane workloads also
+require the upstream nullable invocation-map fix (`e0c874b9` or newer).
+Newer revisions can be used when they
+preserve the CLI, recipe v2 and managed-container inspection contracts.
+Unsupported runtime directories do not
 prevent discovery of supported functions. Explicitly selecting an unsupported
-runtime fails before provisioning; Rust support is tracked separately in #57.
+runtime fails before provisioning. Rust functions use their packaged Dockerfiles
+and support the same build, deployment and artifact-contract workflows as Go.
+See the [Rust qualification and source compatibility evidence](docs/superpowers/plans/2026-10-09-rust-functions-evidence.md).
 
 Pure tests run without a NanoFaaS checkout:
 
@@ -91,7 +96,7 @@ The public console command is `nanolab`.
 
 `.github/workflows/ci.yml` runs on every push and pull request against
 `main`. It checks out this repo and the pinned nanoFaaS source at
-`e7914be065e844776af57fe9e449bce7f12e03c5` into `.nanofaas-source`, points
+`6570aaf0c2287201013bd09406c2d7905c2666c5` into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below. The gate
 validates all checked-in recipe profiles. To reproduce profile validation
 and the full container lifecycles locally, use the commands below.
@@ -153,15 +158,15 @@ commit the updated lockfile separately.
 Each native release VM assembles three reusable profiles from
 [`packages/nanolab/src/nanolab/assets/presets/recipes`](packages/nanolab/src/nanolab/assets/presets/recipes):
 
-| Profiles (one per architecture) | Images at NanoFaaS `e7914be0` | Build policy |
+| Profiles (one per architecture) | Images at NanoFaaS `6570aaf0` | Build policy |
 | --- | ---: | --- |
 | `release-{amd64,arm64}-jvm.yaml` | 9 per architecture | JVM G1/C2: control plane, Java functions and warm-echo |
 | `release-{amd64,arm64}-native.yaml` | 12 per architecture | Oracle/O3/G1/JFR for Spring; Community/O3/serial for Java-lite |
-| `release-{amd64,arm64}-default.yaml` | 23 per architecture | Bash, Go, JavaScript, Python and watchdog Dockerfiles |
+| `release-{amd64,arm64}-default.yaml` | 27 per architecture | Bash, Go, JavaScript, Python, Rust and watchdog Dockerfiles |
 
 The default control plane is an artifact only. All six profiles select the
 same eight explicit modules and receive the guarded release version as their
-tag. The frozen archive and profiles define 44 images per architecture.
+tag. The frozen archive and profiles define 48 images per architecture.
 
 Both assembly phases use an owned Buildx builder with local loading. Separate
 staging phases verify local IDs before pushing to the stack registry. ARM64

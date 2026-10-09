@@ -114,7 +114,7 @@ def test_preflight_freezes_release_recipe_groups(
     release_request: ReleaseRequest,
 ) -> None:
     groups = release_request.recipe_groups
-    assert tuple(len(group.cells) for group in groups) == (9, 12, 23)
+    assert tuple(len(group.cells) for group in groups) == (9, 12, 27)
     assert groups[0].tag == f"v{CURRENT_VERSION}-amd64-jvm"
     assert groups[2].tag == f"v{CURRENT_VERSION}-amd64"
     assert all(group.profile_bytes for group in groups)
@@ -1757,9 +1757,9 @@ def test_direct_request_requires_frozen_recipe_inputs(release_request):
 
 def test_preflight_freezes_arm64_matrix_and_profiles(release_request):
     groups = release_request.arm_recipe_groups
-    assert tuple(len(g.cells) for g in groups) == (9, 12, 23)
+    assert tuple(len(g.cells) for g in groups) == (9, 12, 27)
     assert release_request.arm_image_plan is not None
-    assert len(release_request.arm_image_plan.cells) == 44
+    assert len(release_request.arm_image_plan.cells) == 48
     assert {c.architecture for c in release_request.arm_image_plan.cells} == {"arm64"}
     assert groups[0].tag == f"v{CURRENT_VERSION}-arm64-jvm"
     assert groups[2].tag == f"v{CURRENT_VERSION}-arm64"
@@ -1924,7 +1924,7 @@ def test_release_dag_has_symmetric_recipe_build_and_push(release_request, monkey
         assert phase.phase_inputs["recipeContract"] == 2
         assert phase.phase_inputs["architecture"] == architecture
         assert phase.phase_inputs["role"] == role
-        assert len(phase.expected_images) == 44
+        assert len(phase.expected_images) == 48
         assert len(phase.phase_inputs["commands"]) == 3
         assert all(
             command["argv"][:2] == ("./gradlew", "assembleRecipe")

@@ -108,6 +108,22 @@ functions:
   sdk: python
   container:
     image: python-word-stats
+- name: json-transform
+  sdk: rust
+  container:
+    image: rust-json-transform
+- name: qr-code
+  sdk: rust
+  container:
+    image: rust-qr-code
+- name: roman-numeral
+  sdk: rust
+  container:
+    image: rust-roman-numeral
+- name: word-stats
+  sdk: rust
+  container:
+    image: rust-word-stats
 services:
 - name: watchdog
   sdk: dockerfile

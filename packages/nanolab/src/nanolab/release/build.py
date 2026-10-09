@@ -45,7 +45,7 @@ _NODE_TOOLCHAIN = (
 )
 _RUST_TOOLCHAIN = (
     "rust:1.97.1-alpine3.21@"
-    "sha256:e5c73e7a712b368eb90b1190c6e1c4a01a3ebb0fe0abfff68c3bcd2df26ecc41"
+    "sha256:7bae7c67364dad5ebbd4060923b34d734fbed66d7c1cf3af72aa2f062af93eb6"
 )
 
 _SHA256_PREFIX = "sha256:"
@@ -364,7 +364,12 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 "sh",
                 "-c",
                 copy_source + "apk add --no-cache bash curl jq netcat-openbsd "
-                "python3 >/dev/null && "
+                "python3 musl-dev >/dev/null && "
+                'export CARGO_TARGET_DIR="$PWD/build/cargo-target" && '
+                "for d in sdks/rust functions/rust/word-stats "
+                "functions/rust/json-transform functions/rust/roman-numeral "
+                'functions/rust/qr-code; do (cd "$d" && cargo test) || exit $?; '
+                "done && unset CARGO_TARGET_DIR && "
                 "cargo test --manifest-path runtimes/watchdog/Cargo.toml && "
                 "bash runtimes/watchdog/test-local.sh",
             ),

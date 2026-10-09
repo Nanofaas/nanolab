@@ -31,12 +31,12 @@ def test_explicit_catalog_root_does_not_require_operator_checkout(
 def test_supported_functions_survive_unsupported_runtime_directories(tmp_path):
     _write(tmp_path / "functions/go/echo/function.yaml", "name: echo\n")
     _write(
-        tmp_path / "functions/rust/echo/function.yaml",
-        "name: echo-rust\ncatalog:\n  runtime: rust\n",
+        tmp_path / "functions/swift/echo/function.yaml",
+        "name: echo-swift\ncatalog:\n  runtime: swift\n",
     )
     assert resolve_function_definition("echo-go", tmp_path).runtime == "go"
-    with pytest.raises(ValueError, match=r"Unsupported function runtime: rust.*#57"):
-        resolve_function_definition("echo-rust", tmp_path)
+    with pytest.raises(ValueError, match=r"Unsupported function runtime: swift"):
+        resolve_function_definition("echo-swift", tmp_path)
 
 
 @pytest.mark.nanofaas
@@ -124,7 +124,7 @@ def test_dynamic_catalog_exposes_manifest_backed_roman_numeral_details() -> None
 @pytest.mark.nanofaas
 def test_every_demo_function_declares_a_resolvable_default_payload() -> None:
     families = {"word-stats", "json-transform", "roman-numeral"}
-    runtimes = {"java", "java-lite", "go", "python", "javascript", "exec"}
+    runtimes = {"java", "java-lite", "go", "rust", "python", "javascript", "exec"}
     payloads_root = discover_tool_root() / "scenarios" / "payloads"
     functions = [
         function for function in list_functions() if function.family in families

@@ -36,9 +36,10 @@ _RUNTIME_DIR_TO_CATALOG_RUNTIME: dict[str, FunctionRuntimeKind] = {
     "java": "java",
     "javascript": "javascript",
     "python": "python",
+    "rust": "rust",
 }
 _DISCOVERABLE_RUNTIMES: frozenset[FunctionRuntimeKind] = frozenset(
-    {"java", "java-lite", "go", "python", "exec", "javascript"}
+    {"java", "java-lite", "go", "rust", "python", "exec", "javascript"}
 )
 _IGNORED_DISCOVERY_DIRS = frozenset({"build", "building", "test-data"})
 
@@ -262,11 +263,7 @@ def require_supported_runtimes(keys: tuple[str, ...], root: Path | None = None) 
             continue
         source = Path(root) if root is not None else nanofaas_root_from_env()
         if (source / "functions" / runtime).is_dir():
-            detail = (
-                "Rust support is tracked in #57"
-                if runtime == "rust"
-                else "select a supported function"
-            )
             raise ValueError(
-                f"Unsupported function runtime: {runtime} for {key}; {detail}"
+                f"Unsupported function runtime: {runtime} for {key}; "
+                "select a supported function"
             )

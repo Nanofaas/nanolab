@@ -46,23 +46,24 @@ def test_plan_has_no_platform_side_effects_or_marker(frozen_fixture, tmp_path):
 
 
 @pytest.fixture
-def finished_attempt(tmp_path):
+def finished_attempt(tmp_path, request):
     from nanolab.functions.contracts import ContractCase
 
     root = tmp_path / "run"
     root.mkdir()
+    runtime = getattr(request, "param", "python")
     case = ContractCase("normal", {}, {"answer": 1}, 200, None)
     matrix = {
         "source": {"revision": "frozen"},
         "corpusHashes": {"corpus": "sha"},
-        "subset": ["word-stats-python"],
+        "subset": [f"word-stats-{runtime}"],
         "cases": {"word-stats": [asdict(case)]},
         "images": [
             {
                 "target": {
-                    "name": "python-word-stats",
+                    "name": f"{runtime}-word-stats",
                     "family": "word-stats",
-                    "runtime": "python",
+                    "runtime": runtime,
                 },
                 "flavor": "default",
             }
@@ -71,7 +72,7 @@ def finished_attempt(tmp_path):
     execution = "case-one"
     raw = json.dumps(case.expected).encode()
     callback_raw = json.dumps({"success": True, "output": case.expected}).encode()
-    identifier = "python-word-stats-default/sdk/000"
+    identifier = f"{runtime}-word-stats-default/sdk/000"
     receipt = {
         "id": identifier,
         "case": asdict(case),
@@ -232,6 +233,17 @@ def test_subset_reports_exact_matrix(finished_attempt):
     assert value["corpusHashes"] == {"corpus": "sha"}
     assert len(value["receipts"]) == 1
     assert value["exclusions"]
+
+
+@pytest.mark.parametrize("finished_attempt", ["rust"], indirect=True)
+def test_rust_qualification_does_not_report_rust_as_excluded(finished_attempt):
+    from nanolab.plans.contract import finalize_contract_run
+
+    root, _, executor = finished_attempt
+    value = json.loads(finalize_contract_run(root, executor=executor).read_text())
+    assert value["subset"] == ["word-stats-rust"]
+    assert value["images"][0]["target"]["runtime"] == "rust"
+    assert not any("rust" in exclusion.lower() for exclusion in value["exclusions"])
 
 
 @pytest.mark.parametrize(

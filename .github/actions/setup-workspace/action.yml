@@ -44,9 +44,9 @@ runs:
         #   - fn update sends a patch the control plane can read: Jackson used
         #     to serialize FunctionPatch.isEmpty() into the body and every
         #     update came back HTTP 400.
-        # Tests read the version and the matrix from this checkout rather than
-        # assuming them, so moving the pin needs no test edits.
-        ref: e7914be065e844776af57fe9e449bce7f12e03c5
+        # This revision also includes Rust SDK, functions, recipe schema and k6 support.
+        # Release profiles and their exact matrix contract include those images.
+        ref: 6570aaf0c2287201013bd09406c2d7905c2666c5
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 

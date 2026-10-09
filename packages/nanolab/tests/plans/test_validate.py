@@ -24,23 +24,27 @@ HANDLER_ENVELOPE_FUNCTIONS = (
     "json-transform-java-lite",
     "json-transform-javascript",
     "json-transform-python",
+    "json-transform-rust",
     "qr-code-exec",
     "qr-code-go",
     "qr-code-java",
     "qr-code-javascript",
     "qr-code-python",
+    "qr-code-rust",
     "roman-numeral-exec",
     "roman-numeral-go",
     "roman-numeral-java",
     "roman-numeral-java-lite",
     "roman-numeral-javascript",
     "roman-numeral-python",
+    "roman-numeral-rust",
     "word-stats-exec",
     "word-stats-go",
     "word-stats-java",
     "word-stats-java-lite",
     "word-stats-javascript",
     "word-stats-python",
+    "word-stats-rust",
     "handler-envelope-java",
     "handler-envelope-exec",
     "handler-envelope-go",
@@ -604,7 +608,15 @@ def test_async_container_scenario_selects_every_json_output_function() -> None:
     assert set(config.functions) == {
         f"{family}-{runtime}"
         for family in ("word-stats", "json-transform", "roman-numeral")
-        for runtime in ("exec", "go", "java", "java-lite", "javascript", "python")
+        for runtime in (
+            "exec",
+            "go",
+            "java",
+            "java-lite",
+            "javascript",
+            "python",
+            "rust",
+        )
     }
 
 

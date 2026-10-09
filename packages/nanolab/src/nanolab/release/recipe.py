@@ -130,7 +130,15 @@ def _component(cell: ImageCell) -> tuple[str, dict[str, Any]]:
         sdk = next(
             (
                 sdk
-                for sdk in ("java-lite", "java", "bash", "go", "javascript", "python")
+                for sdk in (
+                    "java-lite",
+                    "java",
+                    "bash",
+                    "go",
+                    "javascript",
+                    "python",
+                    "rust",
+                )
                 if image.startswith(sdk + "-")
             ),
             "",

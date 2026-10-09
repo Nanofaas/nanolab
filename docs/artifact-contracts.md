@@ -18,7 +18,7 @@ implementation retains all its image flavors and all its corpus cases. The
 qualification marker identifies the exact subset; a subset does not qualify the
 full catalog.
 
-The current catalog produces 27 full-preset cells, 119 HTTP invocations and 18
+The CI-pinned catalog produces 31 full-preset cells, 137 HTTP invocations and 18
 fresh bash one-shot containers. SDK invocations require exactly one actual
 callback. Bash warm invocations require zero callbacks; one-shot invocations
 require exit 0 and exactly one callback. The expected totals are derived from
@@ -59,14 +59,21 @@ cannot produce a marker. The marker retains source/corpus identities, selected
 cells, case hashes, derived counts and cleanup evidence. It is an operational
 qualification receipt, not a tamper-proof signature.
 
-Other families, fixtures, service images, Rust, cross-architecture execution and
+Other families, fixtures, service images, cross-architecture execution and
 watchdog FILE/HTTP supervision remain outside this workflow. Control-plane,
 Kubernetes lifecycle and CLI parity are separate validation gates.
 
-The installed ARM64 full preset qualifies on NanoFaaS candidate `84a8f0ce`:
+The previous installed ARM64 full preset qualifies on NanoFaaS candidate `84a8f0ce`:
 all 27 cells and 137 cases pass, with 119 real artifact callbacks and verified
 cleanup. This candidate fixes the missing AWT libraries and JNI metadata that
 blocked Java QR native on `a234ea1`; its upstream fix is
 [NanoFaaS PR #255](https://github.com/Nanofaas/nanofaas/pull/255). The native CLI
 fix in PR #253 and the existing NanoLab coverage deficit remain separate; see the
 [installed execution evidence](superpowers/plans/2026-10-08-packaged-functions-watchdog-evidence.md).
+
+Rust qualification on clean NanoFaaS main `b1aa7f65` covers four installed ARM64
+images, 18 HTTP cases and 18 actual callbacks, with independently verified
+cleanup. The shared NanoLab container build/register/load path also passes the
+three original Rust k6 rows (39,868 requests, no errors). This does not requalify
+the entire 31-cell preset or the generic validation workflow on newer upstream
+container names. See [Rust integration evidence and source limitations](superpowers/plans/2026-10-09-rust-functions-evidence.md).
