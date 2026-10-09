@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 class ArtifactReference(BaseModel):
     """An immutable prerequisite whose bytes must match the recorded hash."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     path: Path
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -27,19 +27,19 @@ class ArtifactReference(BaseModel):
 class OneShotNode(BaseModel):
     """A separate Multipass VM for one logical edge or terminal cloud."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
     kind: Literal["edge", "cloud"]
     cpus: int = Field(default=2, gt=0)
     memory_mib: int = Field(default=4096, alias="memoryMiB", gt=0)
     disk_gib: int = Field(default=20, alias="diskGiB", gt=0)
-    memory_capacity_mib: int = Field(default=512, alias="memoryCapacityMiB", gt=0)
+    memory_capacity_mib: int = Field(default=256, alias="memoryCapacityMiB", gt=0)
 
 
 class OneShotFunction(BaseModel):
     """Declared input, resource limits and model coefficients of a function."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     input: dict[str, JsonValue]
     cpu: float = Field(default=1, gt=0)
     memory_mib: int = Field(default=128, alias="memoryMiB", gt=0)
@@ -53,7 +53,7 @@ class OneShotFunction(BaseModel):
 class OneShotConfig(BaseModel):
     """Provider/purpose boundaries and prerequisites checked before provisioning."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
     provider: Literal["multipass"]
     purpose: Literal["workflow-validation"]
@@ -61,6 +61,9 @@ class OneShotConfig(BaseModel):
     functions: dict[str, OneShotFunction] = Field(min_length=1)
     profile: ArtifactReference | None = None
     qualification: ArtifactReference | None = None
+    runtime_distribution: ArtifactReference | None = Field(
+        default=None, alias="runtimeDistribution"
+    )
     flow_quantum: float = Field(default=1, alias="flowQuantum", gt=0)
     seed: int = 7
 
@@ -75,4 +78,11 @@ class OneShotConfig(BaseModel):
             raise ValueError("at least two independent edges are required")
         if any(node.memory_capacity_mib >= node.memory_mib for node in self.nodes):
             raise ValueError("replica memory must leave room for the node runtime")
+        for node in self.nodes:
+            for function in self.functions.values():
+                if (
+                    node.memory_capacity_mib // function.memory_mib
+                    > function.max_replicas
+                ):
+                    raise ValueError("replica cap does not cover optimizer memory pool")
         return self

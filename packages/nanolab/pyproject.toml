@@ -40,6 +40,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 nanolab = [
+    "assets/one-shot/*.py",
     "assets/one-shot/contracts/*.json",
     "assets/one-shot/contracts/examples/*.json",
     "py.typed",

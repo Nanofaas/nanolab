@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from datetime import datetime
 from typing import Any, Literal, Self
 from urllib.parse import quote
@@ -120,13 +121,20 @@ class OneShotConflictError(RuntimeError):
 class NanoFaasOneShotClient:
     """No implicit retries: transport, API refusal and invalid data stay distinct."""
 
-    def __init__(self, base_url: str, *, http: httpx.Client) -> None:
+    def __init__(
+        self, base_url: str, *, http: httpx.Client, timeout_seconds: float = 30
+    ) -> None:
         """Borrow an explicitly configured HTTP transport."""
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("API timeout must be finite and positive")
+        self.timeout_seconds = timeout_seconds
         self.base_url = base_url.rstrip("/")
         self.http = http
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        response = self.http.request(method, self.base_url + path, timeout=30, **kwargs)
+        response = self.http.request(
+            method, self.base_url + path, timeout=self.timeout_seconds, **kwargs
+        )
         if response.status_code == 409:
             raise OneShotConflictError(f"revision conflict at {path}")
         response.raise_for_status()

@@ -1,0 +1,75 @@
+{
+  "load": "Loaded image: 127.0.0.1:5000/nanofaas/one-shot-multipass/control-plane-one-shot-jvm:one-shot-b1aa7f65\nLoaded image: 127.0.0.1:5000/nanofaas/one-shot-multipass/nanofaas-one-shot-workload:one-shot-b1aa7f65\n",
+  "images": [
+    {
+      "Id": "sha256:89c4cda183351dcb29bca6106728b05f048b67061280ce8bf1dfd05700230c6e",
+      "RepoTags": [
+        "127.0.0.1:5000/nanofaas/one-shot-multipass/control-plane-one-shot-jvm:one-shot-b1aa7f65"
+      ],
+      "RepoDigests": [
+        "127.0.0.1:5000/nanofaas/one-shot-multipass/control-plane-one-shot-jvm@sha256:89c4cda183351dcb29bca6106728b05f048b67061280ce8bf1dfd05700230c6e"
+      ],
+      "Descriptor": {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": "sha256:89c4cda183351dcb29bca6106728b05f048b67061280ce8bf1dfd05700230c6e",
+        "size": 3430,
+        "annotations": {
+          "io.containerd.image.name": "127.0.0.1:5000/nanofaas/one-shot-multipass/control-plane-one-shot-jvm:one-shot-b1aa7f65",
+          "org.opencontainers.image.ref.name": "one-shot-b1aa7f65"
+        }
+      },
+      "RootFS": {
+        "Type": "layers",
+        "Layers": [
+          "sha256:e842bc95a0a8664498b7881e537b5929e419d590f5a9954fb7f81c73c20fc6c7",
+          "sha256:621c35e751a51a9a9dc3e80aa0b7fe8be2a93402ea6ccd307d30852cd7776cda",
+          "sha256:763a77745f27b86cf26b97887b6842d83720e63b1c48848c0ba9ee54e351d63a",
+          "sha256:f0d0eff4c2312a7bd6e21797bdfea5eb35f60e76b555ce2b22794424af2cad36",
+          "sha256:275a30dd8ce958b21daa9ad962c6fbc09f98306ee2f486b65c9075dc257b1412",
+          "sha256:4d049f83d9cf21d1f5cc0e11deaf36df02790d0e60c1a3829538fb4b61685368",
+          "sha256:af5aa97ebe6ce1604747ec1e21af7136ded391bcabe4acef882e718a87c86bcc",
+          "sha256:6f1cdceb6a3146f0ccb986521156bef8a422cdbb0863396f7f751f575ba308f4",
+          "sha256:bd3cdfae1d3fdd83a2231d608969b38b82349777c2fff9a7c12d54f8ac5c9b38",
+          "sha256:4cde6b0bb6f50a5f255eef7b2a42162c661cf776b803225dcac9a659e396bb6b",
+          "sha256:ad51d0769d16ba578106a177987dfe3d2e02c1668c852b795b2f6b024068242a",
+          "sha256:187cfc6d1e3e8a40a5e64653bcd3239c140807dcf1c09e48021178705a5a6139",
+          "sha256:f2392a9484bf6b18f06beaf705b994e31dbb2716c99cf7d03c9c495cd107f364",
+          "sha256:50a5575df19e16694e9b7bfca79ef13cfce85faab4b0585ff197a078a952b007",
+          "sha256:948af73b9b4f49fa4e0009269c2f4a5b174fb02c4485b13ab7f6d0c705d49966",
+          "sha256:91213e6dc2fda431a0de4541602a933c7a48206a0bf487217fa681260fccdc23",
+          "sha256:7b57942929394e731b49e8f1863a4da2cbd1b9fda48d9f1e75a0a28b2d89d01a",
+          "sha256:61366403a03160c191d60c3c39a8e246bad96a8fb02cc0a230193f0bfdb400c4",
+          "sha256:6557be82ac95bddb4ba4922ca944b9046e0ef4c005b02d779ce49e4755b57051",
+          "sha256:359e0f91332cb0b987e1455851db4b2a1fad2182e185479f3d7112da7db29f5c",
+          "sha256:f92174079c62ba57d7c850af5430f12452a0dabb31d5245241d84d46c7f96642"
+        ]
+      }
+    },
+    {
+      "Id": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df",
+      "RepoTags": [
+        "127.0.0.1:5000/nanofaas/one-shot-multipass/nanofaas-one-shot-workload:one-shot-b1aa7f65"
+      ],
+      "RepoDigests": [
+        "127.0.0.1:5000/nanofaas/one-shot-multipass/nanofaas-one-shot-workload@sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df"
+      ],
+      "Descriptor": {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": "sha256:d9659fbd92fa74e9be714dee77bccf599a149e8f8d672186c67180c5cd2ce3df",
+        "size": 553,
+        "annotations": {
+          "io.containerd.image.name": "127.0.0.1:5000/nanofaas/one-shot-multipass/nanofaas-one-shot-workload:one-shot-b1aa7f65",
+          "org.opencontainers.image.ref.name": "one-shot-b1aa7f65"
+        }
+      },
+      "RootFS": {
+        "Type": "layers",
+        "Layers": [
+          "sha256:463940bdd5e7bca65543ef563426d7038c4d1cf4f9a614ca86c81a4ddca6979b",
+          "sha256:330ce37fde9dfff391de68136d2d206321de61f371391bdf358d25929104d0ab"
+        ]
+      }
+    }
+  ],
+  "socketGroup": "109"
+}

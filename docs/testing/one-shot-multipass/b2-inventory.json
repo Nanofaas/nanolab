@@ -1,0 +1,56 @@
+{
+  "provider": "multipass",
+  "purpose": "workflow-validation",
+  "sharedPhysicalHost": true,
+  "generatorLocation": "operator-host",
+  "nodes": [
+    {
+      "id": "edge-0",
+      "vm": {
+        "name": "nl-os-b2-http2-20261009-edge-0",
+        "host": "10.83.80.49"
+      },
+      "facts": {
+        "cpus": 2,
+        "memory": "MemTotal:        3984824 kB",
+        "architecture": "aarch64",
+        "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43"
+      },
+      "clockOffsetSeconds": -0.0002002716064453125,
+      "clockUncertaintySeconds": 0.0027136802673339844,
+      "measuredAt": "2026-10-09T13:56:41.889464+00:00"
+    },
+    {
+      "id": "edge-1",
+      "vm": {
+        "name": "nl-os-b2-http2-20261009-edge-1",
+        "host": "10.83.80.103"
+      },
+      "facts": {
+        "cpus": 2,
+        "memory": "MemTotal:        3984824 kB",
+        "architecture": "aarch64",
+        "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43"
+      },
+      "clockOffsetSeconds": -0.0006396770477294922,
+      "clockUncertaintySeconds": 0.0006196498870849609,
+      "measuredAt": "2026-10-09T13:56:42.585223+00:00"
+    },
+    {
+      "id": "cloud",
+      "vm": {
+        "name": "nl-os-b2-http2-20261009-cloud",
+        "host": "10.83.80.122"
+      },
+      "facts": {
+        "cpus": 2,
+        "memory": "MemTotal:        3984824 kB",
+        "architecture": "aarch64",
+        "os": "Linux-7.0.0-34-generic-aarch64-with-glibc2.43"
+      },
+      "clockOffsetSeconds": -0.0026657581329345703,
+      "clockUncertaintySeconds": 0.0008512735366821289,
+      "measuredAt": "2026-10-09T13:56:43.325338+00:00"
+    }
+  ]
+}

@@ -27,6 +27,7 @@ class FunctionManifest:
     resources: dict[str, Any] | None = None
     scaling_config: dict[str, Any] | None = None
     offload: dict[str, Any] | None = None
+    env: dict[str, str] | None = None
 
     def body(self) -> dict[str, Any]:
         """Return the registration payload the control plane expects."""
@@ -45,6 +46,8 @@ class FunctionManifest:
             body["scalingConfig"] = self.scaling_config
         if self.offload is not None:
             body["offload"] = self.offload
+        if self.env is not None:
+            body["env"] = self.env
         return body
 
     def json(self) -> str:

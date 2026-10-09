@@ -78,6 +78,7 @@ class PlatformFunction:
     concurrency: int = 2
     queue_size: int = 20
     max_retries: int = 3
+    env: dict[str, str] | None = None
 
     def manifest(self) -> FunctionManifest:
         """Build the manifest this function is registered with."""
@@ -91,6 +92,7 @@ class PlatformFunction:
             resources=self.resources,
             scaling_config=self.scaling_config,
             offload=self.offload,
+            env=self.env,
         )
 
 

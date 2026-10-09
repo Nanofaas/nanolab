@@ -114,3 +114,18 @@ def test_events_reject_stalled_cursor() -> None:
         NanoFaasOneShotClient("http://edge:8080", http=http).epoch_events(0, limit=1)
     assert len(calls) == 2
     assert calls[1].url.params["after"] == "1"
+
+
+def test_clock_client_can_bound_its_request_during_teardown():
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"healthy": True})
+
+    from datetime import UTC, datetime
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        client = NanoFaasOneShotClient("http://edge:8080", http=http, timeout_seconds=2)
+        client.update_clock_health(offset_seconds=0.001, measured_at=datetime.now(UTC))
+    assert requests[0].extensions["timeout"]["read"] == 2

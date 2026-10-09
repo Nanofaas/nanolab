@@ -1,0 +1,4 @@
+{"node": "edge-0", "offsetSeconds": -0.0002789497375488281, "uncertaintySeconds": 0.0010907649993896484, "measuredAt": "2026-10-09T14:53:19.915323+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.0038404464721679688, "uncertaintySeconds": 0.0011473894119262695, "measuredAt": "2026-10-09T14:53:20.006270+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.0002772808074951172, "uncertaintySeconds": 0.001055598258972168, "measuredAt": "2026-10-09T14:53:25.112513+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.003820657730102539, "uncertaintySeconds": 0.0009919404983520508, "measuredAt": "2026-10-09T14:53:25.203224+00:00"}

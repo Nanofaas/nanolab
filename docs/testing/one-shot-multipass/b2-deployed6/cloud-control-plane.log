@@ -1,0 +1,7 @@
+2026-10-09T14:53:05.732Z  WARN 1 --- [           main] i.u.d.n.m.offload.OffloadConfiguration   : Offload module loaded without nanofaas.offload.target-url; only functions declaring their own offload.targetUrl can offload
+Warning: Permanently added '10.83.80.48' (ED25519) to the list of known hosts.
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::loadLibrary has been called by io.netty.util.internal.NativeLibraryUtil in an unnamed module (jar:nested:/app/app.jar/!BOOT-INF/lib/netty-common-4.2.17.Final.jar!/)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
