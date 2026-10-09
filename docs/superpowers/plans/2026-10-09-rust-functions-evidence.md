@@ -129,8 +129,10 @@ A separate main-source container workflow succeeded at invocation but failed
 legacy container inspection: main now appends a hash to managed container names
 for every runtime. Generic container identity migration remains separate from
 Rust integration. Main direct-artifact and source-test results remain valid;
-the generic `validate` inspection on main is not qualified by the separate k6
-platform harness. No product check was removed or weakened.
+the generic `validate` inspection on main was not qualified by that separate k6
+platform harness. A subsequent label-based inspection fix independently qualified
+the standard workflow; see [container inspection evidence](2026-10-09-managed-container-inspection-evidence.md).
+No product check was removed or weakened.
 
 The source-contract CI pin also exposed an older upstream SDK defect:
 optional invocation metadata/headers serialized as JSON null cause a malformed

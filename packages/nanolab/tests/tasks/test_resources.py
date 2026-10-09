@@ -25,9 +25,25 @@ class StubExecutor:
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(
-            task_id="", status="passed", return_code=0, stdout=self.stdout
-        )
+        stdout = self.stdout
+        if task.argv[:2] == ("docker", "ps"):
+            stdout = "a" * 64
+        elif task.argv[:2] == ("docker", "inspect") and not stdout.startswith("<"):
+            stdout = json.dumps(
+                {
+                    "Id": "a" * 64,
+                    "State": {"Running": True},
+                    "Config": {
+                        "Labels": {
+                            "io.nanofaas.managed": "true",
+                            "io.nanofaas.function": "word-stats",
+                            "io.nanofaas.replica": "1",
+                        }
+                    },
+                    "HostConfig": json.loads(stdout),
+                }
+            )
+        return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
 
 def _host_config(cpu_shares: int, nano_cpus: int, reservation: int, memory: int) -> str:
@@ -76,17 +92,19 @@ def test_container_check_reads_the_host_config_as_json() -> None:
     executor = StubExecutor(stdout=MATCHING_HOST_CONFIG)
 
     ContainerResourceCheckTask(
-        container="nanofaas-word-stats-r1",
+        function="word-stats",
+        replica=1,
         resources=SPEC,
         executor=executor,
         role="host",
     ).run(TaskInputs.empty())
 
-    assert executor.seen[0].argv == (
+    assert executor.seen[0].argv[:2] == ("docker", "ps")
+    assert executor.seen[1].argv == (
         "docker",
         "inspect",
-        "--format={{json .HostConfig}}",
-        "nanofaas-word-stats-r1",
+        "--format={{json .}}",
+        "a" * 64,
     )
 
 
@@ -94,7 +112,8 @@ def test_container_check_passes_when_every_field_matches() -> None:
     executor = StubExecutor(stdout=MATCHING_HOST_CONFIG)
 
     ContainerResourceCheckTask(
-        container="nanofaas-word-stats-r1",
+        function="word-stats",
+        replica=1,
         resources=SPEC,
         executor=executor,
         role="host",
@@ -119,7 +138,8 @@ def test_container_check_names_the_field_that_mismatched(
     """Name the mismatched field rather than comparing one space-joined line."""
     executor = StubExecutor(stdout=stdout)
     task = ContainerResourceCheckTask(
-        container="nanofaas-word-stats-r1",
+        function="word-stats",
+        replica=1,
         resources=SPEC,
         executor=executor,
         role="host",
@@ -139,7 +159,8 @@ def test_container_reservation_is_zero_when_request_equals_limit() -> None:
     )
 
     ContainerResourceCheckTask(
-        container="nanofaas-word-stats-r1",
+        function="word-stats",
+        replica=1,
         resources=same,
         executor=executor,
         role="host",
@@ -154,7 +175,8 @@ def test_container_cpu_shares_never_drop_below_two() -> None:
     executor = StubExecutor(stdout=_host_config(2, 2_000_000, 0, 8 * 1024 * 1024))
 
     ContainerResourceCheckTask(
-        container="nanofaas-word-stats-r1",
+        function="word-stats",
+        replica=1,
         resources=tiny,
         executor=executor,
         role="host",
@@ -162,10 +184,11 @@ def test_container_cpu_shares_never_drop_below_two() -> None:
 
 
 def test_container_check_without_a_spec_only_reads() -> None:
-    executor = StubExecutor(stdout="not json at all")
+    executor = StubExecutor(stdout="{}")
 
     ContainerResourceCheckTask(
-        container="nanofaas-word-stats-r1",
+        function="word-stats",
+        replica=1,
         resources=None,
         executor=executor,
         role="host",
@@ -237,7 +260,8 @@ def test_k8s_whole_cpu_is_not_rendered_in_millicores() -> None:
 def test_malformed_output_is_reported_as_such() -> None:
     executor = StubExecutor(stdout="<html>502</html>")
     task = ContainerResourceCheckTask(
-        container="nanofaas-word-stats-r1",
+        function="word-stats",
+        replica=1,
         resources=SPEC,
         executor=executor,
         role="host",

@@ -146,7 +146,8 @@ def _inspection_task(
             cwd=cwd,
         )
     return ContainerResourceCheckTask(
-        container=f"nanofaas-{function.name}-r1",
+        function=function.name,
+        replica=1,
         resources=function.resources,
         executor=executor,
         role=request.role,

@@ -23,6 +23,7 @@ from nanolab.tasks.compose import (
 )
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.http_function import HttpFunctionRegisterTask
+from nanolab.tasks.managed_containers import inspect_managed_container
 from nanolab.tasks.recipes.workflow import RecipeDistribution
 
 if TYPE_CHECKING:
@@ -376,6 +377,19 @@ class RecipeImageCheckTask(Task[None]):
                 json.dumps({"stdout": result.stdout if result else None}) + "\n"
             )
             container = result.stdout.strip() if result else ""
+            if not container:
+                raise RuntimeError("Recipe container was not found")
+            result = (
+                CommandTask(
+                    title=f"Inspect image of {container}",
+                    argv=("docker", "inspect", "--format", "{{.Image}}", container),
+                    executor=self.executor,
+                    role="host",
+                )
+                .run(inputs)
+                .value
+            )
+            actual = result.stdout.strip() if result else ""
         else:
             registration_name, recipe_name, sdk = self.function
             component = (
@@ -383,20 +397,16 @@ class RecipeImageCheckTask(Task[None]):
                 if self.kind == "service"
                 else expected.function(recipe_name, sdk)
             )
-            container = f"nanofaas-{registration_name}-r1"
-        if not container:
-            raise RuntimeError("Recipe container was not found")
-        result = (
-            CommandTask(
-                title=f"Inspect image of {container}",
-                argv=("docker", "inspect", "--format", "{{.Image}}", container),
+            observed = inspect_managed_container(
+                function=registration_name,
+                replica=1,
                 executor=self.executor,
                 role="host",
+                inputs=inputs,
+                cwd=self.cwd,
             )
-            .run(inputs)
-            .value
-        )
-        actual = result.stdout.strip() if result else ""
+            container = observed["Id"]
+            actual = observed.get("Image")
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / f"image-{component.kind}-{component.name}.json").write_text(
             json.dumps(

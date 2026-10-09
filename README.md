@@ -69,6 +69,8 @@ The CI-tested NanoFaaS source revision is
 require the upstream nullable invocation-map fix (`e0c874b9` or newer).
 Newer revisions can be used when they
 preserve the CLI, recipe v2 and managed-container inspection contracts.
+Docker validation selects running replicas by NanoFaaS function/replica labels
+and checks their full container IDs, so legacy and hashed container names work.
 Unsupported runtime directories do not
 prevent discovery of supported functions. Explicitly selecting an unsupported
 runtime fails before provisioning. Rust functions use their packaged Dockerfiles
