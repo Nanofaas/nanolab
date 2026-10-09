@@ -1,11 +1,100 @@
 # Native CLI parity — execution evidence, 2026-10-08
 
-The NanoLab implementation is on `fix/operational-validation`. The installed
-ARM64 JVM/native parity cycle passed against an explicitly patched NanoFaaS
-candidate, including every release. The unmodified NanoFaaS native CLI fails
-its required YAML configuration contract; it is not qualified by this evidence.
-Task 5 remains incomplete for the shipped source until that source fix is
-integrated and qualified. Issue #54 also retains the separate function/watchdog lot.
+The NanoLab implementation is on `fix/operational-validation`. On 2026-10-09,
+the installed ARM64 JVM/native parity cycle passed against integrated NanoFaaS
+main, including every release. Task 5's shipped-source qualification is now
+complete. The earlier patched candidate and original-source failure below remain
+historical evidence. The separate function/watchdog lot has its own
+[full installed qualification](2026-10-08-packaged-functions-watchdog-evidence.md).
+
+## Integrated-main qualification, 2026-10-09
+
+- NanoLab source `23fcf61beb269b9a385711f4368959597c500fab`; freshly built
+  NanoLab/toolkit 0.6.0 wheels installed outside the checkout. All 51 installed
+  packages are compatible; public Sonata stays 0.6.14. NanoLab wheel SHA-256:
+  `d23099eb61fa2c6f66fd6ee9f8eb7c5167c0f44657868ac674a549155a83fc17`;
+  toolkit wheel SHA-256:
+  `0a6c4d7a5be418cbcd6e14e4254095d3d0261efa823d0f62ec0d8ea01c79ad90`.
+- Frozen NanoFaaS main `b1aa7f65c7ed0a70c2b94f37092fe62b7e877934` includes
+  merged PR #253. Both artifact receipts and the parity marker record this
+  revision and the empty tracked-patch SHA-256
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+  Operator source and preexisting untracked files were not edited.
+- Real JVM `installDist` and native `nativeCompile` builds completed from that
+  frozen source. The launcher environment selects GraalVM Community 25.2.4
+  and requests 12 GiB builder heap / four workers; task records confirm both
+  builds succeeded. Separate CLI Gradle stdout was not retained. Both launchers report `nanofaas 0.22.0`. The native ARM64 ELF SHA-256:
+  `436de71c4ce8c25e3f09750b0e13d049ac8d8cc991592b17b56ff9ee3f1ffa24`.
+  JVM evidence includes the launcher and ten JAR hashes; every artifact hash was
+  independently checked against the retained files.
+- Installed `nanolab run cli-contract-k8s-native-parity.yaml` exited 0:
+  67 task records passed, including all releases. Run interval:
+  09:30:05–09:32:58 UTC. Each artifact passed 27 parsed observations and retained
+  54 complete raw command receipts. Apply/get/list, YAML update/readback,
+  replicas/readiness, corpus output, immutable refusal/replace/readback,
+  info/contract, valid/invalid runtime configuration and YAML `--config` passed.
+  The configuration case clears both endpoint/context environment overrides and
+  supplies no endpoint flag. The two observation mappings independently compare
+  equal, including the exact frozen word-stats corpus output.
+- Both passes changed the controlled rate 1000000 → 999999 → 1000000, with
+  readback and revision guards; restoration revisions were 2 and 4. All retained
+  platform observations preserve Deployment UID
+  `df22f1cc-2742-45e7-8275-455d923b64bf`, pod UID
+  `9498b778-ccd3-4428-80e6-1c6ab040740a` and container ID
+  `e8f0e6209662ba9897a3eaf7ff64980391d442292ad4fcf993e6664f29e72cdf`.
+  All four bounded log captures per artifact passed diagnostic checks.
+- Function, API forward, Helm release, namespace, imported images and pinned
+  credentials released successfully. Independent inspection found exactly the
+  four default/system namespaces, no Helm releases and no attempt-tagged images.
+  The exclusively owned `nanolab-cli54-main` Docker/containerd profile was then
+  deleted. The operator Minikube profile and selected preexisting BuildKit
+  builder remained stopped and unchanged. The two attempt-tagged host images
+  were also removed; `host-cleanup-final.json` verifies their absence and the
+  profile container absence. All 19 preexisting NanoFaaS untracked files retain
+  their filenames and SHA-256 values (`operator-source-final.json`). No images
+  were published.
+- Fresh CLI/Kubernetes package verification with CI-pinned NanoFaaS source:
+  174 passed. The pure phase independently passed 133 with 41 checkout skips.
+  Full NanoLab suite: 3880 passed, 3 skipped in 326.35s. The command exited 1
+  solely for 86.49% branch coverage below the unchanged 90% gate. All 15 quality
+  hooks and installed dependencies pass; thresholds, versions and lock files
+  are unchanged. Logs: `full-nanolab.log`, `cli-pinned-tests.log`, `hooks.log`.
+
+Raw evidence: `/tmp/nanolab-cli54-main-evidence/parity`, attempt
+`cli-attempts/fa07665ce065`; command log `run.log`. Independent checks and cleanup
+observations are retained in the same evidence root, including
+`independent-verification.json`. Parity marker SHA-256:
+`9e61f60a615cddc5cb1c8315eab00e7595b53fe08c68303396dc0551787283a5`.
+These temporary paths locate this qualification; they are not runtime inputs.
+Qualification remains local ARM64, not an amd64 or remote-backend claim.
+
+### Integrated-main review scope and decisions
+
+One fresh independent review checked the new documentation and retained proof:
+all 5,848 frozen source entries match the exact pinned Git tree, every artifact
+hash matches, both observation mappings compare equal, and cleanup snapshots
+support the local qualification. No Critical or Important finding remains.
+
+The review scope preserves these decisions:
+
+1. Previously reviewed failure-injection behavior is unchanged and was not
+   reviewed again; cost: this documentation review adds no new proof for library
+   mutation, replacement, retries, slices or injected cleanup failure.
+2. Rust #57 remains at its separate design-approval gate; cost: this run gives
+   no Rust support or runtime qualification.
+3. Function/watchdog qualification remains its separate retained evidence;
+   cost: it was not executed again during this CLI-only cycle.
+4. amd64 and remote execution remain outside the local ARM64 claim; cost:
+   platform-specific defects there remain unqualified.
+5. Operator resource continuity is supported by observed stopped states and
+   scoped commands, not a retained complete pre-run resource snapshot; cost:
+   this evidence is not a full before/after audit of every operator setting.
+   Source hashes and final owned-image absence have their own retained receipts.
+
+Deferred minor: the earlier generic Verification section retains the historical
+review wording “Shipped-source qualification remains incomplete.” The current
+status and integrated qualification are explicit above; the old review sentence
+has not been rewritten as a current verdict.
 
 ## Actual installed candidate
 
@@ -92,9 +181,10 @@ reported low impact for the two changed files. Verification logs and receipts
 remain under `/tmp/nanofaas-native-cli-context-evidence` and
 `/tmp/nanofaas-native-cli-context-*.log`.
 
-The installed paired Kubernetes evidence above remains the earlier candidate
-cycle. The upstream PR is open; integration and shipped-source qualification
-remain pending, as does the separate function/watchdog delivery under #54.
+The installed paired Kubernetes evidence in the candidate section remains the
+earlier candidate cycle. PR #253 was subsequently merged; the distinct
+integrated-main cycle at the start of this document qualifies that source.
+The separate function/watchdog delivery has its own full evidence linked above.
 
 ## Verification
 

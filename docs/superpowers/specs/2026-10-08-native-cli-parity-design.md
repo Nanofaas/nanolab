@@ -1,11 +1,12 @@
 # Native CLI parity — second native delivery, issue #54
 
 Status: approved and implemented on `fix/operational-validation`, independently
-reviewed with no material NanoLab findings. Installed ARM64 parity passed only
-against an explicitly patched NanoFaaS candidate. Shipped-source qualification
-remains incomplete: the native CLI lacks `Context` reflection registration.
-See [execution evidence](../plans/2026-10-08-native-cli-parity-evidence.md).
-Function/watchdog contracts remain the third delivery; issue #54 stays open.
+reviewed with no material NanoLab findings. Installed ARM64 parity passed on
+2026-10-09 against integrated NanoFaaS main `b1aa7f65`, with an empty tracked
+patch. The earlier candidate proof remains historical evidence. See
+[execution evidence](../plans/2026-10-08-native-cli-parity-evidence.md).
+The separate function/watchdog delivery also has its own full installed proof;
+neither delivery's evidence substitutes for the other's.
 
 ## Outcome and source of requirements
 

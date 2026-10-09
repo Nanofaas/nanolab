@@ -311,7 +311,7 @@ update this plan and its approved spec status with actual results.
 - [x] Build/install isolated NanoLab/toolkit wheels with unchanged public Sonata
   dependencies. Resolve both new bundled presets through the installed CLI.
   Expected: valid compilation and compatible installed dependencies.
-- [ ] Run the installed parity scenario against an exclusively owned local
+- [x] Run the installed parity scenario against an exclusively owned local
   arm64 Minikube profile, using an isolated MINIKUBE_HOME/KUBECONFIG and frozen
   source containing the native CLI fixes. Record actual Gradle builds, ELF/JAR
   hashes, version, every required command, corpus result, baseline restoration,
@@ -337,22 +337,23 @@ update this plan and its approved spec status with actual results.
   findings in the prescribed single RED-to-GREEN pass and rerun the whole suite;
   repeat affected live qualification if runtime behavior changed. Record exclusions
   and costs. Expected: no unaddressed material findings, no fabricated live proof.
-- [ ] Commit the evidence, preserve decisions and actual coverage limitations,
+- [x] Commit the evidence, preserve decisions and actual coverage limitations,
   remove only this plan's scratch workspace, and keep the requested branch and
   worktree. Do not push, publish, merge or close #54 as part of this plan.
 
 ### Task 5 execution status
 
-The candidate installed parity cycle passed, the original functional suites,
-quality hooks and dependencies passed, and one final whole-branch review found
-no material NanoLab defect. The unchanged 90% coverage gate remains failing.
-Clean NanoFaaS source fails the required native YAML context contract. A minimal
-Context reflection patch passes in a temporary clone, but is not integrated.
-Task 5 and shipped-source qualification remain incomplete; keep the plan scratch
-workspace to resume after the upstream fix. The user subsequently authorized
-push and pull requests for both repositories; the upstream correction is now
-in [NanoFaaS PR #253](https://github.com/Nanofaas/nanofaas/pull/253). This later
-authorization supersedes the plan's initial restriction on push and PR creation.
+The integrated-main installed parity cycle passed on 2026-10-09, using freshly
+built wheels and frozen NanoFaaS `b1aa7f65` with an empty tracked patch. Both
+artifacts passed 27 observations and 54 raw receipts, compared equal, restored
+the baseline, preserved the control plane and completed all releases. Independent
+inspection confirmed cleanup before deleting the owned Minikube profile.
+The native Context correction in
+[NanoFaaS PR #253](https://github.com/Nanofaas/nanofaas/pull/253) is merged.
+Shipped-source qualification is complete. The user subsequently authorized
+push and pull requests for both repositories; that authorization supersedes the
+plan's initial restriction on push and PR creation. The original 90% branch
+coverage debt remains separate from these successful runtime checks.
 See [actual evidence](2026-10-08-native-cli-parity-evidence.md).
 
 ## Self-review and execution handoff
