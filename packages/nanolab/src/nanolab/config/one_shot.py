@@ -50,6 +50,31 @@ class OneShotFunction(BaseModel):
     gamma: float = Field(default=0.1, ge=0)
 
 
+class CalibrationSettings(BaseModel):
+    """Bounded independent measurement and model validation settings."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    min_samples: int = Field(default=24, alias="minSamples", ge=2)
+    max_samples: int = Field(default=96, alias="maxSamples", ge=2, le=10000)
+    repetitions: int = Field(default=2, ge=1, le=100)
+    warmup_invocations: int = Field(default=3, alias="warmupInvocations", ge=1)
+    relative_ci: float = Field(default=0.15, alias="relativeCI", gt=0, lt=1)
+    confidence: float = Field(default=0.95, gt=0, lt=1)
+    capacity_error: float = Field(default=0.35, alias="capacityError", gt=0, lt=1)
+    capacity_seconds: float = Field(default=4, alias="capacitySeconds", gt=0)
+    timeout_seconds: float = Field(default=10, alias="timeoutSeconds", gt=0)
+    quantiles: list[float] = Field(default_factory=lambda: [0.5, 0.95], min_length=1)
+
+    @model_validator(mode="after")
+    def validate_sample_bounds(self) -> Self:
+        """Require feasible bounded sample counts in each independent repetition."""
+        if self.min_samples > self.max_samples:
+            raise ValueError("minSamples exceeds maxSamples")
+        if any(not 0 < value <= 1 for value in self.quantiles):
+            raise ValueError("invalid service quantiles")
+        return self
+
+
 class OneShotConfig(BaseModel):
     """Provider/purpose boundaries and prerequisites checked before provisioning."""
 
@@ -66,6 +91,7 @@ class OneShotConfig(BaseModel):
     )
     flow_quantum: float = Field(default=1, alias="flowQuantum", gt=0)
     seed: int = 7
+    calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
 
     @model_validator(mode="after")
     def validate_topology(self) -> Self:

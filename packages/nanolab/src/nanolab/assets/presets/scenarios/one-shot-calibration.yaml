@@ -1,0 +1,29 @@
+workflow: one-shot-calibration
+backend: container
+functions: [one-shot-workload-rust]
+oneShot:
+  provider: multipass
+  purpose: workflow-validation
+  nodes:
+    - {id: edge-0, kind: edge, cpus: 2, memoryMiB: 4096, memoryCapacityMiB: 256}
+    - {id: edge-1, kind: edge, cpus: 2, memoryMiB: 4096, memoryCapacityMiB: 256}
+    - {id: cloud, kind: cloud, cpus: 2, memoryMiB: 4096, memoryCapacityMiB: 256}
+  functions:
+    one-shot-workload-rust:
+      input: {iterations: 20000000, working_set_bytes: 4096, seed: 7}
+      cpu: 1
+      memoryMiB: 128
+      maxReplicas: 2
+      utilization: 0.8
+  seed: 7
+  calibration:
+    minSamples: 24
+    maxSamples: 96
+    repetitions: 2
+    warmupInvocations: 3
+    confidence: 0.95
+    quantiles: [0.5, 0.95]
+    relativeCI: 0.15
+    capacityError: 0.35
+    capacitySeconds: 4
+    timeoutSeconds: 10

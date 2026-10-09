@@ -1,0 +1,6 @@
+{
+  "status": "NOT_QUALIFIED",
+  "reason": "'int' object has no attribute 'get'",
+  "notes": [],
+  "cleanup": "all owned VM releases passed; retained diagnostic /tmp/oneshot-b3-real"
+}

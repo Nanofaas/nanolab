@@ -33,3 +33,22 @@ unnamed Docker-save images, config/manifest ID semantics, and an unscoped manage
 container label. Regression tests cover each; all owned VMs were released.
 `b2-import-diagnostic.json` records the image-store diagnosis.
 Pre-existing `nanofaas-stack` and concurrent `lb-worker-*` VMs were preserved.
+
+## B3: independent service calibration
+
+`b3-calibration` retains 144 raw warm service samples, readiness/warmup records,
+per-node seeded bootstrap statistics and six capacity configurations (one/two
+replicas on each of three VMs). Mean physical occupancy is approximately 111ms.
+Capacity-model error was below 2.8%; declared tolerance was 35%, confidence 95%,
+relative mean-interval tolerance 15%. Profile v1 schema validation passed.
+The profile aggregates homogeneous local nodes while retaining node statistics.
+VM OS/architecture, host CPU and image/input/resource identities are fingerprinted.
+The profile and its prerequisite reference are immutable bytes.
+
+Run: `NANOFAAS_ROOT=/tmp/nanofaas-one-shot-source UV_CACHE_DIR=/tmp/nanolab-uv-cache
+uv run --frozen --all-packages --all-groups python /tmp/oneshot-b3-calibration.py`.
+Builder: `build_one_shot_calibration_plan`, bundled calibration preset and the
+B2 immutable runtime distribution, Sonata journal in `/tmp/oneshot-b3-real2`.
+The initial attempt's SDK response-envelope mismatch and complete VM cleanup
+are retained in `prior-failure.json`; its regression reproduces the raw integer
+HTTP response. No NanoFaaS runtime change or implicit synthetic sample was used.

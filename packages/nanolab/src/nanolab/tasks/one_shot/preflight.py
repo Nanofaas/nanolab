@@ -34,6 +34,8 @@ class NodeEvidence(BaseModel):
     clock_uncertainty_seconds: float = Field(ge=0)
     rtt_seconds: float = Field(ge=0)
     bandwidth_mbps: float = Field(gt=0)
+    os: str | None = None
+    architecture: str | None = None
 
 
 class TopologyEvidence(BaseModel):
@@ -140,7 +142,7 @@ def measure_http_clock(
 
 
 def runtime_endpoint(
-    node: NodeResource, function: str, *, inputs: TaskInputs
+    node: NodeResource, function: str, *, inputs: TaskInputs, replica: int = 1
 ) -> tuple[str, dict]:
     """Resolve replica one by verified managed-container labels."""
     from nanolab.one_shot.infrastructure import NodeExecutor
@@ -148,7 +150,7 @@ def runtime_endpoint(
 
     observed = inspect_managed_container(
         function=f"{node.request.name}/{function}",
-        replica=1,
+        replica=replica,
         executor=NodeExecutor(node),
         role="host",
         inputs=inputs,
@@ -339,6 +341,8 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     clock_uncertainty_seconds=uncertainty,
                     rtt_seconds=2 * uncertainty,
                     bandwidth_mbps=network["bytes"] * 8 / network["seconds"] / 1e6,
+                    os=inventory["os"],
+                    architecture=inventory["architecture"],
                 )
                 validate_node(fact, max_clock_skew_seconds=self.max_clock_skew_seconds)
                 if fact.cpus < node.config.cpus:

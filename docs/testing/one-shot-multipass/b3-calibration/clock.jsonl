@@ -1,0 +1,14 @@
+{"node": "edge-0", "offsetSeconds": -0.0004963874816894531, "uncertaintySeconds": 0.0010770559310913086, "measuredAt": "2026-10-09T15:09:58.078610+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.0005218982696533203, "uncertaintySeconds": 0.0009778738021850586, "measuredAt": "2026-10-09T15:09:58.177686+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.0009114742279052734, "uncertaintySeconds": 0.0008192062377929688, "measuredAt": "2026-10-09T15:10:08.286196+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.0004360675811767578, "uncertaintySeconds": 0.0006568431854248047, "measuredAt": "2026-10-09T15:10:08.378320+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.0006499290466308594, "uncertaintySeconds": 0.0011298656463623047, "measuredAt": "2026-10-09T15:10:18.481511+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.00043010711669921875, "uncertaintySeconds": 0.0009800195693969727, "measuredAt": "2026-10-09T15:10:18.573227+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.0010170936584472656, "uncertaintySeconds": 0.0011104345321655273, "measuredAt": "2026-10-09T15:10:28.682415+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.00036978721618652344, "uncertaintySeconds": 0.0007686614990234375, "measuredAt": "2026-10-09T15:10:28.774444+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.0012209415435791016, "uncertaintySeconds": 0.0009249448776245117, "measuredAt": "2026-10-09T15:10:38.889071+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.00019788742065429688, "uncertaintySeconds": 0.0004703998565673828, "measuredAt": "2026-10-09T15:10:38.980277+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.0014023780822753906, "uncertaintySeconds": 0.0009537935256958008, "measuredAt": "2026-10-09T15:10:49.084938+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.00034117698669433594, "uncertaintySeconds": 0.0011115074157714844, "measuredAt": "2026-10-09T15:10:49.177306+00:00"}
+{"node": "edge-0", "offsetSeconds": -0.0012335777282714844, "uncertaintySeconds": 0.001341700553894043, "measuredAt": "2026-10-09T15:10:59.293598+00:00"}
+{"node": "edge-1", "offsetSeconds": 0.00023889541625976562, "uncertaintySeconds": 0.0009464025497436523, "measuredAt": "2026-10-09T15:10:59.386376+00:00"}
