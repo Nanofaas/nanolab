@@ -1117,32 +1117,11 @@ def classify_result(row: dict, *, expected: str, physical: list[dict]) -> dict:
         and str(row["responseStatus"]).upper() == "SUCCESS"
         and row.get("outputJson") == expected
     )
-    try:
-        body = json.loads(row.get("responseBody") or "{}")
-    except (ValueError, TypeError):
-        body = {}
-    target = row.get("offloadedTarget")
-    message = body.get("message") if isinstance(body, dict) else None
-    refusal = f"remote {target} returned 429"
-    explicit_refusal = (
-        row["statusCode"] == 502
-        and isinstance(body, dict)
-        and body.get("error") == "OFFLOAD_FAILED"
-        and isinstance(target, str)
-        and bool(target)
-        and isinstance(message, str)
-        and (message == refusal or message.startswith(refusal + ":"))
-    )
-    proxy_refusal = (
-        isinstance(body, dict)
-        and body.get("error")
-        == {"code": "EXTERNAL_ERROR", "message": "Too many concurrent invocations"}
-        and row["statusCode"] == 200
-        and str(row["responseStatus"]).upper() == "ERROR"
-    )
+    from nanolab.one_shot.returned_errors import classify_response
+
+    explicit_refusal = classify_response(row) == "reject"
     terminal_error = not success and (
-        proxy_refusal
-        or (400 <= row["statusCode"] < 500 and row["statusCode"] != 408)
+        (400 <= row["statusCode"] < 500 and row["statusCode"] != 408)
         or explicit_refusal
         or (
             str(row["responseStatus"]).upper() == "ERROR"

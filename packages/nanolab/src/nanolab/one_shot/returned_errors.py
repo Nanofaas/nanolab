@@ -29,6 +29,7 @@ ERRORS = (
 def classify_response(row: dict[str, Any]) -> str:
     """Separate explicit refusals from HTTP errors and uncertain timeout outcomes."""
     status = row.get("statusCode")
+    response_status = str(row.get("responseStatus", "")).upper()
     try:
         body = json.loads(row.get("responseBody") or "{}")
     except (TypeError, ValueError):
@@ -36,6 +37,22 @@ def classify_response(row: dict[str, Any]) -> str:
     body = body if isinstance(body, dict) else {}
     error = body.get("error")
     target = row.get("offloadedTarget")
+    proxy_refusal = False
+    if status == 200 and response_status == "ERROR" and isinstance(error, dict):
+        if error.get("code") == "EXTERNAL_TIMEOUT":
+            return "timeoutResponse"
+        if error.get("code") == "EXTERNAL_ERROR":
+            proxy_refusal = error.get("message") == "Too many concurrent invocations"
+            try:
+                wrapped = json.loads(error.get("message") or "{}")
+            except (ValueError, TypeError):
+                wrapped = {}
+            runtime_error = wrapped.get("error") if isinstance(wrapped, dict) else None
+            if isinstance(runtime_error, dict):
+                proxy_refusal = runtime_error.get("code") in {
+                    "RUNTIME_HANDLER_SATURATED",
+                    "RUNTIME_CALLBACK_SATURATED",
+                }
     remote_refusal = (
         status == 502
         and error == "OFFLOAD_FAILED"
@@ -45,16 +62,7 @@ def classify_response(row: dict[str, Any]) -> str:
             or str(body.get("message", "")).startswith(f"remote {target} returned 429:")
         )
     )
-    if (
-        status == 429
-        or remote_refusal
-        or (
-            status == 200
-            and row.get("responseStatus") == "ERROR"
-            and error
-            == {"code": "EXTERNAL_ERROR", "message": "Too many concurrent invocations"}
-        )
-    ):
+    if status == 429 or remote_refusal or proxy_refusal:
         return "reject"
     if not isinstance(status, int) or status == 0:
         return "unresolved"
@@ -62,9 +70,9 @@ def classify_response(row: dict[str, Any]) -> str:
         return "timeoutResponse"
     if status >= 400:
         return "httpError"
-    if row.get("responseStatus") == "ERROR":
+    if response_status == "ERROR":
         return "applicationError"
-    if status == 200 and row.get("responseStatus") == "SUCCESS":
+    if status == 200 and response_status == "SUCCESS":
         return "successResponse"
     return "invalidResponse"
 

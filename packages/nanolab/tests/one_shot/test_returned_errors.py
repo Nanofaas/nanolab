@@ -177,3 +177,87 @@ def test_conflicting_results_are_unresolved_and_unknown_originals_are_visible():
     assert summary["phases"]["warmup"]["total"]["returnedErrors"] == 0
     assert summary["phases"]["warmup"]["byNode"]["cloud"]["emitted"] == 1
     assert summary["unexpectedOriginals"] == 1
+
+
+def test_actual_generator_lowercase_status_preserves_success_and_proxy_reject():
+    assert (
+        classify_response({"statusCode": 200, "responseStatus": "success"})
+        == "successResponse"
+    )
+    assert (
+        classify_response(
+            {
+                "statusCode": 200,
+                "responseStatus": "error",
+                "responseBody": json.dumps(
+                    {
+                        "error": {
+                            "code": "EXTERNAL_ERROR",
+                            "message": "Too many concurrent invocations",
+                        }
+                    }
+                ),
+            }
+        )
+        == "reject"
+    )
+    assert (
+        classify_response(
+            {
+                "statusCode": 200,
+                "responseStatus": "error",
+                "responseBody": json.dumps(
+                    {"error": {"code": "HANDLER_ERROR", "message": "failed"}}
+                ),
+            }
+        )
+        == "applicationError"
+    )
+
+
+def test_rust_admission_refusal_wrapped_by_control_plane_is_terminal_reject():
+    from nanolab.tasks.one_shot.experiment import classify_result
+
+    for code in ("RUNTIME_HANDLER_SATURATED", "RUNTIME_CALLBACK_SATURATED"):
+        row = {
+            "statusCode": 200,
+            "responseStatus": "error",
+            "outputJson": None,
+            "responseBody": json.dumps(
+                {
+                    "error": {
+                        "code": "EXTERNAL_ERROR",
+                        "message": json.dumps(
+                            {"error": {"code": code, "message": "capacity exhausted"}}
+                        ),
+                    }
+                }
+            ),
+        }
+        assert classify_response(row) == "reject"
+        assert classify_result(row, expected="42", physical=[])["terminalError"]
+
+
+def test_wrapped_external_timeout_is_reported_without_proving_execution_end():
+    from nanolab.tasks.one_shot.experiment import classify_result
+
+    row = {
+        "statusCode": 200,
+        "responseStatus": "error",
+        "outputJson": None,
+        "responseBody": json.dumps(
+            {
+                "error": {
+                    "code": "EXTERNAL_TIMEOUT",
+                    "message": "External request timed out",
+                }
+            }
+        ),
+    }
+    assert classify_response(row) == "timeoutResponse"
+    assert not classify_result(row, expected="42", physical=[])["terminalError"]
+    row["responseBody"] = json.dumps(
+        {"error": {"code": "EXTERNAL_ERROR", "message": "capacity exhausted"}}
+    )
+    assert classify_response(row) == "applicationError"
+    assert not classify_result(row, expected="42", physical=[])["terminalError"]

@@ -302,3 +302,11 @@ raw generator artifact. An HTTP/application success is descriptive response
 evidence: physical handler completion and correct function output still require
 the existing independent proof and checksum validation. Returned-error rates do
 not make an otherwise censored or incomplete run conforming.
+
+The same explicit-rejection classifier is shared with scientific conservation:
+Rust `RUNTIME_HANDLER_SATURATED` / `RUNTIME_CALLBACK_SATURATED` refusals wrapped
+inside a control-plane `EXTERNAL_ERROR` remain rejects, even with HTTP 200.
+An `EXTERNAL_TIMEOUT` response counts as a returned timeout error and does not
+establish execution completion. Parse structured codes, not vague substrings in
+an error message; a generic external error remains unresolved scientifically
+until the independent terminal proof is available.
