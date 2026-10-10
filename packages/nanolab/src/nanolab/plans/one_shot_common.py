@@ -30,6 +30,7 @@ from nanolab.tasks.components.bootstrap import plan_vm_provision_base
 from nanolab.tasks.one_shot.images import archive_image_ids
 from nanolab.tasks.one_shot.logging import backend_resource, collector_resource
 from nanolab.tasks.one_shot.resources import node_probe_resource
+from nanolab.tasks.one_shot.workload import WORKLOAD_NAMES
 from nanolab.tasks.platform import (
     Platform,
     PlatformFunction,
@@ -589,6 +590,7 @@ def add_one_shot_platforms(
                 env={
                     "NANOFAAS_ONE_SHOT_PROFILE": "true",
                     "NANOFAAS_MAX_CONCURRENT_HANDLERS": "1",
+                    **({"FUNCTION_HANDLER": name} if name in WORKLOAD_NAMES else {}),
                     **({"NANOFAAS_LOG_FORMAT": "json"} if logs.enabled else {}),
                 },
             )

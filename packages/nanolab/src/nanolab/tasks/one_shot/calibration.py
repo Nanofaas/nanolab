@@ -31,8 +31,14 @@ from nanolab.tasks.one_shot.preflight import TopologyEvidence, runtime_endpoint
 from nanolab.tasks.one_shot.statistics import summarize_service
 
 
-def workload_checksum(payload: dict[str, Any]) -> int:
+def workload_checksum(
+    payload: dict[str, Any], *, function: str = "one-shot-workload"
+) -> int:
     """Compute the independent integer oracle of the bounded Rust CPU/memory work."""
+    if function.removesuffix("-rust") != "one-shot-workload":
+        from nanolab.tasks.one_shot.workload import expected_output
+
+        return expected_output(function, payload)
     if set(payload) != {"iterations", "working_set_bytes", "seed"} or any(
         type(value) is not int or value < 0 for value in payload.values()
     ):
@@ -320,11 +326,7 @@ class WarmupTask(_CalibrationTask[dict[str, Any]]):
                 value["nodeEnvironments"][node_id] = local_environment
         with httpx.Client(trust_env=False) as http:
             for name, function in self.topology.function_settings.items():
-                if name != "one-shot-workload":
-                    raise ValueError(
-                        "calibration needs an independent output oracle for " + name
-                    )
-                output = workload_checksum(function.input)
+                output = workload_checksum(function.input, function=name)
                 value["outputs"][name] = output
                 for key, node in self.topology.resources.nodes.items():
                     started = time.monotonic()

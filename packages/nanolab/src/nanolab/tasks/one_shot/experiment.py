@@ -1053,7 +1053,7 @@ def collect_original_evidence(run, inputs: TaskInputs) -> RunEvidence:
     ]
     emitted = [row for row in rows if row["event"] == "emitted"]
     expected = {
-        name: str(workload_checksum(function.input))
+        name: str(workload_checksum(function.input, function=name))
         for name, function in run.topology.function_settings.items()
     }
     physical = run.run_dir / "physical.jsonl"
