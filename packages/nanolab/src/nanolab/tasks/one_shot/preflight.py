@@ -38,6 +38,7 @@ class NodeEvidence(BaseModel):
     bandwidth_mbps: float = Field(gt=0)
     os: str | None = None
     architecture: str | None = None
+    runtime_limits: dict[str, dict] | None = None
 
 
 class TopologyEvidence(BaseModel):
@@ -189,6 +190,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         purpose: Literal[
             "workflow-validation", "scientific-experiment"
         ] = "workflow-validation",
+        strict_memory: bool = False,
     ):
         """Bind explicit resource handles and expected physical identities."""
         self.collectors = collectors or {}
@@ -203,6 +205,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         }
         self.node_function_settings = node_function_settings or {}
         self.purpose: Literal["workflow-validation", "scientific-experiment"] = purpose
+        self.strict_memory = strict_memory
         self.resources, self.endpoints, self.probes = resources, endpoints, probes
         self.distribution, self.function_settings = distribution, function_settings
         self.output, self.max_clock_skew_seconds = output, max_clock_skew_seconds
@@ -306,6 +309,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     ("docker", "ps", "-a", "--format={{json .}}")
                 ).stdout
                 image_digests = {}
+                runtime_limits = {}
                 for function, expected in self.node_function_settings.get(
                     key, self.function_settings
                 ).items():
@@ -337,6 +341,17 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                         "NanoCpus"
                     ] != int(expected.cpu * 1e9):
                         raise ValueError("runtime CPU/memory resource mismatch")
+                    if self.strict_memory:
+                        if limits.get("MemorySwap") != limits["Memory"]:
+                            raise ValueError(
+                                "strict runtime memory/swap resource mismatch"
+                            )
+                        sample = collect_container_cgroup(node, observed)
+                        runtime_limits[function] = sample
+                        self.observations[key]["runtimeLimits"] = runtime_limits
+                        validate_strict_cgroup(
+                            sample, memory_mib=expected.memory_mib, cpu=expected.cpu
+                        )
                     spec_response = http.get(url + "/v1/functions/" + function)
                     spec_response.raise_for_status()
                     spec = spec_response.json()
@@ -387,6 +402,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     bandwidth_mbps=network["bytes"] * 8 / network["seconds"] / 1e6,
                     os=inventory["os"],
                     architecture=inventory["architecture"],
+                    runtime_limits=runtime_limits or None,
                 )
                 validate_node(fact, max_clock_skew_seconds=self.max_clock_skew_seconds)
                 if fact.cpus < node.config.cpus:
@@ -415,3 +431,81 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         )
         self.output.write_text(topology.model_dump_json(indent=2) + "\n")
         return TaskOutcome(value=topology)
+
+
+_CGROUP_READ_SCRIPT = """
+import json, subprocess, sys
+from pathlib import Path
+identifier, expected_pid = sys.argv[1], int(sys.argv[2])
+def inspect():
+    row = json.loads(subprocess.check_output(['docker', 'inspect', identifier]))[0]
+    if (row['Id'] != identifier or row['State']['Pid'] != expected_pid
+        or not row['State']['Running']):
+        raise RuntimeError('container identity changed during cgroup collection')
+    return row
+before = inspect()
+proc = Path('/proc') / str(expected_pid)
+# starttime distinguishes reuse of a numeric PID; comm can contain spaces.
+start = (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+lines = (proc / 'cgroup').read_text().splitlines()
+paths = [line[3:] for line in lines if line.startswith('0::')]
+if len(paths) != 1:
+    raise RuntimeError('unified cgroup v2 not available')
+root = Path('/sys/fs/cgroup').resolve()
+folder = (root / paths[0].lstrip('/')).resolve()
+if not folder.is_relative_to(root) or folder == root:
+    raise RuntimeError('invalid container cgroup path')
+keys = ('memory.max', 'memory.swap.max', 'memory.current',
+        'memory.peak', 'memory.events', 'cpu.max')
+value = {key: (folder / key).read_text().strip() for key in keys}
+after = inspect()
+end = (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+if (before['Config']['Labels'] != after['Config']['Labels'] or start != end
+    or (proc / 'cgroup').read_text().splitlines() != lines):
+    raise RuntimeError('container identity changed during cgroup collection')
+value.update(containerId=identifier, pid=expected_pid, cgroup=paths[0])
+print(json.dumps(value))
+"""
+
+
+def collect_container_cgroup(node: NodeResource, observed: dict) -> dict:
+    """Read on the VM host: distroless function images need no shell or tools."""
+    import json
+    import re
+
+    identifier = observed.get("Id", "")
+    pid = observed.get("State", {}).get("Pid")
+    if (
+        not re.fullmatch(r"[0-9a-f]{64}", identifier)
+        or type(pid) is not int
+        or pid <= 0
+    ):
+        raise ValueError("invalid managed container identity for cgroup collection")
+    result = node.command(("python3", "-c", _CGROUP_READ_SCRIPT, identifier, str(pid)))
+    sample = json.loads(result.stdout)
+    if (
+        not isinstance(sample, dict)
+        or sample.get("containerId") != identifier
+        or sample.get("pid") != pid
+    ):
+        raise ValueError("cgroup response container identity mismatch")
+    return sample
+
+
+def validate_strict_cgroup(sample: dict, *, memory_mib: int, cpu: float) -> None:
+    """Refuse wrong units, swap, missing evidence, unbounded CPU and prior OOM."""
+    try:
+        memory = int(sample["memory.max"])
+        swap = int(sample["memory.swap.max"])
+        current, peak = int(sample["memory.current"]), int(sample["memory.peak"])
+        quota, period = map(int, sample["cpu.max"].split())
+        events = dict(line.split() for line in sample["memory.events"].splitlines())
+        oom, killed = int(events["oom"]), int(events["oom_kill"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("missing or invalid cgroup limit evidence") from error
+    if memory != memory_mib * 1024 * 1024 or swap != 0:
+        raise ValueError("cgroup memory or swap limit mismatch")
+    if period <= 0 or quota <= 0 or abs(quota / period - cpu) > 1e-6:
+        raise ValueError("cgroup CPU quota mismatch")
+    if current < 0 or peak < current or oom != 0 or killed != 0:
+        raise ValueError("cgroup memory evidence contains OOM or inconsistent usage")

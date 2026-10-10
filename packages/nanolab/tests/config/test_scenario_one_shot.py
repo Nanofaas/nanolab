@@ -80,3 +80,14 @@ def test_declared_replica_cap_covers_the_entire_optimizer_memory_pool():
     data["oneShot"]["functions"]["one-shot-workload-rust"]["maxReplicas"] = 2
     with pytest.raises(ValidationError, match="replica cap"):
         ScenarioConfig.model_validate(data)
+
+
+def test_strict_memory_is_explicit_and_disabled_for_legacy_scenarios():
+    data = scenario("one-shot-calibration")
+    legacy = ScenarioConfig.model_validate(data)
+    assert legacy.one_shot is not None
+    assert legacy.one_shot.strict_memory is False
+    data["oneShot"]["strictMemory"] = True
+    strict = ScenarioConfig.model_validate(data)
+    assert strict.one_shot is not None
+    assert strict.one_shot.strict_memory is True

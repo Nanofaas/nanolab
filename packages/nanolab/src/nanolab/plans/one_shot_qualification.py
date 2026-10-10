@@ -59,6 +59,7 @@ def build_one_shot_qualification_plan(
                     neighbor_graph=topology.neighbor_graph,
                     node_function_settings=topology.node_function_settings,
                     purpose=config.one_shot.purpose,
+                    strict_memory=config.one_shot.strict_memory,
                     output=run_dir / "preflight.json",
                 ),
                 QualifyTimingTask(

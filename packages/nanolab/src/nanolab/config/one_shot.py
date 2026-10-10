@@ -291,6 +291,7 @@ class OneShotConfig(BaseModel):
     purpose: Literal["workflow-validation", "scientific-experiment"]
     nodes: list[OneShotNode] = Field(min_length=3)
     functions: dict[str, OneShotFunction] = Field(min_length=1)
+    strict_memory: bool = Field(default=False, alias="strictMemory")
     profile: ArtifactReference | None = None
     qualification: ArtifactReference | None = None
     runtime_distribution: ArtifactReference | None = Field(

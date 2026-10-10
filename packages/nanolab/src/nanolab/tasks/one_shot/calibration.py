@@ -221,6 +221,8 @@ def environment_identity(
         },
         "flowQuantum": settings.flow_quantum,
     }
+    if settings.strict_memory:
+        identity["strictMemory"] = True
     if settings.purpose == "scientific-experiment":
         identity["nanolabPackageSha256"] = package_fingerprint()
         identity["controlPlaneLimits"] = {"cpu": 0.35, "memoryMiB": 512}

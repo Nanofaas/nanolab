@@ -87,6 +87,9 @@ def test_http_clock_uses_server_timestamp_and_measured_uncertainty(monkeypatch):
         "network",
         "cpu",
         "peer",
+        "swap",
+        "cgroup",
+        "strict-healthy",
         None,
     ],
 )
@@ -239,9 +242,22 @@ def test_collection_validates_measured_facts_and_preserves_failures(
                 "HostConfig": {
                     "Memory": (256 if failure == "resources" else 128) * 1024 * 1024,
                     "NanoCpus": 1000000000,
+                    "MemorySwap": 1 if failure == "swap" else 128 * 1024 * 1024,
                 },
             },
         ),
+    )
+
+    def cgroups(*args):
+        if failure == "cgroup":
+            raise ValueError("remote cgroup evidence unavailable")
+        sample = strict_cgroup_sample()
+        sample["memory.max"] = str(128 * 1024 * 1024)
+        sample["cpu.max"] = "100000 100000"
+        return sample
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.preflight.collect_container_cgroup", cgroups
     )
     output = tmp_path / "preflight.json"
     task = CollectTopologyTask(
@@ -251,11 +267,12 @@ def test_collection_validates_measured_facts_and_preserves_failures(
         distribution=distribution,
         function_settings={"f": settings.functions["f"]},
         output=output,
+        strict_memory=failure in {"swap", "cgroup", "strict-healthy"},
     )
     inputs = TaskInputs._for_resources(values, set(values))
     import json
 
-    if failure is not None:
+    if failure not in {None, "strict-healthy"}:
         reasons = {
             "release": "physical concurrency",
             "image": "digest",
@@ -265,6 +282,8 @@ def test_collection_validates_measured_facts_and_preserves_failures(
             "network": "network transfer",
             "cpu": "CPU allocation",
             "peer": "neighbor",
+            "swap": "memory/swap",
+            "cgroup": "cgroup",
         }
         with pytest.raises(ValueError, match=reasons[failure]):
             task.run(inputs)
@@ -273,6 +292,8 @@ def test_collection_validates_measured_facts_and_preserves_failures(
         result = task.run(inputs).value
         assert result is not None and len(result.nodes) == 3
         assert all(node.bandwidth_mbps > 0 for node in result.nodes)
+        if failure == "strict-healthy":
+            assert all(node.runtime_limits for node in result.nodes)
     assert output.is_file()
 
 
@@ -401,3 +422,63 @@ def test_ssh_clock_preserves_selected_remote_timestamp_and_actual_rtt(monkeypatc
     assert offset == pytest.approx(0)
     assert uncertainty == pytest.approx(0.001)
     assert stamp.timestamp() == 100.001
+
+
+def strict_cgroup_sample():
+    return {
+        "containerId": "a" * 64,
+        "pid": 123,
+        "cgroup": "/system.slice/docker-" + "a" * 64 + ".scope",
+        "memory.max": str(64 * 1024 * 1024),
+        "memory.swap.max": "0",
+        "memory.current": "1048576",
+        "memory.peak": "2097152",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n",
+        "cpu.max": "25000 100000",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("memory.max", "64"),
+        ("memory.max", "max"),
+        ("memory.swap.max", "67108864"),
+        ("cpu.max", "max 100000"),
+        ("cpu.max", "50000 100000"),
+        ("memory.events", "oom 1\noom_kill 1"),
+        ("memory.peak", None),
+    ],
+)
+def test_strict_limits_reject_missing_or_incorrect_physical_evidence(field, value):
+    from nanolab.tasks.one_shot.preflight import validate_strict_cgroup
+
+    sample = strict_cgroup_sample()
+    if value is None:
+        del sample[field]
+    else:
+        sample[field] = value
+    with pytest.raises(ValueError, match="cgroup"):
+        validate_strict_cgroup(sample, memory_mib=64, cpu=0.25)
+
+
+def test_strict_limits_accept_actual_bytes_zero_swap_and_cpu_quota():
+    from nanolab.tasks.one_shot.preflight import validate_strict_cgroup
+
+    validate_strict_cgroup(strict_cgroup_sample(), memory_mib=64, cpu=0.25)
+
+
+def test_cgroup_remote_failure_is_preserved():
+    from types import SimpleNamespace
+
+    from nanolab.one_shot.infrastructure import NodeResource
+    from nanolab.tasks.one_shot.preflight import collect_container_cgroup
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("remote cgroup unavailable")
+
+    with pytest.raises(RuntimeError, match="remote cgroup unavailable"):
+        collect_container_cgroup(
+            cast(NodeResource, SimpleNamespace(command=fail)),
+            {"Id": "a" * 64, "State": {"Pid": 123, "Running": True}},
+        )

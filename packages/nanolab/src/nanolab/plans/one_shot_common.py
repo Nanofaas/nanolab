@@ -121,6 +121,7 @@ def _control_plane(
     collector: Resource | None = None,
     neighbor_graph: dict[str, tuple[str, ...]] | None = None,
     scientific: bool = False,
+    strict_memory: bool = False,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
 
@@ -248,6 +249,11 @@ def _control_plane(
             "--nanofaas.metrics.profile=advanced",
             "--nanofaas.registry.path=/tmp/functions.json",
             "--nanofaas.container-local.runtime-adapter=docker-java",
+            *(
+                ["--nanofaas.container-local.strict-memory=true"]
+                if strict_memory
+                else []
+            ),
             "--nanofaas.container-local.bind-host=0.0.0.0",
             f"--nanofaas.container-local.namespace={vm.name}",
             f"--nanofaas.p2p.enabled={boolean}",
@@ -474,6 +480,7 @@ def add_one_shot_platforms(
             bootstrap=bootstraps[key],
             collector=collectors.get(key),
             scientific=settings.purpose == "scientific-experiment",
+            strict_memory=settings.strict_memory,
             neighbor_graph=graph if settings.neighbors is not None else None,
             distribution=distribution,
             archive=archive,
