@@ -324,7 +324,12 @@ def test_qualification_scales_terminal_cloud_own_pool_and_observes_cloud_origin(
     actions = []
     with httpx.Client(
         transport=httpx.MockTransport(
-            lambda request: actions.append(request) or httpx.Response(200)
+            lambda request: (
+                actions.append(request)
+                or httpx.Response(
+                    200, json={"maxConcurrentHandlers": 1, "physicalReleaseProof": True}
+                )
+            )
         )
     ) as http:
         monkeypatch.setattr(
@@ -342,7 +347,8 @@ def test_qualification_scales_terminal_cloud_own_pool_and_observes_cloud_origin(
         for cell in result.matrix
     )
     assert len([row for row in calls if row[1] == "profile"]) == 2
-    assert len(actions) == 1
+    assert len([row for row in actions if row.method == "PUT"]) == 1
+    assert len([row for row in actions if row.method == "GET"]) == 1
     import json
 
     assert json.loads(actions[0].content)["replicas"] == 1

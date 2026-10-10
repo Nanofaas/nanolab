@@ -118,6 +118,141 @@ def test_complete_matrix_publishes_immutable_qualification(tmp_path, monkeypatch
     )
 
 
+@pytest.mark.parametrize("oom", [False, True])
+def test_synchronized_matrix_has_450_samples_and_feasible_fixed_cloud(
+    tmp_path, monkeypatch, oom
+):
+    from contextlib import nullcontext
+    from copy import deepcopy
+
+    import httpx
+
+    from nanolab.config.one_shot import TimingSettings, resolve_node_functions
+    from nanolab.one_shot.profiles import CalibrationProfiles
+    from nanolab.tasks.one_shot.trace import (
+        cloud_capacity_requirements,
+        concurrent_trace,
+    )
+    from tests.one_shot.test_multi_function_trace import inputs as multi_inputs
+
+    task, inputs, _calls = task_fixture(tmp_path, monkeypatch)
+    settings, records = multi_inputs()
+    trace = concurrent_trace(
+        records,
+        settings,
+        period=360,
+        seed=7,
+        aliases={name: name for name in settings.functions},
+    )
+    records += [
+        {
+            "node": "cloud",
+            "replicaVector": dict.fromkeys(trace.functions, 7),
+            "rates": rates,
+            "trials": [],
+        }
+        for rates in cloud_capacity_requirements(trace, "cloud")
+    ]
+    assert trace.phase_ids is not None
+    assert isinstance(task.profile, CalibrationProfile)
+    local = task.profile.model_dump(by_alias=True)
+    local["functions"] = [
+        {
+            **deepcopy(local["functions"][0]),
+            "function": name,
+            "memoryMiB": 64,
+            "serviceSeconds": 0.1,
+            "statistics": {**local["functions"][0]["statistics"], "meanSeconds": 0.1},
+        }
+        for name in settings.functions
+    ]
+    profile = CalibrationProfile.model_validate(local)
+    task.profile = CalibrationProfiles(
+        {node.id: profile for node in settings.nodes},
+        "a" * 64,
+        profile.environment_fingerprint,
+        concurrent_capacities=records,
+    )
+    timing = TimingSettings.model_validate(
+        {
+            "periodCandidatesSeconds": [360],
+            "maxTraceResolutionSeconds": 360,
+            "minSamples": 50,
+            "quantile": 0.95,
+            "epsilon": 0.05,
+            "measurementLeadSeconds": 2,
+            "protocol": {"preparationSeconds": 1},
+            "matrix": [
+                {"id": phase, "rates": window}
+                for phase, window in zip(trace.phase_ids, trace.windows, strict=True)
+            ],
+        }
+    )
+    task.settings = settings.model_copy(
+        update={"timing": timing, "profile": task.settings.profile}
+    )
+    task.topology.resources.nodes = {
+        node.id: SimpleNamespace(config=node) for node in settings.nodes
+    }
+    task.topology.endpoints = {node.id: "http://" + node.id for node in settings.nodes}
+    task.topology.function_settings = settings.functions
+    task.topology.function_aliases = {name: name for name in settings.functions}
+    task.topology.node_function_settings = {
+        node.id: resolve_node_functions(settings, node.id) for node in settings.nodes
+    }
+    allocations = []
+    cgroups = []
+
+    def sample_cgroup(*args):
+        cgroups.append(True)
+        return {
+            "memory.max": str(64 * 1024 * 1024),
+            "memory.swap.max": "0",
+            "memory.current": "1024",
+            "memory.peak": "2048",
+            "cpu.max": "21400 100000",
+            "memory.events": "oom 1\noom_kill 1" if oom else "oom 0\noom_kill 0",
+        }
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.preflight.collect_container_cgroup", sample_cgroup
+    )
+
+    def response(request):
+        if request.method == "PUT":
+            allocations.append(json.loads(request.content)["replicas"])
+            return httpx.Response(200)
+        return httpx.Response(
+            200, json={"maxConcurrentHandlers": 1, "physicalReleaseProof": True}
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(response)) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.qualification.httpx.Client",
+            lambda **kwargs: nullcontext(http),
+        )
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.qualification.runtime_endpoint",
+            lambda *args, **kwargs: (
+                "http://sdk",
+                {"HostConfig": {"MemorySwap": 64 * 1024 * 1024}},
+            ),
+        )
+        if oom:
+            with pytest.raises(ValueError, match="OOM"):
+                task.run(inputs)
+            assert not (tmp_path / "timing.json").exists()
+            return
+        result = task.run(inputs).value
+    assert result is not None and result.qualified
+    assert result.period_seconds == 360 and result.sample_count == 450
+    assert len(result.matrix) == 9 and all(
+        cast(Any, cell)["result"]["sample_count"] == 50 for cell in result.matrix
+    )
+    assert allocations == [7] * 5
+    assert len(cgroups) == 35
+
+
 def test_censored_matrix_is_retained_and_never_qualified(tmp_path, monkeypatch):
     task, inputs, calls = task_fixture(tmp_path, monkeypatch, censored=True)
     with pytest.raises(ValueError, match="NOT_QUALIFIED"):

@@ -843,6 +843,120 @@ class ValidateCapacityTask(_CalibrationTask[dict[str, Any]]):
             raise ValueError("capacity warmup failed")
 
 
+class ValidateTraceCapacityTask(_CalibrationTask[dict[str, Any]]):
+    """Measure the actual nine cloud mixtures with one feasible fixed vector."""
+
+    title = "Qualify cloud mixtures for synchronized trace"
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[dict[str, Any]]:
+        """Retain three verified trials for each complete requested cloud mixture."""
+        from nanolab.one_shot.capacity import capacity_configurations
+        from nanolab.tasks.one_shot.trace import (
+            cloud_capacity_requirements,
+            concurrent_trace,
+        )
+
+        value = inputs.upstream()
+        records = value["measuredConcurrentCapacity"]
+        trace = concurrent_trace(
+            records,
+            self.settings,
+            period=360,
+            seed=self.settings.seed,
+            aliases=self.topology.function_aliases,
+        )
+        vector = next(
+            entry["vectors"]["cloud"]
+            for entry in capacity_configurations(
+                self.settings, self.topology.function_aliases
+            )
+            if entry["kind"] == "mixed" and entry["dominant"] is None
+        )
+        requirements = list(
+            {
+                canonical_bytes(rates): rates
+                for rates in cloud_capacity_requirements(trace, "cloud")
+            }.values()
+        )
+        write_immutable_artifact(
+            self.run_dir / "candidate-trace.json", canonical_bytes(trace.model_dump())
+        )
+        write_immutable_artifact(
+            self.run_dir / "trace-capacity-plan.json",
+            canonical_bytes(
+                {
+                    "traceSha256": trace.sha256,
+                    "fixedCloudVector": vector,
+                    "rates": requirements,
+                    "repetitions": 3,
+                    "warmupSeconds": 30,
+                    "measurementSeconds": 60,
+                    "minimumWallSeconds": len(requirements) * 3 * 90,
+                    "scope": (
+                        "Physical cloud capacity under each trace mixture with "
+                        "ten-percent headroom; network and planner qualify separately."
+                    ),
+                }
+            ),
+        )
+        for index, rates in enumerate(requirements):
+            rows, references = [], []
+            for repetition in range(3):
+                directory = (
+                    self.run_dir
+                    / "capacity-trials"
+                    / f"trace-cloud-c{index}-p{repetition}"
+                )
+                observed = run_capacity_trial(
+                    self.topology,
+                    self.settings,
+                    inputs,
+                    value,
+                    replicas={"cloud": vector},
+                    rates={"cloud": rates},
+                    repetition=repetition,
+                    run_dir=directory,
+                    clock=self.clock,
+                )
+                rows.extend(observed)
+                for row in observed:
+                    append_observation(self.run_dir / "capacity.jsonl", row)
+                references.append(
+                    {
+                        "path": str(
+                            (directory / "trial.json").relative_to(self.run_dir)
+                        ),
+                        "sha256": content_hash((directory / "trial.json").read_bytes()),
+                    }
+                )
+            select_mixed_capacity(
+                rows,
+                node="cloud",
+                vector=vector,
+                rates=rates,
+                tolerance=self.settings.calibration.capacity_error,
+            )
+            records[:] = [
+                record
+                for record in records
+                if not (
+                    record["node"] == "cloud"
+                    and record["replicaVector"] == vector
+                    and record["rates"] == rates
+                )
+            ]
+            records.append(
+                {
+                    "node": "cloud",
+                    "replicaVector": vector,
+                    "rates": rates,
+                    "trials": references,
+                }
+            )
+            value.setdefault("capacity", []).extend(rows)
+        return TaskOutcome(value=value)
+
+
 class PublishCalibrationTask(
     _CalibrationTask[CalibrationProfile | CalibrationProfiles]
 ):

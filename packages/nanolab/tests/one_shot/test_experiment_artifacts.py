@@ -230,6 +230,232 @@ def test_mode_uses_expected_public_apis_and_never_injects_decisions(
                 assert json.loads(data)["replicas"] == 1
 
 
+@pytest.mark.parametrize("mode", ["baseline", "oracle", "ewma"])
+def test_concurrent_mode_allocates_feasible_static_vectors_and_keeps_forecasts_separate(
+    tmp_path, monkeypatch, mode
+):
+    from copy import deepcopy
+
+    from nanolab.config.one_shot import resolve_node_functions
+    from nanolab.one_shot.profiles import CalibrationProfiles
+    from nanolab.tasks.one_shot.trace import concurrent_trace
+    from tests.one_shot.test_multi_function_trace import inputs as multi_inputs
+
+    run, _inputs = frozen_run(tmp_path, monkeypatch, mode=mode)
+    run.run(_inputs)
+    settings, records = multi_inputs()
+    profile = run.profile
+    profiles = {}
+    for node in settings.nodes:
+        document = profile.model_dump(by_alias=True)
+        document["functions"] = [
+            {**deepcopy(profile.functions[0]), "function": name}
+            for name in settings.functions
+        ]
+        profiles[node.id] = CalibrationProfile.model_validate(document)
+    run.settings = settings
+    run.profile = CalibrationProfiles(
+        profiles,
+        "a" * 64,
+        profile.environment_fingerprint,
+        concurrent_capacities=records,
+    )
+    run.trace = concurrent_trace(
+        records,
+        settings,
+        period=360,
+        seed=7,
+        aliases={name: name for name in settings.functions},
+    )
+    run.topology.function_settings = settings.functions
+    run.topology.function_aliases = {name: name for name in settings.functions}
+    run.topology.node_function_settings = {
+        node.id: resolve_node_functions(settings, node.id) for node in settings.nodes
+    }
+    run.topology.endpoints = {node.id: node.id for node in settings.nodes}
+    run.topology.resources.nodes = {
+        node.id: SimpleNamespace(config=node) for node in settings.nodes
+    }
+    actions = []
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: (
+                actions.append((request.method, str(request.url), request.content))
+                or httpx.Response(200)
+            )
+        )
+    ) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.httpx.Client",
+            lambda **kwargs: nullcontext(http),
+        )
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.runtime_endpoint",
+            lambda *args, **kwargs: ("http://runtime", {}),
+        )
+
+        class Client:
+            def __init__(self, url, **kwargs):
+                self.base_url = url
+
+            def load_profile(self, *args, **kwargs):
+                pass
+
+            def status(self):
+                return SimpleNamespace(
+                    revision=1, catalog_generations=dict.fromkeys(settings.functions, 1)
+                )
+
+            def configure(self, conf, **kwargs):
+                actions.append(("CONFIGURE", self.base_url, conf))
+
+            def load_trace(self, trace, **kwargs):
+                actions.append(("TRACE", self.base_url, trace))
+                return SimpleNamespace(model_dump=lambda **kwargs: {"revision": 1})
+
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.NanoFaasOneShotClient", Client
+        )
+        task_inputs = cast(Any, SimpleNamespace(resource=lambda key: "http://" + key))
+        UploadForecastTask(run).run(task_inputs)
+    puts = [
+        (url, json.loads(content)["replicas"])
+        for method, url, content in actions
+        if method == "PUT"
+    ]
+    assert len(puts) == 30
+    for url, count in puts:
+        node = url.split("/")[2]
+        assert (
+            count
+            == {
+                "edge-1": 1,
+                "edge-2": 1,
+                "edge-3": 2,
+                "edge-4": 2,
+                "edge-5": 3,
+                "cloud": 7,
+            }[node]
+        )
+    assert len([action for action in actions if action[0] == "TRACE"]) == (
+        5 if mode == "oracle" else 0
+    )
+    assert len([action for action in actions if action[0] == "CONFIGURE"]) == (
+        0 if mode == "baseline" else 5
+    )
+
+
+def test_concurrent_manifest_has_feasible_baseline_and_twelve_minute_warmup(
+    tmp_path, monkeypatch
+):
+    from copy import deepcopy
+
+    from nanolab.config.one_shot import ExperimentSettings, resolve_node_functions
+    from nanolab.one_shot.profiles import CalibrationProfiles
+    from nanolab.tasks.one_shot.trace import (
+        cloud_capacity_requirements,
+        concurrent_trace,
+    )
+    from tests.one_shot.test_multi_function_trace import inputs as multi_inputs
+
+    run, _inputs = frozen_run(tmp_path, monkeypatch)
+    base_profile = run.profile
+    settings, records = multi_inputs()
+    trace = concurrent_trace(
+        records,
+        settings,
+        period=360,
+        seed=7,
+        aliases={name: name for name in settings.functions},
+    )
+    assert trace.phase_ids is not None
+    records += [
+        {
+            "node": "cloud",
+            "replicaVector": dict.fromkeys(trace.functions, 7),
+            "rates": rates,
+            "trials": [],
+        }
+        for rates in cloud_capacity_requirements(trace, "cloud")
+    ]
+    experiment = ExperimentSettings.model_validate(
+        {
+            "warmupSeconds": 720,
+            "windows": [
+                {"id": phase, "epochs": 1, "rates": window}
+                for phase, window in zip(trace.phase_ids, trace.windows, strict=True)
+            ],
+        }
+    )
+    run.settings = settings.model_copy(
+        update={
+            "profile": run.settings.profile,
+            "qualification": run.settings.qualification,
+            "experiment": experiment,
+        }
+    )
+    local = base_profile.model_dump(by_alias=True)
+    local["functions"] = [
+        {
+            **deepcopy(local["functions"][0]),
+            "function": name,
+            "memoryMiB": 64,
+            "serviceSeconds": 0.1,
+            "statistics": {**local["functions"][0]["statistics"], "meanSeconds": 0.1},
+        }
+        for name in settings.functions
+    ]
+    profile = CalibrationProfile.model_validate(local)
+    run.profile = CalibrationProfiles(
+        {node.id: profile for node in settings.nodes},
+        "a" * 64,
+        profile.environment_fingerprint,
+        concurrent_capacities=records,
+    )
+    run.trace = trace
+    run.qualification.period_seconds = 360
+    run.topology.function_settings = settings.functions
+    run.topology.function_aliases = {name: name for name in settings.functions}
+    run.topology.node_function_settings = {
+        node.id: resolve_node_functions(settings, node.id) for node in settings.nodes
+    }
+    run.topology.resources.nodes = {
+        node.id: SimpleNamespace(config=node) for node in settings.nodes
+    }
+    run.topology.endpoints = {node.id: node.id for node in settings.nodes}
+    run.topology.neighbor_graph = settings.neighbors
+    built = _inputs.resource("distribution")
+    task_inputs = cast(
+        Any,
+        SimpleNamespace(
+            resource=lambda key: (
+                built
+                if key == "distribution"
+                else SimpleNamespace(require_healthy=lambda: None)
+                if key == "clock"
+                else "http://" + key
+            ),
+            upstream=lambda: None,
+        ),
+    )
+    monkeypatch.setattr(
+        "nanolab.one_shot.profiles.read_profiles", lambda _: run.profile
+    )
+    manifest = run.run(task_inputs).value
+    assert manifest is not None and manifest.period_seconds == 360
+    assert manifest.parameters["baselinePolicy"]["replicas"]["cloud"] == dict.fromkeys(
+        trace.functions, 7
+    )
+    rows = json.loads((tmp_path / "schedule.json").read_bytes())
+    warm = [row for row in rows if row["phase"] == "warmup"]
+    for node in trace.nodes:
+        for name, rate in trace.windows[0][node].items():
+            assert sum(
+                row["origin"] == node and row["function"] == name for row in warm
+            ) == round(720 * rate)
+    assert len({row["originalId"] for row in rows}) == len(rows)
+
+
 @pytest.mark.parametrize("missing_proof", [False, True])
 @pytest.mark.parametrize("load_failed", [False, True])
 def test_collected_evidence_counts_real_events_and_never_fills_missing_sdk_proof(

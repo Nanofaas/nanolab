@@ -1,0 +1,644 @@
+# Candidate template: replace artifact hashes and rates only after actual qualification.
+workflow: one-shot-experiment
+backend: container
+functions:
+- one-shot-arithmetic-rust
+- one-shot-matrix-rust
+- one-shot-memory-rust
+- one-shot-mixed-rust
+- one-shot-sort-rust
+oneShot:
+  provider: multipass
+  purpose: scientific-experiment
+  nodes:
+  - cpus: 1
+    functionLimits:
+      one-shot-arithmetic-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-matrix-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-memory-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-mixed-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-sort-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+    id: edge-1
+    kind: edge
+    memoryCapacityMiB: 320
+    memoryMiB: 2048
+  - cpus: 1
+    functionLimits:
+      one-shot-arithmetic-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-matrix-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-memory-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-mixed-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+      one-shot-sort-rust:
+        cpu: 0.1
+        maxReplicas: 5
+        memoryMiB: 64
+    id: edge-2
+    kind: edge
+    memoryCapacityMiB: 320
+    memoryMiB: 3072
+  - cpus: 2
+    functionLimits:
+      one-shot-arithmetic-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-matrix-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-memory-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-mixed-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-sort-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+    id: edge-3
+    kind: edge
+    memoryCapacityMiB: 640
+    memoryMiB: 3072
+  - cpus: 2
+    functionLimits:
+      one-shot-arithmetic-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-matrix-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-memory-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-mixed-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+      one-shot-sort-rust:
+        cpu: 0.149
+        maxReplicas: 10
+        memoryMiB: 64
+    id: edge-4
+    kind: edge
+    memoryCapacityMiB: 640
+    memoryMiB: 4096
+  - cpus: 3
+    functionLimits:
+      one-shot-arithmetic-rust:
+        cpu: 0.166
+        maxReplicas: 15
+        memoryMiB: 64
+      one-shot-matrix-rust:
+        cpu: 0.166
+        maxReplicas: 15
+        memoryMiB: 64
+      one-shot-memory-rust:
+        cpu: 0.166
+        maxReplicas: 15
+        memoryMiB: 64
+      one-shot-mixed-rust:
+        cpu: 0.166
+        maxReplicas: 15
+        memoryMiB: 64
+      one-shot-sort-rust:
+        cpu: 0.166
+        maxReplicas: 15
+        memoryMiB: 64
+    id: edge-5
+    kind: edge
+    memoryCapacityMiB: 960
+    memoryMiB: 6144
+  - cpus: 8
+    functionLimits:
+      one-shot-arithmetic-rust:
+        cpu: 0.214
+        maxReplicas: 35
+        memoryMiB: 64
+      one-shot-matrix-rust:
+        cpu: 0.214
+        maxReplicas: 35
+        memoryMiB: 64
+      one-shot-memory-rust:
+        cpu: 0.214
+        maxReplicas: 35
+        memoryMiB: 64
+      one-shot-mixed-rust:
+        cpu: 0.214
+        maxReplicas: 35
+        memoryMiB: 64
+      one-shot-sort-rust:
+        cpu: 0.214
+        maxReplicas: 35
+        memoryMiB: 64
+    id: cloud
+    kind: cloud
+    memoryCapacityMiB: 2240
+    memoryMiB: 12288
+  functions:
+    one-shot-arithmetic-rust:
+      input:
+        iterations: 100000000
+        seed: 7
+      cpu: 0.1
+      memoryMiB: 64
+      maxReplicas: 5
+      utilization: 0.8
+    one-shot-matrix-rust:
+      input:
+        dimension: 96
+        repetitions: 160
+        seed: 17
+      cpu: 0.1
+      memoryMiB: 64
+      maxReplicas: 5
+      utilization: 0.8
+    one-shot-memory-rust:
+      input:
+        passes: 16
+        seed: 13
+        working_set_bytes: 25165824
+      cpu: 0.1
+      memoryMiB: 64
+      maxReplicas: 5
+      utilization: 0.8
+    one-shot-mixed-rust:
+      input:
+        arithmetic_iterations: 50000000
+        matrix_dimension: 96
+        matrix_repetitions: 32
+        memory_passes: 8
+        seed: 19
+        sort_items: 65536
+        sort_passes: 16
+        working_set_bytes: 12582912
+      cpu: 0.1
+      memoryMiB: 64
+      maxReplicas: 5
+      utilization: 0.8
+    one-shot-sort-rust:
+      input:
+        items: 131072
+        passes: 64
+        seed: 11
+      cpu: 0.1
+      memoryMiB: 64
+      maxReplicas: 5
+      utilization: 0.8
+  seed: 7
+  calibration:
+    minSamples: 50
+    maxSamples: 200
+    repetitions: 3
+    warmupInvocations: 3
+    confidence: 0.95
+    quantiles:
+    - 0.5
+    - 0.95
+    relativeCI: 0.15
+    capacityError: 0.15
+    capacitySeconds: 60
+    timeoutSeconds: 30
+  flowQuantum: 0.05
+  neighbors:
+    edge-1:
+    - edge-2
+    - edge-3
+    edge-2:
+    - edge-1
+    - edge-3
+    edge-3:
+    - edge-1
+    - edge-2
+    - edge-4
+    - edge-5
+    edge-4:
+    - edge-3
+    - edge-5
+    edge-5:
+    - edge-3
+    - edge-4
+  observability:
+    logs:
+      enabled: true
+      endpoint: http://10.83.80.1:43100/loki/api/v1/push
+      backendOwned: true
+      backendBind: 10.83.80.1
+      campaignId: multifunction-one-shot
+      environment: local
+      image: fluent/fluent-bit:5.1.3
+      cpu: 0.1
+      memoryMiB: 64
+      bufferMiB: 256
+  runtimeDistribution:
+    path: ./distribution.json
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+  strictMemory: true
+  profile:
+    path: ./profile-set.json
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+  qualification:
+    path: ./timing.json
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+  experiment:
+    repetitions: 1
+    warmupSeconds: 720
+    generatorVus: 512
+    maxArrivalLatenessSeconds: 0.25
+    campaignProtocol:
+      path: ./protocol.json
+      sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+    campaignBlock: 0
+    windows:
+    - id: control
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: hotspot-edge-5
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: hotspot-edge-1
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: hotspot-edge-4
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: hotspot-edge-2
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: hotspot-edge-3
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: two-triangles
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: diffuse-subset
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+    - id: recovery
+      epochs: 1
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-2:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-3:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-4:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        edge-5:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0
+        cloud:
+          one-shot-arithmetic-rust: 1.0
+          one-shot-matrix-rust: 1.0
+          one-shot-memory-rust: 1.0
+          one-shot-mixed-rust: 1.0
+          one-shot-sort-rust: 1.0

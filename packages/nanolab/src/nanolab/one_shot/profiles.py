@@ -206,11 +206,103 @@ def profile_for_node(
     )
 
 
+def synchronized_timing_trace(settings: OneShotConfig, profiles: CalibrationProfiles):
+    """Reject an altered nine-cell timing protocol before VM acquisition."""
+    from nanolab.tasks.one_shot.trace import concurrent_trace
+
+    timing = settings.timing
+    if profiles.concurrent_capacities is None:
+        raise ValueError("synchronized timing requires concurrent capacity")
+    if (
+        timing is None
+        or timing.period_candidates != [360]
+        or timing.max_trace_resolution < 360
+        or timing.minimum_samples < 50
+        or timing.quantile < 0.95
+        or timing.epsilon > 0.05
+        or timing.margin_seconds < 0.2
+        or timing.ready_margin_seconds < 0.3
+    ):
+        raise ValueError("synchronized timing period/sampling scope mismatch")
+    names = {
+        str(row["function"]) for row in next(iter(profiles.by_node.values())).functions
+    }
+    aliases = {
+        key: key if key in names else key.removesuffix("-rust")
+        for key in settings.functions
+    }
+    trace = concurrent_trace(
+        profiles.concurrent_capacities,
+        settings,
+        period=360,
+        seed=settings.seed,
+        aliases=aliases,
+    )
+    rates = [
+        {
+            node: {aliases[key]: rate for key, rate in values.items()}
+            for node, values in cell.rates.items()
+        }
+        for cell in timing.matrix
+    ]
+    if [cell.id for cell in timing.matrix] != trace.phase_ids or rates != trace.windows:
+        raise ValueError("synchronized timing matrix differs from frozen candidate")
+    validate_trace_capacity(trace, profiles, settings)
+    return trace
+
+
 def validate_trace_capacity(trace, profiles: CalibrationProfiles, settings) -> None:
     """Check actual empirical and native local cloud bounds before provisioning."""
     from nanolab.tasks.one_shot.trace import validate_cloud_headroom
 
     cloud = next(node.id for node in settings.nodes if node.kind == "cloud")
+    if len(trace.functions) > 1:
+        from nanolab.one_shot.capacity import capacity_configurations
+        from nanolab.tasks.one_shot.trace import (
+            cloud_capacity_requirements,
+            validate_multi_cloud_bounds,
+        )
+
+        records = profiles.concurrent_capacities
+        if not settings.strict_memory or not records:
+            raise ValueError("scientific trace requires measured concurrent cloud mix")
+        names = set(trace.functions)
+        aliases = {
+            key: key if key in names else key.removesuffix("-rust")
+            for key in settings.functions
+        }
+        if set(aliases.values()) != names:
+            raise ValueError("concurrent trace function scope mismatch")
+        vector = next(
+            entry["vectors"][cloud]
+            for entry in capacity_configurations(settings, aliases)
+            if entry["kind"] == "mixed" and entry["dominant"] is None
+        )
+        rows = {
+            str(row["function"]): cast(dict[str, Any], row)
+            for row in profiles.by_node[cloud].functions
+        }
+        node = next(node for node in settings.nodes if node.id == cloud)
+        if (
+            set(rows) != names
+            or sum(vector[name] * rows[name]["memoryMiB"] for name in names)
+            > node.memory_capacity_mib
+            or any(
+                vector[name] > rows[name]["validity"]["maxReplicas"] for name in names
+            )
+        ):
+            raise ValueError("fixed cloud replica vector exceeds resource scope")
+        physical = {name: vector[name] / rows[name]["serviceSeconds"] for name in names}
+        validate_multi_cloud_bounds(trace, cloud=cloud, rates=physical)
+        for required in cloud_capacity_requirements(trace, cloud):
+            if not any(
+                record["node"] == cloud
+                and record["replicaVector"] == vector
+                and record["rates"] == required
+                for record in records
+            ):
+                raise ValueError("concurrent cloud mix is not qualified")
+        return
     if profiles.capacities is None or len(trace.functions) != 1:
         raise ValueError("scientific trace requires measured capacity")
     rows = {row["function"]: row for row in profiles.by_node[cloud].functions}

@@ -27,6 +27,13 @@ def build_one_shot_qualification_plan(
             "qualification requires explicit period candidates and timing matrix"
         )
     profile = read_profile(config.one_shot)
+    from nanolab.one_shot.profiles import CalibrationProfiles, synchronized_timing_trace
+
+    if (
+        isinstance(profile, CalibrationProfiles)
+        and profile.concurrent_capacities is not None
+    ):
+        synchronized_timing_trace(config.one_shot, profile)
     workflow = Workflow("one-shot-qualification")
     topology = add_one_shot_platforms(
         workflow,

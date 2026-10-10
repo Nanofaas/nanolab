@@ -190,3 +190,27 @@ calibration. The synchronized experiment itself measures nine 360-second
 intervals, or 54 minutes per mode, across all six nodes simultaneously. Each mode
 also requires at least 12 minutes of warmup. Pilot and main repetitions are
 separate acquisitions, with their full time reported separately.
+
+### Synchronized multi-function templates
+
+The packaged `one-shot-multifunction-calibration`, `qualification` and `pilot`
+templates bind five distinct Rust handlers, strict 64 MiB replica limits and the
+two triangles sharing edge-3. Zero artifact hashes and provisional qualification
+rates deliberately block acquisition until measured artifacts replace them.
+
+The candidate trace has nine 360-second windows: control, five distinct node
+hotspots, two triangle hotspots, diffuse overload on edges 1/3/5 and recovery.
+Every node/function cell remains positive. Rates come from a complete balanced
+concurrent-capacity record, rather than assembled isolated maxima. The cloud
+keeps a feasible balanced replica vector. Each of the nine worst-case aggregate
+cloud mixes requires three additional 90-second trials and at least 10 percent
+per-function headroom. These 27 trials add 40 minutes 30 seconds to the capacity
+acquisition; the combined minimum is 82 hours 34 minutes 30 seconds.
+
+Timing qualification checks SDK readiness and physical cgroups for all cloud
+replicas before sampling the complete trace. Fifty samples for each of nine
+cells, at 360 seconds plus a three-second measurement lead, require at least
+45 hours 22 minutes 30 seconds. Provisioning, evidence collection and cleanup
+add further time. These calibration costs are distinct from the 54 measured
+minutes of each experiment mode. All acquisition attempts and cleanup errors
+remain in the evidence, including attempts that cannot publish a qualification.

@@ -60,6 +60,14 @@ def test_six_nodes_register_five_explicit_handler_identities(tmp_path, monkeypat
         return original(workflow, request, **kwargs)
 
     monkeypatch.setattr(one_shot_common, "add_platform", capture)
+    recipes = []
+    original_recipe = one_shot_common.recipe_run_resource
+
+    def capture_recipe(**kwargs):
+        recipes.append(kwargs["recipe"])
+        return original_recipe(**kwargs)
+
+    monkeypatch.setattr(one_shot_common, "recipe_run_resource", capture_recipe)
     names = [row["function"] for row in VECTORS[:5]]
     for name in names:
         (tmp_path / "functions/rust" / name).mkdir(parents=True)
@@ -102,6 +110,7 @@ def test_six_nodes_register_five_explicit_handler_identities(tmp_path, monkeypat
     assert len(topology.platforms) == 6
     assert len(set(topology.function_aliases.values())) == 5
     assert len(requests) == 6
+    assert [recipe.name for recipe in recipes] == ["one-shot-multifunction-jvm.yaml"]
     for platform in requests:
         assert {fn.name for fn in platform.functions} == set(names)
         for fn in platform.functions:

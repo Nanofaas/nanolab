@@ -407,6 +407,13 @@ class QualifyTimingTask(Task[TimingQualification]):
         timing = self.settings.timing
         if timing is None or self.settings.profile is None:
             raise ValueError("explicit timing matrix and profile are required")
+        if (
+            isinstance(self.profile, CalibrationProfiles)
+            and self.profile.concurrent_capacities is not None
+        ):
+            from nanolab.one_shot.profiles import synchronized_timing_trace
+
+            synchronized_timing_trace(self.settings, self.profile)
         built = inputs.resource(self.topology.distribution)
         fingerprint = verify_profile_scope(
             self.profile,
@@ -440,16 +447,79 @@ class QualifyTimingTask(Task[TimingQualification]):
         epoch = 0
         with httpx.Client(trust_env=False) as http:
             if self.settings.purpose == "scientific-experiment":
+                from nanolab.one_shot.capacity import comparison_replica_vectors
+
                 functions = self.topology.node_function_settings[cloud_key]
                 cloud = self.topology.resources.nodes[cloud_key]
-                for name, function in functions.items():
+                static = (
+                    comparison_replica_vectors(
+                        self.settings, self.topology.function_aliases
+                    )[cloud_key]
+                    if self.settings.strict_memory and len(self.settings.functions) > 1
+                    else {name: fn.max_replicas for name, fn in functions.items()}
+                )
+                for name in functions:
                     http.put(
                         cloud_uri + f"/v1/functions/{name}/replicas",
-                        json={"replicas": function.max_replicas},
+                        json={"replicas": static[name]},
                         timeout=30,
                     ).raise_for_status()
-                    for replica in range(1, function.max_replicas + 1):
-                        runtime_endpoint(cloud, name, inputs=inputs, replica=replica)
+                    for replica in range(1, static[name] + 1):
+                        deadline = time.monotonic() + 30
+                        while True:
+                            try:
+                                runtime, observed = runtime_endpoint(
+                                    cloud, name, inputs=inputs, replica=replica
+                                )
+                                response = http.get(
+                                    runtime + "/runtime/status", timeout=2
+                                )
+                                response.raise_for_status()
+                                status = response.json()
+                                if (
+                                    status.get("maxConcurrentHandlers") != 1
+                                    or status.get("physicalReleaseProof") is not True
+                                ):
+                                    raise ValueError(
+                                        "cloud replica lacks physical c1 readiness"
+                                    )
+                                break
+                            except (httpx.HTTPError, ValueError, RuntimeError):
+                                if time.monotonic() >= deadline:
+                                    raise
+                                time.sleep(0.1)
+                        ready = {
+                            "node": cloud_key,
+                            "function": name,
+                            "replica": replica,
+                            "url": runtime,
+                            "container": observed,
+                            "status": status,
+                        }
+                        if self.settings.strict_memory:
+                            from nanolab.tasks.one_shot.preflight import (
+                                collect_container_cgroup,
+                                validate_strict_cgroup,
+                            )
+
+                            fn = functions[name]
+                            sample = collect_container_cgroup(cloud, observed)
+                            ready["cgroup"] = sample
+                            append_observation(
+                                self.run_dir / "cloud-readiness.jsonl", ready
+                            )
+                            if (
+                                observed.get("HostConfig", {}).get("MemorySwap")
+                                != fn.memory_mib * 1024 * 1024
+                            ):
+                                raise ValueError("cloud strict swap limit mismatch")
+                            validate_strict_cgroup(
+                                sample, memory_mib=fn.memory_mib, cpu=fn.cpu
+                            )
+                        else:
+                            append_observation(
+                                self.run_dir / "cloud-readiness.jsonl", ready
+                            )
             clients = {
                 key: NanoFaasOneShotClient(inputs.resource(endpoint), http=http)
                 for key, endpoint in self.topology.endpoints.items()

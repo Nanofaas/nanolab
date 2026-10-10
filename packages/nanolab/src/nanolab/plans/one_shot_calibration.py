@@ -10,6 +10,7 @@ from nanolab.tasks.one_shot.calibration import (
     MeasureServiceTask,
     PublishCalibrationTask,
     ValidateCapacityTask,
+    ValidateTraceCapacityTask,
     WarmupTask,
 )
 from nanolab.tasks.one_shot.clock import clock_health_resource
@@ -66,6 +67,17 @@ def build_one_shot_calibration_plan(
                 WarmupTask(topology, config.one_shot, run_dir, clock=clock),
                 measure,
                 capacity,
+                *(
+                    (
+                        ValidateTraceCapacityTask(
+                            topology, config.one_shot, run_dir, clock=clock
+                        ),
+                    )
+                    if config.one_shot.purpose == "scientific-experiment"
+                    and len(config.one_shot.functions) == 5
+                    and len(config.one_shot.nodes) == 6
+                    else ()
+                ),
                 PublishCalibrationTask(topology, config.one_shot, run_dir, clock=clock),
             ),
         ),

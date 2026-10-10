@@ -249,10 +249,32 @@ class FreezeManifestTask(Task[CampaignManifest]):
         experiment = self.settings.experiment
         cloud = next(node for node in self.settings.nodes if node.kind == "cloud")
         node_functions = getattr(self.topology, "node_function_settings", {})
+        concurrent = (
+            isinstance(self.profile, CalibrationProfiles)
+            and self.profile.concurrent_capacities is not None
+        )
+        if concurrent:
+            from nanolab.one_shot.capacity import comparison_replica_vectors
+
+            static = comparison_replica_vectors(
+                self.settings, self.topology.function_aliases
+            )
+        else:
+            static = {
+                node.id: {
+                    name: fn.max_replicas
+                    for name, fn in node_functions.get(
+                        node.id, self.topology.function_settings
+                    ).items()
+                }
+                for node in self.settings.nodes
+            }
         for node in self.settings.nodes:
             functions = node_functions.get(node.id, self.topology.function_settings)
-            memory = sum(fn.max_replicas * fn.memory_mib for fn in functions.values())
-            cpu = sum(fn.max_replicas * fn.cpu for fn in functions.values())
+            memory = sum(
+                static[node.id][name] * fn.memory_mib for name, fn in functions.items()
+            )
+            cpu = sum(static[node.id][name] * fn.cpu for name, fn in functions.items())
             if memory > node.memory_capacity_mib or cpu > node.cpus:
                 raise ValueError(
                     "static comparison replicas exceed node RAM/CPU budget"
@@ -262,7 +284,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
         cloud_functions = node_functions.get(cloud.id, self.topology.function_settings)
         if isinstance(self.profile, CalibrationProfiles):
             validate_trace_capacity(self.trace, self.profile, self.settings)
-        for window in self.trace.windows:
+        for window in [] if concurrent else self.trace.windows:
             terminal_occupancy = sum(
                 sum(rates[name] for rates in window.values())
                 * measured[name]["serviceSeconds"]
@@ -278,7 +300,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
             if self.settings.purpose == "scientific-experiment"
             else experiment.warmup_seconds
         )
-        if warmup_seconds > 120:
+        if warmup_seconds > (720 if concurrent else 120):
             raise ValueError("scientific warmup exceeds configured maximum")
         anchor = datetime.now(UTC) + timedelta(seconds=warmup_seconds + 20)
         run_id = f"{self.trace.sha256[:12]}:{self.mode}:{self.repetition}"
@@ -352,6 +374,9 @@ class FreezeManifestTask(Task[CampaignManifest]):
                 for node, local in self.profile.by_node.items()
             }
             parameters["capacities"] = self.profile.capacities
+            if concurrent:
+                parameters["concurrentCapacities"] = self.profile.concurrent_capacities
+                parameters["staticReplicaVectors"] = static
             parameters["peerGraph"] = self.topology.neighbor_graph
             parameters["phaseIds"] = self.trace.phase_ids
             parameters["nodeRoles"] = self.trace.node_roles
@@ -375,8 +400,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
                     for node, functions in node_functions.items()
                 },
                 "replicas": {
-                    node: {name: fn.max_replicas for name, fn in functions.items()}
-                    for node, functions in node_functions.items()
+                    node: static[node] for node, functions in node_functions.items()
                 },
             }
         if binding is not None:
@@ -468,21 +492,45 @@ class UploadForecastTask(Task[None]):
         protocol = ProtocolSettings.model_validate(run.qualification.protocol)
         cloud_key = next(node.id for node in run.settings.nodes if node.kind == "cloud")
         cloud_url = inputs.resource(run.topology.endpoints[cloud_key])
+        from nanolab.one_shot.capacity import comparison_replica_vectors
+
+        aliases = getattr(
+            run.topology,
+            "function_aliases",
+            {key: key.removesuffix("-rust") for key in run.settings.functions},
+        )
+        static = (
+            comparison_replica_vectors(run.settings, aliases)
+            if run.settings.strict_memory and len(run.settings.functions) > 1
+            else {
+                node: {
+                    name: fn.max_replicas
+                    for name, fn in getattr(run.topology, "node_function_settings", {})
+                    .get(node, run.topology.function_settings)
+                    .items()
+                }
+                for node in run.topology.endpoints
+            }
+        )
         with httpx.Client(trust_env=False) as http:
             for key, endpoint in run.topology.endpoints.items():
                 url = inputs.resource(endpoint)
                 node = run.topology.resources.nodes[key]
-                if node.config.kind == "cloud" or run.mode == "baseline":
+                if (
+                    node.config.kind == "cloud"
+                    or run.mode == "baseline"
+                    or (run.settings.strict_memory and len(run.settings.functions) > 1)
+                ):
                     functions = getattr(run.topology, "node_function_settings", {}).get(
                         key, run.topology.function_settings
                     )
-                    for name, function in functions.items():
+                    for name in functions:
                         http.put(
                             url + f"/v1/functions/{name}/replicas",
-                            json={"replicas": function.max_replicas},
+                            json={"replicas": static[key][name]},
                             timeout=30,
                         ).raise_for_status()
-                        for replica in range(1, function.max_replicas + 1):
+                        for replica in range(1, static[key][name] + 1):
                             runtime_endpoint(node, name, inputs=inputs, replica=replica)
                 if node.config.kind == "cloud":
                     continue

@@ -10,6 +10,27 @@ from pathlib import Path
 CAPACITY_FACTORS = (0.5, 0.7, 0.9, 1.0, 1.1, 1.25)
 
 
+def comparison_replica_vectors(
+    settings, aliases: dict[str, str]
+) -> dict[str, dict[str, int]]:
+    """Use one feasible balanced vector for strict concurrent baseline and cloud."""
+    from nanolab.config.one_shot import resolve_node_functions
+
+    if settings.strict_memory and len(settings.functions) > 1:
+        return next(
+            entry["vectors"]
+            for entry in capacity_configurations(settings, aliases)
+            if entry["kind"] == "mixed" and entry["dominant"] is None
+        )
+    return {
+        node.id: {
+            aliases[name]: fn.max_replicas
+            for name, fn in resolve_node_functions(settings, node.id).items()
+        }
+        for node in settings.nodes
+    }
+
+
 def capacity_configurations(settings, aliases: dict[str, str]) -> list[dict]:
     """Predeclare every pure integer level and six feasible concurrent mixes."""
     from nanolab.config.one_shot import resolve_node_functions

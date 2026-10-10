@@ -172,7 +172,7 @@ class ExperimentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     windows: list[ExperimentWindow] = Field(min_length=1)
     repetitions: int = Field(default=1, ge=1, le=20)
-    warmup_seconds: int = Field(default=5, alias="warmupSeconds", ge=2, le=120)
+    warmup_seconds: int = Field(default=5, alias="warmupSeconds", ge=2, le=720)
     warmup_rate: float = Field(default=4, alias="warmupRate", gt=0)
     generator_vus: int = Field(default=64, alias="generatorVus", ge=1, le=512)
     max_arrival_lateness: float = Field(

@@ -354,12 +354,14 @@ def add_one_shot_platforms(
     selected = tuple(
         (definition.family, definition.runtime) for definition in definitions.values()
     )
+    default_recipe = (
+        "one-shot-multifunction-jvm.yaml"
+        if settings.strict_memory
+        and {definition.family for definition in definitions.values()} == WORKLOAD_NAMES
+        else "one-shot-jvm.yaml"
+    )
     recipe = config.recipe_profile or Path(
-        str(
-            files("nanolab").joinpath(
-                "assets", "presets", "recipes", "one-shot-jvm.yaml"
-            )
-        )
+        str(files("nanolab").joinpath("assets", "presets", "recipes", default_recipe))
     )
     if config.control_plane_runtime != "jvm" and config.recipe_profile is None:
         raise ValueError("native one-shot requires an explicit native recipeProfile")

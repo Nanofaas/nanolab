@@ -90,3 +90,58 @@ def test_logging_compiles_one_collector_for_every_node(tmp_path, monkeypatch):
     ]
     assert sum("Fluent Bit collector" in title for title in titles) == 3
     assert "Use external logging backend" in titles
+
+
+def test_multi_function_calibration_qualifies_trace_mixes_before_publication(
+    tmp_path, monkeypatch
+):
+    from tests.one_shot.test_multi_function_trace import inputs
+
+    settings, _records = inputs()
+    monkeypatch.setattr("nanolab.one_shot.infrastructure.external_vm_cpus", lambda: 0)
+    from nanolab.plans import one_shot_calibration
+
+    original = one_shot_calibration.Steps
+    titles = []
+
+    def steps(**kwargs):
+        titles.extend(task.title for task in kwargs["steps"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(one_shot_calibration, "Steps", steps)
+    names = list(settings.functions)
+    for name in names:
+        (tmp_path / "functions/rust" / name).mkdir(parents=True)
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "one-shot-calibration",
+            "backend": "container",
+            "functions": [name + "-rust" for name in names],
+            "oneShot": settings.model_copy(
+                update={
+                    "functions": {
+                        name + "-rust": function
+                        for name, function in settings.functions.items()
+                    },
+                    "nodes": [
+                        node.model_copy(
+                            update={
+                                "function_limits": {
+                                    name + "-rust": limit
+                                    for name, limit in node.function_limits.items()
+                                }
+                            }
+                        )
+                        for node in settings.nodes
+                    ],
+                }
+            ).model_dump(by_alias=True),
+        }
+    )
+    workflow = build_one_shot_calibration_plan(
+        config, environment(), run_dir=tmp_path / "run", repo_root=tmp_path
+    )
+    workflow.compile()
+    assert titles.index("Qualify cloud mixtures for synchronized trace") < titles.index(
+        "Publish immutable local calibration profile"
+    )

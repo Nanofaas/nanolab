@@ -269,6 +269,172 @@ def capacity_trace(
     return trace
 
 
+def concurrent_trace(
+    records: list[dict],
+    settings: OneShotConfig,
+    *,
+    period: float,
+    seed: int,
+    aliases: dict[str, str],
+) -> TraceArtifact:
+    """Build from complete concurrent records; qualify cloud mixtures separately."""
+    from nanolab.one_shot.capacity import capacity_configurations
+
+    edges = [f"edge-{number}" for number in range(1, 6)]
+    graph = {
+        edges[0]: {edges[1], edges[2]},
+        edges[1]: {edges[0], edges[2]},
+        edges[2]: {edges[0], edges[1], edges[3], edges[4]},
+        edges[3]: {edges[2], edges[4]},
+        edges[4]: {edges[2], edges[3]},
+    }
+    if (
+        {node.id for node in settings.nodes} != {*edges, "cloud"}
+        or settings.neighbors is None
+        or {node: set(peers) for node, peers in settings.neighbors.items()} != graph
+    ):
+        raise ValueError("concurrent trace requires the two triangles scope")
+    if (
+        not settings.strict_memory
+        or len(settings.functions) != 5
+        or set(aliases) != set(settings.functions)
+        or len(set(aliases.values())) != 5
+        or not isinstance(records, list)
+    ):
+        raise ValueError("concurrent capacity/function scope mismatch")
+    if period != 360:
+        raise ValueError(
+            "synchronized campaign requires period360; "
+            "requalify other periods separately"
+        )
+    names, nodes = list(aliases.values()), [node.id for node in settings.nodes]
+    balanced = next(
+        entry["vectors"]
+        for entry in capacity_configurations(settings, aliases)
+        if entry["kind"] == "mixed" and entry["dominant"] is None
+    )
+    capacities = {}
+    for node, vector in balanced.items():
+        candidates = [
+            entry
+            for entry in records
+            if entry.get("node") == node
+            and entry.get("replicaVector") == vector
+            and isinstance(entry.get("rates"), dict)
+            and set(entry["rates"]) == set(names)
+            and all(
+                type(rate) in (int, float) and math.isfinite(rate) and rate > 0
+                for rate in entry["rates"].values()
+            )
+        ]
+        if not candidates:
+            raise ValueError("missing qualified balanced concurrent capacity scope")
+        # Select ONE measured vector, never assemble per-function maxima.
+        capacities[node] = max(
+            candidates, key=lambda entry: sum(entry["rates"].values())
+        )
+    hotspots = edges.copy()
+    random.Random(seed).shuffle(hotspots)  # nosec B311: frozen experimental order
+    conditions = [("control", set())]
+    conditions += [("hotspot-" + edge, {edge}) for edge in hotspots]
+    conditions += [
+        ("two-triangles", {"edge-2", "edge-4"}),
+        ("diffuse-subset", {"edge-1", "edge-3", "edge-5"}),
+        ("recovery", set()),
+    ]
+    windows, requested = [], []
+    for epoch, (phase, hot) in enumerate(conditions):
+        raw, effective = {}, {}
+        for position, node in enumerate(nodes):
+            raw[node], effective[node] = {}, {}
+            for name in names:
+                overloaded = node in hot and (
+                    phase == "diffuse-subset" or name == names[edges.index(node)]
+                )
+                factor = (
+                    0.035 + epoch * 0.001
+                    if node == "cloud"
+                    else 1.25
+                    if phase == "diffuse-subset" and node in hot
+                    else 1.8
+                    if overloaded
+                    else 0.29 + position * 0.012 + epoch * 0.006
+                )
+                rate = capacities[node]["rates"][name]
+                raw[node][name] = rate * factor
+                effective[node][name] = _quantized(
+                    raw[node][name], settings.flow_quantum, upward=overloaded
+                )
+                if overloaded and effective[node][name] <= rate:
+                    raise ValueError("quantization loses intended capacity overload")
+        requested.append(raw)
+        windows.append(effective)
+    trace = TraceArtifact(
+        nodes=nodes,
+        functions=names,
+        period_seconds=period,
+        flow_quantum=settings.flow_quantum,
+        seed=seed,
+        payloads={aliases[key]: fn.input for key, fn in settings.functions.items()},
+        windows=windows,
+        requested_windows=requested,
+        node_roles={
+            node: "cloud-direct" if node == "cloud" else "edge" for node in nodes
+        },
+        phase_ids=[phase for phase, _hot in conditions],
+    )
+    validate_multi_cloud_bounds(
+        trace, cloud="cloud", rates=capacities["cloud"]["rates"]
+    )
+    return trace
+
+
+def cloud_capacity_requirements(
+    trace: TraceArtifact, cloud: str
+) -> list[dict[str, float]]:
+    """Predeclare the exact joint SDK rates that prove a ten-percent cloud margin."""
+    if cloud not in trace.nodes:
+        raise ValueError("cloud capacity scope mismatch")
+    return [
+        {
+            name: math.ceil(
+                sum(window[node][name] for node in trace.nodes) / 0.9 * 90 - 1e-9
+            )
+            / 90
+            for name in trace.functions
+        }
+        for window in trace.windows
+    ]
+
+
+def validate_multi_cloud_bounds(
+    trace: TraceArtifact,
+    *,
+    cloud: str,
+    rates: dict[str, float],
+    physical: dict[str, float] | None = None,
+) -> None:
+    """Screen each function, including cloud-direct traffic and possible offload."""
+    if set(rates) != set(trace.functions) or (
+        physical is not None and set(physical) != set(rates)
+    ):
+        raise ValueError("cloud function capacity scope mismatch")
+    for name in trace.functions:
+        capacity = (
+            min(rates[name], physical[name]) if physical is not None else rates[name]
+        )
+        if (
+            type(capacity) not in (int, float)
+            or not math.isfinite(capacity)
+            or capacity <= 0
+            or any(
+                sum(window[node][name] for node in trace.nodes) > 0.9 * capacity + 1e-9
+                for window in trace.windows
+            )
+        ):
+            raise ValueError("terminal cloud function lacks ten percent headroom")
+
+
 def experiment_trace(
     settings: OneShotConfig, *, period: float, aliases: dict[str, str]
 ) -> TraceArtifact:
@@ -310,7 +476,15 @@ def warmup_trace(
     legacy_rate: float = 4,
 ) -> TraceArtifact:
     """Use positive local capacity backgrounds, with a separate warmup interval."""
-    if capacities is not None:
+    if (
+        len(trace.functions) == 5
+        and len(trace.windows) == 9
+        and trace.period_seconds == 360
+    ):
+        if seconds < 2 * trace.period_seconds:
+            raise ValueError("scientific warmup requires at least two periods")
+        rates = trace.windows[0]
+    elif capacities is not None:
         if seconds < 2 * trace.period_seconds:
             raise ValueError("scientific warmup requires at least two periods")
         if set(capacities) != set(trace.nodes) or len(trace.functions) != 1:
