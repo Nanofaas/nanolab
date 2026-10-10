@@ -129,3 +129,10 @@ Starting telemetry before each capacity load reserves an additional 45-second
 lead. For 3,303 capacity trials this adds at least 41h17m15 to the unchanged
 82h34m30 of scheduled load: **123h51m45 before SDK preparation, VM provisioning,
 collection and cleanup**. The 54-minute measured campaign window stays unchanged.
+
+The reporting acceptance gate additionally requires returned-response counts and
+percentages for every mode/node/function/epoch, separately for warmup and the
+nine measured intervals. Preserve `schedule.json` and `generator.jsonl` for
+failed runs. Check reject, HTTP/application error, invalid-response and uncertain
+outcome categories independently; do not equate successful HTTP responses with
+physically verified completions or discard failed runs from error denominators.

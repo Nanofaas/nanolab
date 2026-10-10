@@ -276,3 +276,29 @@ six streams before the first scheduled request. Across 3,303 trials this adds
 41h17m15; capacity load plus these leads totals at least 123h51m45. Runtime
 preparation, streaming cleanup and provisioning add further time. The nine
 360-second campaign epochs and its separate 720-second warmup are unchanged.
+
+### Returned errors and request denominators
+
+Each run report reads the immutable schedule and `generator.jsonl`, including
+when the workflow failed before producing `evidence.json`. `returnedResponses`
+counts original requests once, separately for warmup and measured campaign.
+It reports totals and counts by origin node, function, epoch and their combined
+cell, for each mode. Cloud-direct requests are included in these descriptive
+totals; the primary scientific edge-only throughput remains separately defined.
+
+Rejects (HTTP 429 and the platform's explicit wrapped admission refusals), other
+HTTP errors, application errors returned with HTTP 200, HTTP timeout responses
+(408/504), and invalid responses are mutually exclusive. HTTP timeout responses
+count as returned errors but do not prove whether execution completed. Counts and percentages use explicitly named planned
+and emitted denominators. Zero denominators produce `null`, not a zero error
+rate. Timeouts, missing results, requests never emitted, duplicate results and
+unexpected originals are visible separately. Conflicting duplicate responses
+are unresolved; identical duplicate log events do not inflate counts. A generic
+503 is an HTTP error, not sufficient evidence of a rejection.
+
+The report includes up to 100 diagnostic response records with their original
+status, body, timestamps and correlation fields; every response remains in the
+raw generator artifact. An HTTP/application success is descriptive response
+evidence: physical handler completion and correct function output still require
+the existing independent proof and checksum validation. Returned-error rates do
+not make an otherwise censored or incomplete run conforming.

@@ -448,6 +448,34 @@ def render_report(
     """Produce standalone interactive HTML and the same numerical JSON."""
     summary = summarize(manifest, evidence)
     resource_charts = []
+    schedule_path = output.parent / "schedule.json"
+    if schedule_path.exists():
+        from nanolab.one_shot.returned_errors import summarize_responses
+        from nanolab.tasks.one_shot.experiment import generator_rows
+
+        summary["returnedResponses"] = summarize_responses(
+            json.loads(schedule_path.read_bytes()),
+            generator_rows(output.parent / "generator.jsonl"),
+            mode=manifest.mode,
+        )
+        totals = summary["returnedResponses"]["phases"]["campaign"]["total"]
+        resource_charts.append(
+            "<h2>Returned errors</h2><p>"
+            + html.escape(
+                f"{totals['returnedErrors']} returned errors / "
+                f"{totals['planned']} planned / {totals['emitted']} emitted originals; "
+                f"rejects: {totals['reject']}, HTTP errors: {totals['httpError']}, "
+                f"application errors: {totals['applicationError']}, "
+                f"invalid responses: {totals['invalidResponse']}, "
+                f"HTTP timeout responses: {totals['timeoutResponse']}, "
+                f"unresolved responses: {totals['unresolved']}, "
+                f"missing results: {totals['missingResult']}. "
+                "Warmup and per-node/function/epoch counts and percentages "
+                "appear below; "
+                "full responses remain in generator.jsonl."
+            )
+            + "</p>"
+        )
     if manifest.parameters.get("vmTelemetry"):
         from nanolab.one_shot.vm_resources import summarize_resources
 
@@ -464,7 +492,7 @@ def render_report(
             run_id=manifest.run_id,
         )
         summary["vmResources"] = coverage
-        resource_charts = resource_figures(output.parent, manifest)
+        resource_charts.extend(resource_figures(output.parent, manifest))
     return _write(summary, output, f"One-shot {manifest.mode}", resource_charts)
 
 
