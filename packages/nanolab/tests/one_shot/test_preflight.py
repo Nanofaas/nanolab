@@ -78,7 +78,17 @@ def test_http_clock_uses_server_timestamp_and_measured_uncertainty(monkeypatch):
 
 @pytest.mark.parametrize(
     "failure",
-    ["release", "image", "resources", "mode", "scaling", "network", "cpu", None],
+    [
+        "release",
+        "image",
+        "resources",
+        "mode",
+        "scaling",
+        "network",
+        "cpu",
+        "peer",
+        None,
+    ],
 )
 def test_collection_validates_measured_facts_and_preserves_failures(
     tmp_path, monkeypatch, failure
@@ -131,7 +141,9 @@ def test_collection_validates_measured_facts_and_preserves_failures(
         )
         for node in resources.nodes.values()
     }
-    values.update(dict.fromkeys(endpoints.values(), "http://node:8080"))
+    values.update(
+        {resource: "http://" + key + ":8080" for key, resource in endpoints.items()}
+    )
     values.update(dict.fromkeys(probes.values(), "http://probe:17111"))
     values[distribution] = SimpleNamespace(
         components=[
@@ -197,7 +209,9 @@ def test_collection_validates_measured_facts_and_preserves_failures(
                 "catalogGenerations": {"f": 1},
                 "peerEndpoints": [
                     {
-                        "peerId": "edge-1",
+                        "peerId": "edge-99"
+                        if failure == "peer"
+                        else ("edge-1" if request.url.host == "edge-0" else "edge-0"),
                         "incarnation": "i",
                         "invocationUri": "http://other:8080",
                     }
@@ -250,6 +264,7 @@ def test_collection_validates_measured_facts_and_preserves_failures(
             "scaling": "HPA/scaling",
             "network": "network transfer",
             "cpu": "CPU allocation",
+            "peer": "neighbor",
         }
         with pytest.raises(ValueError, match=reasons[failure]):
             task.run(inputs)

@@ -25,6 +25,7 @@ from nanolab.one_shot.infrastructure import (
     OneShotResources,
     build_one_shot_resources,
 )
+from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_graph
 from nanolab.tasks.components.bootstrap import plan_vm_provision_base
 from nanolab.tasks.one_shot.images import archive_image_ids
 from nanolab.tasks.one_shot.logging import backend_resource, collector_resource
@@ -65,6 +66,7 @@ class OneShotTopology:
     node_function_settings: dict[str, dict[str, OneShotFunction]] = field(
         default_factory=dict
     )
+    neighbor_graph: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def requires(self) -> tuple[Resource[Any], ...]:
@@ -117,6 +119,7 @@ def _control_plane(
     terminal_queueing: bool = False,
     baseline_depth: int | None = None,
     collector: Resource | None = None,
+    neighbor_graph: dict[str, tuple[str, ...]] | None = None,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
 
@@ -167,6 +170,39 @@ def _control_plane(
         if not socket_group.isdigit():
             raise ValueError("invalid Docker socket group")
         edge = node.config.kind == "edge"
+        peer_mount = []
+        if edge and neighbor_graph is not None:
+            operator_file = run_dir / f"{node.config.id}-p2p-operator.yaml"
+            operator_file.write_text(
+                json.dumps(
+                    {
+                        "config": {
+                            "peers": [
+                                {"id": peer, "mode": mode}
+                                for peer, mode in operator_peer_modes(
+                                    node.config.id, neighbor_graph
+                                ).items()
+                            ]
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+            remote_dir = f"{vm.home}/one-shot-p2p"
+            node.command(("mkdir", "-p", remote_dir))
+            transfer = node.provider.transfer_to(
+                node.request,
+                source=operator_file,
+                destination=remote_dir + "/peers.yaml",
+            )
+            if transfer.return_code != 0:
+                raise RuntimeError("operator peer configuration transfer failed")
+            # The nonroot platform must atomically replace its state file; this
+            # directory exists only inside the run-owned VM.
+            node.command(("chmod", "777", remote_dir))
+            node.command(("chmod", "666", remote_dir + "/peers.yaml"))
+            peer_mount = ["-v", remote_dir + ":/tmp/one-shot-p2p"]
         boolean = str(edge).lower()
         args = [
             "docker",
@@ -196,7 +232,13 @@ def _control_plane(
                 if collector is not None
                 else []
             ),
+            *peer_mount,
             loaded_ids[built.control_plane().image.reference],
+            *(
+                ["--nanofaas.p2p.state-file=/tmp/one-shot-p2p/peers.yaml"]
+                if peer_mount
+                else []
+            ),
             "--server.port=8080",
             "--management.server.port=9090",
             "--logging.level.root=WARN",
@@ -295,6 +337,7 @@ def add_one_shot_platforms(
     if settings is None:
         raise ValueError("one-shot configuration missing")
     run_dir.mkdir(parents=True, exist_ok=True)
+    graph = validate_neighbor_graph(settings)
     resources = build_one_shot_resources(settings, environment, repo_root=repo_root)
     definitions = {
         key: resolve_function_definition(key, repo_root) for key in config.functions
@@ -428,6 +471,7 @@ def add_one_shot_platforms(
             resources,
             bootstrap=bootstraps[key],
             collector=collectors.get(key),
+            neighbor_graph=graph if settings.neighbors is not None else None,
             distribution=distribution,
             archive=archive,
             run_dir=run_dir,
@@ -560,4 +604,5 @@ def add_one_shot_platforms(
         {key: definition.family for key, definition in definitions.items()},
         collectors,
         node_functions,
+        graph,
     )

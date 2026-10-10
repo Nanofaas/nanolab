@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sonata_engine import Task, TaskInputs, TaskOutcome
 
 from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
+from nanolab.one_shot.topology import observe_neighbors
 
 
 class NodeEvidence(BaseModel):
@@ -29,6 +30,7 @@ class NodeEvidence(BaseModel):
     hpa_active: bool
     ready: bool
     peer_count: int = Field(ge=0)
+    neighbor_ids: list[str] | None = None
     image_digests: dict[str, str]
     clock_offset_seconds: float
     clock_uncertainty_seconds: float = Field(ge=0)
@@ -43,12 +45,15 @@ class TopologyEvidence(BaseModel):
 
     schema_version: Literal[1] = 1
     provider: Literal["multipass"] = "multipass"
-    purpose: Literal["workflow-validation"] = "workflow-validation"
+    purpose: Literal["workflow-validation", "scientific-experiment"] = (
+        "workflow-validation"
+    )
     measured_at: datetime
     generator_location: str
     shared_physical_host: bool = True
     nodes: list[NodeEvidence]
     logging: dict | None = None
+    peer_graph: dict | None = None
 
 
 def validate_node(node: NodeEvidence, *, max_clock_skew_seconds: float) -> None:
@@ -179,9 +184,15 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         output,
         max_clock_skew_seconds: float = 0.1,
         collectors=None,
+        neighbor_graph=None,
+        node_function_settings=None,
+        purpose="workflow-validation",
     ):
         """Bind explicit resource handles and expected physical identities."""
         self.collectors = collectors or {}
+        self.neighbor_graph = neighbor_graph
+        self.node_function_settings = node_function_settings or {}
+        self.purpose = purpose
         self.resources, self.endpoints, self.probes = resources, endpoints, probes
         self.distribution, self.function_settings = distribution, function_settings
         self.output, self.max_clock_skew_seconds = output, max_clock_skew_seconds
@@ -205,7 +216,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     {
                         "status": "FAIL",
                         "provider": "multipass",
-                        "purpose": "workflow-validation",
+                        "purpose": self.purpose,
                         "observations": self.observations,
                         "reason": str(error),
                     },
@@ -244,22 +255,35 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     client.update_clock_health(
                         offset_seconds=clock, measured_at=measured_at
                     )
-                    expected_peers = (
-                        sum(
-                            other.config.kind == "edge"
+                    expected_neighbors = (
+                        set(self.neighbor_graph[key])
+                        if self.neighbor_graph
+                        else {
+                            other.config.id
                             for other in self.resources.nodes.values()
-                        )
-                        - 1
+                            if other.config.kind == "edge" and other.config.id != key
+                        }
                     )
                     deadline = time.monotonic() + 30
                     while time.monotonic() < deadline:
                         status = client.status()
-                        peer_count = len(status.peer_endpoints)
-                        if peer_count == expected_peers:
+                        peers = [peer.peer_id for peer in status.peer_endpoints]
+                        peer_count = len(peers)
+                        if (
+                            len(peers) != len(set(peers))
+                            or set(peers) - expected_neighbors
+                        ):
+                            raise ValueError(
+                                "operative neighbor identities differ from frozen graph"
+                            )
+                        if set(peers) == expected_neighbors:
                             break
                         time.sleep(0.2)
-                    if peer_count != expected_peers:
-                        raise ValueError("incomplete peer membership")
+                    if set(peers) != expected_neighbors:
+                        raise ValueError("incomplete peer neighbor membership")
+                    self.observations[key]["neighbors"] = [
+                        peer.model_dump(by_alias=True) for peer in status.peer_endpoints
+                    ]
                 listing = http.get(url + "/v1/functions")
                 listing.raise_for_status()
                 self.observations[key]["functions"] = [
@@ -270,7 +294,9 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     ("docker", "ps", "-a", "--format={{json .}}")
                 ).stdout
                 image_digests = {}
-                for function, expected in self.function_settings.items():
+                for function, expected in self.node_function_settings.get(
+                    key, self.function_settings
+                ).items():
                     deadline = time.monotonic() + 30
                     while True:
                         try:
@@ -341,6 +367,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     hpa_active=False,
                     ready=True,
                     peer_count=peer_count,
+                    neighbor_ids=peers if node.config.kind == "edge" else [],
                     image_digests=image_digests,
                     clock_offset_seconds=clock,
                     clock_uncertainty_seconds=uncertainty,
@@ -353,7 +380,18 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                 if fact.cpus < node.config.cpus:
                     raise ValueError("VM CPU allocation mismatch")
                 evidence.append(fact)
+            if self.purpose == "scientific-experiment":
+                self.observations["peerGraph"] = observe_neighbors(
+                    http,
+                    {
+                        key: inputs.resource(self.endpoints[key])
+                        for key in self.neighbor_graph
+                    },
+                    self.neighbor_graph,
+                )
         topology = TopologyEvidence(
+            purpose=self.purpose,
+            peer_graph=self.observations.get("peerGraph"),
             measured_at=datetime.now(UTC),
             generator_location=self.resources.generator_location,
             nodes=evidence,

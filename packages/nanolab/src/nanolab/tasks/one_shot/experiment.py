@@ -20,6 +20,7 @@ from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from nanolab.config.one_shot import ProtocolSettings, TimingCell
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import CampaignManifest, TimingQualification
+from nanolab.one_shot.topology import observe_neighbors
 from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
@@ -604,6 +605,18 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
     runtimes = []
     sampled_at = datetime.now(UTC).isoformat()
     with httpx.Client(trust_env=False) as http:
+        if getattr(run.topology, "neighbor_graph", None):
+            snapshot = observe_neighbors(
+                http,
+                {
+                    key: inputs.resource(run.topology.endpoints[key])
+                    for key in run.topology.neighbor_graph
+                },
+                run.topology.neighbor_graph,
+            )
+            append_observation(
+                run.run_dir / "peer-graph.jsonl", {"at": sampled_at, "nodes": snapshot}
+            )
         for node_id, node in run.topology.resources.nodes.items():
             for name, function in run.topology.function_settings.items():
                 for replica in range(1, function.max_replicas + 1):
