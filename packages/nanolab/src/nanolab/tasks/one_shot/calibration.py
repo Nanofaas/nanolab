@@ -15,7 +15,12 @@ import httpx
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
 from nanolab.config.one_shot import OneShotConfig, resolve_node_functions
-from nanolab.one_shot.capacity import select_capacity
+from nanolab.one_shot.capacity import (
+    CAPACITY_FACTORS,
+    capacity_configurations,
+    select_capacity,
+    select_mixed_capacity,
+)
 from nanolab.one_shot.models import CalibrationProfile
 from nanolab.one_shot.profiles import CalibrationProfiles, ProfileSet
 from nanolab.tasks.one_shot.artifacts import (
@@ -555,7 +560,7 @@ class ValidateCapacityTask(_CalibrationTask[dict[str, Any]]):
 
     def _validate_scientific(self, inputs, value):
         if len(self.topology.function_settings) != 1:
-            raise ValueError("scientific campaign requires one identical workload")
+            return self._validate_multi_scientific(inputs, value)
         name = next(iter(self.topology.function_settings))
         trials, capacities, maximum = [], {}, {}
         for node in self.settings.nodes:
@@ -627,6 +632,184 @@ class ValidateCapacityTask(_CalibrationTask[dict[str, Any]]):
             )
         value["capacity"] = trials + simultaneous
         value["measuredCapacity"] = capacities
+        return value
+
+    def _validate_multi_scientific(self, inputs, value):
+        if not self.settings.strict_memory:
+            raise ValueError(
+                "multi-function scientific capacity requires strict memory"
+            )
+        configurations = capacity_configurations(
+            self.settings, self.topology.function_aliases
+        )
+        tolerance = self.settings.calibration.capacity_error
+        local = {
+            node.id: {
+                self.topology.function_aliases[name]: fn
+                for name, fn in resolve_node_functions(self.settings, node.id).items()
+            }
+            for node in self.settings.nodes
+        }
+        mixed_count = sum(entry["kind"] == "mixed" for entry in configurations)
+        sweep_count = len(configurations) * len(CAPACITY_FACTORS) * 3
+        write_immutable_artifact(
+            self.run_dir / "capacity-plan.json",
+            canonical_bytes(
+                {
+                    "schemaVersion": 2,
+                    "configurations": configurations,
+                    "factors": CAPACITY_FACTORS,
+                    "repetitions": 3,
+                    "warmupSeconds": 30,
+                    "measurementSeconds": 60,
+                    "sweepTrials": sweep_count,
+                    "simultaneousTrials": 3 * mixed_count,
+                    "minimumTrialWallSeconds": 90 * (sweep_count + 3 * mixed_count),
+                    "additionalCosts": [
+                        "provisioning",
+                        "replica drain/start/warmup",
+                        "evidence collection",
+                        "cleanup",
+                    ],
+                    "statistics": value["statistics"],
+                }
+            ),
+        )
+        all_trials, records, signatures = [], [], set()
+
+        def execute(vectors, rates, repetition, identifier):
+            directory = self.run_dir / "capacity-trials" / identifier
+            rows = run_capacity_trial(
+                self.topology,
+                self.settings,
+                inputs,
+                value,
+                replicas=vectors,
+                rates=rates,
+                repetition=repetition,
+                run_dir=directory,
+                clock=self.clock,
+            )
+            all_trials.extend(rows)
+            for row in rows:
+                append_observation(self.run_dir / "capacity.jsonl", row)
+            reference = {
+                "path": str((directory / "trial.json").relative_to(self.run_dir)),
+                "sha256": content_hash((directory / "trial.json").read_bytes()),
+            }
+            return rows, reference
+
+        def record(node, vector, rates, references):
+            signature = canonical_bytes([node, vector, rates])
+            if signature not in signatures:
+                signatures.add(signature)
+                records.append(
+                    {
+                        "node": node,
+                        "replicaVector": vector,
+                        "rates": rates,
+                        "trials": references,
+                    }
+                )
+
+        for index, configuration in enumerate(configurations):
+            vectors = configuration["vectors"]
+            candidates = []
+            for factor in CAPACITY_FACTORS:
+                rates = {
+                    node: {
+                        name: round(
+                            factor
+                            * count
+                            / value["statistics"][f"{node}/{name}"]["meanSeconds"]
+                            * 90
+                        )
+                        / 90
+                        for name, count in vector.items()
+                    }
+                    for node, vector in vectors.items()
+                }
+                if any(
+                    count > 0 and rates[node][name] <= 0
+                    for node, vector in vectors.items()
+                    for name, count in vector.items()
+                ):
+                    raise ValueError(
+                        "NOT_QUALIFIED: capacity arrival grid loses positive load"
+                    )
+                rows, references = [], []
+                for repetition in range(3):
+                    observed, reference = execute(
+                        vectors, rates, repetition, f"c{index}-f{factor}-p{repetition}"
+                    )
+                    rows.extend(observed)
+                    references.append(reference)
+                candidates.append((rates, rows, references))
+            selected = {}
+            for node, vector in vectors.items():
+                for rates, rows, references in reversed(candidates):
+                    try:
+                        select_mixed_capacity(
+                            rows,
+                            node=node,
+                            vector=vector,
+                            rates=rates[node],
+                            tolerance=tolerance,
+                        )
+                    except ValueError:
+                        continue
+                    selected[node] = rates[node]
+                    if any(
+                        rates[node][name]
+                        < count
+                        * local[node][name].utilization
+                        / value["statistics"][f"{node}/{name}"]["meanSeconds"]
+                        * (1 - tolerance)
+                        for name, count in vector.items()
+                        if count
+                    ):
+                        raise ValueError(
+                            "NOT_QUALIFIED: concurrent replica capacity model mismatch"
+                        )
+                    record(node, vector, rates[node], references)
+                    break
+                else:
+                    raise ValueError(
+                        f"NOT_QUALIFIED: no concurrent capacity for {node}"
+                    )
+            if configuration["kind"] == "mixed":
+                rows, references = [], []
+                for repetition in range(3):
+                    observed, reference = execute(
+                        vectors,
+                        selected,
+                        repetition,
+                        f"simultaneous-c{index}-p{repetition}",
+                    )
+                    rows.extend(observed)
+                    references.append(reference)
+                for node, vector in vectors.items():
+                    select_mixed_capacity(
+                        rows,
+                        node=node,
+                        vector=vector,
+                        rates=selected[node],
+                        tolerance=tolerance,
+                    )
+                    # Prefer the simultaneous proof over the identical sweep record.
+                    records[:] = [
+                        entry
+                        for entry in records
+                        if not (
+                            entry["node"] == node
+                            and entry["replicaVector"] == vector
+                            and entry["rates"] == selected[node]
+                        )
+                    ]
+                    signatures.discard(canonical_bytes([node, vector, selected[node]]))
+                    record(node, vector, selected[node], references)
+        value["capacity"] = all_trials
+        value["measuredConcurrentCapacity"] = records
         return value
 
     def _warm_replica(self, http, runtime, name, payload, value):
@@ -864,22 +1047,47 @@ class PublishCalibrationTask(
                 "path": str((directory / "profile.json").relative_to(self.run_dir)),
                 "sha256": digest,
             }
-        capacities = value["measuredCapacity"]
-        if set(capacities) != set(profiles) or any(
-            not math.isfinite(rate) or rate <= 0 for rate in capacities.values()
-        ):
-            raise ValueError("NOT_QUALIFIED: measured capacity scope incomplete")
+        capacities, concurrent = None, None
+        if len(self.topology.function_settings) > 1:
+            from nanolab.one_shot.capacity import read_concurrent_capacity
+
+            if not self.settings.strict_memory:
+                raise ValueError("concurrent capacity requires strict memory")
+            capacity_document = {
+                "schemaVersion": 2,
+                "artifactType": "measured-concurrent-capacity",
+                "environmentFingerprint": value["fingerprint"],
+                "functions": list(self.topology.function_settings),
+                "capacities": value["measuredConcurrentCapacity"],
+                "inferenceScope": (
+                    "Exact measured vectors and rates; isolated capacities "
+                    "do not qualify unmeasured mixes."
+                ),
+            }
+            concurrent = read_concurrent_capacity(
+                capacity_document,
+                root=self.run_dir,
+                nodes=set(profiles),
+                functions=set(self.topology.function_settings),
+                fingerprint=value["fingerprint"],
+                tolerance=self.settings.calibration.capacity_error,
+            )
+        else:
+            capacities = value["measuredCapacity"]
+            if set(capacities) != set(profiles) or any(
+                not math.isfinite(rate) or rate <= 0 for rate in capacities.values()
+            ):
+                raise ValueError("NOT_QUALIFIED: measured capacity scope incomplete")
+            capacity_document = {
+                "schemaVersion": 1,
+                "artifactType": "measured-node-capacity",
+                "environmentFingerprint": value["fingerprint"],
+                "capacities": capacities,
+                "trials": value.get("capacity", []),
+            }
         capacity_hash = write_immutable_artifact(
             self.run_dir / "capacity-summary.json",
-            canonical_bytes(
-                {
-                    "schemaVersion": 1,
-                    "artifactType": "measured-node-capacity",
-                    "environmentFingerprint": value["fingerprint"],
-                    "capacities": capacities,
-                    "trials": value.get("capacity", []),
-                }
-            ),
+            canonical_bytes(capacity_document),
         )
         index = ProfileSet.model_validate(
             {
@@ -906,4 +1114,6 @@ class PublishCalibrationTask(
                 {"path": str(self.run_dir / "profile.json"), "sha256": digest}
             ),
         )
-        return CalibrationProfiles(profiles, digest, value["fingerprint"], capacities)
+        return CalibrationProfiles(
+            profiles, digest, value["fingerprint"], capacities, concurrent
+        )

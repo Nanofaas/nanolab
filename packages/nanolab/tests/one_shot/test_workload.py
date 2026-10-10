@@ -108,6 +108,7 @@ def test_six_nodes_register_five_explicit_handler_identities(tmp_path, monkeypat
             assert fn.env["FUNCTION_HANDLER"] == fn.name
             assert fn.env["NANOFAAS_MAX_CONCURRENT_HANDLERS"] == "1"
             assert fn.max_retries == 0
+            assert fn.resources["requests"] == fn.resources["limits"]
 
 
 def test_packaged_recipe_exports_each_workload_and_enables_strict_memory():

@@ -74,7 +74,10 @@ def test_live_collection_uses_remote_id_and_preserves_invalid_identity_diagnosti
         assert "identity" in (tmp_path / "collection-errors.jsonl").read_text()
 
 
-def test_live_collector_observes_replica_beyond_global_default(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fixed", [False, True])
+def test_live_collector_observes_replica_beyond_global_default(
+    tmp_path, monkeypatch, fixed
+):
     """Cloud replica seven must not vanish because the global default is two."""
     node = SimpleNamespace(config=SimpleNamespace(memory_capacity_mib=384))
     topology = SimpleNamespace(
@@ -84,6 +87,8 @@ def test_live_collector_observes_replica_beyond_global_default(tmp_path, monkeyp
         endpoints={"cloud": "cloud-endpoint"},
     )
     run = SimpleNamespace(topology=topology, run_dir=tmp_path)
+    if fixed:
+        run.runtime_replica_counts = {"cloud": {"work": 1}}
     row = {
         "event": "result",
         "phase": "campaign",
@@ -117,6 +122,12 @@ def test_live_collector_observes_replica_beyond_global_default(tmp_path, monkeyp
             )
         return httpx.Response(200, text="nanofaas_runtime_active_handlers 0\n")
 
+    probed = []
+
+    def endpoint(*args, **kwargs):
+        probed.append(kwargs["replica"])
+        return "http://sdk-" + str(kwargs["replica"]), {}
+
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
         monkeypatch.setattr(
             "nanolab.tasks.one_shot.experiment.httpx.Client",
@@ -124,10 +135,15 @@ def test_live_collector_observes_replica_beyond_global_default(tmp_path, monkeyp
         )
         monkeypatch.setattr(
             "nanolab.tasks.one_shot.experiment.runtime_endpoint",
-            lambda *_args, **kwargs: ("http://sdk-" + str(kwargs["replica"]), {}),
+            endpoint,
         )
         inputs = cast(Any, SimpleNamespace(resource=lambda _: "http://gateway:8080"))
         collect_runtime_evidence(run, inputs, [row])
+    if fixed:
+        assert probed == [1]
+        assert not (tmp_path / "physical.jsonl").exists()
+        return
+    assert probed == [1, 2, 3]
     assert (tmp_path / "physical.jsonl").is_file()
     proof = json.loads((tmp_path / "physical.jsonl").read_text())
     assert proof["incarnation"] == "r3"

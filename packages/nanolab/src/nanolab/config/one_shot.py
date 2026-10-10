@@ -320,8 +320,34 @@ class OneShotConfig(BaseModel):
             if node.function_limits.keys() - self.functions.keys():
                 raise ValueError("unknown function override")
             functions = resolve_node_functions(self, node.id)
-            if sum(fn.cpu * fn.max_replicas for fn in functions.values()) > node.cpus:
-                raise ValueError("replica pool exceeds node CPU budget")
+            if (
+                self.strict_memory
+                and sum(fn.memory_mib for fn in functions.values())
+                > node.memory_capacity_mib
+            ):
+                raise ValueError(
+                    "initial function replicas must fit simultaneously in memory pool"
+                )
+            reserved_cpu = (
+                0.4
+                if self.strict_memory and self.purpose == "scientific-experiment"
+                else 0
+            )
+            if (
+                replica_cpu_bound(node.memory_capacity_mib, functions) + reserved_cpu
+                > node.cpus + 1e-9
+            ):
+                raise ValueError(
+                    "replica pool/platform reservation exceeds node CPU budget"
+                )
+            if (
+                self.strict_memory
+                and self.purpose == "scientific-experiment"
+                and node.memory_capacity_mib + 512 + 128 >= node.memory_mib
+            ):
+                raise ValueError(
+                    "platform/OS memory reservation exceeds node memory budget"
+                )
             for function in functions.values():
                 if node.memory_capacity_mib < function.memory_mib:
                     raise ValueError("optimizer memory pool must fit one replica")
@@ -333,23 +359,40 @@ class OneShotConfig(BaseModel):
         if self.observability.logs.enabled:
             collector = self.observability.logs
             for node in self.nodes:
-                peak_cpu = sum(
-                    function.cpu
-                    * min(
-                        function.max_replicas,
-                        node.memory_capacity_mib // function.memory_mib,
-                    )
-                    for function in resolve_node_functions(self, node.id).values()
+                peak_cpu = replica_cpu_bound(
+                    node.memory_capacity_mib, resolve_node_functions(self, node.id)
                 )
-                if peak_cpu + collector.cpu > node.cpus:
+                reserved_cpu = (
+                    0.4
+                    if self.strict_memory and self.purpose == "scientific-experiment"
+                    else 0
+                )
+                if peak_cpu + reserved_cpu + collector.cpu > node.cpus + 1e-9:
                     raise ValueError(
                         "collector CPU reservation exceeds node compute budget"
                     )
-                if node.memory_capacity_mib + collector.memory_mib >= node.memory_mib:
+                reserved_memory = (
+                    640
+                    if self.strict_memory and self.purpose == "scientific-experiment"
+                    else 0
+                )
+                if (
+                    node.memory_capacity_mib + reserved_memory + collector.memory_mib
+                    >= node.memory_mib
+                ):
                     raise ValueError(
                         "collector memory reservation leaves no platform memory"
                     )
         return self
+
+
+def replica_cpu_bound(pool_mib: int, functions: dict[str, OneShotFunction]) -> float:
+    """Upper bound all memory-feasible allocations, never assume maxima coexist."""
+    return min(
+        sum(function.cpu * function.max_replicas for function in functions.values()),
+        pool_mib
+        * max(function.cpu / function.memory_mib for function in functions.values()),
+    )
 
 
 def resolve_node_functions(

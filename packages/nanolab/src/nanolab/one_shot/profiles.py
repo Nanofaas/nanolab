@@ -42,6 +42,7 @@ class CalibrationProfiles:
     sha256: str
     environment_fingerprint: str
     capacities: dict[str, float] | None = None
+    concurrent_capacities: list[dict] | None = None
 
 
 def relative_reference(root: Path, reference: ArtifactReference) -> ArtifactReference:
@@ -136,6 +137,46 @@ def read_profiles(settings: OneShotConfig) -> CalibrationProfiles:
         verify_node_resources(profile, settings, node)
         profiles[node] = profile
     capacity = json.loads(relative_reference(root, index.capacity).read_verified())
+    if capacity.get("schemaVersion") == 2:
+        from nanolab.one_shot.capacity import read_concurrent_capacity
+
+        if not settings.strict_memory:
+            raise ValueError("concurrent capacity requires strict memory")
+        names = {
+            str(row["function"]) for row in next(iter(profiles.values())).functions
+        }
+        records = read_concurrent_capacity(
+            capacity,
+            root=root,
+            nodes=expected,
+            functions=names,
+            fingerprint=index.environment_fingerprint,
+            tolerance=settings.calibration.capacity_error,
+        )
+        for record in records:
+            profile = profiles[record["node"]]
+            measured = {str(row["function"]): row for row in profile.functions}
+            vector = record["replicaVector"]
+            node = next(node for node in settings.nodes if node.id == record["node"])
+            if (
+                any(
+                    vector[name] > measured[name]["validity"]["maxReplicas"]
+                    for name in names
+                )
+                or sum(vector[name] * measured[name]["memoryMiB"] for name in names)
+                > node.memory_capacity_mib
+            ):
+                raise ValueError(
+                    "concurrent capacity replica vector exceeds resource scope"
+                )
+        return CalibrationProfiles(
+            profiles,
+            settings.profile.sha256,
+            index.environment_fingerprint,
+            concurrent_capacities=records,
+        )
+    if len(settings.functions) != 1:
+        raise ValueError("scalar capacity cannot qualify concurrent functions")
     if (
         capacity.get("schemaVersion") != 1
         or capacity.get("artifactType") != "measured-node-capacity"

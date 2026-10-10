@@ -166,3 +166,27 @@ resource table, sparse graph, acquisition gates and conditional paired analysis.
 experiment scenarios; no separate infrastructure orchestration or CLI is needed.
 Scientific fingerprints include the installed NanoLab code/assets and explicit
 control-plane limits; changing either invalidates calibration compatibility.
+
+### Concurrent multi-function capacity
+
+Strict multi-function calibration uses the version 2
+`measured-concurrent-capacity` artifact. Each record binds a node, the complete
+replica vector, per-function rates and three relative SHA-256 references to raw
+`trial.json` files. Reading the profile verifies those bytes, physical completion
+accounting, lateness and service drift again. A scalar legacy capacity cannot
+qualify multiple functions. Isolated rates never qualify an unmeasured mix.
+
+The sweep predeclares every integer replica level for each function and batches
+nodes at the same level. Mixed trials use a memory-feasible balanced vector and
+five dominant-function vectors, with three additional simultaneous repetitions
+at the selected rates. All attempts remain in `capacity.jsonl`; a failed gate
+does not publish a qualified profile. `capacity-plan.json` records the factors,
+vectors and minimum acquisition time before the first capacity trial. Replica
+transitions, warmup, evidence collection and infrastructure add to that time.
+
+The five-function design with maximum replica counts 5/5/10/10/15/35 requires
+3,276 trials at 90 seconds: at least 81 hours and 54 minutes for this exhaustive
+calibration. The synchronized experiment itself measures nine 360-second
+intervals, or 54 minutes per mode, across all six nodes simultaneously. Each mode
+also requires at least 12 minutes of warmup. Pilot and main repetitions are
+separate acquisitions, with their full time reported separately.

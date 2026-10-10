@@ -713,8 +713,12 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
             functions = getattr(run.topology, "node_function_settings", {}).get(
                 node_id, run.topology.function_settings
             )
+            fixed = getattr(run, "runtime_replica_counts", {}).get(node_id)
             for name, function in functions.items():
-                for replica in range(1, function.max_replicas + 1):
+                replica_count = (
+                    function.max_replicas if fixed is None else fixed.get(name, 0)
+                )
+                for replica in range(1, replica_count + 1):
                     try:
                         url, container = runtime_endpoint(
                             node, name, inputs=inputs, replica=replica

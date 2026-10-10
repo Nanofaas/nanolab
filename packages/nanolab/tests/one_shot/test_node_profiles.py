@@ -164,6 +164,77 @@ def test_legacy_profile_keeps_capacity_unknown(tmp_path):
     assert profiles.by_node["edge-1"].functions[0]["serviceSeconds"] == 0.1
 
 
+@pytest.mark.parametrize("scalar", [False, True])
+def test_multi_function_profiles_require_verified_concurrent_capacity(tmp_path, scalar):
+    from copy import deepcopy
+
+    from .test_multi_function_capacity import mixed_trials
+
+    settings, index = fixture(tmp_path)
+    settings["strictMemory"] = True
+    settings["functions"] = {
+        name: {"input": {"seed": i}, "cpu": 0.25} for i, name in enumerate(["f0", "f1"])
+    }
+    for node in settings["nodes"]:
+        node.pop("functionLimits", None)
+        path = tmp_path / (node["id"] + ".json")
+        document = json.loads(path.read_bytes())
+        row = document["functions"][0]
+        document["functions"] = []
+        for name, function in settings["functions"].items():
+            local = deepcopy(row)
+            local.update(
+                function=name,
+                cpuQuota=0.25,
+                inputHash="sha256:" + content_hash(canonical_bytes(function["input"])),
+                coLocation=[other for other in settings["functions"] if other != name],
+            )
+            document["functions"].append(local)
+        path.write_bytes(canonical_bytes(document))
+        index["nodes"][node["id"]]["sha256"] = content_hash(path.read_bytes())
+    if scalar:
+        with pytest.raises(ValueError, match=r"concurrent|scalar"):
+            read(tmp_path, settings, index)
+        return
+    references = []
+    for repetition in range(3):
+        rows = [
+            {**row, "node": node["id"]}
+            for node in settings["nodes"]
+            for row in mixed_trials()
+            if row["repetition"] == repetition
+        ]
+        path = tmp_path / f"joint-{repetition}.json"
+        path.write_bytes(canonical_bytes(rows))
+        references.append(
+            {"path": path.name, "sha256": content_hash(path.read_bytes())}
+        )
+    path = tmp_path / "capacity.json"
+    path.write_bytes(
+        canonical_bytes(
+            {
+                "schemaVersion": 2,
+                "artifactType": "measured-concurrent-capacity",
+                "environmentFingerprint": index["environmentFingerprint"],
+                "functions": ["f0", "f1"],
+                "capacities": [
+                    {
+                        "node": node["id"],
+                        "replicaVector": {"f0": 1, "f1": 1},
+                        "rates": {"f0": 2.0, "f1": 3.0},
+                        "trials": references,
+                    }
+                    for node in settings["nodes"]
+                ],
+            }
+        )
+    )
+    index["capacity"]["sha256"] = content_hash(path.read_bytes())
+    profiles = read(tmp_path, settings, index)
+    assert profiles.capacities is None
+    assert len(profiles.concurrent_capacities) == 3
+
+
 def test_publish_node_profiles_preserves_local_demand_and_immutable_bytes(tmp_path):
     from types import SimpleNamespace
     from typing import Any, cast

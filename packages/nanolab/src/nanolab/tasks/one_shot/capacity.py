@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import sys
 import time
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
@@ -10,18 +12,22 @@ from types import SimpleNamespace
 
 import httpx
 
-from nanolab.tasks.one_shot.artifacts import canonical_bytes, write_immutable_artifact
+from nanolab.tasks.one_shot.artifacts import (
+    append_observation,
+    canonical_bytes,
+    write_immutable_artifact,
+)
 from nanolab.tasks.one_shot.trace import TraceArtifact, request_schedule
 
 
-def run_capacity_trial(
+def _run_capacity_trial(
     topology,
     settings,
     inputs,
     value,
     *,
-    replicas: dict[str, int],
-    rates: dict[str, float],
+    replicas: dict,
+    rates: dict,
     repetition: int,
     run_dir: Path,
     clock,
@@ -41,66 +47,172 @@ def run_capacity_trial(
     from nanolab.tasks.one_shot.preflight import runtime_endpoint
 
     run_dir.mkdir(parents=True, exist_ok=False)
-    function_name = next(iter(topology.function_settings))
-    payload = topology.function_settings[function_name].input
-    expected = value["outputs"][function_name]
+    from nanolab.config.one_shot import resolve_node_functions
+    from nanolab.tasks.one_shot.preflight import (
+        collect_container_cgroup,
+        validate_strict_cgroup,
+    )
+
+    functions = list(topology.function_settings)
+    legacy = all(type(count) is int for count in replicas.values())
+    if legacy:
+        if len(functions) != 1:
+            raise ValueError("scalar capacity input has ambiguous function scope")
+        replicas = {node: {functions[0]: count} for node, count in replicas.items()}
+        rates = {node: {functions[0]: rate} for node, rate in rates.items()}
+    if not replicas or set(replicas) != set(rates):
+        raise ValueError("capacity node scope mismatch")
+    aliases = getattr(topology, "function_aliases", {})
+    node_settings, counts, effective = {}, {}, {}
+    for node, vector in replicas.items():
+        node_config = next(
+            (entry for entry in settings.nodes if entry.id == node), None
+        )
+        if node_config is None or node not in topology.endpoints:
+            raise ValueError("unknown capacity node")
+        local = {
+            aliases.get(name, name): fn
+            for name, fn in resolve_node_functions(settings, node).items()
+        }
+        node_settings[node] = local
+        if (
+            not isinstance(vector, dict)
+            or not isinstance(rates[node], dict)
+            or set(vector) - set(functions)
+            or set(rates[node]) - set(functions)
+        ):
+            raise ValueError("capacity function scope mismatch")
+        counts[node], effective[node] = {}, {}
+        for function in functions:
+            count = vector.get(function, 0)
+            rate = rates[node].get(function, 0)
+            if (
+                type(count) is not int
+                or count < 0
+                or count > local[function].max_replicas
+                or isinstance(rate, bool)
+                or not isinstance(rate, (int, float))
+                or not math.isfinite(rate)
+                or rate < 0
+            ):
+                raise ValueError("invalid capacity replicas/rate")
+            if (count == 0 and rate != 0) or (count > 0 and rate == 0):
+                raise ValueError("capacity active replica/rate scope mismatch")
+            rounded = round(rate * 90) / 90
+            if rate > 0 and rounded <= 0:
+                raise ValueError("capacity arrival grid loses positive load")
+            counts[node][function], effective[node][function] = count, rounded
+        if not any(counts[node].values()):
+            raise ValueError("capacity node has no active function")
+        if (
+            sum(counts[node][name] * local[name].memory_mib for name in functions)
+            > node_config.memory_capacity_mib
+        ):
+            raise ValueError("capacity replica vector exceeds memory pool")
     runtime_urls = {}
     with httpx.Client(trust_env=False) as http:
-        for node_id, count in replicas.items():
-            response = http.put(
-                inputs.resource(topology.endpoints[node_id])
-                + f"/v1/functions/{function_name}/replicas",
-                json={"replicas": count},
-                timeout=30,
-            )
-            response.raise_for_status()
-            runtime_urls[node_id] = []
-            for replica in range(1, count + 1):
-                deadline = time.monotonic() + 30
-                while True:
-                    try:
-                        runtime, _ = runtime_endpoint(
-                            topology.resources.nodes[node_id],
-                            function_name,
-                            inputs=inputs,
-                            replica=replica,
-                        )
-                        status = http.get(runtime + "/runtime/status", timeout=2)
-                        status.raise_for_status()
-                        if (
-                            status.json().get("maxConcurrentHandlers") != 1
-                            or status.json().get("physicalReleaseProof") is not True
-                        ):
-                            raise ValueError("capacity replica lacks physical c1 proof")
-                        break
-                    except (httpx.HTTPError, RuntimeError, ValueError):
+        for node_id, vector in counts.items():
+            gateway = inputs.resource(topology.endpoints[node_id])
+            node = topology.resources.nodes[node_id]
+            if not legacy:
+                # Drain the previous configuration before growing a new feasible one.
+                for name in functions:
+                    http.put(
+                        gateway + f"/v1/functions/{name}/replicas",
+                        json={"replicas": 0},
+                        timeout=30,
+                    ).raise_for_status()
+                    deadline = time.monotonic() + 30
+                    while True:
+                        remaining = node.command(
+                            (
+                                "docker",
+                                "ps",
+                                "-q",
+                                "--filter",
+                                "label=io.nanofaas.managed=true",
+                                "--filter",
+                                f"label=io.nanofaas.function={node.request.name}/{name}",
+                            )
+                        ).stdout.strip()
+                        if not remaining:
+                            break
                         if time.monotonic() >= deadline:
-                            raise
+                            raise RuntimeError(
+                                "capacity previous replicas did not drain"
+                            )
                         time.sleep(0.1)
-                runtime_urls[node_id].append(runtime)
-                warm = measure_invocation(
-                    http,
-                    runtime,
-                    payload=payload,
-                    execution_id=f"capacity-warm-{node_id}-{replica}-{run_dir.name}",
-                    expected_output=expected,
-                    timeout_seconds=settings.calibration.timeout_seconds,
-                    release_timeout_seconds=settings.calibration.timeout_seconds,
-                )
-                if warm["state"] != "complete":
-                    raise ValueError("capacity replica warmup failed")
-    effective = {node: round(rate * 90) / 90 for node, rate in rates.items()}
-    if any(rate <= 0 for rate in effective.values()):
-        raise ValueError("capacity arrival grid loses positive load")
+            runtime_urls[node_id] = {}
+            for name, count in vector.items():
+                if not count:
+                    continue
+                payload = topology.function_settings[name].input
+                expected = value["outputs"][name]
+                http.put(
+                    gateway + f"/v1/functions/{name}/replicas",
+                    json={"replicas": count},
+                    timeout=30,
+                ).raise_for_status()
+                runtime_urls[node_id][name] = []
+                for replica in range(1, count + 1):
+                    deadline = time.monotonic() + 30
+                    while True:
+                        try:
+                            runtime, observed = runtime_endpoint(
+                                node, name, inputs=inputs, replica=replica
+                            )
+                            status = http.get(runtime + "/runtime/status", timeout=2)
+                            status.raise_for_status()
+                            if (
+                                status.json().get("maxConcurrentHandlers") != 1
+                                or status.json().get("physicalReleaseProof") is not True
+                            ):
+                                raise ValueError(
+                                    "capacity replica lacks physical c1 proof"
+                                )
+                            break
+                        except (httpx.HTTPError, RuntimeError, ValueError):
+                            if time.monotonic() >= deadline:
+                                raise
+                            time.sleep(0.1)
+                    runtime_urls[node_id][name].append(runtime)
+                    if settings.strict_memory:
+                        expected_resources = node_settings[node_id][name]
+                        if (
+                            observed.get("HostConfig", {}).get("MemorySwap")
+                            != expected_resources.memory_mib * 1024 * 1024
+                        ):
+                            raise ValueError("capacity strict swap limit mismatch")
+                        sample = collect_container_cgroup(node, observed)
+                        write_immutable_artifact(
+                            run_dir / f"{node_id}-{name}-r{replica}-cgroup-before.json",
+                            canonical_bytes(sample),
+                        )
+                        validate_strict_cgroup(
+                            sample,
+                            memory_mib=expected_resources.memory_mib,
+                            cpu=expected_resources.cpu,
+                        )
+                    warm = measure_invocation(
+                        http,
+                        runtime,
+                        payload=payload,
+                        execution_id=f"capacity-warm-{node_id}-{name}-{replica}-{run_dir.name}",
+                        expected_output=expected,
+                        timeout_seconds=settings.calibration.timeout_seconds,
+                        release_timeout_seconds=settings.calibration.timeout_seconds,
+                    )
+                    if warm["state"] != "complete":
+                        raise ValueError("capacity replica warmup failed")
     anchor = datetime.now(UTC) + timedelta(seconds=2)
     trace = TraceArtifact(
         nodes=list(effective),
-        functions=[function_name],
+        functions=functions,
         period_seconds=90,
         flow_quantum=1 / 90,
         seed=settings.seed,
-        payloads={function_name: payload},
-        windows=[{node: {function_name: rate} for node, rate in effective.items()}],
+        payloads={name: topology.function_settings[name].input for name in functions},
+        windows=[effective],
     )
     schedule = request_schedule(
         trace,
@@ -112,18 +224,37 @@ def run_capacity_trial(
     )
     for row in schedule:
         node = row["origin"]
-        replica = int(row["originalId"].rsplit(":", 1)[1]) % replicas[node]
-        row.update(sdk=True, url=runtime_urls[node][replica] + "/invoke")
+        name = row["function"]
+        replica = int(row["originalId"].rsplit(":", 1)[1]) % counts[node][name]
+        row.update(sdk=True, url=runtime_urls[node][name][replica] + "/invoke")
     write_immutable_artifact(run_dir / "schedule.json", canonical_bytes(schedule))
-    run = SimpleNamespace(topology=topology, run_dir=run_dir)
+    run = SimpleNamespace(
+        topology=topology, run_dir=run_dir, runtime_replica_counts=counts
+    )
     resource = generator_resource(run_dir=run_dir, vus=512, duration=90)
     primary = None
+
+    def compensate(callback, *args):
+        original = sys.exception()
+        try:
+            callback(*args)
+        except Exception as error:
+            if original is None:
+                raise
+            original.add_note(f"cleanup also failed: {error}")
+            try:
+                append_observation(
+                    run_dir / "cleanup-errors.jsonl", {"error": str(error)}
+                )
+            except OSError as evidence_error:
+                original.add_note(f"cleanup diagnostic unavailable: {evidence_error}")
+
     try:
         with ExitStack() as stack:
             process = resource.acquire(inputs)
-            stack.callback(resource.release, inputs, process)
+            stack.callback(compensate, resource.release, inputs, process)
             collector = LiveEvidenceCollector(run, inputs)
-            stack.callback(collector.close)
+            stack.callback(compensate, collector.close)
             deadline = time.monotonic() + 150
             while process.poll() is None:
                 inputs.resource(clock).require_healthy()
@@ -143,88 +274,162 @@ def run_capacity_trial(
     finally:
         # Record the original error even if collection or compensation failed.
         if primary is not None:
-            (run_dir / "failure.txt").write_text(str(primary) + "\n")
+            try:
+                (run_dir / "failure.txt").write_text(str(primary) + "\n")
+            except OSError as error:
+                primary.add_note(f"failure diagnostic unavailable: {error}")
     rows = generator_rows(run_dir / "generator.jsonl")
     proofs = physical_attempts(run_dir / "physical.jsonl")
     measurements = []
-    for node in effective:
-        planned = {
-            row["originalId"]: row
-            for row in schedule
-            if row["origin"] == node and row["scheduledAt"] >= anchor.timestamp() + 30
-        }
-        emitted = [
-            row
-            for row in rows
-            if row["event"] == "emitted" and row["originalId"] in planned
-        ]
-        outcomes = [
-            row
-            for row in rows
-            if row["event"] == "result" and row["originalId"] in planned
-        ]
-        ids = {row["originalId"] for row in emitted}
-        local_proofs = [proof for proof in proofs if proof["originalId"] in planned]
-        completed, errors, durations, valid_output = set(), set(), [], True
-        for row in outcomes:
-            physical = [
-                proof
-                for proof in local_proofs
-                if proof["originalId"] == row["originalId"]
+    for node, vector in counts.items():
+        for function_name, replica_count in vector.items():
+            if not replica_count:
+                continue
+            expected = value["outputs"][function_name]
+            planned = {
+                row["originalId"]: row
+                for row in schedule
+                if row["origin"] == node
+                and row["function"] == function_name
+                and row["scheduledAt"] >= anchor.timestamp() + 30
+            }
+            emitted = [
+                row
+                for row in rows
+                if row["event"] == "emitted" and row["originalId"] in planned
             ]
-            result = classify_result(row, expected=str(expected), physical=physical)
-            valid_output &= (
-                row["statusCode"] != 200 or result["success"] or result["terminalError"]
+            outcomes = [
+                row
+                for row in rows
+                if row["event"] == "result" and row["originalId"] in planned
+            ]
+            ids = {row["originalId"] for row in emitted}
+            local_proofs = [proof for proof in proofs if proof["originalId"] in planned]
+            completed, errors, durations, valid_output = set(), set(), [], True
+            for row in outcomes:
+                physical = [
+                    proof
+                    for proof in local_proofs
+                    if proof["originalId"] == row["originalId"]
+                ]
+                result = classify_result(row, expected=str(expected), physical=physical)
+                if any(proof.get("function") != function_name for proof in physical):
+                    valid_output = False
+                    continue
+                valid_output &= (
+                    row["statusCode"] != 200
+                    or result["success"]
+                    or result["terminalError"]
+                )
+                if (
+                    result["success"]
+                    and row["originalId"] in ids
+                    and len(physical) == 1
+                    and physical[0].get("state") == "RELEASED"
+                    and physical[0].get("handlerStarted")
+                    and physical[0]["destination"] == node
+                ):
+                    completed.add(row["originalId"])
+                    durations.append(physical[0]["occupancySeconds"])
+                elif result["terminalError"]:
+                    errors.add(row["originalId"])
+            lateness = [
+                row["emittedAt"] - planned[row["originalId"]]["scheduledAt"]
+                for row in emitted
+            ]
+            duplicate = (
+                len(emitted) != len(ids)
+                or len(outcomes) != len({row["originalId"] for row in outcomes})
+                or len(local_proofs) > len(completed)
             )
-            if (
-                result["success"]
-                and len(physical) == 1
-                and physical[0].get("state") == "RELEASED"
-                and physical[0].get("handlerStarted")
-                and physical[0]["destination"] == node
-            ):
-                completed.add(row["originalId"])
-                durations.append(physical[0]["occupancySeconds"])
-            elif result["terminalError"]:
-                errors.add(row["originalId"])
-        lateness = [
-            row["emittedAt"] - planned[row["originalId"]]["scheduledAt"]
-            for row in emitted
-        ]
-        duplicate = (
-            len(emitted) != len(ids)
-            or len(outcomes) != len({row["originalId"] for row in outcomes})
-            or len(local_proofs) > len(completed)
-        )
-        deficit = len(set(planned) - ids)
-        service = value["statistics"][f"{node}/{function_name}"]["meanSeconds"]
-        measured = {
-            "node": node,
-            "replicas": replicas[node],
-            "rate": effective[node],
-            "requestedRate": rates[node],
-            "repetition": repetition,
-            "warmupSeconds": 30,
-            "measurementSeconds": 60,
-            "planned": len(planned),
-            "emitted": len(emitted),
-            "physicalCompletions": len(completed),
-            "knownErrors": len(errors),
-            "censored": len(ids - completed - errors),
-            "generatorDeficit": deficit,
-            "validOutput": bool(
-                valid_output
-                and not duplicate
-                and lateness
-                and min(lateness) >= -0.001
-                and max(lateness) <= 0.25
-            ),
-            "relativeServiceDrift": abs(sum(durations) / len(durations) / service - 1)
-            if durations
-            else 1.0,
-            "maxArrivalLatenessSeconds": max(lateness) if lateness else None,
-            "trialDirectory": str(run_dir),
-        }
-        measurements.append(measured)
+            deficit = len(set(planned) - ids)
+            service = value["statistics"][f"{node}/{function_name}"]["meanSeconds"]
+            measured = {
+                "node": node,
+                "replicas": replica_count,
+                "rate": effective[node][function_name],
+                "requestedRate": rates[node].get(function_name, 0),
+                "repetition": repetition,
+                "warmupSeconds": 30,
+                "measurementSeconds": 60,
+                "planned": len(planned),
+                "emitted": len(emitted),
+                "physicalCompletions": len(completed),
+                "knownErrors": len(errors),
+                "censored": len(ids - completed - errors),
+                "generatorDeficit": deficit,
+                "validOutput": bool(
+                    valid_output
+                    and not duplicate
+                    and lateness
+                    and min(lateness) >= -0.001
+                    and max(lateness) <= 0.25
+                ),
+                "relativeServiceDrift": abs(
+                    sum(durations) / len(durations) / service - 1
+                )
+                if durations
+                else 1.0,
+                "maxArrivalLatenessSeconds": max(lateness) if lateness else None,
+                "trialDirectory": str(run_dir),
+            }
+            if not legacy:
+                measured.update(
+                    function=function_name, replicaVector=vector, mix=effective[node]
+                )
+            measurements.append(measured)
+    if settings.strict_memory:
+        for node_id, vector in counts.items():
+            for name, count in vector.items():
+                for replica in range(1, count + 1):
+                    node = topology.resources.nodes[node_id]
+                    _, observed = runtime_endpoint(
+                        node, name, inputs=inputs, replica=replica
+                    )
+                    sample = collect_container_cgroup(node, observed)
+                    write_immutable_artifact(
+                        run_dir / f"{node_id}-{name}-r{replica}-cgroup-after.json",
+                        canonical_bytes(sample),
+                    )
+                    expected_resources = node_settings[node_id][name]
+                    validate_strict_cgroup(
+                        sample,
+                        memory_mib=expected_resources.memory_mib,
+                        cpu=expected_resources.cpu,
+                    )
     write_immutable_artifact(run_dir / "trial.json", canonical_bytes(measurements))
     return measurements
+
+
+def run_capacity_trial(
+    topology,
+    settings,
+    inputs,
+    value,
+    *,
+    replicas: dict,
+    rates: dict,
+    repetition: int,
+    run_dir: Path,
+    clock,
+) -> list[dict]:
+    """Keep the original error even during allocation, warmup or cgroup collection."""
+    try:
+        return _run_capacity_trial(
+            topology,
+            settings,
+            inputs,
+            value,
+            replicas=replicas,
+            rates=rates,
+            repetition=repetition,
+            run_dir=run_dir,
+            clock=clock,
+        )
+    except BaseException as error:
+        if run_dir.is_dir() and not (run_dir / "failure.txt").exists():
+            try:
+                (run_dir / "failure.txt").write_text(str(error) + "\n")
+            except OSError as evidence_error:
+                error.add_note(f"failure diagnostic unavailable: {evidence_error}")
+        raise

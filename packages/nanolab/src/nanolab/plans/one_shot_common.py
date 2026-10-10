@@ -571,7 +571,17 @@ def add_one_shot_platforms(
                 payload=json.dumps(function.input),
                 build_argv=(),
                 resources={
-                    "limits": {"cpu": function.cpu, "memoryMiB": function.memory_mib}
+                    "limits": {"cpu": function.cpu, "memoryMiB": function.memory_mib},
+                    **(
+                        {
+                            "requests": {
+                                "cpu": function.cpu,
+                                "memoryMiB": function.memory_mib,
+                            }
+                        }
+                        if settings.strict_memory
+                        else {}
+                    ),
                 },
                 scaling_config={
                     "strategy": "NONE",
