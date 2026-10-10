@@ -66,23 +66,23 @@ oneShot:
   - cpus: 2
     functionLimits:
       one-shot-arithmetic-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-matrix-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-memory-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-mixed-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-sort-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
     id: edge-3
@@ -92,23 +92,23 @@ oneShot:
   - cpus: 2
     functionLimits:
       one-shot-arithmetic-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-matrix-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-memory-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-mixed-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
       one-shot-sort-rust:
-        cpu: 0.149
+        cpu: 0.14
         maxReplicas: 10
         memoryMiB: 64
     id: edge-4
@@ -118,23 +118,23 @@ oneShot:
   - cpus: 3
     functionLimits:
       one-shot-arithmetic-rust:
-        cpu: 0.166
+        cpu: 0.16
         maxReplicas: 15
         memoryMiB: 64
       one-shot-matrix-rust:
-        cpu: 0.166
+        cpu: 0.16
         maxReplicas: 15
         memoryMiB: 64
       one-shot-memory-rust:
-        cpu: 0.166
+        cpu: 0.16
         maxReplicas: 15
         memoryMiB: 64
       one-shot-mixed-rust:
-        cpu: 0.166
+        cpu: 0.16
         maxReplicas: 15
         memoryMiB: 64
       one-shot-sort-rust:
-        cpu: 0.166
+        cpu: 0.16
         maxReplicas: 15
         memoryMiB: 64
     id: edge-5
@@ -144,23 +144,23 @@ oneShot:
   - cpus: 8
     functionLimits:
       one-shot-arithmetic-rust:
-        cpu: 0.214
+        cpu: 0.21
         maxReplicas: 35
         memoryMiB: 64
       one-shot-matrix-rust:
-        cpu: 0.214
+        cpu: 0.21
         maxReplicas: 35
         memoryMiB: 64
       one-shot-memory-rust:
-        cpu: 0.214
+        cpu: 0.21
         maxReplicas: 35
         memoryMiB: 64
       one-shot-mixed-rust:
-        cpu: 0.214
+        cpu: 0.21
         maxReplicas: 35
         memoryMiB: 64
       one-shot-sort-rust:
-        cpu: 0.214
+        cpu: 0.21
         maxReplicas: 35
         memoryMiB: 64
     id: cloud

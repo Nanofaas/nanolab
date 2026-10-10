@@ -1,5 +1,6 @@
 """Packaged templates keep strict resources and six-minute scope explicit."""
 
+from decimal import Decimal
 from importlib.resources import files
 
 import pytest
@@ -46,3 +47,22 @@ def test_multifunction_templates_are_strict_and_block_unfilled_artifacts(stage):
         assert settings.experiment is not None
         assert settings.experiment.warmup_seconds == 720
         assert all(window.epochs == 1 for window in settings.experiment.windows)
+
+
+@pytest.mark.parametrize("stage", ["calibration", "qualification", "pilot"])
+def test_multifunction_cpu_limits_are_representable_and_fit_vm_reserve(stage):
+    path = files("nanolab").joinpath(
+        "assets/presets/scenarios/one-shot-multifunction-" + stage + ".yaml"
+    )
+    settings = ScenarioConfig.model_validate(yaml.safe_load(path.read_text())).one_shot
+    assert settings is not None
+    for node in settings.nodes:
+        for limit in node.function_limits.values():
+            # systemd/runc rounds CPU quota per second to 10ms, i.e. 0.01 CPU.
+            cpu = Decimal(str(limit.cpu))
+            assert cpu % Decimal("0.01") == 0
+            feasible_replicas = min(
+                limit.max_replicas, node.memory_capacity_mib // limit.memory_mib
+            )
+            # Preserve CP .35, collector .10 and OS .05 CPU on every node.
+            assert cpu * feasible_replicas + Decimal("0.50") <= node.cpus

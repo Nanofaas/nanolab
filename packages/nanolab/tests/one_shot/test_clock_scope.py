@@ -65,7 +65,7 @@ def test_all_nodes_measured_but_only_configured_nodes_receive_health(
     assert publications == (["http://edge"] if reporting_nodes else [])
 
 
-@pytest.mark.parametrize("offset, uncertainty", [(0.2, 0.001), (0.09, 0.02)])
+@pytest.mark.parametrize(("offset", "uncertainty"), [(0.2, 0.001), (0.09, 0.02)])
 def test_nonreporting_cloud_still_fails_an_unhealthy_clock(
     tmp_path, monkeypatch, offset, uncertainty
 ):
@@ -126,7 +126,7 @@ def test_enabled_edge_http_failure_is_not_ignored(tmp_path, monkeypatch):
 
 def test_unknown_reporting_node_fails_before_acquisition(tmp_path):
     endpoints, probes, _inputs = resources()
-    with pytest.raises(ValueError, match="reporting.*scope"):
+    with pytest.raises(ValueError, match=r"reporting.*scope"):
         clock_health_resource(
             endpoints=endpoints,
             probes=probes,
