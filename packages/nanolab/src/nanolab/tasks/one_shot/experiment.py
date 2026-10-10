@@ -38,7 +38,7 @@ from nanolab.tasks.one_shot.qualification import (
     verify_profile_scope,
     wait_until,
 )
-from nanolab.tasks.one_shot.trace import oracle_entries, request_schedule
+from nanolab.tasks.one_shot.trace import oracle_entries, request_schedule, warmup_trace
 from nanolab.tasks.one_shot.verification import (
     realized_utility,
     validate_proof,
@@ -245,7 +245,14 @@ class FreezeManifestTask(Task[CampaignManifest]):
                 raise ValueError(
                     "terminal cloud lacks declared ten percent physical headroom"
                 )
-        anchor = datetime.now(UTC) + timedelta(seconds=experiment.warmup_seconds + 20)
+        warmup_seconds = (
+            max(experiment.warmup_seconds, 2 * self.trace.period_seconds)
+            if self.settings.purpose == "scientific-experiment"
+            else experiment.warmup_seconds
+        )
+        if warmup_seconds > 120:
+            raise ValueError("scientific warmup exceeds configured maximum")
+        anchor = datetime.now(UTC) + timedelta(seconds=warmup_seconds + 20)
         run_id = f"{self.trace.sha256[:12]}:{self.mode}:{self.repetition}"
         parameters = {
             "nodes": [node.model_dump(by_alias=True) for node in self.settings.nodes],
@@ -325,23 +332,22 @@ class FreezeManifestTask(Task[CampaignManifest]):
         schedule = request_schedule(
             self.trace, anchor=anchor, endpoints=endpoints, run_id=run_id
         )
-        warmup = self.trace.model_copy(
-            update={
-                "windows": [
-                    {
-                        node: dict.fromkeys(
-                            self.trace.functions, experiment.warmup_rate
-                        )
-                        for node in self.trace.nodes
-                    }
-                ],
-                "period_seconds": float(experiment.warmup_seconds),
-            }
+        from nanolab.one_shot.profiles import read_profiles
+
+        capacities = (
+            read_profiles(self.settings).capacities
+            if self.settings.purpose == "scientific-experiment"
+            else None
         )
-        warmup = type(warmup).model_validate(warmup.model_dump())
+        warmup = warmup_trace(
+            self.trace,
+            seconds=warmup_seconds,
+            capacities=capacities,
+            legacy_rate=experiment.warmup_rate,
+        )
         warm = request_schedule(
             warmup,
-            anchor=anchor - timedelta(seconds=experiment.warmup_seconds),
+            anchor=anchor - timedelta(seconds=warmup_seconds),
             endpoints=endpoints,
             run_id=run_id + ":warmup",
         )
@@ -772,6 +778,8 @@ class RunOneShotLoadTask(Task[None]):
                         inputs.resource(run.topology.endpoints[key]), http=http
                     )
                     for key in run.trace.nodes
+                    if not getattr(run.trace, "node_roles", None)
+                    or run.trace.node_roles[key] == "edge"
                 }
                 for epoch in range(len(run.trace.windows)):
                     start = anchor + timedelta(seconds=epoch * run.trace.period_seconds)

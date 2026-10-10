@@ -67,8 +67,13 @@ def summarize(
     cloud = {
         row["id"] for row in parameters.get("nodes", []) if row.get("kind") == "cloud"
     } or {"cloud"}
+    direct = {"planned": 0, "completed": 0, "errors": 0}
     if evidence:
         for cell in evidence.cells:
+            if cell["origin"] in cloud:
+                for key in direct:
+                    direct[key] += int(cast(int, cell.get(key, 0)))
+                continue
             destinations = cell.get("destinations", {})
             if isinstance(destinations, dict):
                 for destination, count in destinations.items():
@@ -80,6 +85,15 @@ def summarize(
                         else "peer"
                     )
                     routing[category] += int(cast(int, count))
+    result["platformThroughputOriginalsPerSecond"] = result[
+        "throughputOriginalsPerSecond"
+    ]
+    result["throughputOriginalsPerSecond"] = (
+        (evidence.completed - direct["completed"]) / duration
+        if evidence and duration
+        else None
+    )
+    result["cloudDirect"] = direct if evidence else None
     result["routing"] = routing if evidence else None
     latencies = observations.get("latenciesSeconds", [])
     result["latencySeconds"] = (

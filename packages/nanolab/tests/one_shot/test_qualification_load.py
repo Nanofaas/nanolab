@@ -56,7 +56,10 @@ def test_owned_load_compensates_generator_and_collector_on_failure(
         endpoints={"edge": "url"},
     )
     settings = SimpleNamespace(
-        timing=SimpleNamespace(minimum_samples=1), flow_quantum=1, seed=7
+        timing=SimpleNamespace(minimum_samples=1),
+        flow_quantum=1,
+        seed=7,
+        purpose="workflow-validation",
     )
     inputs = SimpleNamespace(resource=lambda key: "http://edge")
     cell = SimpleNamespace(rates={"edge": {"work": 4}}, id="bounded")

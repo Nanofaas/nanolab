@@ -41,7 +41,13 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
             SimpleNamespace(id="cloud", kind="cloud"),
         ],
         experiment=SimpleNamespace(
-            windows=[SimpleNamespace(rates={"edge-0": {"f": 4}, "edge-1": {"f": 4}})],
+            windows=[
+                SimpleNamespace(
+                    id="legacy",
+                    epochs=1,
+                    rates={"edge-0": {"f": 4}, "edge-1": {"f": 4}},
+                )
+            ],
             repetitions=1,
             generator_vus=2,
         ),

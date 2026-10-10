@@ -147,6 +147,7 @@ def verify_epoch_flows(plans: dict) -> None:
 
 def realized_utility(cells, *, functions, cloud) -> float | None:
     """Normalize realized routing utility using the solver's zero-price convention."""
+    cells = [cell for cell in cells if cell["origin"] != cloud]
     planned = sum(cell["planned"] for cell in cells)
     if not planned:
         return None

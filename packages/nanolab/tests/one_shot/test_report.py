@@ -239,3 +239,30 @@ def test_missing_workflow_outcome_is_not_inferred_from_physical_measurements(tmp
         (directory / "evidence.json").write_text(evidence().model_dump_json())
     path = render_campaign(tmp_path)
     assert not json.loads(path.with_suffix(".json").read_text())["validComparison"]
+
+
+def test_cloud_direct_counts_are_separate_from_edge_offload_and_goodput():
+    from nanolab.one_shot.report import summarize
+
+    value = evidence()
+    value.cells.append(
+        {
+            "origin": "cloud",
+            "function": "work",
+            "epoch": 0,
+            "planned": 100,
+            "completed": 100,
+            "errors": 0,
+            "destinations": {"cloud": 100},
+        }
+    )
+    value.planned += 100
+    value.emitted += 100
+    value.received += 100
+    value.attempts += 100
+    value.completed += 100
+    summary = summarize(manifest(), value)
+    assert summary["routing"] == {"local": 6, "peer": 2, "cloud": 2}
+    assert summary["throughputOriginalsPerSecond"] == 0.5
+    assert summary["cloudDirect"] == {"planned": 100, "completed": 100, "errors": 0}
+    assert summary["platformThroughputOriginalsPerSecond"] == 5.5

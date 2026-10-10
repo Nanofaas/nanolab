@@ -108,6 +108,16 @@ class QualificationLoad:
                 name: fn.input for name, fn in topology.function_settings.items()
             },
             windows=[rates],
+            node_roles={
+                node.id: "edge" if node.kind == "edge" else "cloud-direct"
+                for node in settings.nodes
+                if node.id in rates
+            }
+            if settings.purpose == "scientific-experiment"
+            else None,
+            phase_ids=[cell.id]
+            if settings.purpose == "scientific-experiment"
+            else None,
         )
         self.schedule = request_schedule(
             trace,

@@ -165,9 +165,10 @@ def test_admission_refusal_requires_exact_gateway_target_and_status(message, tar
     assert not classify_result(row, expected="42", physical=[])["terminalError"]
 
 
+@pytest.mark.parametrize("cloud_direct", [False, True])
 @pytest.mark.parametrize("censored", [False, True])
 def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
-    tmp_path, monkeypatch, censored
+    tmp_path, monkeypatch, censored, cloud_direct
 ):
     from nanolab.tasks.one_shot.experiment import FreezeManifestTask
 
@@ -175,7 +176,7 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
     (tmp_path / "manifest.json").write_text(result.model_dump_json())
     node = SimpleNamespace(config=SimpleNamespace(memory_capacity_mib=128))
     topology = SimpleNamespace(
-        endpoints={"edge-0": "endpoint"},
+        endpoints={"edge-0": "endpoint", "cloud": "cloud-endpoint"},
         resources=SimpleNamespace(nodes={"edge-0": node}),
     )
     freeze = cast(
@@ -185,7 +186,14 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
             clock="clock",
             mode="oracle",
             topology=topology,
-            trace=SimpleNamespace(nodes=["edge-0"], windows=[{}], period_seconds=20),
+            trace=SimpleNamespace(
+                nodes=["edge-0", "cloud"] if cloud_direct else ["edge-0"],
+                node_roles={"edge-0": "edge", "cloud": "cloud-direct"}
+                if cloud_direct
+                else None,
+                windows=[{}],
+                period_seconds=20,
+            ),
             settings=SimpleNamespace(experiment=SimpleNamespace(fail_load=False)),
             qualification=SimpleNamespace(margin_seconds=0.2, epsilon=0.1),
         ),
@@ -212,6 +220,7 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
         "generator": Child(),
         "collector": collector,
         "endpoint": "http://edge",
+        "cloud-endpoint": "http://cloud",
     }
     inputs = cast(Any, SimpleNamespace(resource=lambda key: resources[key]))
     plan = {
@@ -231,7 +240,8 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
         },
     }
 
-    def prepare(*_, **kwargs):
+    def prepare(clients, **kwargs):
+        assert set(clients) == {"edge-0"}
         calls.append(kwargs["epoch"])
         return SimpleNamespace(
             censored=censored, ready_seconds=0.1, auction_seconds=0.1

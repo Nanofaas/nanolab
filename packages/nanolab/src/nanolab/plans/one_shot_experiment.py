@@ -24,7 +24,7 @@ from nanolab.tasks.one_shot.experiment import (
 )
 from nanolab.tasks.one_shot.preflight import CollectTopologyTask
 from nanolab.tasks.one_shot.qualification import read_profile
-from nanolab.tasks.one_shot.trace import TraceArtifact
+from nanolab.tasks.one_shot.trace import experiment_trace
 from nanolab.workspace.paths import default_tool_paths
 
 
@@ -52,20 +52,8 @@ def build_one_shot_experiment_plan(
         key: resolve_function_definition(key, source).family for key in config.functions
     }
     edges = [node.id for node in settings.nodes if node.kind == "edge"]
-    trace = TraceArtifact(
-        nodes=edges,
-        functions=list(aliases.values()),
-        period_seconds=qualification.period_seconds,
-        flow_quantum=settings.flow_quantum,
-        seed=settings.seed,
-        payloads={aliases[key]: fn.input for key, fn in settings.functions.items()},
-        windows=[
-            {
-                node: {aliases[key]: rate for key, rate in rates.items()}
-                for node, rates in window.rates.items()
-            }
-            for window in experiment.windows
-        ],
+    trace = experiment_trace(
+        settings, period=qualification.period_seconds, aliases=aliases
     )
     maximum = max(
         sum(
@@ -137,7 +125,13 @@ def build_one_shot_experiment_plan(
             generator = generator_resource(
                 run_dir=directory,
                 vus=experiment.generator_vus,
-                duration=len(trace.windows) * trace.period_seconds + 25,
+                duration=len(trace.windows) * trace.period_seconds
+                + (
+                    max(experiment.warmup_seconds, 2 * trace.period_seconds)
+                    if settings.purpose == "scientific-experiment"
+                    else 0
+                )
+                + 25,
             )
             collector = evidence_collector_resource(freeze, generator)
             workflow.add(
