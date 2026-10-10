@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import random
 import statistics
 from pathlib import Path
@@ -134,7 +135,81 @@ def summarize(
         for epoch in observations.get("epochs", [])
         for node, row in epoch.get("nodes", {}).items()
     ]
+    _heterogeneous_details(manifest, evidence, result)
     return result
+
+
+def _heterogeneous_details(manifest, evidence, result):
+    """Expose phase demand and destinations without filtering outcomes."""
+    parameters = cast(dict[str, Any], manifest.parameters)
+    observations = cast(dict[str, Any], evidence.observations) if evidence else {}
+    matrix = {}
+    for cell in evidence.cells if evidence else []:
+        origin = matrix.setdefault(cell["origin"], {})
+        for destination, count in cell.get("destinations", {}).items():
+            origin[destination] = origin.get(destination, 0) + count
+    result["originDestination"] = matrix
+    result["peerGraph"] = parameters.get("peerGraph")
+    windows = observations.get("plannedWindows", [])
+    phases = parameters.get("phaseIds") or [str(i) for i in range(len(windows))]
+    requested = parameters.get("requestedWindows") or windows
+    rows = []
+    for epoch, window in enumerate(windows):
+        for node, rates in window.items():
+            profile = parameters.get("nodeProfiles", {}).get(node, {})
+            profiles = {row["function"]: row for row in profile.get("functions", [])}
+            limits = parameters.get("nodeFunctions", {}).get(node, {})
+            for name, rate in rates.items():
+                capacity = parameters.get("capacities", {}).get(node)
+                quota = limits.get(name, {})
+                rows.append(
+                    {
+                        "epoch": epoch,
+                        "phase": phases[epoch],
+                        "node": node,
+                        "function": name,
+                        "requestedRate": requested[epoch][node][name],
+                        "effectiveRate": rate,
+                        "capacity": capacity,
+                        "loadToCapacity": rate / capacity if capacity else None,
+                        "demandSeconds": profiles.get(name, {}).get("serviceSeconds"),
+                        "cpuQuota": quota.get("cpu"),
+                        "memoryMiB": quota.get("memoryMiB"),
+                        "maxReplicas": quota.get("maxReplicas"),
+                    }
+                )
+    result["phaseNodes"] = rows
+    busy = {}
+    for sample in observations.get("metricSamples", []):
+        if sample["metrics"].get("nanofaas_runtime_active_handlers", 0) >= 1:
+            key = (sample["node"], sample.get("function"), sample.get("replica"))
+            busy[key] = busy.get(key, 0) + 1
+    routing = result["routing"] or {}
+    origins = (
+        {cell["origin"] for cell in evidence.cells if cell["planned"] > 0}
+        if evidence
+        else set()
+    )
+    result["coverage"] = {
+        "allOrigins": origins == set(manifest.nodes),
+        "peerCompletions": routing.get("peer", 0),
+        "verticalCompletions": routing.get("cloud", 0),
+        "busyHandlerObserved": any(count >= 3 for count in busy.values()),
+        "generatorHealthy": bool(evidence and not evidence.generator_deficit),
+    }
+    coverage = result["coverage"]
+    result["coverageSatisfied"] = bool(
+        manifest.mode != "baseline"
+        and coverage["allOrigins"]
+        and coverage["peerCompletions"]
+        and coverage["verticalCompletions"]
+        and coverage["busyHandlerObserved"]
+        and coverage["generatorHealthy"]
+    )
+    result["coverageLimitations"] = (
+        "busy handler samples are descriptive; pilot acceptance separately requires "
+        "sustained physical saturation, cloud margin and native SDK proof"
+    )
 
 
 def _write(summary: dict[str, Any], output: Path, title: str) -> Path:
@@ -162,6 +237,75 @@ def _write(summary: dict[str, Any], output: Path, title: str) -> Path:
     routing.update_layout(title="Physical completions by destination", barmode="stack")
     charts.append(routing.to_html(full_html=False, include_plotlyjs=False))
     for row in rows:
+        matrix = row.get("originDestination", {})
+        if matrix:
+            nodes = sorted(
+                set(matrix) | {d for counts in matrix.values() for d in counts}
+            )
+            figure = go.Figure(
+                go.Heatmap(
+                    x=nodes,
+                    y=nodes,
+                    z=[
+                        [
+                            matrix.get(origin, {}).get(destination, 0)
+                            for destination in nodes
+                        ]
+                        for origin in nodes
+                    ],
+                    colorbar={"title": "Completions"},
+                )
+            )
+            figure.update_layout(
+                title=f"{row['mode']}: origin/destination (includes cloud direct)"
+            )
+            charts.append(figure.to_html(full_html=False, include_plotlyjs=False))
+        graph = row.get("peerGraph")
+        if graph:
+            nodes = sorted(graph)
+            positions = {
+                node: (
+                    math.cos(2 * math.pi * i / len(nodes)),
+                    math.sin(2 * math.pi * i / len(nodes)),
+                )
+                for i, node in enumerate(nodes)
+            }
+            figure = go.Figure()
+            for node, neighbors in graph.items():
+                for neighbor in neighbors:
+                    if node < neighbor and neighbor in positions:
+                        figure.add_scatter(
+                            x=[positions[node][0], positions[neighbor][0]],
+                            y=[positions[node][1], positions[neighbor][1]],
+                            mode="lines",
+                            showlegend=False,
+                        )
+            figure.add_scatter(
+                x=[positions[node][0] for node in nodes],
+                y=[positions[node][1] for node in nodes],
+                text=nodes,
+                mode="markers+text",
+                showlegend=False,
+            )
+            figure.update_layout(
+                title=("Horizontal peer graph; every edge also reaches terminal cloud")
+            )
+            charts.append(figure.to_html(full_html=False, include_plotlyjs=False))
+        phase_rows = row.get("phaseNodes", [])
+        if phase_rows:
+            figure = go.Figure()
+            for node in sorted({cell["node"] for cell in phase_rows}):
+                cells = [cell for cell in phase_rows if cell["node"] == node]
+                figure.add_scatter(
+                    x=[cell["epoch"] for cell in cells],
+                    y=[cell["loadToCapacity"] for cell in cells],
+                    text=[cell["phase"] for cell in cells],
+                    name=node,
+                )
+            figure.update_layout(
+                title=f"{row['mode']}: effective load / measured capacity"
+            )
+            charts.append(figure.to_html(full_html=False, include_plotlyjs=False))
         epochs = row.get("auctionEpochs", [])
         if epochs:
             wall = go.Figure(
@@ -206,8 +350,8 @@ def _write(summary: dict[str, Any], output: Path, title: str) -> Path:
         + html.escape(title)
         + "</title></head><body><h1>"
         + html.escape(title)
-        + "</h1><p>Multipass workflow-validation: "
-        + "this report does not establish scientific performance.</p>"
+        + "</h1><p>Multipass on a shared physical host: "
+        + "a single run does not establish a paired campaign result.</p>"
         + "".join(charts)
         + "<h2>Measured evidence and qualification status</h2><pre>"
         + html.escape(text)
@@ -307,5 +451,39 @@ def render_campaign(run_dir: Path, *, workflow_completed: bool | None = None) ->
             "betweenRepetitions": between,
         },
         run_dir / "comparison.html",
-        "One-shot workflow-validation comparison",
+        (
+            "One-shot scientific block (paired main analysis separate)"
+            if manifests and manifests[0].purpose == "scientific-experiment"
+            else "One-shot workflow-validation comparison"
+        ),
     )
+
+
+def render_paired_campaign(blocks, output: Path, *, seed: int, protocol=None) -> Path:
+    """Write the same paired numerical summary and standalone temporal figure."""
+    from nanolab.one_shot.campaign import paired_summary
+
+    summary = paired_summary(blocks, seed=seed, protocol=protocol)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(summary, indent=2, allow_nan=False)
+    output.with_suffix(".json").write_text(text + "\n")
+    figure = go.Figure(
+        go.Scatter(
+            x=summary["serialDiagnostics"]["blockOrder"],
+            y=summary["serialDiagnostics"]["primarySequence"],
+            mode="lines+markers",
+            name="EWMA minus baseline cloud share",
+        )
+    )
+    figure.update_layout(title="Paired block contrasts in registered execution order")
+    output.write_text(
+        "<!doctype html><html><meta charset='utf-8'>"
+        "<title>One-shot paired campaign</title>"
+        "<h1>One-shot paired campaign</h1><p>Shared host: inference is conditional "
+        "on independent blocks. Pilot data are excluded.</p>"
+        + figure.to_html(full_html=False, include_plotlyjs=True)
+        + "<pre>"
+        + html.escape(text)
+        + "</pre></html>"
+    )
+    return output

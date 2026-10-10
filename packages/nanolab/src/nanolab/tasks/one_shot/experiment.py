@@ -35,7 +35,7 @@ from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
     canonical_bytes,
-    content_hash,
+    package_fingerprint,
     write_immutable_artifact,
 )
 from nanolab.tasks.one_shot.calibration import workload_checksum
@@ -57,18 +57,6 @@ from nanolab.tasks.one_shot.verification import (
     verify_runtime_inventory,
     verify_warmup,
 )
-
-
-def package_fingerprint() -> str:
-    """Bind the installed implementation/assets, including a dirty local checkout."""
-    root = Path(str(files("nanolab")))
-    entries = {
-        str(path.relative_to(root)): content_hash(path.read_bytes())
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-        and path.suffix in {".py", ".js", ".json", ".yaml", ".yml", ".example"}
-    }
-    return content_hash(canonical_bytes(entries))
 
 
 def read_qualification(settings) -> TimingQualification:

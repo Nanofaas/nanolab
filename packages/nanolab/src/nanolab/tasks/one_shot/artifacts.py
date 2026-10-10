@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -52,3 +53,15 @@ def append_observation(path: Path, value: Any) -> None:
     with path.open("ab") as evidence:
         evidence.write(canonical_bytes(value) + b"\n")
         evidence.flush()
+
+
+def package_fingerprint() -> str:
+    """Bind the installed implementation/assets, including a dirty local checkout."""
+    root = Path(str(files("nanolab")))
+    entries = {
+        str(path.relative_to(root)): content_hash(path.read_bytes())
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+        and path.suffix in {".py", ".js", ".json", ".yaml", ".yml", ".example"}
+    }
+    return content_hash(canonical_bytes(entries))

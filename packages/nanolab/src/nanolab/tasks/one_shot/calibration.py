@@ -22,6 +22,7 @@ from nanolab.tasks.one_shot.artifacts import (
     append_observation,
     canonical_bytes,
     content_hash,
+    package_fingerprint,
     write_immutable_artifact,
 )
 from nanolab.tasks.one_shot.capacity import run_capacity_trial
@@ -220,6 +221,9 @@ def environment_identity(
         },
         "flowQuantum": settings.flow_quantum,
     }
+    if settings.purpose == "scientific-experiment":
+        identity["nanolabPackageSha256"] = package_fingerprint()
+        identity["controlPlaneLimits"] = {"cpu": 0.35, "memoryMiB": 512}
     if settings.neighbors is not None:
         identity["neighbors"] = settings.neighbors
     if settings.observability.logs.enabled:

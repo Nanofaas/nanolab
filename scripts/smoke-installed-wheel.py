@@ -116,6 +116,11 @@ def main() -> None:
         assert any(choice.value == "setup:azure" for choice in selected)
         for name in NanofaasTUI.SCENARIO_FILES.values():
             assert (scenario.parent / name).is_file(), name
+        for stage in ("calibration", "qualification", "pilot"):
+            config = _scenario(scenario.parent / f"one-shot-heterogeneous-{stage}.yaml")
+            assert config.one_shot is not None
+            assert len(config.one_shot.nodes) == 6
+            assert config.one_shot.purpose == "scientific-experiment"
         paths = default_tool_paths()
         assert paths.scenarios_dir == scenario.parent
         assert paths.runs_dir == Path.cwd() / "runs", paths

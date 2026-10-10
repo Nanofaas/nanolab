@@ -549,3 +549,23 @@ def test_main_freeze_rejects_pilot_order_outside_registered_protocol(tmp_path):
             pilot_rows=rows,
             settings=settings,
         )
+
+
+def test_public_binding_rejects_changed_installed_implementation(tmp_path, monkeypatch):
+    import yaml
+
+    from nanolab.config import ScenarioConfig
+
+    settings, profiles, qualification, _ = protocol_fixture(tmp_path)
+    protocol = campaign().freeze_campaign_protocol(
+        profiles=profiles, qualification=qualification, pilot_rows=[], settings=settings
+    )
+    paths = campaign().write_campaign_scenarios(protocol, tmp_path / "frozen")
+    settings = ScenarioConfig.model_validate(
+        yaml.safe_load(paths[0].read_text())
+    ).one_shot
+    monkeypatch.setattr(
+        campaign(), "package_fingerprint", lambda: "changed", raising=False
+    )
+    with pytest.raises(ValueError, match="implementation"):
+        campaign().read_campaign_binding(settings)

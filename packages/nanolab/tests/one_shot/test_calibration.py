@@ -192,7 +192,10 @@ def test_invalid_workload_inputs_are_rejected(payload):
         workload_checksum(payload)
 
 
-def test_environment_fingerprint_includes_vm_os_but_not_run_addresses():
+@pytest.mark.parametrize("purpose", ["workflow-validation", "scientific-experiment"])
+def test_environment_fingerprint_includes_vm_os_but_not_run_addresses(
+    monkeypatch, purpose
+):
     from datetime import UTC, datetime
     from types import SimpleNamespace
 
@@ -203,7 +206,7 @@ def test_environment_fingerprint_includes_vm_os_but_not_run_addresses():
     settings = OneShotConfig.model_validate(
         {
             "provider": "multipass",
-            "purpose": "workflow-validation",
+            "purpose": purpose,
             "nodes": [
                 {"id": "edge-0", "kind": "edge"},
                 {"id": "edge-1", "kind": "edge"},
@@ -248,6 +251,15 @@ def test_environment_fingerprint_includes_vm_os_but_not_run_addresses():
     assert environment_identity(settings, topology, built)[0] == first
     node.os = "Ubuntu 26.04 kernel B"
     assert environment_identity(settings, topology, built)[0] != first
+
+    node.os = "Ubuntu 26.04 kernel A"
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.calibration.package_fingerprint",
+        lambda: "changed",
+        raising=False,
+    )
+    current = environment_identity(settings, topology, built)[0]
+    assert (current != first) == (purpose == "scientific-experiment")
 
 
 def test_output_oracle_matches_the_measured_rust_workload_golden():

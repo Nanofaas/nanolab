@@ -1,0 +1,172 @@
+# Replace the matrix with all nine vectors derived from measured capacities.
+workflow: one-shot-qualification
+backend: container
+functions:
+- one-shot-workload-rust
+oneShot:
+  provider: multipass
+  purpose: scientific-experiment
+  nodes:
+  - id: edge-1
+    kind: edge
+    cpus: 1
+    memoryMiB: 2048
+    memoryCapacityMiB: 256
+    functionLimits:
+      one-shot-workload-rust:
+        cpu: 0.35
+        memoryMiB: 256
+        maxReplicas: 1
+  - id: edge-2
+    kind: edge
+    cpus: 1
+    memoryMiB: 3072
+    memoryCapacityMiB: 256
+    functionLimits:
+      one-shot-workload-rust:
+        cpu: 0.5
+        memoryMiB: 256
+        maxReplicas: 1
+  - id: edge-3
+    kind: edge
+    cpus: 2
+    memoryMiB: 3072
+    memoryCapacityMiB: 512
+    functionLimits:
+      one-shot-workload-rust:
+        cpu: 0.6
+        memoryMiB: 256
+        maxReplicas: 2
+  - id: edge-4
+    kind: edge
+    cpus: 2
+    memoryMiB: 4096
+    memoryCapacityMiB: 512
+    functionLimits:
+      one-shot-workload-rust:
+        cpu: 0.7
+        memoryMiB: 256
+        maxReplicas: 2
+  - id: edge-5
+    kind: edge
+    cpus: 3
+    memoryMiB: 6144
+    memoryCapacityMiB: 512
+    functionLimits:
+      one-shot-workload-rust:
+        cpu: 0.85
+        memoryMiB: 256
+        maxReplicas: 2
+  - id: cloud
+    kind: cloud
+    cpus: 8
+    memoryMiB: 12288
+    memoryCapacityMiB: 1792
+    functionLimits:
+      one-shot-workload-rust:
+        cpu: 1.0
+        memoryMiB: 256
+        maxReplicas: 7
+  functions:
+    one-shot-workload-rust:
+      input:
+        iterations: 20000000
+        working_set_bytes: 4096
+        seed: 7
+      cpu: 1
+      memoryMiB: 256
+      maxReplicas: 1
+      utilization: 0.8
+  seed: 7
+  calibration:
+    minSamples: 50
+    maxSamples: 200
+    repetitions: 3
+    warmupInvocations: 3
+    confidence: 0.95
+    quantiles:
+    - 0.5
+    - 0.95
+    relativeCI: 0.15
+    capacityError: 0.15
+    capacitySeconds: 4
+    timeoutSeconds: 10
+  flowQuantum: 0.2
+  neighbors:
+    edge-1:
+    - edge-2
+    - edge-5
+    edge-2:
+    - edge-1
+    - edge-3
+    - edge-5
+    edge-3:
+    - edge-2
+    - edge-4
+    edge-4:
+    - edge-3
+    - edge-5
+    edge-5:
+    - edge-1
+    - edge-2
+    - edge-4
+  observability:
+    logs:
+      enabled: true
+      endpoint: http://10.83.80.1:43100/loki/api/v1/push
+      backendOwned: true
+      backendBind: 10.83.80.1
+      campaignId: heterogeneous-one-shot
+      environment: local
+      image: fluent/fluent-bit:5.1.3
+      cpu: 0.1
+      memoryMiB: 64
+      bufferMiB: 256
+  runtimeDistribution:
+    path: ./distribution.json
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+  profile:
+    path: ./profile-set.json
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+  timing:
+    periodCandidatesSeconds:
+    - 5
+    - 10
+    - 20
+    - 30
+    - 60
+    maxTraceResolutionSeconds: 60
+    minSamples: 50
+    quantile: 0.95
+    marginSeconds: 0.2
+    readyMarginSeconds: 0.3
+    epsilon: 0.05
+    measurementLeadSeconds: 3
+    maxCensoredFraction: 0
+    protocol:
+      auctionSeconds: 0.6
+      peerSeconds: 0.15
+      solverSeconds: 0.15
+      preparationSeconds: 1
+      maxRounds: 8
+      parallelism: 4
+      queueCapacity: 64
+      maxPeers: 16
+      maxSolverStates: 2000000
+      maxSolverBytes: 67108864
+    matrix:
+    - id: replace-measured-vectors
+      network: observed-local
+      rates:
+        edge-1:
+          one-shot-workload-rust: 1.0
+        edge-2:
+          one-shot-workload-rust: 1.0
+        edge-3:
+          one-shot-workload-rust: 1.0
+        edge-4:
+          one-shot-workload-rust: 1.0
+        edge-5:
+          one-shot-workload-rust: 1.0
+        cloud:
+          one-shot-workload-rust: 1.0

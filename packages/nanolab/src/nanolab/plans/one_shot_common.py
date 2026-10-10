@@ -120,6 +120,7 @@ def _control_plane(
     baseline_depth: int | None = None,
     collector: Resource | None = None,
     neighbor_graph: dict[str, tuple[str, ...]] | None = None,
+    scientific: bool = False,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
 
@@ -232,6 +233,7 @@ def _control_plane(
                 if collector is not None
                 else []
             ),
+            *(["--cpus", "0.35", "--memory", "512m"] if scientific else []),
             *peer_mount,
             loaded_ids[built.control_plane().image.reference],
             *(
@@ -471,6 +473,7 @@ def add_one_shot_platforms(
             resources,
             bootstrap=bootstraps[key],
             collector=collectors.get(key),
+            scientific=settings.purpose == "scientific-experiment",
             neighbor_graph=graph if settings.neighbors is not None else None,
             distribution=distribution,
             archive=archive,

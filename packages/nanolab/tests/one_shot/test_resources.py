@@ -276,8 +276,9 @@ def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypat
 @pytest.mark.parametrize("failure", [None, "transfer", "image", "socket"])
 @pytest.mark.parametrize("terminal_queueing", [False, True])
 @pytest.mark.parametrize("baseline", [False, True])
+@pytest.mark.parametrize("scientific", [False, True])
 def test_control_plane_namespace_and_compensated_cleanup(
-    tmp_path, monkeypatch, failure, terminal_queueing, baseline
+    tmp_path, monkeypatch, failure, terminal_queueing, baseline, scientific
 ):
     from types import SimpleNamespace
 
@@ -355,6 +356,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
         archive=archive,
         run_dir=tmp_path,
         terminal_queueing=terminal_queueing,
+        scientific=scientific,
         baseline_depth=2 if baseline else None,
     )
 
@@ -370,6 +372,11 @@ def test_control_plane_namespace_and_compensated_cleanup(
     else:
         url = resource.acquire(inputs)
         launch = next(argv for argv in calls if argv[:2] == ("docker", "run"))
+        if scientific:
+            assert launch[launch.index("--cpus") + 1] == "0.35"
+            assert launch[launch.index("--memory") + 1] == "512m"
+        else:
+            assert "--cpus" not in launch
         assert "--group-add" in launch
         assert launch[launch.index("--group-add") + 1] == "999"
         assert (

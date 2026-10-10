@@ -90,3 +90,7 @@ def test_bundled_scenario_recipe_and_policy_references_resolve() -> None:
             assert (path.parent / data["soakPolicyFile"]).is_file(), path
         checked.append(path)
     assert checked
+    assert {
+        f"one-shot-heterogeneous-{stage}.yaml"
+        for stage in ("calibration", "qualification", "pilot")
+    } <= {path.name for path in checked}

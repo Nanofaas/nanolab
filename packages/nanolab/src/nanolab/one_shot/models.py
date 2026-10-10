@@ -169,6 +169,9 @@ class CampaignProtocol(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1] = Field(alias="schemaVersion")
     artifact_type: Literal["paired-one-shot-campaign"] = Field(alias="artifactType")
+    nanolab_package_sha256: str = Field(
+        alias="nanolabPackageSha256", pattern=r"^[0-9a-f]{64}$"
+    )
     role: Literal["pilot", "main"]
     seed: int
     planned_blocks: int = Field(alias="plannedBlocks", ge=6, le=36)

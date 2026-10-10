@@ -153,3 +153,16 @@ Stable CPU identity hashes model/features/topology; frequency/BogoMIPS/clock
 observations are recorded separately. Old hardware fingerprint formats require
 explicit recalibration. Forecast-only timing artifacts are rejected: each matrix
 cell must include accounted emissions and exact SDK occupancy under actual load.
+
+## Heterogeneous scientific campaign
+
+Use the packaged `one-shot-heterogeneous-calibration`, `qualification`, and `pilot`
+scenario templates for five different edges and a terminal cloud. They require
+real immutable artifact references and a measured capacity matrix; their zero
+hashes are intentional blockers, not runnable qualification. See
+[the campaign dossier](testing/one-shot-heterogeneous-multipass/README.md) for the
+resource table, sparse graph, acquisition gates and conditional paired analysis.
+`freeze_campaign_protocol` and `write_campaign_scenarios` emit standard public
+experiment scenarios; no separate infrastructure orchestration or CLI is needed.
+Scientific fingerprints include the installed NanoLab code/assets and explicit
+control-plane limits; changing either invalidates calibration compatibility.

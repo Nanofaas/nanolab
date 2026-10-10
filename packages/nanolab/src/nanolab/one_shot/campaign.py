@@ -11,7 +11,11 @@ from itertools import pairwise
 from typing import Any, cast
 
 from nanolab.one_shot.models import CampaignManifest, TimingQualification
-from nanolab.tasks.one_shot.artifacts import canonical_bytes, content_hash
+from nanolab.tasks.one_shot.artifacts import (
+    canonical_bytes,
+    content_hash,
+    package_fingerprint,
+)
 from nanolab.tasks.one_shot.conservation import RunEvidence
 from nanolab.tasks.one_shot.statistics import quantile
 from nanolab.tasks.one_shot.trace import TraceArtifact
@@ -439,6 +443,7 @@ def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -
     return {
         "schemaVersion": 1,
         "artifactType": "paired-one-shot-campaign",
+        "nanolabPackageSha256": package_fingerprint(),
         "role": role,
         "seed": settings.seed,
         "plannedBlocks": n,
@@ -545,6 +550,8 @@ def read_campaign_binding(settings) -> dict | None:
         return None
     reference = experiment.campaign_protocol
     protocol = CampaignProtocol.model_validate(json.loads(reference.read_verified()))
+    if protocol.nanolab_package_sha256 != package_fingerprint():
+        raise ValueError("installed implementation differs from frozen campaign")
     frozen = OneShotConfig.model_validate(protocol.settings)
     descriptor = next(
         (
