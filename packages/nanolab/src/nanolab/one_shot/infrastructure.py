@@ -108,6 +108,11 @@ def build_one_shot_resources(
         raise ValueError("one-shot VM CPU allocation exceeds host capacity")
     if sum(node.memory_mib for node in config.nodes) > available_memory:
         raise ValueError("one-shot VM memory allocation exceeds available host memory")
+    if config.observability.logs.enabled and config.observability.logs.backend_owned:
+        if sum(node.cpus for node in config.nodes) + 1.5 > cpus:
+            raise ValueError("owned logging backend CPU budget exceeds host capacity")
+        if sum(node.memory_mib for node in config.nodes) + 768 > available_memory:
+            raise ValueError("owned backend memory budget exceeds host capacity")
     namespace = run_id or uuid4().hex[:12]
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", namespace):
         raise ValueError("invalid one-shot run namespace")

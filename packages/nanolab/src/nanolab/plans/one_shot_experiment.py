@@ -108,6 +108,7 @@ def build_one_shot_experiment_plan(
                 probes=topology.probes,
                 distribution=topology.distribution,
                 function_settings=topology.function_settings,
+                collectors=topology.collectors,
                 output=directory / "preflight.json",
             )
             freeze = FreezeManifestTask(

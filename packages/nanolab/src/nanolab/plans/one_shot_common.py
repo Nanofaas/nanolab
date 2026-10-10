@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -27,6 +27,7 @@ from nanolab.one_shot.infrastructure import (
 )
 from nanolab.tasks.components.bootstrap import plan_vm_provision_base
 from nanolab.tasks.one_shot.images import archive_image_ids
+from nanolab.tasks.one_shot.logging import backend_resource, collector_resource
 from nanolab.tasks.one_shot.resources import node_probe_resource
 from nanolab.tasks.platform import (
     Platform,
@@ -60,6 +61,7 @@ class OneShotTopology:
     distribution: Resource[RecipeDistribution]
     function_settings: dict[str, OneShotFunction]
     function_aliases: dict[str, str]
+    collectors: dict[str, Resource] = field(default_factory=dict)
 
     @property
     def requires(self) -> tuple[Resource[Any], ...]:
@@ -70,6 +72,7 @@ class OneShotTopology:
             *self.endpoints.values(),
             *self.probes.values(),
             self.distribution,
+            *self.collectors.values(),
             *(
                 function
                 for platform in self.platforms.values()
@@ -110,6 +113,7 @@ def _control_plane(
     forecast_provider: str = "ORACLE",
     terminal_queueing: bool = False,
     baseline_depth: int | None = None,
+    collector: Resource | None = None,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
 
@@ -175,6 +179,20 @@ def _control_plane(
             "/var/run/docker.sock:/var/run/docker.sock",
             "-e",
             "DOCKER_HOST=unix:///var/run/docker.sock",
+            *(
+                [
+                    "--log-driver",
+                    "json-file",
+                    "--log-opt",
+                    "max-size=10m",
+                    "--log-opt",
+                    "max-file=3",
+                    "-e",
+                    "NANOFAAS_LOG_FORMAT=json",
+                ]
+                if collector is not None
+                else []
+            ),
             loaded_ids[built.control_plane().image.reference],
             "--server.port=8080",
             "--management.server.port=9090",
@@ -248,7 +266,13 @@ def _control_plane(
         acquire=acquire,
         release=release,
         compensate=release,
-        requires=(bootstrap, distribution, archive, *topology.vms),
+        requires=(
+            bootstrap,
+            distribution,
+            archive,
+            *topology.vms,
+            *((collector,) if collector is not None else ()),
+        ),
     )
 
 
@@ -375,11 +399,32 @@ def add_one_shot_platforms(
         requires=(distribution,),
     )
 
+    bootstraps = {
+        key: _bootstrap(node, repo_root) for key, node in resources.nodes.items()
+    }
+    logs = settings.observability.logs
+    collectors = {}
+    if logs.enabled:
+        backend = backend_resource(logs, root=repo_root, run_dir=run_dir)
+        collectors = {
+            key: collector_resource(
+                node,
+                logs,
+                bootstrap=bootstraps[key],
+                backend=backend,
+                root=repo_root,
+                run_dir=run_dir,
+                mode="BASELINE" if baseline else forecast_provider,
+            )
+            for key, node in resources.nodes.items()
+        }
+
     endpoints = {
         key: _control_plane(
             node,
             resources,
-            bootstrap=_bootstrap(node, repo_root),
+            bootstrap=bootstraps[key],
+            collector=collectors.get(key),
             distribution=distribution,
             archive=archive,
             run_dir=run_dir,
@@ -478,6 +523,7 @@ def add_one_shot_platforms(
                 env={
                     "NANOFAAS_ONE_SHOT_PROFILE": "true",
                     "NANOFAAS_MAX_CONCURRENT_HANDLERS": "1",
+                    **({"NANOFAAS_LOG_FORMAT": "json"} if logs.enabled else {}),
                 },
             )
             for name, function in functions.items()
@@ -500,4 +546,5 @@ def add_one_shot_platforms(
         pinned,
         functions,
         {key: definition.family for key, definition in definitions.items()},
+        collectors,
     )

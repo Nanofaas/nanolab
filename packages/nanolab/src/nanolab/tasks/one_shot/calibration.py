@@ -217,6 +217,15 @@ def environment_identity(
         },
         "flowQuantum": settings.flow_quantum,
     }
+    if settings.observability.logs.enabled:
+        if not topology.logging or set(topology.logging) != {
+            node.id for node in settings.nodes
+        }:
+            raise ValueError("missing collector identities for logging fingerprint")
+        identity["observability"] = {
+            "configuration": settings.observability.logs.fingerprint(),
+            "collectors": topology.logging,
+        }
     fingerprint = "sha256:" + content_hash(canonical_bytes(identity))
     return fingerprint, environment
 

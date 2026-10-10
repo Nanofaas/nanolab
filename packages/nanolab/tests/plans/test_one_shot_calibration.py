@@ -63,3 +63,20 @@ def test_wrong_workflow_is_rejected_before_provisioning(tmp_path):
             run_dir=tmp_path,
             repo_root=Path.cwd(),
         )
+
+
+def test_logging_compiles_one_collector_for_every_node(tmp_path,monkeypatch):
+    data=scenario().model_dump(by_alias=True,exclude_unset=True)
+    data['oneShot']['functions']['one-shot-workload-rust']['cpu']=.5
+    data['oneShot']['observability']={'logs':{'enabled':True,'endpoint':'http://10.0.0.1:3100/loki/api/v1/push'}}
+    config=ScenarioConfig.model_validate(data)
+    (tmp_path/'functions/rust/one-shot-workload').mkdir(parents=True)
+    assets=tmp_path/'deploy/observability';assets.mkdir(parents=True)
+    for filename in ['fluent-bit.conf','parsers.conf']:(assets/filename).write_text(filename)
+    monkeypatch.setenv('NANOFAAS_ROOT',str(tmp_path))
+    workflow=build_one_shot_calibration_plan(config,environment(),run_dir=tmp_path/'run',repo_root=tmp_path)
+    compiled=workflow.compile()
+    # Resource dependency closure, rather than constructing unused handles.
+    titles=[unit.resource.title for unit in compiled.tasks if unit.kind=="acquire" and unit.resource is not None]
+    assert sum('Fluent Bit collector' in title for title in titles)==3
+    assert 'Use external logging backend' in titles

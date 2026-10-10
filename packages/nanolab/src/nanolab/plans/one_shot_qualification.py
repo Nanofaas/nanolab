@@ -54,6 +54,7 @@ def build_one_shot_qualification_plan(
                     probes=topology.probes,
                     distribution=topology.distribution,
                     function_settings=topology.function_settings,
+                    collectors=topology.collectors,
                     output=run_dir / "preflight.json",
                 ),
                 QualifyTimingTask(

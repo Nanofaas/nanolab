@@ -163,6 +163,94 @@ class ExperimentSettings(BaseModel):
     fail_load: bool = Field(default=False, alias="failLoad")
 
 
+class OneShotLogs(BaseModel):
+    """Explicit per-node collection; backends are external unless owned is requested."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    enabled: bool = False
+    endpoint: str | None = None
+    image: str = "fluent/fluent-bit:5.1.3"
+    cpu: float = Field(default=0.1, gt=0, le=2)
+    memory_mib: int = Field(default=64, alias="memoryMiB", ge=32, le=1024)
+    buffer_mib: int = Field(default=256, alias="bufferMiB", ge=1, le=4096)
+    campaign_id: str = Field(
+        default="one-shot", alias="campaignId", pattern=r"^[A-Za-z0-9_-]+$"
+    )
+    environment: str = Field(default="local", pattern=r"^[A-Za-z0-9_-]+$")
+    backend_owned: bool = Field(default=False, alias="backendOwned")
+    backend_bind: str = Field(default="127.0.0.1", alias="backendBind")
+    export_limit: int = Field(default=5000, alias="exportLimit", ge=1, le=5000)
+
+    @model_validator(mode="after")
+    def validate_endpoint(self) -> Self:
+        """Reject ambiguous endpoints and unpinned collectors before provisioning."""
+        from urllib.parse import urlsplit
+
+        if self.enabled:
+            if not self.endpoint:
+                raise ValueError("logging endpoint is required")
+            endpoint = urlsplit(self.endpoint)
+            _ = endpoint.port
+            if (
+                endpoint.scheme not in ("http", "https")
+                or not endpoint.hostname
+                or not endpoint.path.endswith("/loki/api/v1/push")
+                or endpoint.query
+                or endpoint.fragment
+                or endpoint.username
+            ):
+                raise ValueError(
+                    "endpoint must be an http(s) Loki push URL without credentials"
+                )
+            if endpoint.hostname in ("localhost", "127.0.0.1", "::1"):
+                raise ValueError("endpoint must be reachable from the VMs")
+            if self.backend_owned:
+                from ipaddress import IPv4Address
+
+                try:
+                    binding = IPv4Address(self.backend_bind)
+                except ValueError as error:
+                    raise ValueError(
+                        "owned backend needs a private IPv4 backendBind"
+                    ) from error
+                if (
+                    endpoint.scheme != "http"
+                    or not binding.is_private
+                    or binding.is_loopback
+                    or binding.is_unspecified
+                    or binding.is_link_local
+                ):
+                    raise ValueError(
+                        "owned backend needs private backendBind and an http endpoint"
+                    )
+            image_leaf = self.image.rsplit("/", 1)[-1]
+            if ":" not in image_leaf or image_leaf.rsplit(":", 1)[-1] in ("", "latest"):
+                raise ValueError("collector image must be pinned")
+        return self
+
+    def fingerprint(self) -> dict[str, JsonValue] | None:
+        """Keep volatile campaign/run identity out of calibration compatibility."""
+        if not self.enabled:
+            return None
+        return {
+            **self.model_dump(by_alias=True, exclude={"campaign_id"}),
+            "format": "json",
+            "levels": {"controlPlane": "WARN", "functions": "runtime-default"},
+            "collectorConfigVersion": 1,
+            "backendImages": ["grafana/loki:3.7.8", "grafana/grafana:13.2.3"],
+            "backendBudget": {"cpu": 1.5, "memoryMiB": 768}
+            if self.backend_owned
+            else None,
+        }
+
+
+class OneShotObservability(BaseModel):
+    """Keep optional observation outside SDK and optimizer configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+    logs: OneShotLogs = Field(default_factory=OneShotLogs)
+
+
 class OneShotConfig(BaseModel):
     """Provider/purpose boundaries and prerequisites checked before provisioning."""
 
@@ -179,6 +267,7 @@ class OneShotConfig(BaseModel):
     )
     flow_quantum: float = Field(default=1, alias="flowQuantum", gt=0)
     seed: int = 7
+    observability: OneShotObservability = Field(default_factory=OneShotObservability)
     calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
     timing: TimingSettings | None = None
     experiment: ExperimentSettings | None = None
@@ -203,4 +292,23 @@ class OneShotConfig(BaseModel):
                     > function.max_replicas
                 ):
                     raise ValueError("replica cap does not cover optimizer memory pool")
+        if self.observability.logs.enabled:
+            collector = self.observability.logs
+            for node in self.nodes:
+                peak_cpu = sum(
+                    function.cpu
+                    * min(
+                        function.max_replicas,
+                        node.memory_capacity_mib // function.memory_mib,
+                    )
+                    for function in self.functions.values()
+                )
+                if peak_cpu + collector.cpu > node.cpus:
+                    raise ValueError(
+                        "collector CPU reservation exceeds node compute budget"
+                    )
+                if node.memory_capacity_mib + collector.memory_mib >= node.memory_mib:
+                    raise ValueError(
+                        "collector memory reservation leaves no platform memory"
+                    )
         return self

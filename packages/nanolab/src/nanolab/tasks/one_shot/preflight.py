@@ -48,6 +48,7 @@ class TopologyEvidence(BaseModel):
     generator_location: str
     shared_physical_host: bool = True
     nodes: list[NodeEvidence]
+    logging: dict | None = None
 
 
 def validate_node(node: NodeEvidence, *, max_clock_skew_seconds: float) -> None:
@@ -177,8 +178,10 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         function_settings,
         output,
         max_clock_skew_seconds: float = 0.1,
+        collectors=None,
     ):
         """Bind explicit resource handles and expected physical identities."""
+        self.collectors = collectors or {}
         self.resources, self.endpoints, self.probes = resources, endpoints, probes
         self.distribution, self.function_settings = distribution, function_settings
         self.output, self.max_clock_skew_seconds = output, max_clock_skew_seconds
@@ -354,6 +357,11 @@ class CollectTopologyTask(Task[TopologyEvidence]):
             measured_at=datetime.now(UTC),
             generator_location=self.resources.generator_location,
             nodes=evidence,
+            logging={
+                key: inputs.resource(resource).identity
+                for key, resource in self.collectors.items()
+            }
+            or None,
         )
         self.output.write_text(topology.model_dump_json(indent=2) + "\n")
         return TaskOutcome(value=topology)
