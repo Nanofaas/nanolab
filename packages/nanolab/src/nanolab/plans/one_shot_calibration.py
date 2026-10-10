@@ -40,6 +40,12 @@ def build_one_shot_calibration_plan(
         endpoints={
             key: endpoint
             for key, endpoint in topology.endpoints.items()
+            if config.one_shot.purpose == "scientific-experiment"
+            or topology.resources.nodes[key].config.kind == "edge"
+        },
+        reporting_nodes={
+            key
+            for key in topology.endpoints
             if topology.resources.nodes[key].config.kind == "edge"
         },
         probes=topology.probes,

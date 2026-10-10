@@ -310,3 +310,5 @@ An `EXTERNAL_TIMEOUT` response counts as a returned timeout error and does not
 establish execution completion. Parse structured codes, not vague substrings in
 an error message; a generic external error remains unresolved scientifically
 until the independent terminal proof is available.
+
+Clock monitoring measures all six VM probes in scientific calibration, qualification and experiments. Skew and measurement uncertainty remain mandatory for the terminal cloud. Health publication targets only edge negotiation APIs: the cloud intentionally disables them. A failed edge publication remains fatal; a missing cloud API is never used to bypass a failed clock measurement.

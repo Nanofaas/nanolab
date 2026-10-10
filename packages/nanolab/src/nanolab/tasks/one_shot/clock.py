@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from threading import Event, Thread
 
@@ -66,10 +66,14 @@ def clock_health_resource(
     endpoints: dict[str, Resource[str]],
     probes: dict[str, Resource[str]],
     output: Path,
+    reporting_nodes: Collection[str] | None = None,
     interval_seconds: float = 10,
     max_skew_seconds: float = 0.1,
 ) -> Resource[ClockMonitor]:
     """Own periodic measured reports and preserve each original measurement time."""
+    reports = frozenset(endpoints if reporting_nodes is None else reporting_nodes)
+    if not reports <= endpoints.keys():
+        raise ValueError("clock reporting nodes outside measured endpoint scope")
 
     def acquire(inputs: TaskInputs) -> ClockMonitor:
         addresses = [
@@ -95,6 +99,8 @@ def clock_health_resource(
                         evidence.write(json.dumps(sample) + "\n")
                     if abs(offset) + uncertainty > max_skew_seconds:
                         raise ValueError("measured clock unhealthy or too uncertain")
+                    if key not in reports:
+                        continue
                     receipt = NanoFaasOneShotClient(
                         endpoint, http=http, timeout_seconds=2
                     ).update_clock_health(offset_seconds=offset, measured_at=at)

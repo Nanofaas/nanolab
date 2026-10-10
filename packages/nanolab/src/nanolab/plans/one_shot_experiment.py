@@ -113,6 +113,7 @@ def build_one_shot_experiment_plan(
                         else edges
                     )
                 },
+                reporting_nodes=set(edges),
                 probes=topology.probes,
                 output=directory / "clock.jsonl",
             )
