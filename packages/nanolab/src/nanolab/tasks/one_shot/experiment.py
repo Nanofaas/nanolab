@@ -618,7 +618,10 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                 run.run_dir / "peer-graph.jsonl", {"at": sampled_at, "nodes": snapshot}
             )
         for node_id, node in run.topology.resources.nodes.items():
-            for name, function in run.topology.function_settings.items():
+            functions = getattr(run.topology, "node_function_settings", {}).get(
+                node_id, run.topology.function_settings
+            )
+            for name, function in functions.items():
                 for replica in range(1, function.max_replicas + 1):
                     try:
                         url, container = runtime_endpoint(

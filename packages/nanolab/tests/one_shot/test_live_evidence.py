@@ -72,3 +72,63 @@ def test_live_collection_uses_remote_id_and_preserves_invalid_identity_diagnosti
     else:
         assert not (tmp_path / "physical.jsonl").exists()
         assert "identity" in (tmp_path / "collection-errors.jsonl").read_text()
+
+
+def test_live_collector_observes_replica_beyond_global_default(tmp_path, monkeypatch):
+    """Cloud replica seven must not vanish because the global default is two."""
+    node = SimpleNamespace(config=SimpleNamespace(memory_capacity_mib=384))
+    topology = SimpleNamespace(
+        resources=SimpleNamespace(nodes={"cloud": node}),
+        function_settings={"work": SimpleNamespace(max_replicas=1)},
+        node_function_settings={"cloud": {"work": SimpleNamespace(max_replicas=3)}},
+        endpoints={"cloud": "cloud-endpoint"},
+    )
+    run = SimpleNamespace(topology=topology, run_dir=tmp_path)
+    row = {
+        "event": "result",
+        "phase": "campaign",
+        "originalId": "original",
+        "executionId": "origin",
+        "terminalExecutionId": "remote",
+        "function": "work",
+    }
+
+    def handler(request):
+        if request.url.path == "/runtime/status":
+            return httpx.Response(
+                200,
+                json={
+                    "maxConcurrentHandlers": 1,
+                    "activeHandlers": 0,
+                    "physicalReleaseProof": True,
+                },
+            )
+        if request.url.path.endswith("remote"):
+            if request.url.host != "sdk-3":
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                json={
+                    "executionId": "remote",
+                    "incarnation": "r3",
+                    "dispatchAttempt": "1",
+                    "state": "RELEASED",
+                },
+            )
+        return httpx.Response(200, text="nanofaas_runtime_active_handlers 0\n")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.httpx.Client",
+            lambda **_: nullcontext(http),
+        )
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.runtime_endpoint",
+            lambda *_args, **kwargs: ("http://sdk-" + str(kwargs["replica"]), {}),
+        )
+        inputs = cast(Any, SimpleNamespace(resource=lambda _: "http://gateway:8080"))
+        collect_runtime_evidence(run, inputs, [row])
+    assert (tmp_path / "physical.jsonl").is_file()
+    proof = json.loads((tmp_path / "physical.jsonl").read_text())
+    assert proof["incarnation"] == "r3"
+    assert proof["destination"] == "cloud"

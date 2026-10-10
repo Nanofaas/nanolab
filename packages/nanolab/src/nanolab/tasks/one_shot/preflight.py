@@ -186,13 +186,23 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         collectors=None,
         neighbor_graph=None,
         node_function_settings=None,
-        purpose="workflow-validation",
+        purpose: Literal[
+            "workflow-validation", "scientific-experiment"
+        ] = "workflow-validation",
     ):
         """Bind explicit resource handles and expected physical identities."""
         self.collectors = collectors or {}
-        self.neighbor_graph = neighbor_graph
+        self.neighbor_graph = neighbor_graph or {
+            key: tuple(
+                other.config.id
+                for other in resources.nodes.values()
+                if other.config.kind == "edge" and other.config.id != key
+            )
+            for key, node in resources.nodes.items()
+            if node.config.kind == "edge"
+        }
         self.node_function_settings = node_function_settings or {}
-        self.purpose = purpose
+        self.purpose: Literal["workflow-validation", "scientific-experiment"] = purpose
         self.resources, self.endpoints, self.probes = resources, endpoints, probes
         self.distribution, self.function_settings = distribution, function_settings
         self.output, self.max_clock_skew_seconds = output, max_clock_skew_seconds
@@ -249,6 +259,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                 inventory = inventory_response.json()
                 self.observations[key] = {"inventory": inventory}
                 peer_count = 0
+                peers: list[str] = []
                 clock, uncertainty, measured_at = measure_http_clock(probe, http=http)
                 if node.config.kind == "edge":
                     client = NanoFaasOneShotClient(url, http=http)
@@ -265,6 +276,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                         }
                     )
                     deadline = time.monotonic() + 30
+                    status = client.status()
                     while time.monotonic() < deadline:
                         status = client.status()
                         peers = [peer.peer_id for peer in status.peer_endpoints]

@@ -1,0 +1,87 @@
+{
+  "$defs": {
+    "ArtifactReference": {
+      "additionalProperties": false,
+      "description": "An immutable prerequisite whose bytes must match the recorded hash.",
+      "properties": {
+        "path": {
+          "format": "path",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "title": "ArtifactReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "NanoLab index binds node identity, native profile hashes and capacity bytes.",
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "artifactType": {
+      "const": "node-profile-set",
+      "title": "Artifacttype",
+      "type": "string"
+    },
+    "provider": {
+      "const": "multipass",
+      "title": "Provider",
+      "type": "string"
+    },
+    "purpose": {
+      "enum": [
+        "workflow-validation",
+        "scientific-experiment"
+      ],
+      "title": "Purpose",
+      "type": "string"
+    },
+    "environmentFingerprint": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Environmentfingerprint",
+      "type": "string"
+    },
+    "nodes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ArtifactReference"
+      },
+      "title": "Nodes",
+      "type": "object"
+    },
+    "nodeFingerprints": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Nodefingerprints",
+      "type": "object"
+    },
+    "capacity": {
+      "$ref": "#/$defs/ArtifactReference"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "provider",
+    "purpose",
+    "environmentFingerprint",
+    "nodes",
+    "nodeFingerprints",
+    "capacity"
+  ],
+  "title": "ProfileSet",
+  "type": "object"
+}

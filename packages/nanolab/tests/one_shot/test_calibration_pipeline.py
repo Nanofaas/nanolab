@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from nanolab.config.one_shot import OneShotConfig
+from nanolab.one_shot.models import CalibrationProfile
 from nanolab.tasks.one_shot.calibration import (
     MeasureServiceTask,
     PublishCalibrationTask,
@@ -145,7 +146,7 @@ def test_independent_calibration_preserves_raw_and_refuses_capacity_drift(
             assert json.loads(
                 (tmp_path / "cpu-runtime-observations.json").read_bytes()
             )["rawCpuInfo"]
-            assert profile is not None
+            assert isinstance(profile, CalibrationProfile)
             assert profile.functions[0]["serviceSeconds"] == 0.1
             assert len(value["capacity"]) == 6
             assert (tmp_path / "profile-reference.json").exists()

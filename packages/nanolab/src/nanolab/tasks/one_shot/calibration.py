@@ -14,14 +14,17 @@ from uuid import uuid4
 import httpx
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
-from nanolab.config.one_shot import OneShotConfig
+from nanolab.config.one_shot import OneShotConfig, resolve_node_functions
+from nanolab.one_shot.capacity import select_capacity
 from nanolab.one_shot.models import CalibrationProfile
+from nanolab.one_shot.profiles import CalibrationProfiles, ProfileSet
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
     canonical_bytes,
     content_hash,
     write_immutable_artifact,
 )
+from nanolab.tasks.one_shot.capacity import run_capacity_trial
 from nanolab.tasks.one_shot.clock import ClockMonitor
 from nanolab.tasks.one_shot.preflight import TopologyEvidence, runtime_endpoint
 from nanolab.tasks.one_shot.statistics import summarize_service
@@ -217,6 +220,8 @@ def environment_identity(
         },
         "flowQuantum": settings.flow_quantum,
     }
+    if settings.neighbors is not None:
+        identity["neighbors"] = settings.neighbors
     if settings.observability.logs.enabled:
         if not topology.logging or set(topology.logging) != {
             node.id for node in settings.nodes
@@ -228,6 +233,32 @@ def environment_identity(
         }
     fingerprint = "sha256:" + content_hash(canonical_bytes(identity))
     return fingerprint, environment
+
+
+def node_environment_identity(
+    settings, topology, built, node_id: str
+) -> tuple[str, dict[str, str]]:
+    """Bind each native profile to its own stable measured VM identity and limits."""
+    global_fingerprint, environment = environment_identity(settings, topology, built)
+    node = next(row for row in topology.nodes if row.node_id == node_id)
+    identity = {
+        "campaign": global_fingerprint,
+        "node": node_id,
+        "cpus": node.cpus,
+        "memoryMiB": node.memory_mib,
+        "os": node.os,
+        "architecture": node.architecture,
+        "limits": {
+            name: fn.model_dump(by_alias=True)
+            for name, fn in resolve_node_functions(settings, node_id).items()
+        },
+    }
+    return "sha256:" + content_hash(canonical_bytes(identity)), {
+        **environment,
+        "vm": "multipass/" + node_id,
+        "os": node.os,
+        "architecture": node.architecture,
+    }
 
 
 class _CalibrationTask[T](Task[T]):
@@ -273,6 +304,14 @@ class WarmupTask(_CalibrationTask[dict[str, Any]]):
             "capacity": [],
             "source": built.source,
         }
+        if self.settings.purpose == "scientific-experiment":
+            value["nodeFingerprints"], value["nodeEnvironments"] = {}, {}
+            for node_id in self.topology.resources.nodes:
+                local_fingerprint, local_environment = node_environment_identity(
+                    self.settings, preflight, built, node_id
+                )
+                value["nodeFingerprints"][node_id] = local_fingerprint
+                value["nodeEnvironments"][node_id] = local_environment
         with httpx.Client(trust_env=False) as http:
             for name, function in self.topology.function_settings.items():
                 if name != "one-shot-workload":
@@ -389,6 +428,8 @@ class ValidateCapacityTask(_CalibrationTask[dict[str, Any]]):
         """Measure each configuration; retain failed proof without widening validity."""
         value = inputs.upstream()
         calibration = self.settings.calibration
+        if self.settings.purpose == "scientific-experiment":
+            return TaskOutcome(value=self._validate_scientific(inputs, value))
         for key, node in self.topology.resources.nodes.items():
             endpoint = inputs.resource(self.topology.endpoints[key])
             for replicas in range(
@@ -504,6 +545,82 @@ class ValidateCapacityTask(_CalibrationTask[dict[str, Any]]):
                     ).raise_for_status()
         return TaskOutcome(value=value)
 
+    def _validate_scientific(self, inputs, value):
+        if len(self.topology.function_settings) != 1:
+            raise ValueError("scientific campaign requires one identical workload")
+        name = next(iter(self.topology.function_settings))
+        trials, capacities, maximum = [], {}, {}
+        for node in self.settings.nodes:
+            functions = resolve_node_functions(self.settings, node.id)
+            key = next(iter(functions))
+            maximum[node.id] = functions[key].max_replicas
+            service = value["statistics"][f"{node.id}/{name}"]["meanSeconds"]
+            for replicas in range(1, maximum[node.id] + 1):
+                for factor in [0.5, 0.7, 0.9, 1.0, 1.1, 1.25]:
+                    rate = factor * replicas / service
+                    for repetition in range(3):
+                        rows = run_capacity_trial(
+                            self.topology,
+                            self.settings,
+                            inputs,
+                            value,
+                            replicas={node.id: replicas},
+                            rates={node.id: rate},
+                            repetition=repetition,
+                            run_dir=self.run_dir
+                            / "capacity-trials"
+                            / f"{node.id}-r{replicas}-f{factor}-p{repetition}",
+                            clock=self.clock,
+                        )
+                        trials.extend(rows)
+                        for row in rows:
+                            append_observation(self.run_dir / "capacity.jsonl", row)
+                supported = select_capacity(
+                    trials,
+                    node=node.id,
+                    replicas=replicas,
+                    tolerance=self.settings.calibration.capacity_error,
+                )
+                modeled = replicas * functions[key].utilization / service
+                if supported < modeled * (1 - self.settings.calibration.capacity_error):
+                    raise ValueError("NOT_QUALIFIED: replica capacity model mismatch")
+            capacities[node.id] = select_capacity(
+                trials,
+                node=node.id,
+                replicas=maximum[node.id],
+                tolerance=self.settings.calibration.capacity_error,
+            )
+        simultaneous = []
+        for repetition in range(3):
+            rows = run_capacity_trial(
+                self.topology,
+                self.settings,
+                inputs,
+                value,
+                replicas=maximum,
+                rates=capacities,
+                repetition=repetition,
+                run_dir=self.run_dir
+                / "capacity-trials"
+                / f"simultaneous-p{repetition}",
+                clock=self.clock,
+            )
+            simultaneous.extend(rows)
+            for row in rows:
+                append_observation(
+                    self.run_dir / "capacity.jsonl", {**row, "simultaneous": True}
+                )
+        for node in self.settings.nodes:
+            select_capacity(
+                simultaneous,
+                node=node.id,
+                replicas=maximum[node.id],
+                tolerance=self.settings.calibration.capacity_error,
+            )
+        value["capacity"] = trials + simultaneous
+        value["measuredCapacity"] = capacities
+        return value
+
     def _warm_replica(self, http, runtime, name, payload, value):
         deadline = time.monotonic() + 30
         while True:
@@ -535,15 +652,21 @@ class ValidateCapacityTask(_CalibrationTask[dict[str, Any]]):
             raise ValueError("capacity warmup failed")
 
 
-class PublishCalibrationTask(_CalibrationTask[CalibrationProfile]):
+class PublishCalibrationTask(
+    _CalibrationTask[CalibrationProfile | CalibrationProfiles]
+):
     """Publish a schema-valid measured artifact only after all validity checks."""
 
     title = "Publish immutable local calibration profile"
 
-    def run(self, inputs: TaskInputs) -> TaskOutcome[CalibrationProfile]:
+    def run(
+        self, inputs: TaskInputs
+    ) -> TaskOutcome[CalibrationProfile | CalibrationProfiles]:
         """Bind raw bytes, image IDs, input and the measured configuration scope."""
         value = inputs.upstream()
         built = inputs.resource(self.topology.distribution)
+        if self.settings.purpose == "scientific-experiment":
+            return TaskOutcome(value=self._publish_nodes(value, built))
         raw_hash = content_hash((self.run_dir / "samples.jsonl").read_bytes())
         functions = []
         for name, function in self.topology.function_settings.items():
@@ -639,3 +762,140 @@ class PublishCalibrationTask(_CalibrationTask[CalibrationProfile]):
             ),
         )
         return TaskOutcome(value=profile)
+
+    def _publish_nodes(self, value, built) -> CalibrationProfiles:
+        """Publish native v1 profiles without merging different physical demands."""
+        profiles, references = {}, {}
+        statistics = {}
+        for node in self.settings.nodes:
+            directory = self.run_dir / "nodes" / node.id
+            functions = []
+            local_samples = []
+            for key, function in resolve_node_functions(self.settings, node.id).items():
+                name = self.topology.function_aliases[key]
+                rows = value["samples"][f"{node.id}/{name}"]
+                stats = summarize_service(
+                    rows,
+                    minimum_samples=self.settings.calibration.min_samples,
+                    relative_ci=self.settings.calibration.relative_ci,
+                    confidence=self.settings.calibration.confidence,
+                    quantiles=self.settings.calibration.quantiles,
+                    seed=self.settings.seed,
+                )
+                if not stats["qualified"]:
+                    raise ValueError("NOT_QUALIFIED: local service stability")
+                statistics[f"{node.id}/{name}"] = stats
+                local_samples.extend(rows)
+                raw = b"".join(canonical_bytes(row) + b"\n" for row in rows)
+                functions.append(
+                    {
+                        "function": name,
+                        "imageDigest": built.function(name, "rust").image.id,
+                        "runtime": "HTTP",
+                        "backend": "container-local",
+                        "inputHash": "sha256:"
+                        + content_hash(canonical_bytes(function.input)),
+                        "cpuQuota": function.cpu,
+                        "memoryMiB": function.memory_mib,
+                        "replicas": 1,
+                        "coLocation": sorted(
+                            other
+                            for other in self.topology.function_settings
+                            if other != name
+                        ),
+                        "serviceSeconds": stats["meanSeconds"],
+                        "statistics": {
+                            field: stats[field]
+                            for field in (
+                                "sampleCount",
+                                "meanSeconds",
+                                "stddevSeconds",
+                                "p95Seconds",
+                            )
+                        },
+                        "validity": {
+                            "minReplicas": 1,
+                            "maxReplicas": function.max_replicas,
+                            "maxRelativeCapacityError": (
+                                self.settings.calibration.capacity_error
+                            ),
+                        },
+                        "measurement": {
+                            "warmupInvocations": (
+                                self.settings.calibration.warmup_invocations
+                            ),
+                            "includesColdStarts": False,
+                            "occupancy": "physical-handler",
+                            "rawSamplesHash": "sha256:" + content_hash(raw),
+                        },
+                    }
+                )
+            raw_samples = b"".join(
+                canonical_bytes(row) + b"\n" for row in local_samples
+            )
+            write_immutable_artifact(directory / "samples.jsonl", raw_samples)
+            profile = CalibrationProfile.model_validate(
+                {
+                    "schemaVersion": 1,
+                    "profileId": node.id + "-" + content_hash(raw_samples)[:16],
+                    "provider": self.settings.provider,
+                    "purpose": self.settings.purpose,
+                    "synthetic": False,
+                    "sourceCommit": value["source"]["revision"],
+                    "environmentFingerprint": value["nodeFingerprints"][node.id],
+                    "environment": value["nodeEnvironments"][node.id],
+                    "functions": functions,
+                }
+            )
+            digest = write_immutable_artifact(
+                directory / "profile.json",
+                canonical_bytes(profile.model_dump(by_alias=True)),
+            )
+            profiles[node.id] = profile
+            references[node.id] = {
+                "path": str((directory / "profile.json").relative_to(self.run_dir)),
+                "sha256": digest,
+            }
+        capacities = value["measuredCapacity"]
+        if set(capacities) != set(profiles) or any(
+            not math.isfinite(rate) or rate <= 0 for rate in capacities.values()
+        ):
+            raise ValueError("NOT_QUALIFIED: measured capacity scope incomplete")
+        capacity_hash = write_immutable_artifact(
+            self.run_dir / "capacity-summary.json",
+            canonical_bytes(
+                {
+                    "schemaVersion": 1,
+                    "artifactType": "measured-node-capacity",
+                    "environmentFingerprint": value["fingerprint"],
+                    "capacities": capacities,
+                    "trials": value.get("capacity", []),
+                }
+            ),
+        )
+        index = ProfileSet.model_validate(
+            {
+                "schemaVersion": 1,
+                "artifactType": "node-profile-set",
+                "provider": self.settings.provider,
+                "purpose": self.settings.purpose,
+                "environmentFingerprint": value["fingerprint"],
+                "nodes": references,
+                "nodeFingerprints": value["nodeFingerprints"],
+                "capacity": {"path": "capacity-summary.json", "sha256": capacity_hash},
+            }
+        )
+        write_immutable_artifact(
+            self.run_dir / "statistics.json", canonical_bytes(statistics)
+        )
+        digest = write_immutable_artifact(
+            self.run_dir / "profile.json",
+            canonical_bytes(index.model_dump(mode="json", by_alias=True)),
+        )
+        write_immutable_artifact(
+            self.run_dir / "profile-reference.json",
+            canonical_bytes(
+                {"path": str(self.run_dir / "profile.json"), "sha256": digest}
+            ),
+        )
+        return CalibrationProfiles(profiles, digest, value["fingerprint"], capacities)

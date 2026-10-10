@@ -18,17 +18,18 @@ export default function () {
   const emittedAt = Date.now()/1000;
   console.log(JSON.stringify({...row, event:'emitted', emittedAt}));
   const result = http.post(row.url, JSON.stringify({input: row.input}), {
-    headers: {'Content-Type':'application/json', 'Idempotency-Key':row.originalId, 'X-Trace-Id':row.originalId},
+    headers: {'Content-Type':'application/json', 'Idempotency-Key':row.originalId, 'X-Trace-Id':row.originalId,
+      ...(row.sdk ? {'X-Execution-Id':row.originalId, 'X-Dispatch-Attempt':'1'} : {})},
     timeout:'30s', redirects:0,
   });
   let body = {};
   try {body = result.json();} catch (_) {}
-  const output = /"output"\s*:\s*([0-9]+)/.exec(result.body || '');
+  const output = (row.sdk ? /^\s*([0-9]+)\s*$/ : /"output"\s*:\s*([0-9]+)/).exec(result.body || '');
   console.log(JSON.stringify({...row, event:'result', emittedAt, finishedAt:Date.now()/1000,
     latencySeconds:result.timings.duration/1000, statusCode:result.status, responseBody:result.body,
-    executionId:body.executionId || header(result, 'X-Execution-Id') || null,
-    terminalExecutionId:header(result, 'X-NanoFaaS-Terminal-Execution-Id') || body.executionId || null,
-    responseStatus:body.status || null, outputJson:output ? output[1] : null,
+    executionId:row.sdk ? row.originalId : body.executionId || header(result, 'X-Execution-Id') || null,
+    terminalExecutionId:row.sdk ? row.originalId : header(result, 'X-NanoFaaS-Terminal-Execution-Id') || body.executionId || null,
+    responseStatus:row.sdk ? (result.status === 200 ? 'success' : 'error') : body.status || null, outputJson:output ? output[1] : null,
     executionNode:header(result, 'X-NanoFaaS-Execution-Node') || null,
     offloadedTarget:header(result, 'X-NanoFaaS-Offloaded') || null}));
 }
