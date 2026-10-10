@@ -324,7 +324,7 @@ def collector_resource(
         )
 
     def release(_inputs, _value=None):
-        nonlocal final_metrics, archive_issue
+        nonlocal created, final_metrics, archive_issue
         if not created:
             return
         # The platform/function resources depend on this collector: they stop first.
@@ -358,13 +358,20 @@ def collector_resource(
                 "Log export failed for %s: %s", node.config.id, error
             )
         removed = node.provider.exec_argv(node.request, ("docker", "rm", "-f", name))
-        if removed.return_code and "No such container" not in removed.stderr:
+        if (
+            removed.return_code
+            and "No such container" not in removed.stdout + removed.stderr
+        ):
             raise RuntimeError("collector cleanup unconfirmed")
         deleted = node.provider.exec_argv(
             node.request, ("docker", "volume", "rm", volume)
         )
-        if deleted.return_code and "no such volume" not in deleted.stderr.lower():
+        if (
+            deleted.return_code
+            and "no such volume" not in (deleted.stdout + deleted.stderr).lower()
+        ):
             raise RuntimeError("collector volume cleanup unconfirmed")
+        created = False
         if archive_issue:
             raise RuntimeError(
                 "collector state archive failed before owned cleanup: " + archive_issue

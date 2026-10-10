@@ -403,6 +403,21 @@ def test_export_disk_error_does_not_skip_owned_cleanup(tmp_path, monkeypatch):
     assert any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
 
 
+def test_compensation_does_not_repeat_completed_cleanup_after_archive_failure(
+    tmp_path, monkeypatch
+):
+    resource, inputs, commands = fake_collector(
+        tmp_path, monkeypatch, archive_error=True
+    )
+    successful_query(monkeypatch)
+    value = resource.acquire(inputs)
+    with pytest.raises(RuntimeError, match="state archive"):
+        resource.release(inputs, value)
+    count = len(commands)
+    resource.release(inputs, value)
+    assert len(commands) == count
+
+
 def test_backend_export_disk_error_does_not_skip_owned_cleanup(tmp_path, monkeypatch):
     from pathlib import Path
     from types import SimpleNamespace

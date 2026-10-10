@@ -31,7 +31,7 @@ SIZES = [
     ("cloud", "cloud", 8, 12288, 1.0, 4),
 ]
 CP_IMAGE = "nanofaas/edge-logging-control-plane:20261010"
-FN_IMAGE = "nanofaas/edge-logging-workload:20261010"
+FN_IMAGE = "nanofaas/edge-logging-workload:20261010-final"
 K6 = r"""import http from "k6/http";
 import {Counter,Trend} from "k6/metrics";
 import {sleep} from "k6";
