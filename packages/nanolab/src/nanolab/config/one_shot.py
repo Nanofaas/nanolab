@@ -25,6 +25,15 @@ class ArtifactReference(BaseModel):
         return content
 
 
+class NodeFunctionLimits(BaseModel):
+    """Only resource limits vary between nodes; input and coefficients stay shared."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    cpu: float = Field(gt=0)
+    memory_mib: int = Field(alias="memoryMiB", gt=0)
+    max_replicas: int = Field(alias="maxReplicas", gt=0)
+
+
 class OneShotNode(BaseModel):
     """A separate Multipass VM for one logical edge or terminal cloud."""
 
@@ -35,6 +44,9 @@ class OneShotNode(BaseModel):
     memory_mib: int = Field(default=4096, alias="memoryMiB", gt=0)
     disk_gib: int = Field(default=20, alias="diskGiB", gt=0)
     memory_capacity_mib: int = Field(default=256, alias="memoryCapacityMiB", gt=0)
+    function_limits: dict[str, NodeFunctionLimits] = Field(
+        default_factory=dict, alias="functionLimits"
+    )
 
 
 class OneShotFunction(BaseModel):
@@ -148,13 +160,19 @@ class TimingSettings(BaseModel):
         return self
 
 
+class ExperimentWindow(TimingCell):
+    """A phase whose load persists for an explicit number of epochs."""
+
+    epochs: int = Field(default=1, ge=1, le=1000)
+
+
 class ExperimentSettings(BaseModel):
     """Explicit comparison windows, repetitions and generator capacity."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    windows: list[TimingCell] = Field(min_length=1)
+    windows: list[ExperimentWindow] = Field(min_length=1)
     repetitions: int = Field(default=1, ge=1, le=20)
-    warmup_seconds: int = Field(default=5, alias="warmupSeconds", ge=2, le=60)
+    warmup_seconds: int = Field(default=5, alias="warmupSeconds", ge=2, le=120)
     warmup_rate: float = Field(default=4, alias="warmupRate", gt=0)
     generator_vus: int = Field(default=64, alias="generatorVus", ge=1, le=512)
     max_arrival_lateness: float = Field(
@@ -257,7 +275,7 @@ class OneShotConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
     provider: Literal["multipass"]
-    purpose: Literal["workflow-validation"]
+    purpose: Literal["workflow-validation", "scientific-experiment"]
     nodes: list[OneShotNode] = Field(min_length=3)
     functions: dict[str, OneShotFunction] = Field(min_length=1)
     profile: ArtifactReference | None = None
@@ -267,6 +285,7 @@ class OneShotConfig(BaseModel):
     )
     flow_quantum: float = Field(default=1, alias="flowQuantum", gt=0)
     seed: int = 7
+    neighbors: dict[str, list[str]] | None = None
     observability: OneShotObservability = Field(default_factory=OneShotObservability)
     calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
     timing: TimingSettings | None = None
@@ -284,7 +303,12 @@ class OneShotConfig(BaseModel):
         if any(node.memory_capacity_mib >= node.memory_mib for node in self.nodes):
             raise ValueError("replica memory must leave room for the node runtime")
         for node in self.nodes:
-            for function in self.functions.values():
+            if node.function_limits.keys() - self.functions.keys():
+                raise ValueError("unknown function override")
+            functions = resolve_node_functions(self, node.id)
+            if sum(fn.cpu * fn.max_replicas for fn in functions.values()) > node.cpus:
+                raise ValueError("replica pool exceeds node CPU budget")
+            for function in functions.values():
                 if node.memory_capacity_mib < function.memory_mib:
                     raise ValueError("optimizer memory pool must fit one replica")
                 if (
@@ -301,7 +325,7 @@ class OneShotConfig(BaseModel):
                         function.max_replicas,
                         node.memory_capacity_mib // function.memory_mib,
                     )
-                    for function in self.functions.values()
+                    for function in resolve_node_functions(self, node.id).values()
                 )
                 if peak_cpu + collector.cpu > node.cpus:
                     raise ValueError(
@@ -312,3 +336,18 @@ class OneShotConfig(BaseModel):
                         "collector memory reservation leaves no platform memory"
                     )
         return self
+
+
+def resolve_node_functions(
+    settings: OneShotConfig, node_id: str
+) -> dict[str, OneShotFunction]:
+    """Resolve only explicit overrides, without mutating shared settings."""
+    node = next((node for node in settings.nodes if node.id == node_id), None)
+    if node is None:
+        raise ValueError(f"unknown node: {node_id}")
+    return {
+        name: function.model_copy(update=node.function_limits[name].model_dump())
+        if name in node.function_limits
+        else function.model_copy(deep=True)
+        for name, function in settings.functions.items()
+    }

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -93,6 +95,57 @@ def host_capacity() -> tuple[int, int]:
     return os.cpu_count() or 1, memory["MemAvailable"] // 1024
 
 
+def host_budget(
+    config: OneShotConfig,
+    *,
+    host_cpus: int,
+    available_memory_mib: int,
+    external_cpus: int = 0,
+    reserve_cpus: float = 1,
+    reserve_memory_mib: int = 1024,
+) -> dict[str, float]:
+    """Require disjoint VM, operator and owned backend budgets before acquisition.
+
+    MemAvailable already reflects running external VMs, so do not subtract twice.
+    Collector resources fit inside each node and are validated by the config.
+    """
+    backend = (
+        config.observability.logs.enabled and config.observability.logs.backend_owned
+    )
+    cpu_required = (
+        sum(node.cpus for node in config.nodes)
+        + external_cpus
+        + reserve_cpus
+        + (1.5 if backend else 0)
+    )
+    memory_required = (
+        sum(node.memory_mib for node in config.nodes)
+        + reserve_memory_mib
+        + (768 if backend else 0)
+    )
+    if cpu_required > host_cpus:
+        raise ValueError("campaign and external VM CPU budgets exceed host capacity")
+    if memory_required > available_memory_mib:
+        raise ValueError("campaign memory budget exceeds available host memory")
+    return {"cpuRequired": cpu_required, "memoryRequiredMiB": memory_required}
+
+
+def external_vm_cpus() -> int:
+    """Inventory running VM allocations without adopting or changing them."""
+    result = subprocess.run(
+        ("multipass", "info", "--all", "--format", "json"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    info = json.loads(result.stdout)
+    if info.get("errors"):
+        raise RuntimeError("external VM inventory is incomplete")
+    return sum(
+        int(vm["cpu_count"]) for vm in info["info"].values() if vm["state"] == "Running"
+    )
+
+
 def build_one_shot_resources(
     config: OneShotConfig,
     environment: EnvironmentConfig,
@@ -104,6 +157,13 @@ def build_one_shot_resources(
     if environment.provider != config.provider:
         raise ValueError("one-shot environment must use Multipass")
     cpus, available_memory = host_capacity()
+    if config.purpose == "scientific-experiment":
+        host_budget(
+            config,
+            host_cpus=cpus,
+            available_memory_mib=available_memory,
+            external_cpus=external_vm_cpus(),
+        )
     if sum(node.cpus for node in config.nodes) > cpus:
         raise ValueError("one-shot VM CPU allocation exceeds host capacity")
     if sum(node.memory_mib for node in config.nodes) > available_memory:

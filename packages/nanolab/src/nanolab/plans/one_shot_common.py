@@ -17,7 +17,7 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.application.execution import build_role_bindings
 from nanolab.config import EnvironmentConfig, ScenarioConfig
-from nanolab.config.one_shot import OneShotFunction
+from nanolab.config.one_shot import OneShotFunction, resolve_node_functions
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.one_shot.infrastructure import (
     NodeExecutor,
@@ -62,6 +62,9 @@ class OneShotTopology:
     function_settings: dict[str, OneShotFunction]
     function_aliases: dict[str, str]
     collectors: dict[str, Resource] = field(default_factory=dict)
+    node_function_settings: dict[str, dict[str, OneShotFunction]] = field(
+        default_factory=dict
+    )
 
     @property
     def requires(self) -> tuple[Resource[Any], ...]:
@@ -430,7 +433,9 @@ def add_one_shot_platforms(
             run_dir=run_dir,
             forecast_provider=forecast_provider,
             terminal_queueing=terminal_queueing,
-            baseline_depth=max(fn.max_replicas for fn in settings.functions.values())
+            baseline_depth=max(
+                fn.max_replicas for fn in resolve_node_functions(settings, key).values()
+            )
             if baseline
             else None,
         )
@@ -494,6 +499,13 @@ def add_one_shot_platforms(
         },
         run_dir=run_dir,
     )
+    node_functions = {
+        node.id: {
+            definition.family: resolve_node_functions(settings, node.id)[key]
+            for key, definition in definitions.items()
+        }
+        for node in settings.nodes
+    }
     platforms = {}
     for key, node in resources.nodes.items():
         endpoint = endpoints[key]
@@ -526,7 +538,7 @@ def add_one_shot_platforms(
                     **({"NANOFAAS_LOG_FORMAT": "json"} if logs.enabled else {}),
                 },
             )
-            for name, function in functions.items()
+            for name, function in node_functions[key].items()
         )
         request = PlatformRequest(
             backend="container", functions=platform_functions, recipe=binding, label=key
@@ -547,4 +559,5 @@ def add_one_shot_platforms(
         functions,
         {key: definition.family for key, definition in definitions.items()},
         collectors,
+        node_functions,
     )
