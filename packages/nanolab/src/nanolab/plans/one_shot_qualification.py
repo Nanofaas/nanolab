@@ -39,7 +39,8 @@ def build_one_shot_qualification_plan(
         endpoints={
             key: endpoint
             for key, endpoint in topology.endpoints.items()
-            if topology.resources.nodes[key].config.kind == "edge"
+            if config.one_shot.purpose == "scientific-experiment"
+            or topology.resources.nodes[key].config.kind == "edge"
         },
         probes=topology.probes,
         output=run_dir / "clock.jsonl",

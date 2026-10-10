@@ -112,7 +112,7 @@ def frozen_run(tmp_path, monkeypatch, *, mode="oracle"):
         clock="clock",
         run_dir=tmp_path,
     )
-    return run, inputs
+    return cast(Any, run), inputs
 
 
 def test_manifest_freezes_same_trace_and_distinct_originals_before_load(
@@ -147,12 +147,33 @@ def test_timing_fingerprint_or_terminal_headroom_failure_prevents_manifest(
     assert not (tmp_path / "schedule.json").exists()
 
 
+@pytest.mark.parametrize("node_specific", [False, True])
 @pytest.mark.parametrize("mode", ["baseline", "oracle", "ewma"])
 def test_mode_uses_expected_public_apis_and_never_injects_decisions(
-    tmp_path, monkeypatch, mode
+    tmp_path, monkeypatch, mode, node_specific
 ):
     run, inputs = frozen_run(tmp_path, monkeypatch, mode=mode)
     run.run(inputs)
+    if node_specific:
+        from nanolab.one_shot.profiles import CalibrationProfiles
+
+        run.profile = CalibrationProfiles(
+            by_node={
+                n.id: run.profile.model_copy(deep=True, update={"profile_id": n.id})
+                for n in run.settings.nodes
+            },
+            sha256="a" * 64,
+            environment_fingerprint="fp",
+        )
+        run.topology.node_function_settings = {
+            n.id: {
+                name: fn.model_copy(
+                    update={"max_replicas": 1 if n.id == "edge-0" else 2}
+                )
+                for name, fn in run.topology.function_settings.items()
+            }
+            for n in run.settings.nodes
+        }
     actions = []
     with httpx.Client(
         transport=httpx.MockTransport(
@@ -175,8 +196,8 @@ def test_mode_uses_expected_public_apis_and_never_injects_decisions(
             def __init__(self, url, **kwargs):
                 self.base_url = url
 
-            def load_profile(self, *args, **kwargs):
-                actions.append(("PROFILE", self.base_url, None))
+            def load_profile(self, profile, **kwargs):
+                actions.append(("PROFILE", self.base_url, profile.profile_id))
 
             def status(self):
                 return SimpleNamespace(
@@ -201,6 +222,12 @@ def test_mode_uses_expected_public_apis_and_never_injects_decisions(
         0 if mode == "baseline" else 2
     )
     assert not [action for action in actions if action[0] == "PATCH"]
+    if node_specific:
+        for method, url, data in actions:
+            if method == "PROFILE":
+                assert data == url.rsplit("/", 1)[-1]
+            if method == "PUT" and "edge-0" in url:
+                assert json.loads(data)["replicas"] == 1
 
 
 @pytest.mark.parametrize("missing_proof", [False, True])

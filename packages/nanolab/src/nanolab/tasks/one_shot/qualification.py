@@ -13,12 +13,21 @@ from typing import Any
 import httpx
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
-from nanolab.config.one_shot import OneShotConfig, ProtocolSettings
+from nanolab.config.one_shot import (
+    OneShotConfig,
+    ProtocolSettings,
+    resolve_node_functions,
+)
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import (
     CalibrationProfile,
     TimingQualification,
     verify_calibration,
+)
+from nanolab.one_shot.profiles import (
+    CalibrationProfiles,
+    profile_for_node,
+    read_profiles,
 )
 from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import (
@@ -27,7 +36,10 @@ from nanolab.tasks.one_shot.artifacts import (
     content_hash,
     write_immutable_artifact,
 )
-from nanolab.tasks.one_shot.calibration import environment_identity
+from nanolab.tasks.one_shot.calibration import (
+    environment_identity,
+    node_environment_identity,
+)
 from nanolab.tasks.one_shot.clock import ClockMonitor
 from nanolab.tasks.one_shot.preflight import runtime_endpoint
 from nanolab.tasks.one_shot.qualification_load import QualificationLoad
@@ -64,8 +76,13 @@ def duration(seconds: float) -> str:
     return f"PT{seconds:.9f}S"
 
 
-def read_profile(settings: OneShotConfig) -> CalibrationProfile:
+def read_profile(settings: OneShotConfig) -> CalibrationProfile | CalibrationProfiles:
     """Reject altered or synthetic prerequisite bytes before any VM acquisition."""
+    if settings.purpose == "scientific-experiment":
+        return read_profiles(settings)
+    effective = [resolve_node_functions(settings, node.id) for node in settings.nodes]
+    if any(functions != effective[0] for functions in effective[1:]):
+        raise ValueError("single profile requires homogeneous resource limits")
     if settings.profile is None:
         raise ValueError("independent measured profile is required")
     profile = CalibrationProfile.model_validate(
@@ -83,6 +100,44 @@ def read_profile(settings: OneShotConfig) -> CalibrationProfile:
 def verify_profile_scope(profile, settings, topology, preflight, built):
     """Match current measured identity and every runtime/input validity field."""
     fingerprint, _ = environment_identity(settings, preflight, built)
+    if isinstance(profile, CalibrationProfiles):
+        if profile.environment_fingerprint != fingerprint or set(profile.by_node) != {
+            n.id for n in settings.nodes
+        }:
+            raise ValueError("profile-set environment/node scope mismatch")
+        for node in settings.nodes:
+            local_fingerprint, _ = node_environment_identity(
+                settings, preflight, built, node.id
+            )
+            local = profile.by_node[node.id]
+            functions = topology.node_function_settings[node.id]
+            _verify_native_scope(
+                local,
+                settings,
+                built,
+                functions,
+                local_fingerprint,
+                {name: fn.max_replicas for name, fn in functions.items()},
+            )
+    else:
+        _verify_native_scope(
+            profile,
+            settings,
+            built,
+            topology.function_settings,
+            fingerprint,
+            {
+                name: max(
+                    node.memory_capacity_mib // fn.memory_mib for node in settings.nodes
+                )
+                for name, fn in topology.function_settings.items()
+            },
+        )
+    return fingerprint
+
+
+def _verify_native_scope(profile, settings, built, functions, fingerprint, maxima):
+    """Check one measured native profile against only its bound node's resources."""
     verify_calibration(
         profile,
         provider=settings.provider,
@@ -90,11 +145,9 @@ def verify_profile_scope(profile, settings, topology, preflight, built):
         fingerprint=fingerprint,
     )
     measured = {row["function"]: row for row in profile.functions}
-    if len(measured) != len(profile.functions) or set(measured) != set(
-        topology.function_settings
-    ):
+    if len(measured) != len(profile.functions) or set(measured) != set(functions):
         raise ValueError("profile function scope mismatch")
-    for name, function in topology.function_settings.items():
+    for name, function in functions.items():
         row = measured[name]
         if (
             row["imageDigest"] != built.function(name, "rust").image.id
@@ -104,22 +157,17 @@ def verify_profile_scope(profile, settings, topology, preflight, built):
             or row["memoryMiB"] != function.memory_mib
             or row["backend"] != "container-local"
             or row["runtime"] != "HTTP"
-            or set(row["coLocation"]) != set(topology.function_settings) - {name}
+            or set(row["coLocation"]) != set(functions) - {name}
             or row["validity"]["minReplicas"] > 1
-            or row["validity"]["maxReplicas"]
-            < max(
-                node.memory_capacity_mib // function.memory_mib
-                for node in settings.nodes
-            )
+            or row["validity"]["maxReplicas"] < maxima[name]
         ):
             raise ValueError("profile runtime/input/resource scope mismatch")
-    return fingerprint
 
 
 def configuration_for_node(
     topology,
     settings: OneShotConfig,
-    profile: CalibrationProfile,
+    profile: CalibrationProfile | CalibrationProfiles,
     node_id: str,
     *,
     client: NanoFaasOneShotClient,
@@ -132,6 +180,7 @@ def configuration_for_node(
 ) -> dict[str, Any]:
     """Translate declared identity and limits without deciding replicas or flows."""
     generations = client.status().catalog_generations
+    profile = profile_for_node(profile, node_id)
     measured = {row["function"]: row for row in profile.functions}
     functions = {
         name: {
@@ -143,7 +192,9 @@ def configuration_for_node(
             "delta": function.delta,
             "gamma": function.gamma,
         }
-        for name, function in topology.function_settings.items()
+        for name, function in getattr(topology, "node_function_settings", {})
+        .get(node_id, topology.function_settings)
+        .items()
     }
 
     node = topology.resources.nodes[node_id]
@@ -342,7 +393,7 @@ class QualifyTimingTask(Task[TimingQualification]):
         self,
         topology: Any,
         settings: OneShotConfig,
-        profile: CalibrationProfile,
+        profile: CalibrationProfile | CalibrationProfiles,
         *,
         clock: Resource[ClockMonitor],
         run_dir: Path,
@@ -388,6 +439,17 @@ class QualifyTimingTask(Task[TimingQualification]):
         all_samples, cells = [], []
         epoch = 0
         with httpx.Client(trust_env=False) as http:
+            if self.settings.purpose == "scientific-experiment":
+                functions = self.topology.node_function_settings[cloud_key]
+                cloud = self.topology.resources.nodes[cloud_key]
+                for name, function in functions.items():
+                    http.put(
+                        cloud_uri + f"/v1/functions/{name}/replicas",
+                        json={"replicas": function.max_replicas},
+                        timeout=30,
+                    ).raise_for_status()
+                    for replica in range(1, function.max_replicas + 1):
+                        runtime_endpoint(cloud, name, inputs=inputs, replica=replica)
             clients = {
                 key: NanoFaasOneShotClient(inputs.resource(endpoint), http=http)
                 for key, endpoint in self.topology.endpoints.items()
@@ -395,7 +457,7 @@ class QualifyTimingTask(Task[TimingQualification]):
             }
             revisions = dict.fromkeys(clients, 0)
             for key, client in clients.items():
-                client.load_profile(self.profile, revision=0)
+                client.load_profile(profile_for_node(self.profile, key), revision=0)
                 configuration = configuration_for_node(
                     self.topology,
                     self.settings,
@@ -416,8 +478,13 @@ class QualifyTimingTask(Task[TimingQualification]):
                     output=self.run_dir / "api.jsonl",
                 )
             for cell_number, cell in enumerate(timing.matrix):
-                if set(cell.rates) != set(clients):
-                    raise ValueError("timing matrix must declare every edge")
+                required_nodes = (
+                    set(self.topology.endpoints)
+                    if self.settings.purpose == "scientific-experiment"
+                    else set(clients)
+                )
+                if set(cell.rates) != required_nodes:
+                    raise ValueError("timing matrix must declare every load origin")
                 samples = []
                 measured_through = time.time()
                 with QualificationLoad(

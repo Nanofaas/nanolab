@@ -10,6 +10,7 @@ from sonata_engine import Steps, Workflow
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import TimingCell
 from nanolab.functions.catalog import resolve_function_definition
+from nanolab.one_shot.profiles import CalibrationProfiles, validate_trace_capacity
 from nanolab.plans.one_shot_common import add_one_shot_platforms
 from nanolab.tasks.one_shot.clock import clock_health_resource
 from nanolab.tasks.one_shot.experiment import (
@@ -21,6 +22,7 @@ from nanolab.tasks.one_shot.experiment import (
     evidence_collector_resource,
     generator_resource,
     read_qualification,
+    verify_qualified_load,
 )
 from nanolab.tasks.one_shot.preflight import CollectTopologyTask
 from nanolab.tasks.one_shot.qualification import read_profile
@@ -55,18 +57,24 @@ def build_one_shot_experiment_plan(
     trace = experiment_trace(
         settings, period=qualification.period_seconds, aliases=aliases
     )
-    maximum = max(
-        sum(
-            sum(rates.values())
-            for rates in TimingCell.model_validate(cell["cell"]).rates.values()
+    if isinstance(profile, CalibrationProfiles):
+        verify_qualified_load(trace, qualification, aliases=aliases)
+        validate_trace_capacity(trace, profile, settings)
+    else:
+        maximum = max(
+            sum(
+                sum(rates.values())
+                for rates in TimingCell.model_validate(cell["cell"]).rates.values()
+            )
+            for cell in qualification.matrix
         )
-        for cell in qualification.matrix
-    )
-    if any(
-        sum(sum(rates.values()) for rates in window.values()) > maximum
-        for window in trace.windows
-    ):
-        raise ValueError("experiment load exceeds the independently qualified matrix")
+        if any(
+            sum(sum(rates.values()) for rates in window.values()) > maximum
+            for window in trace.windows
+        ):
+            raise ValueError(
+                "experiment load exceeds the independently qualified matrix"
+            )
     workflow = Workflow("one-shot-experiment")
     for repetition in range(experiment.repetitions):
         modes = ["baseline", "oracle", "ewma"]
@@ -85,7 +93,14 @@ def build_one_shot_experiment_plan(
                 baseline=mode == "baseline",
             )
             clock = clock_health_resource(
-                endpoints={key: topology.endpoints[key] for key in edges},
+                endpoints={
+                    key: topology.endpoints[key]
+                    for key in (
+                        trace.nodes
+                        if settings.purpose == "scientific-experiment"
+                        else edges
+                    )
+                },
                 probes=topology.probes,
                 output=directory / "clock.jsonl",
             )

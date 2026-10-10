@@ -152,3 +152,30 @@ def read_profiles(settings: OneShotConfig) -> CalibrationProfiles:
     return CalibrationProfiles(
         profiles, settings.profile.sha256, index.environment_fingerprint, values
     )
+
+
+def profile_for_node(
+    profiles: CalibrationProfiles | CalibrationProfile, node_id: str
+) -> CalibrationProfile:
+    """Select the local native profile without changing its public schema."""
+    return (
+        profiles.by_node[node_id]
+        if isinstance(profiles, CalibrationProfiles)
+        else profiles
+    )
+
+
+def validate_trace_capacity(trace, profiles: CalibrationProfiles, settings) -> None:
+    """Check actual empirical and native local cloud bounds before provisioning."""
+    from nanolab.tasks.one_shot.trace import validate_cloud_headroom
+
+    cloud = next(node.id for node in settings.nodes if node.kind == "cloud")
+    if profiles.capacities is None or len(trace.functions) != 1:
+        raise ValueError("scientific trace requires measured capacity")
+    rows = {row["function"]: row for row in profiles.by_node[cloud].functions}
+    demand = cast(float, rows[trace.functions[0]]["serviceSeconds"])
+    functions = resolve_node_functions(settings, cloud)
+    physical = next(iter(functions.values())).max_replicas / demand
+    validate_cloud_headroom(
+        trace, cloud=cloud, empirical=profiles.capacities[cloud], physical=physical
+    )

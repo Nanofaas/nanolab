@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Any, cast
+
+from nanolab.one_shot.profiles import CalibrationProfiles, profile_for_node
 
 
 def validate_proof(proof: dict, execution_id: str) -> bool:
@@ -23,10 +26,10 @@ def verify_observations(
     nodes,
     endpoints=None,
     require_execution_node=True,
+    cloud=None,
 ):
     """Detect service drift separately per destination/function and routing mismatch."""
     violations = []
-    demand = {row["function"]: row["serviceSeconds"] for row in profile.functions}
     durations = defaultdict(list)
     outcome = {row["originalId"]: row for row in results}
     for proof in attempts:
@@ -34,9 +37,20 @@ def verify_observations(
         if destination not in nodes:
             violations.append("physical destination is outside frozen topology")
         row = outcome.get(proof["originalId"], {})
-        if (require_execution_node or row.get("executionNode") is not None) and row.get(
-            "executionNode"
-        ) != destination:
+        exact_direct = (
+            cloud is not None
+            and destination == cloud
+            and row.get("origin") == cloud
+            and proof.get("state") == "RELEASED"
+            and proof.get("handlerStarted")
+            and validate_proof(
+                proof, row.get("terminalExecutionId") or row.get("executionId")
+            )
+        )
+        if (
+            (require_execution_node and not exact_direct)
+            or row.get("executionNode") is not None
+        ) and row.get("executionNode") != destination:
             violations.append("terminal destination disagrees with physical proof")
         if endpoints is not None:
             target = row.get("offloadedTarget")
@@ -61,14 +75,22 @@ def verify_observations(
     observed = {}
     for (node, name), values in durations.items():
         mean = sum(values) / len(values)
-        drift = abs(mean / demand[name] - 1)
+        if isinstance(profile, CalibrationProfiles) and node not in profile.by_node:
+            violations.append("physical destination has no bound local profile")
+            continue
+        local = cast(Any, profile_for_node(profile, node))
+        measured = {row["function"]: row for row in local.functions}
+        if name not in measured:
+            violations.append("physical function has no bound local profile")
+            continue
+        drift = abs(mean / measured[name]["serviceSeconds"] - 1)
         observed[f"{node}/{name}"] = {
             "samples": len(values),
             "meanSeconds": mean,
             "drift": drift,
         }
         profile_limit = (
-            next(row for row in profile.functions if row["function"] == name)
+            measured[name]
             .get("validity", {})
             .get("maxRelativeCapacityError", tolerance)
         )
@@ -81,13 +103,20 @@ def verify_observations(
     return sorted(set(violations)), observed
 
 
-def verify_runtime_inventory(rows, *, functions, nodes):
+def verify_runtime_inventory(rows, *, functions, nodes, node_functions=None):
     """Verify observed physical c1 and declared container limits."""
     violations = []
     memory = defaultdict(int)
     for row in rows:
         status = row["status"]
-        fn = functions[row["function"]]
+        if (row.get("node") is not None or node_functions) and row.get(
+            "node"
+        ) not in nodes:
+            violations.append("runtime destination is outside frozen topology")
+            continue
+        fn = (
+            node_functions.get(row["node"], functions) if node_functions else functions
+        )[row["function"]]
         limits = row["container"]["HostConfig"]
         if row.get("at") and row.get("node"):
             memory[(row["at"], row["node"])] += limits.get("Memory", 0)
@@ -109,7 +138,7 @@ def verify_runtime_inventory(rows, *, functions, nodes):
     return sorted(set(violations))
 
 
-def verify_epoch_flows(plans: dict) -> None:
+def verify_epoch_flows(plans: dict, *, neighbor_graph=None) -> None:
     """Match acknowledged one-hop peer assignments and conserve forecast rates."""
     for node, plan in plans.items():
         for name, function in plan["functions"].items():
@@ -138,7 +167,14 @@ def verify_epoch_flows(plans: dict) -> None:
                     peer = (
                         row["sellerId"] if direction == "outbound" else row["buyerId"]
                     )
-                    if peer == node or peer not in plans:
+                    if (
+                        peer == node
+                        or peer not in plans
+                        or (
+                            neighbor_graph is not None
+                            and peer not in neighbor_graph.get(node, [])
+                        )
+                    ):
                         raise ValueError("peer assignment outside one-hop topology")
                     other = plans[peer]["functions"].get(name, {}).get(counterpart, [])
                     if row not in other:

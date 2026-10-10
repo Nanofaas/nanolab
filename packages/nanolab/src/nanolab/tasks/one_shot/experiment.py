@@ -11,7 +11,7 @@ from importlib.metadata import version
 from importlib.resources import files
 from pathlib import Path
 from threading import Event, Thread
-from typing import cast
+from typing import Any, cast
 
 import httpx
 from pydantic import JsonValue, TypeAdapter
@@ -19,7 +19,16 @@ from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
 from nanolab.config.one_shot import ProtocolSettings, TimingCell
 from nanolab.one_shot.client import NanoFaasOneShotClient
-from nanolab.one_shot.models import CampaignManifest, TimingQualification
+from nanolab.one_shot.models import (
+    CalibrationProfile,
+    CampaignManifest,
+    TimingQualification,
+)
+from nanolab.one_shot.profiles import (
+    CalibrationProfiles,
+    profile_for_node,
+    validate_trace_capacity,
+)
 from nanolab.one_shot.topology import observe_neighbors
 from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import (
@@ -91,7 +100,11 @@ def read_qualification(settings) -> TimingQualification:
         or result.period_seconds > result.max_trace_resolution
     ):
         raise ValueError("timing qualification lacks valid period/resolution scope")
-    edges = {node.id for node in settings.nodes if node.kind == "edge"}
+    edges = {
+        node.id
+        for node in settings.nodes
+        if settings.purpose == "scientific-experiment" or node.kind == "edge"
+    }
     for cell in result.matrix:
         load = cell.get("load")
         if (
@@ -130,6 +143,32 @@ def read_qualification(settings) -> TimingQualification:
         ):
             raise ValueError("timing matrix is not independently qualified")
     return result
+
+
+def verify_qualified_load(trace, qualification, *, aliases=None) -> None:
+    """Require one actual qualified vector for every campaign vector, cloud included."""
+    aliases = aliases or {name: name for name in trace.functions}
+    vectors = [
+        {
+            node: {aliases.get(name, name): rate for name, rate in values.items()}
+            for node, values in TimingCell.model_validate(cell["cell"]).rates.items()
+        }
+        for cell in qualification.matrix
+    ]
+    for window in trace.windows:
+        if not any(
+            set(vector) == set(window)
+            and all(
+                set(vector[node]) == set(window[node])
+                and all(
+                    abs(vector[node][name] - rate) <= 1e-9
+                    for name, rate in window[node].items()
+                )
+                for node in window
+            )
+            for vector in vectors
+        ):
+            raise ValueError("experiment vector lacks independent timing qualification")
 
 
 METRICS = (
@@ -183,7 +222,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
         self,
         topology,
         settings,
-        profile,
+        profile: CalibrationProfile | CalibrationProfiles,
         qualification,
         trace,
         *,
@@ -220,25 +259,25 @@ class FreezeManifestTask(Task[CampaignManifest]):
         inputs.resource(self.clock).require_healthy()
         experiment = self.settings.experiment
         cloud = next(node for node in self.settings.nodes if node.kind == "cloud")
+        node_functions = getattr(self.topology, "node_function_settings", {})
         for node in self.settings.nodes:
-            memory = sum(
-                fn.max_replicas * fn.memory_mib
-                for fn in self.topology.function_settings.values()
-            )
-            cpu = sum(
-                fn.max_replicas * fn.cpu
-                for fn in self.topology.function_settings.values()
-            )
+            functions = node_functions.get(node.id, self.topology.function_settings)
+            memory = sum(fn.max_replicas * fn.memory_mib for fn in functions.values())
+            cpu = sum(fn.max_replicas * fn.cpu for fn in functions.values())
             if memory > node.memory_capacity_mib or cpu > node.cpus:
                 raise ValueError(
                     "static comparison replicas exceed node RAM/CPU budget"
                 )
-        measured = {row["function"]: row for row in self.profile.functions}
+        cloud_profile = cast(Any, profile_for_node(self.profile, cloud.id))
+        measured = {row["function"]: row for row in cloud_profile.functions}
+        cloud_functions = node_functions.get(cloud.id, self.topology.function_settings)
+        if isinstance(self.profile, CalibrationProfiles):
+            validate_trace_capacity(self.trace, self.profile, self.settings)
         for window in self.trace.windows:
             terminal_occupancy = sum(
                 sum(rates[name] for rates in window.values())
                 * measured[name]["serviceSeconds"]
-                / self.topology.function_settings[name].max_replicas
+                / cloud_functions[name].max_replicas
                 for name in self.trace.functions
             )
             if terminal_occupancy > 0.9:
@@ -283,7 +322,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
                     self.settings.calibration.capacity_error,
                     row["validity"]["maxRelativeCapacityError"],
                 )
-                for row in self.profile.functions
+                for row in cloud_profile.functions
             },
             "admissionProfile": "SYNC_QUEUE",
             "metricsProfile": "advanced",
@@ -304,11 +343,50 @@ class FreezeManifestTask(Task[CampaignManifest]):
                 for key, endpoint in self.topology.endpoints.items()
             },
         }
+        if isinstance(self.profile, CalibrationProfiles):
+            parameters["nodeFunctions"] = {
+                node: {
+                    name: fn.model_dump(by_alias=True) for name, fn in functions.items()
+                }
+                for node, functions in node_functions.items()
+            }
+            parameters["nodeProfiles"] = {
+                node: local.model_dump(by_alias=True)
+                for node, local in self.profile.by_node.items()
+            }
+            parameters["capacities"] = self.profile.capacities
+            parameters["peerGraph"] = self.topology.neighbor_graph
+            parameters["phaseIds"] = self.trace.phase_ids
+            parameters["nodeRoles"] = self.trace.node_roles
+            parameters["requestedWindows"] = self.trace.requested_windows
+            parameters.pop("serviceDriftToleranceByFunction")
+            parameters["serviceDriftToleranceByNodeFunction"] = {
+                node: {
+                    row["function"]: min(
+                        self.settings.calibration.capacity_error,
+                        row["validity"]["maxRelativeCapacityError"],
+                    )
+                    for row in cast(list[dict[str, Any]], local.functions)
+                }
+                for node, local in self.profile.by_node.items()
+            }
+            parameters["baselinePolicy"] = {
+                "mode": "pressure",
+                "edgeSyncQueue": True,
+                "edgeMaxDepth": {
+                    node: max(fn.max_replicas for fn in functions.values())
+                    for node, functions in node_functions.items()
+                },
+                "replicas": {
+                    node: {name: fn.max_replicas for name, fn in functions.items()}
+                    for node, functions in node_functions.items()
+                },
+            }
         manifest = CampaignManifest(
             provider=self.settings.provider,
             purpose=self.settings.purpose,
             environment_fingerprint=fingerprint,
-            source_commit=self.profile.source_commit,
+            source_commit=cloud_profile.source_commit,
             profile_sha256=self.settings.profile.sha256,
             qualification_sha256=self.settings.qualification.sha256,
             trace_sha256=self.trace.sha256,
@@ -390,7 +468,10 @@ class UploadForecastTask(Task[None]):
                 url = inputs.resource(endpoint)
                 node = run.topology.resources.nodes[key]
                 if node.config.kind == "cloud" or run.mode == "baseline":
-                    for name, function in run.topology.function_settings.items():
+                    functions = getattr(run.topology, "node_function_settings", {}).get(
+                        key, run.topology.function_settings
+                    )
+                    for name, function in functions.items():
                         http.put(
                             url + f"/v1/functions/{name}/replicas",
                             json={"replicas": function.max_replicas},
@@ -403,7 +484,7 @@ class UploadForecastTask(Task[None]):
                 if run.mode == "baseline":
                     continue
                 client = NanoFaasOneShotClient(url, http=http)
-                client.load_profile(run.profile, revision=0)
+                client.load_profile(profile_for_node(run.profile, key), revision=0)
                 conf = configuration_for_node(
                     run.topology,
                     run.settings,
@@ -813,7 +894,11 @@ class RunOneShotLoadTask(Task[None]):
                         }
                         if len(plans) != len(clients):
                             raise ValueError("missing native ready allocation")
-                        verify_epoch_flows(plans)
+                        verify_epoch_flows(
+                            plans,
+                            neighbor_graph=getattr(run.topology, "neighbor_graph", None)
+                            or None,
+                        )
                         if (
                             sample.censored
                             or sample.ready_seconds is None
@@ -1004,6 +1089,7 @@ def collect_original_evidence(run, inputs: TaskInputs) -> RunEvidence:
         profile=run.profile,
         tolerance=run.settings.calibration.capacity_error,
         require_execution_node=run.mode != "baseline",
+        cloud=next(node.id for node in run.settings.nodes if node.kind == "cloud"),
         nodes=list(run.topology.resources.nodes),
         endpoints={
             key: inputs.resource(endpoint)
@@ -1019,6 +1105,7 @@ def collect_original_evidence(run, inputs: TaskInputs) -> RunEvidence:
     violations += verify_runtime_inventory(
         inventory,
         functions=run.topology.function_settings,
+        node_functions=getattr(run.topology, "node_function_settings", None),
         nodes=run.topology.resources.nodes,
     )
     if violations:
