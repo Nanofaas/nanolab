@@ -145,3 +145,73 @@ class CampaignManifest(BaseModel):
     repetition: int = Field(default=0, ge=0)
     anchor: str = ""
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class CampaignBlock(BaseModel):
+    """One registered seed and the exact three-mode execution order."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: int = Field(ge=0)
+    seed: int
+    modes: list[Literal["baseline", "oracle", "ewma"]]
+
+    @model_validator(mode="after")
+    def checked(self) -> Self:
+        """Validate the frozen execution registry."""
+        if len(self.modes) != 3 or set(self.modes) != {"baseline", "oracle", "ewma"}:
+            raise ValueError("frozen block requires exactly the three modes")
+        return self
+
+
+class CampaignProtocol(BaseModel):
+    """NanoLab protocol binds source settings, trace, order and planned replication."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[1] = Field(alias="schemaVersion")
+    artifact_type: Literal["paired-one-shot-campaign"] = Field(alias="artifactType")
+    role: Literal["pilot", "main"]
+    seed: int
+    planned_blocks: int = Field(alias="plannedBlocks", ge=6, le=36)
+    blocks: list[CampaignBlock]
+    replacements: list[CampaignBlock]
+    settings: dict[str, JsonValue]
+    trace: dict[str, JsonValue]
+    trace_sha256: str = Field(alias="traceSha256", pattern=r"^[0-9a-f]{64}$")
+    profile_sha256: str = Field(alias="profileSha256", pattern=r"^[0-9a-f]{64}$")
+    qualification_sha256: str = Field(
+        alias="qualificationSha256", pattern=r"^[0-9a-f]{64}$"
+    )
+    environment_fingerprint: str = Field(
+        alias="environmentFingerprint", pattern=r"^sha256:[0-9a-f]{64}$"
+    )
+    pilot: dict[str, JsonValue] | None
+    analysis: dict[str, JsonValue]
+
+    @model_validator(mode="after")
+    def checked(self) -> Self:
+        """Validate the frozen execution registry."""
+        from collections import Counter
+
+        from nanolab.tasks.one_shot.trace import TraceArtifact
+
+        n = self.planned_blocks
+        replacement_count = math.floor(0.20 * n) if self.role == "main" else 0
+        if (
+            (self.role == "pilot" and n != 6)
+            or (self.role == "main" and (n < 12 or n % 6))
+            or len(self.blocks) != n
+            or {b.block for b in self.blocks} != set(range(n))
+            or len(self.replacements) != replacement_count
+            or {b.block for b in self.replacements}
+            != set(range(n, n + replacement_count))
+        ):
+            raise ValueError("frozen campaign registry is incomplete or outside budget")
+        order = Counter(tuple(b.modes) for b in self.blocks)
+        if len(order) != 6 or set(order.values()) != {n // 6}:
+            raise ValueError("frozen mode order is not balanced")
+        seeds = [b.seed for b in self.blocks + self.replacements]
+        if len(seeds) != len(set(seeds)):
+            raise ValueError("frozen campaign seeds must be unique")
+        if TraceArtifact.model_validate(self.trace).sha256 != self.trace_sha256:
+            raise ValueError("frozen trace hash mismatch")
+        return self

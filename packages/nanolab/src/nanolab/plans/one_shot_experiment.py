@@ -10,6 +10,7 @@ from sonata_engine import Steps, Workflow
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import TimingCell
 from nanolab.functions.catalog import resolve_function_definition
+from nanolab.one_shot.campaign import read_campaign_binding
 from nanolab.one_shot.profiles import CalibrationProfiles, validate_trace_capacity
 from nanolab.plans.one_shot_common import add_one_shot_platforms
 from nanolab.tasks.one_shot.clock import clock_health_resource
@@ -54,8 +55,13 @@ def build_one_shot_experiment_plan(
         key: resolve_function_definition(key, source).family for key in config.functions
     }
     edges = [node.id for node in settings.nodes if node.kind == "edge"]
-    trace = experiment_trace(
-        settings, period=qualification.period_seconds, aliases=aliases
+    binding = read_campaign_binding(settings)
+    trace = (
+        binding["trace"]
+        if binding
+        else experiment_trace(
+            settings, period=qualification.period_seconds, aliases=aliases
+        )
     )
     if isinstance(profile, CalibrationProfiles):
         verify_qualified_load(trace, qualification, aliases=aliases)
@@ -77,9 +83,14 @@ def build_one_shot_experiment_plan(
             )
     workflow = Workflow("one-shot-experiment")
     for repetition in range(experiment.repetitions):
-        modes = ["baseline", "oracle", "ewma"]
-        # Reproducible mode order, not a security-sensitive random choice.
-        random.Random(settings.seed + repetition).shuffle(modes)  # nosec B311
+        modes = (
+            binding["block"]["modes"].copy()
+            if binding
+            else ["baseline", "oracle", "ewma"]
+        )
+        if binding is None:
+            # Reproducible mode order, not a security-sensitive random choice.
+            random.Random(settings.seed + repetition).shuffle(modes)  # nosec B311
         for mode in modes:
             directory = run_dir / f"rep-{repetition}-{mode}"
             topology = add_one_shot_platforms(

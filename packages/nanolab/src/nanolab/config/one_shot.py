@@ -178,7 +178,20 @@ class ExperimentSettings(BaseModel):
     max_arrival_lateness: float = Field(
         default=0.25, alias="maxArrivalLatenessSeconds", gt=0
     )
+    campaign_protocol: ArtifactReference | None = Field(
+        default=None, alias="campaignProtocol"
+    )
+    campaign_block: int | None = Field(default=None, alias="campaignBlock", ge=0)
     fail_load: bool = Field(default=False, alias="failLoad")
+
+    @model_validator(mode="after")
+    def paired_protocol(self) -> Self:
+        """Require the immutable protocol reference for each block."""
+        if (self.campaign_protocol is None) != (self.campaign_block is None):
+            raise ValueError("campaignProtocol and campaignBlock are required together")
+        if self.campaign_protocol is not None and self.repetitions != 1:
+            raise ValueError("a frozen campaign scenario executes exactly one block")
+        return self
 
 
 class OneShotLogs(BaseModel):

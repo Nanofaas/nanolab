@@ -16,8 +16,9 @@ def test_changed_timing_artifact_is_refused_before_load(tmp_path):
         read_qualification(settings)
 
 
+@pytest.mark.parametrize("frozen_order", [False, True])
 def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, frozen_order
 ):
     from types import SimpleNamespace
     from typing import Any, cast
@@ -28,6 +29,8 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
 
     target = "nanolab.plans.one_shot_experiment."
     calls = []
+    active = set()
+    order = []
     resource = Resource(title="fake", acquire=lambda _: None, release=lambda *_: None)
     settings = SimpleNamespace(
         provider="multipass",
@@ -50,6 +53,8 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
             ],
             repetitions=1,
             generator_vus=2,
+            campaign_protocol=None,
+            campaign_block=None,
         ),
     )
     scenario = SimpleNamespace(
@@ -95,8 +100,13 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
     class Freeze(Preflight):
         title = "freeze"
 
+        def __init__(self, *_args, **kwargs):
+            self.mode = kwargs["mode"]
+
         def run(self, inputs):
             assert inputs.upstream() == "preflight-evidence"
+            assert active == {self.mode + ":" + n.id for n in settings.nodes}
+            order.append(self.mode)
             calls.append("frozen")
             return TaskOutcome()
 
@@ -130,10 +140,26 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
     ]:
         monkeypatch.setattr(target + name, task)
     topology = SimpleNamespace(resources=SimpleNamespace())
-    monkeypatch.setattr(
-        target + "add_one_shot_platforms",
-        lambda *args, **kwargs: SimpleNamespace(
-            requires=(resource,),
+
+    def platforms(*_args, **kwargs):
+        mode = kwargs["run_dir"].name.rsplit("-", 1)[-1]
+        leases = []
+        for node in settings.nodes:
+            name = mode + ":" + node.id
+
+            def acquire(_inputs, name=name):
+                active.add(name)
+                return name
+
+            leases.append(
+                Resource(
+                    title=name,
+                    acquire=acquire,
+                    release=lambda _inputs, name: active.remove(name),
+                )
+            )
+        return SimpleNamespace(
+            requires=(resource, *leases),
             resources=topology.resources,
             endpoints=dict.fromkeys(["edge-0", "edge-1", "cloud"], resource),
             probes={},
@@ -142,9 +168,23 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
             collectors={},
             neighbor_graph={},
             node_function_settings={},
-        ),
-    )
+        )
+
+    monkeypatch.setattr(target + "add_one_shot_platforms", platforms)
+    if frozen_order:
+        from nanolab.tasks.one_shot.trace import experiment_trace
+
+        frozen = {
+            "trace": experiment_trace(
+                cast(Any, settings), period=20, aliases={"f": "f"}
+            ),
+            "block": {"modes": ["oracle", "ewma", "baseline"]},
+        }
+        monkeypatch.setattr(target + "read_campaign_binding", lambda _settings: frozen)
     build_one_shot_experiment_plan(
         cast(Any, scenario), cast(Any, object()), run_dir=tmp_path, repo_root=tmp_path
     ).run()
     assert calls == ["frozen", "evaluated"] * 3
+    assert not active
+    if frozen_order:
+        assert order == ["oracle", "ewma", "baseline"]

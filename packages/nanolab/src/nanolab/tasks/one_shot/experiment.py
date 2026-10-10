@@ -18,6 +18,7 @@ from pydantic import JsonValue, TypeAdapter
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
 from nanolab.config.one_shot import ProtocolSettings, TimingCell
+from nanolab.one_shot.campaign import read_campaign_binding
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import (
     CalibrationProfile,
@@ -293,6 +294,14 @@ class FreezeManifestTask(Task[CampaignManifest]):
             raise ValueError("scientific warmup exceeds configured maximum")
         anchor = datetime.now(UTC) + timedelta(seconds=warmup_seconds + 20)
         run_id = f"{self.trace.sha256[:12]}:{self.mode}:{self.repetition}"
+        binding = read_campaign_binding(self.settings)
+        if binding is not None:
+            if (
+                self.modes != binding["block"]["modes"]
+                or self.trace.sha256 != binding["trace"].sha256
+            ):
+                raise ValueError("execution differs from frozen campaign order/trace")
+            run_id += f":{binding['sha256'][:12]}:{binding['block']['block']}"
         parameters = {
             "nodes": [node.model_dump(by_alias=True) for node in self.settings.nodes],
             "functions": {
@@ -381,6 +390,14 @@ class FreezeManifestTask(Task[CampaignManifest]):
                     node: {name: fn.max_replicas for name, fn in functions.items()}
                     for node, functions in node_functions.items()
                 },
+            }
+        if binding is not None:
+            parameters["campaign"] = {
+                "block": binding["block"]["block"],
+                "seed": binding["block"]["seed"],
+                "role": binding["protocol"]["role"],
+                "plannedBlocks": binding["protocol"]["plannedBlocks"],
+                "protocolSha256": binding["sha256"],
             }
         manifest = CampaignManifest(
             provider=self.settings.provider,
