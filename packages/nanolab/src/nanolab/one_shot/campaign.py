@@ -354,7 +354,8 @@ def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -
     def canonical_window(window):
         return {node: {name: rates[original]} for node, rates in window.items()}
 
-    assert relative.requested_windows is not None
+    if relative.requested_windows is None:
+        raise ValueError("capacity trace requires requested rates")
     trace = TraceArtifact.model_validate(
         {
             **relative.model_dump(),
@@ -493,7 +494,8 @@ def write_campaign_scenarios(protocol: dict, output) -> list:
     settings = protocol["settings"]
     original = next(iter(settings["functions"]))
     name = trace.functions[0]
-    assert trace.phase_ids is not None
+    if trace.phase_ids is None:
+        raise ValueError("campaign trace requires phase identifiers")
     windows = [
         {
             "id": trace.phase_ids[i],

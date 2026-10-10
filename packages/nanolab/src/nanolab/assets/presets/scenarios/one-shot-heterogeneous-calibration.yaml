@@ -1,4 +1,4 @@
-# Fill runtimeDistribution with the exported native image receipt before running.
+# Fill runtimeDistribution with the exported frozen image receipt before running.
 workflow: one-shot-calibration
 backend: container
 functions:

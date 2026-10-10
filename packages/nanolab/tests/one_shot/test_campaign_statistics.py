@@ -569,3 +569,31 @@ def test_public_binding_rejects_changed_installed_implementation(tmp_path, monke
     )
     with pytest.raises(ValueError, match="implementation"):
         campaign().read_campaign_binding(settings)
+
+
+def test_writer_rejects_missing_phases_explicitly(tmp_path):
+    from nanolab.tasks.one_shot.trace import TraceArtifact
+
+    settings, profiles, qualification, _ = protocol_fixture(tmp_path)
+    protocol = campaign().freeze_campaign_protocol(
+        profiles=profiles, qualification=qualification, pilot_rows=[], settings=settings
+    )
+    protocol["trace"]["phase_ids"] = None
+    protocol["traceSha256"] = TraceArtifact.model_validate(protocol["trace"]).sha256
+    with pytest.raises(ValueError, match="phase"):
+        campaign().write_campaign_scenarios(protocol, tmp_path / "invalid")
+
+
+def test_freezer_rejects_missing_requested_capacity_trace(tmp_path, monkeypatch):
+    settings, profiles, qualification, trace = protocol_fixture(tmp_path)
+    trace = trace.model_copy(update={"requested_windows": None})
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.trace.capacity_trace", lambda *args: trace
+    )
+    with pytest.raises(ValueError, match="requested"):
+        campaign().freeze_campaign_protocol(
+            profiles=profiles,
+            qualification=qualification,
+            pilot_rows=[],
+            settings=settings,
+        )

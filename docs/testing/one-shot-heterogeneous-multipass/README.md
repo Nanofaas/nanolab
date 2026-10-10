@@ -12,7 +12,7 @@ Function CPU quotas are .35/.50/.60/.70/.85/1.0 with maximum warm replicas
 owned Loki/Grafana have 1.5 CPU / 768 MiB combined. All fit the declared VM budgets.
 
 One Rust input runs everywhere: 20,000,000 iterations, 4096 working-set bytes,
-seed 7. Images, checksums, native runtime, graph, observer configuration and
+seed 7. Images, checksums, the frozen JVM control-plane recipe, graph, observer configuration and
 NanoLab implementation fingerprint stay frozen. CPU quota emulates relative
 edge speed on one shared physical ARM host; it does not establish geographic
 latency or independence of successive blocks.
@@ -22,7 +22,7 @@ latency or independence of successive blocks.
 1. Run the full frozen-topology logging overhead gate (three paired runs;
    goodput loss and p95 increase each at most 5%). The old one-replica, P2P-off
    technology pilot cannot qualify this campaign.
-2. Run `one-shot-heterogeneous-calibration.yaml` with real hash-bound native
+2. Run `one-shot-heterogeneous-calibration.yaml` with real hash-bound
    runtime distribution. Measure each node independently; retain every sample.
    Sweep each local replica count at six load factors, three trials per factor
    (30s warmup + 60s measurement), plus three simultaneous trials. Initial sweep
