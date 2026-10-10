@@ -370,6 +370,7 @@ def concurrent_trace(
         requested.append(raw)
         windows.append(effective)
     trace = TraceArtifact(
+        schema_version=2,
         nodes=nodes,
         functions=names,
         period_seconds=period,

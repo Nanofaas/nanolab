@@ -93,6 +93,8 @@ def test_collector_reservation_is_checked_against_feasible_replica_bound():
         "duplicate",
         "deficit",
         "late",
+        "telemetry",
+        "telemetry-off",
         "generator-error",
         "generator-cleanup-error",
         "swap",
@@ -154,11 +156,25 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
         poll=lambda: 0,
         returncode=1 if fault in {"generator-error", "generator-cleanup-error"} else 0,
     )
+    telemetry_actions = []
+
+    def generator(**kwargs):
+        if fault in {"telemetry", "telemetry-off"}:
+            assert kwargs["duration"] == 135
+        return SimpleNamespace(
+            acquire=lambda _: telemetry_actions.append("generator") or process,
+            release=lambda *args: released.append(True),
+        )
+
+    monkeypatch.setattr(experiment, "generator_resource", generator)
     monkeypatch.setattr(
-        experiment,
-        "generator_resource",
-        lambda **kwargs: SimpleNamespace(
-            acquire=lambda _: process, release=lambda *args: released.append(True)
+        "nanolab.one_shot.vm_resources.VmTelemetrySession",
+        lambda *args: (
+            telemetry_actions.append("sampler")
+            or SimpleNamespace(
+                close=lambda: telemetry_actions.append("sampler-close"),
+                require_healthy=lambda: None,
+            )
         ),
     )
 
@@ -318,6 +334,8 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             repetition=0,
             run_dir=directory,
             clock="clock",
+            telemetry_enabled=fault == "telemetry",
+            preload_lead_seconds=45 if fault == "telemetry-off" else None,
         )
     assert released == [True]
     assert {row["function"] for row in rows} == {"f0", "f1"}
@@ -325,7 +343,11 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
     assert by_name["f0"]["planned"] == 60
     assert by_name["f1"]["planned"] == 120
     assert all(row["replicaVector"] == {"f0": 1, "f1": 1} for row in rows)
-    if fault is None:
+    if fault in {None, "telemetry", "telemetry-off"}:
+        if fault == "telemetry":
+            assert telemetry_actions == ["sampler", "generator", "sampler-close"]
+        if fault == "telemetry-off":
+            assert telemetry_actions == ["generator"]
         assert all(
             row["validOutput"] and row["physicalCompletions"] == row["planned"]
             for row in rows

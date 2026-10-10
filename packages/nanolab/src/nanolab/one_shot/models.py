@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -167,7 +167,7 @@ class CampaignProtocol(BaseModel):
     """NanoLab protocol binds source settings, trace, order and planned replication."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1] = Field(alias="schemaVersion")
+    schema_version: Literal[1, 2] = Field(alias="schemaVersion")
     artifact_type: Literal["paired-one-shot-campaign"] = Field(alias="artifactType")
     nanolab_package_sha256: str = Field(
         alias="nanolabPackageSha256", pattern=r"^[0-9a-f]{64}$"
@@ -215,6 +215,31 @@ class CampaignProtocol(BaseModel):
         seeds = [b.seed for b in self.blocks + self.replacements]
         if len(seeds) != len(set(seeds)):
             raise ValueError("frozen campaign seeds must be unique")
-        if TraceArtifact.model_validate(self.trace).sha256 != self.trace_sha256:
+        trace = TraceArtifact.model_validate(self.trace)
+        if trace.sha256 != self.trace_sha256:
             raise ValueError("frozen trace hash mismatch")
+        if self.schema_version == 2 or trace.schema_version == 2:
+            from nanolab.one_shot.campaign import analysis_denominator, analysis_epochs
+            from nanolab.one_shot.vm_resources import telemetry_policy
+
+            if self.analysis.get("vmTelemetry") != telemetry_policy():
+                raise ValueError("frozen VM telemetry policy/asset differs")
+            aliases = self.analysis.get("functionAliases")
+            if (
+                self.schema_version != 2
+                or trace.schema_version != 2
+                or self.analysis.get("analysisEpochIndices") != analysis_epochs(trace)
+                or self.analysis.get("denominator") != analysis_denominator(trace)
+                or not isinstance(aliases, dict)
+                or set(aliases) != set(cast(dict, self.settings["functions"]))
+                or not all(isinstance(value, str) for value in aliases.values())
+                or aliases
+                != {
+                    key: key if key in trace.functions else key.removesuffix("-rust")
+                    for key in cast(dict, self.settings["functions"])
+                }
+                or len(set(aliases.values())) != 5
+                or set(aliases.values()) != set(trace.functions)
+            ):
+                raise ValueError("synchronized campaign analysis/alias scope mismatch")
         return self

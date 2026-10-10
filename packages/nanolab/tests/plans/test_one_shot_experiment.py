@@ -35,6 +35,7 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
     settings = SimpleNamespace(
         provider="multipass",
         purpose="workflow-validation",
+        strict_memory=False,
         seed=7,
         flow_quantum=1,
         functions={"f": SimpleNamespace(input={})},

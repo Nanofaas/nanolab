@@ -280,6 +280,9 @@ class OneShotObservability(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     logs: OneShotLogs = Field(default_factory=OneShotLogs)
+    vm_resource_overhead: ArtifactReference | None = Field(
+        default=None, alias="vmResourceOverhead"
+    )
 
 
 class OneShotConfig(BaseModel):

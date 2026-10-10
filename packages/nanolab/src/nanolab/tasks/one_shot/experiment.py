@@ -31,6 +31,7 @@ from nanolab.one_shot.profiles import (
     validate_trace_capacity,
 )
 from nanolab.one_shot.topology import observe_neighbors
+from nanolab.one_shot.vm_resources import telemetry_policy
 from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
@@ -40,7 +41,7 @@ from nanolab.tasks.one_shot.artifacts import (
 )
 from nanolab.tasks.one_shot.calibration import workload_checksum
 from nanolab.tasks.one_shot.conservation import RunEvidence, evaluate_conservation
-from nanolab.tasks.one_shot.preflight import runtime_endpoint
+from nanolab.tasks.one_shot.preflight import runtime_endpoint, runtime_inventory
 from nanolab.tasks.one_shot.qualification import (
     configuration_for_node,
     configure_node,
@@ -302,7 +303,9 @@ class FreezeManifestTask(Task[CampaignManifest]):
         )
         if warmup_seconds > (720 if concurrent else 120):
             raise ValueError("scientific warmup exceeds configured maximum")
-        anchor = datetime.now(UTC) + timedelta(seconds=warmup_seconds + 20)
+        anchor = datetime.now(UTC) + timedelta(
+            seconds=warmup_seconds + (60 if concurrent else 20)
+        )
         run_id = f"{self.trace.sha256[:12]}:{self.mode}:{self.repetition}"
         binding = read_campaign_binding(self.settings)
         if binding is not None:
@@ -325,6 +328,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
             "timing": self.qualification.model_dump(),
             "generator": {
                 **experiment.model_dump(by_alias=True),
+                "warmupSeconds": warmup_seconds,
                 "version": subprocess.run(
                     ("k6", "version"), check=True, capture_output=True, text=True
                 ).stdout.strip(),
@@ -333,6 +337,11 @@ class FreezeManifestTask(Task[CampaignManifest]):
             },
             "nanolabVersion": version("nanolab"),
             "nanolabPackageSha256": package_fingerprint(),
+            **(
+                {"vmTelemetry": telemetry_policy()}
+                if self.settings.strict_memory and len(self.settings.functions) > 1
+                else {}
+            ),
             "network": "observed-local; shared physical host",
             "cloudMemoryCapacityMiB": cloud.memory_capacity_mib,
             "terminalCloudQueueing": True,
@@ -589,7 +598,7 @@ class UploadForecastTask(Task[None]):
 
 
 def generator_resource(
-    *, run_dir: Path, vus: int, duration: float
+    *, run_dir: Path, vus: int, duration: float, telemetry: Resource | None = None
 ) -> Resource[subprocess.Popen]:
     """Sonata owns the only k6 child, including termination after task failures."""
     streams = []
@@ -635,7 +644,10 @@ def generator_resource(
             stream.close()
 
     return Resource(
-        title="Own bounded one-shot k6 generator", acquire=acquire, release=release
+        title="Own bounded one-shot k6 generator",
+        acquire=acquire,
+        release=release,
+        requires=(telemetry,) if telemetry is not None else (),
     )
 
 
@@ -761,62 +773,115 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
             functions = getattr(run.topology, "node_function_settings", {}).get(
                 node_id, run.topology.function_settings
             )
-            fixed = getattr(run, "runtime_replica_counts", {}).get(node_id)
-            for name, function in functions.items():
-                replica_count = (
-                    function.max_replicas if fixed is None else fixed.get(name, 0)
-                )
-                for replica in range(1, replica_count + 1):
-                    try:
-                        url, container = runtime_endpoint(
-                            node, name, inputs=inputs, replica=replica
-                        )
-                        status = http.get(url + "/runtime/status", timeout=2)
-                        status.raise_for_status()
-                        runtimes.append((node_id, name, url))
-                        append_observation(
-                            run.run_dir / "runtime-inventory.jsonl",
-                            {
-                                "at": sampled_at,
-                                "node": node_id,
-                                "function": name,
-                                "replica": replica,
-                                "url": url,
-                                "container": container,
-                                "status": status.json(),
-                            },
-                        )
-                        metrics = http.get(url + "/metrics", timeout=2)
-                        metrics.raise_for_status()
-                        append_observation(
-                            run.run_dir / "metrics.jsonl",
-                            {
-                                "at": datetime.now(UTC).isoformat(),
-                                "node": node_id,
-                                "function": name,
-                                "replica": replica,
-                                "metrics": parse_prometheus(metrics.text, METRICS),
-                            },
-                        )
-                        (
-                            run.run_dir / f"{node_id}-{name}-{replica}-metrics.txt"
-                        ).write_text(metrics.text)
-                    except Exception as error:
-                        append_observation(
-                            run.run_dir / "collection-errors.jsonl",
-                            {
-                                "node": node_id,
-                                "function": name,
-                                "replica": replica,
-                                "error": str(error),
-                            },
-                        )
+            settings = getattr(run, "settings", None)
+            candidates = []
+            if (
+                settings is not None
+                and settings.strict_memory
+                and len(settings.functions) > 1
+            ):
+                try:
+                    candidates = runtime_inventory(
+                        node, functions=list(functions), inputs=inputs
+                    )
+                except Exception as error:
+                    append_observation(
+                        run.run_dir / "collection-errors.jsonl",
+                        {"node": node_id, "error": str(error)},
+                    )
+            else:
+                fixed = getattr(run, "runtime_replica_counts", {}).get(node_id)
+                for name, function in functions.items():
+                    count = (
+                        function.max_replicas if fixed is None else fixed.get(name, 0)
+                    )
+                    for replica in range(1, count + 1):
+                        try:
+                            url, container = runtime_endpoint(
+                                node, name, inputs=inputs, replica=replica
+                            )
+                            candidates.append((name, replica, url, container))
+                        except Exception as error:
+                            append_observation(
+                                run.run_dir / "collection-errors.jsonl",
+                                {
+                                    "node": node_id,
+                                    "function": name,
+                                    "replica": replica,
+                                    "error": str(error),
+                                },
+                            )
+            for name, replica, url, container in candidates:
+                try:
+                    status = http.get(url + "/runtime/status", timeout=2)
+                    status.raise_for_status()
+                    runtimes.append((node_id, name, url))
+                    append_observation(
+                        run.run_dir / "runtime-inventory.jsonl",
+                        {
+                            "at": sampled_at,
+                            "node": node_id,
+                            "function": name,
+                            "replica": replica,
+                            "url": url,
+                            "container": container,
+                            "status": status.json(),
+                        },
+                    )
+                    metrics = http.get(url + "/metrics", timeout=2)
+                    metrics.raise_for_status()
+                    append_observation(
+                        run.run_dir / "metrics.jsonl",
+                        {
+                            "at": datetime.now(UTC).isoformat(),
+                            "node": node_id,
+                            "function": name,
+                            "replica": replica,
+                            "metrics": parse_prometheus(metrics.text, METRICS),
+                        },
+                    )
+                    (
+                        run.run_dir / f"{node_id}-{name}-{replica}-metrics.txt"
+                    ).write_text(metrics.text)
+                except Exception as error:
+                    append_observation(
+                        run.run_dir / "collection-errors.jsonl",
+                        {
+                            "node": node_id,
+                            "function": name,
+                            "replica": replica,
+                            "error": str(error),
+                        },
+                    )
 
         def lookup(row):
             proofs = []
             if not row.get("terminalExecutionId", row.get("executionId")):
                 return proofs
-            for node_id, name, url in runtimes:
+            targets = getattr(run, "sdk_request_targets", {})
+            target = targets.get(row["originalId"])
+            candidates = runtimes
+            if target is not None:
+                node_id, name, target_url = target
+                if (
+                    row.get("sdk") is not True
+                    or row.get("url") != target_url
+                    or row["function"] != name
+                ):
+                    append_observation(
+                        run.run_dir / "collection-errors.jsonl",
+                        {
+                            "originalId": row["originalId"],
+                            "error": "direct SDK target differs from frozen schedule",
+                        },
+                    )
+                    return proofs
+                candidates = [
+                    runtime
+                    for runtime in runtimes
+                    if runtime == (node_id, name, target_url.removesuffix("/invoke"))
+                ]
+            for node_id, name, url in candidates:
                 if name != row["function"]:
                     continue
                 try:
@@ -892,9 +957,10 @@ class RunOneShotLoadTask(Task[None]):
 
     title = "Run original load and collect best-effort physical evidence"
 
-    def __init__(self, freeze, generator, collector):
+    def __init__(self, freeze, generator, collector, telemetry=None):
         """Bind the owned generator and already frozen topology."""
         self.freeze, self.generator, self.collector = freeze, generator, collector
+        self.telemetry = telemetry
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
         """Never retry an ambiguous prepare; collect evidence even on failure."""
@@ -905,6 +971,9 @@ class RunOneShotLoadTask(Task[None]):
         anchor = datetime.fromisoformat(manifest.anchor)
         process, clock = inputs.resource(self.generator), inputs.resource(run.clock)
         collector = inputs.resource(self.collector)
+        telemetry = (
+            inputs.resource(self.telemetry) if self.telemetry is not None else None
+        )
         failure = None
         primary_error = None
         try:
@@ -925,6 +994,8 @@ class RunOneShotLoadTask(Task[None]):
                         start - timedelta(seconds=manifest.lead_seconds), clock=clock
                     )
                     collector.require_healthy()
+                    if telemetry is not None:
+                        telemetry.require_healthy()
                     if process.poll() is not None:
                         raise RuntimeError("generator stopped before scheduled epochs")
                     if run.mode != "baseline":
@@ -973,6 +1044,8 @@ class RunOneShotLoadTask(Task[None]):
             while process.poll() is None:
                 clock.require_healthy()
                 collector.require_healthy()
+                if telemetry is not None:
+                    telemetry.require_healthy()
                 if datetime.now(UTC) > limit:
                     raise TimeoutError("load generator exceeded its bounded duration")
                 wait_until(datetime.now(UTC) + timedelta(seconds=0.1), clock=clock)
@@ -1002,6 +1075,8 @@ class RunOneShotLoadTask(Task[None]):
 
             attempt(collector.close)
             attempt(stop_child)
+            if telemetry is not None:
+                attempt(telemetry.close)
             attempt(
                 lambda: append_observation(
                     run.run_dir / "load-status.jsonl",
@@ -1168,6 +1243,17 @@ def collect_original_evidence(run, inputs: TaskInputs) -> RunEvidence:
     if violations:
         evidence.valid = False
         evidence.violations.extend(violations)
+    resource_path = run.run_dir / "vm-resources" / "coverage.json"
+    resource_coverage = (
+        json.loads(resource_path.read_text()) if resource_path.exists() else None
+    )
+    if (
+        run.settings.strict_memory
+        and len(run.settings.functions) > 1
+        and (not resource_coverage or not resource_coverage["complete"])
+    ):
+        evidence.valid = False
+        evidence.violations.append("whole-VM resource telemetry coverage incomplete")
     evidence.observations = TypeAdapter(dict[str, JsonValue]).validate_python(
         {
             "realizedUtility": realized_utility(
@@ -1197,6 +1283,7 @@ def collect_original_evidence(run, inputs: TaskInputs) -> RunEvidence:
             "results": results,
             "epochs": _observation_rows(run.run_dir / "epochs.jsonl"),
             "metricSamples": _observation_rows(run.run_dir / "metrics.jsonl"),
+            "vmResources": resource_coverage,
         }
     )
     write_immutable_artifact(

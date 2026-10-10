@@ -148,3 +148,173 @@ def test_live_collector_observes_replica_beyond_global_default(
     proof = json.loads((tmp_path / "physical.jsonl").read_text())
     assert proof["incarnation"] == "r3"
     assert proof["destination"] == "cloud"
+
+
+def test_multifunction_collector_uses_one_verified_inventory_per_node(
+    tmp_path, monkeypatch
+):
+    node = SimpleNamespace()
+    names = [f"f{i}" for i in range(5)]
+    topology = SimpleNamespace(
+        resources=SimpleNamespace(nodes={"cloud": node}),
+        function_settings={name: SimpleNamespace(max_replicas=35) for name in names},
+        endpoints={"cloud": "endpoint"},
+    )
+    run = SimpleNamespace(
+        topology=topology,
+        run_dir=tmp_path,
+        settings=SimpleNamespace(strict_memory=True, functions=dict.fromkeys(names)),
+    )
+    calls = []
+
+    def inventory(*args, **kwargs):
+        calls.append(kwargs["functions"])
+        return [
+            (name, replica, f"http://sdk-{name}-{replica}", {})
+            for name in names
+            for replica in range(1, 8)
+        ]
+
+    def handler(request):
+        if request.url.path == "/runtime/status":
+            return httpx.Response(
+                200,
+                json={
+                    "maxConcurrentHandlers": 1,
+                    "activeHandlers": 0,
+                    "physicalReleaseProof": True,
+                },
+            )
+        return httpx.Response(200, text="nanofaas_runtime_active_handlers 0\n")
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.runtime_inventory", inventory, raising=False
+    )
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.runtime_endpoint",
+        lambda *args, **kwargs: pytest.fail(
+            "per-replica Multipass discovery is forbidden "
+            "for strict multi-function collection"
+        ),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.httpx.Client",
+            lambda **_: nullcontext(http),
+        )
+        collect_runtime_evidence(
+            run,
+            cast(Any, SimpleNamespace(resource=lambda _: "http://gateway:8080")),
+            [],
+        )
+    assert calls == [names]
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "runtime-inventory.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 35 and {row["function"] for row in rows} == set(names)
+
+
+def test_batched_inventory_verifies_labels_identity_and_replica_uniqueness(monkeypatch):
+    from sonata_engine import TaskInputs
+
+    from nanolab.tasks.one_shot.preflight import runtime_inventory
+    from tests.tasks.test_managed_container_inspection import ContainerEngine
+
+    engine = ContainerEngine("ignored")
+    engine.object["Config"]["Labels"]["io.nanofaas.function"] = "owned/f0"
+    engine.object["NetworkSettings"] = {"Ports": {"8080/tcp": [{"HostPort": "1234"}]}}
+    node = cast(Any, SimpleNamespace(request=SimpleNamespace(name="owned"), vm="vm"))
+    monkeypatch.setattr(
+        "nanolab.one_shot.infrastructure.NodeExecutor", lambda _: engine
+    )
+    inputs = cast(
+        TaskInputs, SimpleNamespace(resource=lambda _: SimpleNamespace(host="10.1.2.3"))
+    )
+    inventory = runtime_inventory(node, functions=["f0", "f1"], inputs=inputs)
+    assert [(name, replica, url) for name, replica, url, _ in inventory] == [
+        ("f0", 1, "http://10.1.2.3:1234")
+    ]
+    assert len(engine.seen) == 2
+    engine.object["NetworkSettings"]["Ports"]["8080/tcp"].append(
+        {"HostPort": "1234", "HostIp": "::"}
+    )
+    assert len(runtime_inventory(node, functions=["f0", "f1"], inputs=inputs)) == 1
+    engine.object["NetworkSettings"]["Ports"]["8080/tcp"][1]["HostPort"] = "9999"
+    with pytest.raises(ValueError, match="port"):
+        runtime_inventory(node, functions=["f0", "f1"], inputs=inputs)
+    engine.object["NetworkSettings"]["Ports"]["8080/tcp"].pop()
+    engine.object["Config"]["Labels"]["io.nanofaas.replica"] = "0"
+    with pytest.raises(ValueError, match="replica"):
+        runtime_inventory(node, functions=["f0", "f1"], inputs=inputs)
+    engine.object["Config"]["Labels"]["io.nanofaas.replica"] = "1"
+    engine.object["Id"] = "b" * 64
+    with pytest.raises(ValueError, match="identity"):
+        runtime_inventory(node, functions=["f0", "f1"], inputs=inputs)
+
+
+@pytest.mark.parametrize("wrong_target", [False, True])
+def test_direct_sdk_proofs_use_frozen_request_target_and_still_require_release(
+    tmp_path, monkeypatch, wrong_target
+):
+    calls = []
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        topology=SimpleNamespace(
+            resources=SimpleNamespace(nodes={"cloud": SimpleNamespace()}),
+            function_settings={"work": SimpleNamespace(max_replicas=3)},
+            endpoints={"cloud": "endpoint"},
+        ),
+        sdk_request_targets={"id": ("cloud", "work", "http://sdk-2/invoke")},
+    )
+    row = {
+        "originalId": "id",
+        "event": "result",
+        "phase": "campaign",
+        "executionId": "id",
+        "terminalExecutionId": "id",
+        "function": "work",
+        "sdk": True,
+        "url": "http://sdk-3/invoke" if wrong_target else "http://sdk-2/invoke",
+    }
+
+    def handler(request):
+        if "/runtime/executions/" in request.url.path:
+            calls.append(str(request.url))
+            return httpx.Response(
+                200,
+                json={
+                    "executionId": "id",
+                    "incarnation": "r2",
+                    "dispatchAttempt": "1",
+                    "state": "RELEASED",
+                    "handlerStarted": True,
+                },
+            )
+        if request.url.path == "/runtime/status":
+            return httpx.Response(
+                200,
+                json={
+                    "maxConcurrentHandlers": 1,
+                    "activeHandlers": 0,
+                    "physicalReleaseProof": True,
+                },
+            )
+        return httpx.Response(200, text="nanofaas_runtime_active_handlers 0\n")
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.runtime_endpoint",
+        lambda *_args, **kwargs: (f"http://sdk-{kwargs['replica']}", {}),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.httpx.Client",
+            lambda **_: nullcontext(http),
+        )
+        collect_runtime_evidence(
+            run,
+            cast(Any, SimpleNamespace(resource=lambda _: "http://gateway:8080")),
+            [row],
+        )
+    assert calls == ([] if wrong_target else ["http://sdk-2/runtime/executions/id"])
+    assert (tmp_path / "physical.jsonl").exists() is (not wrong_target)

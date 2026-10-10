@@ -340,11 +340,16 @@ def add_one_shot_platforms(
     forecast_provider: str = "ORACLE",
     terminal_queueing: bool = False,
     baseline: bool = False,
+    observer_bootstrap: bool = False,
 ) -> OneShotTopology:
     """Compose existing staged recipes, bootstrap and function resources per VM."""
     settings = config.one_shot
     if settings is None:
         raise ValueError("one-shot configuration missing")
+    from nanolab.one_shot.vm_resources import require_resource_overhead
+
+    if not observer_bootstrap:
+        require_resource_overhead(settings)
     run_dir.mkdir(parents=True, exist_ok=True)
     graph = validate_neighbor_graph(settings)
     resources = build_one_shot_resources(settings, environment, repo_root=repo_root)

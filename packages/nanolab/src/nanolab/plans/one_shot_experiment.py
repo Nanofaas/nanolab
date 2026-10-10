@@ -12,6 +12,7 @@ from nanolab.config.one_shot import TimingCell
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.one_shot.campaign import read_campaign_binding
 from nanolab.one_shot.profiles import CalibrationProfiles, validate_trace_capacity
+from nanolab.one_shot.vm_resources import vm_telemetry_resource
 from nanolab.plans.one_shot_common import add_one_shot_platforms
 from nanolab.tasks.one_shot.clock import clock_health_resource
 from nanolab.tasks.one_shot.experiment import (
@@ -149,20 +150,26 @@ def build_one_shot_experiment_plan(
                 requires=requires,
             )
             workflow.add(UploadForecastTask(freeze), requires=requires)
+            telemetry = (
+                vm_telemetry_resource(freeze)
+                if settings.strict_memory and len(settings.functions) > 1
+                else None
+            )
             generator = generator_resource(
                 run_dir=directory,
                 vus=experiment.generator_vus,
+                telemetry=telemetry,
                 duration=len(trace.windows) * trace.period_seconds
                 + (
                     max(experiment.warmup_seconds, 2 * trace.period_seconds)
                     if settings.purpose == "scientific-experiment"
                     else 0
                 )
-                + 25,
+                + (65 if telemetry is not None else 25),
             )
             collector = evidence_collector_resource(freeze, generator)
             workflow.add(
-                RunOneShotLoadTask(freeze, generator, collector),
+                RunOneShotLoadTask(freeze, generator, collector, telemetry),
                 requires=(*requires, generator, collector),
             )
             workflow.add(

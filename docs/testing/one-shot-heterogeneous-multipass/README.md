@@ -1,57 +1,101 @@
-# Heterogeneous one-shot Multipass campaign
+# Synchronized multi-function one-shot Multipass campaign
 
-Status: implementation and operator preparation. **No measured qualification or
-main result is recorded yet.** This dossier is separate from the earlier
-homogeneous CLI and logging technology pilots.
+Status: software implementation and operator preparation. **No scientific VM
+qualification or main result is recorded yet.** Earlier single-function artifacts
+remain historical; their capacities and timing do not qualify this scope.
 
-Five edges form two planar triangles E1–E2–E3–E1 and E3–E4–E5–E3, sharing
-E3. Degrees are 2/2/4/2/2. Every edge also reaches a terminal cloud. VM allocations
-are 1/1/2/2/3/8 vCPU and 2/3/3/4/6/12 GiB RAM.
-Function CPU quotas are .35/.50/.60/.70/.85/1.0 with maximum warm replicas
-1/1/2/2/2/7 and 256 MiB per replica. Scientific control planes have an explicit
-.35 CPU / 512 MiB limit. Collectors have .1 CPU / 64 MiB, 256 MiB disk buffers;
-owned Loki/Grafana have 1.5 CPU / 768 MiB combined. All fit the declared VM budgets.
+Five edges form two planar triangles E1–E2–E3–E1 and E3–E4–E5–E3, sharing E3.
+Degrees are 2/2/4/2/2. Every edge also reaches a terminal cloud; peer offload is
+one hop and cloud is terminal. All six nodes run concurrently.
 
-One Rust input runs everywhere: 20,000,000 iterations, 4096 working-set bytes,
-seed 7. Images, checksums, the frozen JVM control-plane recipe, graph, observer configuration and
-NanoLab implementation fingerprint stay frozen. CPU quota emulates relative
-edge speed on one shared physical ARM host; it does not establish geographic
-latency or independence of successive blocks.
+| Node | vCPU | VM RAM GiB | Function pool MiB | CPU per replica | Individual maximum |
+|---|---:|---:|---:|---:|---:|
+| E1 | 1 | 2 | 320 | .100 | 5 |
+| E2 | 1 | 3 | 320 | .100 | 5 |
+| E3 | 2 | 3 | 640 | .149 | 10 |
+| E4 | 2 | 4 | 640 | .149 | 10 |
+| E5 | 3 | 6 | 960 | .166 | 15 |
+| Cloud | 8 | 12 | 2240 | .214 | 35 |
 
-## Acquisition order
+These are candidate resources, pending final-quota/co-location verification.
+Five distinct Rust functions run everywhere: arithmetic, sorting, memory scan,
+integer matrix multiplication and a mixture of all four. Each has its own input,
+independent expected checksum and canonical identity. The preliminary owned-host
+memory gate selected 64 MiB for all five, with 50 physically released correct
+samples each, peaks below 48 MiB and swap disabled. This is not a VM D profile.
+Docker Memory=MemorySwap=M gives a hard RAM cap and no swap, and the native planner
+charges the full cap. Individual maxima cannot all be allocated simultaneously.
+Balanced initial vectors are 1/1/2/2/3/7 replicas per function by node.
 
-1. Run the full frozen-topology logging overhead gate (three paired runs;
-   goodput loss and p95 increase each at most 5%). The old one-replica, P2P-off
-   technology pilot cannot qualify this campaign.
-2. Run `one-shot-heterogeneous-calibration.yaml` with real hash-bound
-   runtime distribution. Measure each node independently; retain every sample.
-   Sweep each local replica count at six load factors, three trials per factor
-   (30s warmup + 60s measurement), plus three simultaneous trials. Initial sweep
-   alone needs 6h45, before provisioning and other measurements.
-3. Replace the qualification template's matrix with the nine complete six-node
-   vectors from `capacity_trace(measured_capacities, settings, 5, seed)` (indices
-   0,6,…,48). With q=.2 every candidate period 5/10/20/30/60 represents the same
-   rates. Fifty complete samples per cell, q95, .05 period fraction, .2s auction
-   and .3s ready margins are required; select T and lead from fresh observations.
-4. `freeze_campaign_protocol(..., pilot_rows=[], ...)` and
-   `write_campaign_scenarios(protocol, output)` emit six immutable standard
-   `one-shot-experiment` YAMLs. Run them in registered order, each with a fresh
-   six-VM topology for each mode. Verify actual peer and vertical SDK completions,
-   physical saturation, healthy generation and cloud margin before main.
-5. Freeze main with the six complete, registered pilot triplets. N is rounded to
-   a multiple of six, minimum 12, maximum 36, using the declared 5pp/80% normal
-   planning approximation and pilot paired standard deviation. If N exceeds 36,
-   revise the budget explicitly rather than cap it. Pilot data never enter main.
-6. Run every main YAML, retain all failures, then freeze the complete result
-   registry and call `render_paired_campaign(..., protocol=protocol)`.
+Each VM reserves .35 CPU / 512 MiB for its JVM control plane, .1 CPU / 64 MiB for
+Fluent Bit, and .05 CPU / 128 MiB for OS accounting. The 20-CPU operator host
+budgets 17 VM vCPU, 1.5 CPU / 768 MiB for owned Loki/Grafana and one CPU for
+operation. JSON logging is on for scientific calibration, pilot and main.
 
-The bundled qualification and pilot files are **templates**, not qualified
-inputs. Zero hashes and missing prerequisite paths must fail before any owned VM
-is acquired. Actual commands, receipts, failure classifications and artifact
-SHA-256 values belong in this dossier when acquisition runs. Operator image
-archives and bulky HTML/JSONL live outside Git with immutable hash references.
+## Frozen load and analysis
 
-Public commands, from the NanoLab checkout:
+Nine windows each contain exactly one 360-second round: control, five seeded
+single-node hotspots, hotspots on E2/E4, diffuse overload on E1/E3/E5, recovery.
+Each window contains all 30 positive node/function flows. Offered rates differ by
+function, node and time and come from complete measured balanced-vector records.
+The load transition and native planner share the same boundary. ORACLE gets the
+trace; EWMA gets no future entries. Cloud-direct traffic stays low and separate.
+
+Each mode measures **54 minutes across all six nodes**, plus at least 12 minutes
+of warmup. Baseline, EWMA and ORACLE run separately with identical original
+schedules. Version 2 protocols freeze five biunivocal aliases and
+`analysisEpochIndices=[0,1,2,3,4,5,6,7,8]`. Every planned edge original enters the
+primary denominator; cloud-direct originals are excluded. Only independent SDK
+terminal RELEASED proofs establish completions or peer/cloud destinations.
+Legacy version 1 remains last-four-of-six and is not reinterpreted.
+
+The primary contrast is EWMA minus baseline cloud completions per planned edge
+original. Its completion guard requires a lower paired 95% bound of at least
+−2 percentage points. ORACLE is secondary, not an upper bound. Bootstrap resamples
+whole paired blocks 10,000 times. Reports retain all cell outcomes and summaries
+by function, node and round, observed graph, destination matrices, resource
+limits, timings and raw evidence. The nine changing conditions support no
+steady-state claim. Intervals are conditional on independent blocks; fresh VMs
+and a shared host do not establish independence.
+
+## Acquisition order and budget
+
+1. Fresh clean runtime images and source/helper/hash inventories, full software
+   gates, then three paired logging off/on bootstrap trials with five functions
+   and native control. Both goodput loss and p95 increase must be at most 5%.
+2. Final strict cgroups, memory/co-location, 30 local D profiles with at least 50
+   complete samples per pair, then concurrent capacity sweeps. Every integer
+   replica level, six factors, three repetitions, six different mixed vectors
+   and additional simultaneous trials remain in raw evidence. A scalar capacity
+   cannot qualify five functions.
+3. Derive the nine candidate matrices, then three trials for each worst-case
+   aggregate cloud mix using its fixed balanced vector. Every function must have
+   at least 10% headroom in both measured and physical bounds. Unknown mixes
+   fail before VM timing qualification.
+4. Qualify T=360 only, all nine cells with at least 50 complete samples, q95,
+   epsilon<=.05 and .2/.3-second auction/ready margins. SDK readiness and strict
+   cgroups for all 35 cloud replicas precede sampling. Repeat three observer
+   pairs on the qualified trace before accepting pilot.
+5. Freeze and run six balanced pilot triplets through standard public scenarios,
+   fresh six-VM topology per mode. Actual peer and vertical completions,
+   saturation, generator health and cloud margin are gates. Missing coverage
+   preserves data and triggers an explicit revision before main.
+6. Freeze N from those six complete registered triplets: multiple of six,
+   minimum 12, maximum 36, declared 5pp/80% paired planning approximation.
+   Pilot never enters main. Run all main blocks and retain every failure.
+
+Capacity requires 3,276 base trials plus 27 cloud-mix trials, each 90 seconds:
+**at least 82h34m30**, before provisioning, transitions and evidence collection.
+Timing requires 450 samples, each at least 363 seconds: **at least 45h22m30**.
+The pilot alone takes 19h48 including minimum warmup; main at N=12 takes 39h36.
+These repeated acquisitions are distinct from the 54 measured minutes per mode.
+The future 60-second stage requires a separate decision and fresh qualification.
+
+`one-shot-multifunction-{calibration,qualification,pilot}.yaml` are packaged
+**templates** with intentional zero-hash blockers and provisional qualification
+rates. Replace them only with real hash-bound prerequisites. The existing
+`freeze_campaign_protocol` and `write_campaign_scenarios` emit immutable standard
+`one-shot-experiment` YAMLs; no separate infrastructure orchestrator is needed.
 
 ```sh
 NANOFAAS_ROOT=<clean-runtime-checkout> ./nanolab.sh run <calibration.yaml> --environment <multipass.yaml> --run-dir <runs/calibration>
@@ -60,34 +104,28 @@ NANOFAAS_ROOT=<clean-runtime-checkout> ./nanolab.sh run <pilot/block-000.yaml> -
 NANOFAAS_ROOT=<clean-runtime-checkout> ./nanolab.sh run <main/block-000.yaml> --environment <multipass.yaml> --run-dir <runs/main-000>
 ```
 
-## Interpretation and retention
+Registry incompleteness or algorithm-associated invalidity makes inference
+inconclusive. Technical replacements are preset, at most floor(.2N), require an
+identified external cause and retain the original failure; ambiguity is not an
+exclusion rule. Never retry originals. Preserve every failed gate, SDK proof,
+request, raw log, ownership journal and cleanup error. Bulky artifacts remain in
+`/tmp/oneshot-multifunction-20261010` with immutable references in this dossier.
 
-There are nine phases of six epochs: control, five seeded single-edge hotspots,
-adjacent hotspots, diffuse overload, recovery. All six origins receive load.
-Cloud-direct traffic is .05C and is separately accounted. Measured cloud and
-physical r/D limits must both retain 10% margin even if all planned edge traffic
-arrives there. Only the last four epochs per phase enter the primary denominator.
+The preexisting `nanofaas-stack` was permanently deleted with explicit user
+approval. Its historical deletion receipt remains in the earlier operator root;
+never recreate it. Preserve every other foreign resource. No campaign push or
+merge is authorized.
 
-The primary contrast is EWMA minus baseline cloud completions divided by planned
-edge originals. Negative values mean less vertical offload; errors cannot improve
-the completion guard, whose lower paired 95% bound must be at least −2pp.
-ORACLE is secondary, not an upper bound. Bootstrap resamples whole paired blocks
-10,000 times with the frozen seed, never individual requests. Missing blocks or
-algorithm-associated exclusions make inference inconclusive. Technical replacement
-seeds/orders are preset, at most floor(.2N), and need an identified external cause
-and retained original evidence; ambiguous failures cannot be selectively replaced.
+The revised campaign additionally requires continuous whole-VM and container
+telemetry at 1Hz. Its implementation and sampler hash are frozen before VM
+measurements. Raw JSONL streams cover warmup and all nine epochs on each edge
+and cloud, are retained on failures, and are included in coverage checks and
+per-node temporal plots. A separate three-pair physical telemetry overhead gate
+with logging enabled on both sides is required before scientific provisioning;
+the local operator-host smoke is only a technology check. No VM saturation claim
+is supported by control-plane process metrics or handler occupancy alone.
 
-Report correctness, routing coverage and effect size separately. A valid baseline
-can have zero peer traffic, and a complete main with zero offload remains visible.
-Busy handler samples are descriptive; actual sustained saturation/cloud margin
-are separate pilot gates. Shared-host contention, time order and service drift
-remain methodological limitations even after fresh VM provisioning. Intervals
-are conditional on block independence; fresh VMs do not prove it.
-
-For each mode at T=20s, 54T = 18 minutes of measured load, plus >=2T warmup and
-provisioning/cleanup. Main has 3N modes (at least 10h48 of measured load at that T),
-plus 18 pilot modes and calibration/qualification; actual T determines the final
-wall-time estimate. Preserve node logs before VM deletion, all raw requests and
-proofs, inventories, exact peers and failure artifacts. The operator permanently
-deleted the preexisting `nanofaas-stack` VM with explicit user authorization on 2026-10-10; retain its deletion receipt and preserve all other
-preexisting resources. No restart is required.
+Starting telemetry before each capacity load reserves an additional 45-second
+lead. For 3,303 capacity trials this adds at least 41h17m15 to the unchanged
+82h34m30 of scheduled load: **123h51m45 before SDK preparation, VM provisioning,
+collection and cleanup**. The 54-minute measured campaign window stays unchanged.

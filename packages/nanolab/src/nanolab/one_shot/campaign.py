@@ -51,18 +51,48 @@ def _scope(manifest: CampaignManifest) -> str:
     return content_hash(canonical_bytes(document))
 
 
-def edge_outcomes(evidence: RunEvidence, trace: TraceArtifact) -> dict[str, int]:
-    """Compute the declared steady phase denominator; retain transition cells."""
+def analysis_epochs(trace: TraceArtifact) -> list[int]:
+    """Keep the versioned denominator explicit, including all synchronized rounds."""
     if trace.phase_ids is None or trace.node_roles is None:
         raise ValueError("scientific trace requires phase and origin roles")
+    if trace.schema_version == 2:
+        if (
+            trace.period_seconds != 360
+            or len(trace.windows) != 9
+            or len(trace.functions) != 5
+            or len(trace.nodes) != 6
+            or len(set(trace.phase_ids)) != 9
+            or list(trace.node_roles.values()).count("edge") != 5
+            or list(trace.node_roles.values()).count("cloud-direct") != 1
+        ):
+            raise ValueError("synchronized analysis scope mismatch")
+        return list(range(9))
+    if trace.schema_version != 1:
+        raise ValueError("unsupported scientific trace version")
     positions = {}
-    steady = set()
+    steady = []
     for epoch, phase in enumerate(trace.phase_ids):
         positions[phase] = positions.get(phase, 0) + 1
         if positions[phase] > 2:
-            steady.add(epoch)
+            steady.append(epoch)
     if any(count != 6 for count in positions.values()):
         raise ValueError("scientific phases require six epochs")
+    return steady
+
+
+def analysis_denominator(trace: TraceArtifact) -> str:
+    """Name the denominator without changing interpretation of legacy evidence."""
+    analysis_epochs(trace)
+    return (
+        "planned-edge-originals-all-nine-synchronized-epochs"
+        if trace.schema_version == 2
+        else "planned-edge-originals-last-four-epochs-per-phase"
+    )
+
+
+def edge_outcomes(evidence: RunEvidence, trace: TraceArtifact) -> dict[str, int]:
+    """Count physical outcomes against all declared planned edge originals."""
+    steady = set(analysis_epochs(trace))
     planned = {
         (epoch, node, name): round(rate * trace.period_seconds)
         for epoch, window in enumerate(trace.windows)
@@ -78,6 +108,8 @@ def edge_outcomes(evidence: RunEvidence, trace: TraceArtifact) -> dict[str, int]
         for field in ("planned", "completed", "errors")
     ):
         raise ValueError("planned cell totals disagree with global conservation totals")
+    if trace.node_roles is None:
+        raise ValueError("scientific trace requires origin roles")
     cloud = {node for node, role in trace.node_roles.items() if role == "cloud-direct"}
     result = {"planned": 0, "completed": 0, "cloud": 0, "errors": 0}
     for key, count in planned.items():
@@ -257,13 +289,25 @@ def paired_summary(
         metric("completion"),
         metric("oracle"),
     )
-    primary["denominator"] = "planned-edge-originals-last-four-epochs-per-phase"
+    traces = [
+        TraceArtifact.model_validate(run["trace"])
+        for block in main
+        for run in block.get("runs", {}).values()
+    ]
+    policies = {
+        (analysis_denominator(trace), tuple(analysis_epochs(trace))) for trace in traces
+    }
+    if len(policies) != 1:
+        raise ValueError("main blocks disagree on analysis scope")
+    denominator, epochs = policies.pop()
+    primary["denominator"] = denominator
     completion.update(
         threshold=-0.02,
         passed=bool(complete and completion["confidence95"][0] >= -0.02),
     )
     return {
         "complete": complete,
+        "analysisEpochIndices": list(epochs),
         "confirmatory": False,
         "inference": "conditional-on-independent-blocks"
         if complete
@@ -309,6 +353,7 @@ def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -
     from itertools import permutations
 
     from nanolab.one_shot.profiles import read_profiles, validate_trace_capacity
+    from nanolab.one_shot.vm_resources import telemetry_policy
     from nanolab.tasks.one_shot.experiment import (
         read_qualification,
         verify_qualified_load,
@@ -341,33 +386,53 @@ def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -
         raise ValueError(
             "scientific timing requires fifty complete tail samples per cell"
         )
-    if verified.capacities is None or len(settings.functions) != 1:
-        raise ValueError("measured single-function capacities required")
-    original = next(iter(settings.functions))
-    name = cast(
-        str, verified.by_node[next(iter(verified.by_node))].functions[0]["function"]
-    )
-    relative = capacity_trace(
-        verified.capacities, settings, timing.period_seconds, settings.seed
-    )
+    if verified.concurrent_capacities is not None:
+        from nanolab.tasks.one_shot.trace import concurrent_trace
 
-    def canonical_window(window):
-        return {node: {name: rates[original]} for node, rates in window.items()}
-
-    if relative.requested_windows is None:
-        raise ValueError("capacity trace requires requested rates")
-    trace = TraceArtifact.model_validate(
-        {
-            **relative.model_dump(),
-            "functions": [name],
-            "payloads": {name: relative.payloads[original]},
-            "windows": [canonical_window(window) for window in relative.windows],
-            "requested_windows": [
-                canonical_window(window) for window in relative.requested_windows
-            ],
+        names = {
+            str(row["function"])
+            for row in next(iter(verified.by_node.values())).functions
         }
-    )
-    verify_qualified_load(trace, timing, aliases={original: name})
+        aliases = {
+            key: key if key in names else key.removesuffix("-rust")
+            for key in settings.functions
+        }
+        trace = concurrent_trace(
+            verified.concurrent_capacities,
+            settings,
+            period=timing.period_seconds,
+            seed=settings.seed,
+            aliases=aliases,
+        )
+    else:
+        if verified.capacities is None or len(settings.functions) != 1:
+            raise ValueError("measured single-function capacities required")
+        original = next(iter(settings.functions))
+        name = cast(
+            str, verified.by_node[next(iter(verified.by_node))].functions[0]["function"]
+        )
+        relative = capacity_trace(
+            verified.capacities, settings, timing.period_seconds, settings.seed
+        )
+
+        def canonical_window(window):
+            return {node: {name: rates[original]} for node, rates in window.items()}
+
+        if relative.requested_windows is None:
+            raise ValueError("capacity trace requires requested rates")
+        trace = TraceArtifact.model_validate(
+            {
+                **relative.model_dump(),
+                "functions": [name],
+                "payloads": {name: relative.payloads[original]},
+                "windows": [canonical_window(window) for window in relative.windows],
+                "requested_windows": [
+                    canonical_window(window) for window in relative.requested_windows
+                ],
+            }
+        )
+        aliases = {original: name}
+    verify_qualified_load(trace, timing, aliases=aliases)
     validate_trace_capacity(trace, verified, settings)
     role, n, pilot = "pilot", 6, None
     if pilot_rows:
@@ -442,7 +507,7 @@ def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -
     if settings.runtime_distribution is not None:
         settings.runtime_distribution.read_verified()
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2 if trace.schema_version == 2 else 1,
         "artifactType": "paired-one-shot-campaign",
         "nanolabPackageSha256": package_fingerprint(),
         "role": role,
@@ -459,7 +524,16 @@ def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -
         "pilot": pilot,
         "analysis": {
             "primary": "ewma-minus-baseline-edge-cloud-completion-share",
-            "denominator": "planned-edge-originals-last-four-epochs-per-phase",
+            "denominator": analysis_denominator(trace),
+            **(
+                {
+                    "vmTelemetry": telemetry_policy(),
+                    "analysisEpochIndices": analysis_epochs(trace),
+                    "functionAliases": aliases,
+                }
+                if trace.schema_version == 2
+                else {}
+            ),
             "completionGuard": -0.02,
             "completionGuardBasis": "lower-95-percentile-bound",
             "bootstrapDraws": 10000,
@@ -492,21 +566,29 @@ def write_campaign_scenarios(protocol: dict, output) -> list:
     write_immutable_artifact(reference, content)
     trace = TraceArtifact.model_validate(protocol["trace"])
     settings = protocol["settings"]
-    original = next(iter(settings["functions"]))
-    name = trace.functions[0]
     if trace.phase_ids is None:
         raise ValueError("campaign trace requires phase identifiers")
+    if protocol["schemaVersion"] == 2:
+        aliases = protocol["analysis"]["functionAliases"]
+        step = 1
+    else:
+        aliases = {next(iter(settings["functions"])): trace.functions[0]}
+        step = 6
+    if len(set(aliases.values())) != len(aliases) or set(aliases.values()) != set(
+        trace.functions
+    ):
+        raise ValueError("campaign function aliases must be biunivocal")
     windows = [
         {
             "id": trace.phase_ids[i],
-            "epochs": 6,
+            "epochs": step,
             "network": "observed-local",
             "rates": {
-                node: {original: rates[name]}
+                node: {key: rates[name] for key, name in aliases.items()}
                 for node, rates in trace.windows[i].items()
             },
         }
-        for i in range(0, len(trace.windows), 6)
+        for i in range(0, len(trace.windows), step)
     ]
     paths = []
     for block in protocol["blocks"] + protocol["replacements"]:
@@ -574,7 +656,11 @@ def read_campaign_binding(settings) -> dict | None:
     if current != expected:
         raise ValueError("scenario settings differ from frozen campaign scope")
     trace = TraceArtifact.model_validate(protocol.trace)
-    aliases = {next(iter(settings.functions)): trace.functions[0]}
+    aliases = (
+        cast(dict[str, str], protocol.analysis["functionAliases"])
+        if protocol.schema_version == 2
+        else {next(iter(settings.functions)): trace.functions[0]}
+    )
     declared = experiment_trace(settings, period=trace.period_seconds, aliases=aliases)
     if (
         declared.windows != trace.windows

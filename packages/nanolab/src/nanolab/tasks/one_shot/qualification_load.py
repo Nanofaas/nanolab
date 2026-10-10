@@ -90,7 +90,13 @@ class QualificationLoad:
         """Bind the cell, physical topology and future absolute load schedule."""
         self.inputs, self.clock, self.run_dir = inputs, clock, run_dir
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.run = SimpleNamespace(topology=topology, run_dir=run_dir)
+        from nanolab.one_shot.vm_resources import capacity_telemetry_enabled
+
+        self.use_telemetry = capacity_telemetry_enabled(settings)
+        self.telemetry = None
+        self.run = SimpleNamespace(
+            topology=topology, run_dir=run_dir, settings=settings, mode="qualification"
+        )
         duration = period * (settings.timing.minimum_samples * 2 + 2)
         rates = {
             node: {
@@ -119,9 +125,13 @@ class QualificationLoad:
             if settings.purpose == "scientific-experiment"
             else None,
         )
+        self.run.trace = trace
+        self.anchor = datetime.now(UTC) + timedelta(
+            seconds=45 if self.use_telemetry else 2
+        )
         self.schedule = request_schedule(
             trace,
-            anchor=datetime.now(UTC) + timedelta(seconds=2),
+            anchor=self.anchor,
             endpoints={
                 node: inputs.resource(topology.endpoints[node]) for node in rates
             },
@@ -140,14 +150,36 @@ class QualificationLoad:
         )
 
         try:
+            if self.use_telemetry:
+                from nanolab.one_shot.vm_resources import VmTelemetrySession
+
+                write_immutable_artifact(
+                    self.run_dir / "manifest.json",
+                    canonical_bytes(
+                        {
+                            "purpose": "timing-prefix-only",
+                            "anchor": self.anchor.isoformat(),
+                            "period_seconds": int(self.duration),
+                            "run_id": "qualification:" + self.run_dir.name,
+                            "parameters": {"generator": {"warmupSeconds": 0}},
+                        }
+                    ),
+                )
+                sampler = VmTelemetrySession(self.run, self.inputs)
+                self.telemetry = sampler
+                self.stack.callback(
+                    lambda: sampler.close(coverage_until=datetime.now(UTC))
+                )
             resource = generator_resource(
-                run_dir=self.run_dir, vus=64, duration=self.duration
+                run_dir=self.run_dir,
+                vus=64,
+                duration=self.duration + (45 if self.use_telemetry else 0),
             )
             self.process = resource.acquire(self.inputs)
             self.stack.callback(resource.release, self.inputs, self.process)
             self.collector = LiveEvidenceCollector(self.run, self.inputs)
             self.stack.callback(self.collector.close)
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + (75 if self.use_telemetry else 30)
             while time.monotonic() < deadline:
                 self.require_healthy()
                 if self.audit(cutoff=time.time() - 0.5)["valid"]:
@@ -166,6 +198,8 @@ class QualificationLoad:
         if self.process.poll() is not None:
             raise RuntimeError("qualification generator stopped during measurements")
         self.collector.require_healthy()
+        if self.telemetry is not None:
+            self.telemetry.require_healthy()
         self.clock.require_healthy()
 
     def audit(self, *, cutoff):

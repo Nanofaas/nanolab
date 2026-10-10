@@ -169,6 +169,100 @@ def runtime_endpoint(
     return f"http://{host}:{int(ports[0]['HostPort'])}", observed
 
 
+def runtime_inventory(
+    node: NodeResource, *, functions: list[str], inputs: TaskInputs
+) -> list[tuple[str, int, str, dict]]:
+    """Resolve current owned replicas in two commands instead of querying all maxima."""
+    import json
+    import re
+
+    from sonata_tasks.command import CommandTask
+
+    from nanolab.one_shot.infrastructure import NodeExecutor
+
+    executor = NodeExecutor(node)
+    result = (
+        CommandTask(
+            title="List current managed replicas",
+            argv=(
+                "docker",
+                "ps",
+                "--no-trunc",
+                "-q",
+                "--filter",
+                "label=io.nanofaas.managed=true",
+            ),
+            executor=executor,
+            role="host",
+        )
+        .run(inputs)
+        .value
+    )
+    identifiers = result.stdout.split() if result else []
+    if not identifiers:
+        return []
+    if any(
+        re.fullmatch(r"[0-9a-f]{64}", identifier) is None for identifier in identifiers
+    ) or len(set(identifiers)) != len(identifiers):
+        raise ValueError("runtime inventory identity mismatch")
+    result = (
+        CommandTask(
+            title="Inspect current managed replicas",
+            argv=("docker", "inspect", "--format={{json .}}", *identifiers),
+            executor=executor,
+            role="host",
+        )
+        .run(inputs)
+        .value
+    )
+    objects = (
+        [json.loads(line) for line in result.stdout.splitlines()] if result else []
+    )
+    if {obj.get("Id") for obj in objects} != set(identifiers) or len(objects) != len(
+        identifiers
+    ):
+        raise ValueError("runtime inventory identity mismatch")
+    if node.request.name is None:
+        raise ValueError("runtime inventory requires owned VM identity")
+    prefix = node.request.name + "/"
+    inventory = []
+    seen = set()
+    for obj in objects:
+        labels = obj.get("Config", {}).get("Labels", {})
+        function = labels.get("io.nanofaas.function", "")
+        if not function.startswith(prefix) or function[len(prefix) :] not in functions:
+            continue
+        name = function[len(prefix) :]
+        replica = labels.get("io.nanofaas.replica", "")
+        if not isinstance(replica, str) or not replica.isdecimal() or int(replica) < 1:
+            raise ValueError("runtime inventory invalid replica")
+        key = (name, int(replica))
+        if (
+            key in seen
+            or labels.get("io.nanofaas.managed") != "true"
+            or obj.get("State", {}).get("Running") is not True
+        ):
+            raise ValueError("runtime inventory replica identity mismatch")
+        seen.add(key)
+        ports = obj["NetworkSettings"]["Ports"]["8080/tcp"]
+        if (
+            not isinstance(ports, list)
+            or not ports
+            or len({port["HostPort"] for port in ports}) != 1
+            or not 0 < int(ports[0]["HostPort"]) < 65536
+        ):
+            raise ValueError("runtime inventory published port missing")
+        inventory.append(
+            (
+                name,
+                int(replica),
+                f"http://{inputs.resource(node.vm).host}:{int(ports[0]['HostPort'])}",
+                obj,
+            )
+        )
+    return inventory
+
+
 class CollectTopologyTask(Task[TopologyEvidence]):
     """Collect physical facts through SDK APIs and verified Docker metadata."""
 

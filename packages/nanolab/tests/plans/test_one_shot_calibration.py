@@ -98,6 +98,11 @@ def test_multi_function_calibration_qualifies_trace_mixes_before_publication(
     from tests.one_shot.test_multi_function_trace import inputs
 
     settings, _records = inputs()
+    gate_calls = []
+    monkeypatch.setattr(
+        "nanolab.one_shot.vm_resources.require_resource_overhead",
+        lambda settings: gate_calls.append(settings),
+    )
     monkeypatch.setattr("nanolab.one_shot.infrastructure.external_vm_cpus", lambda: 0)
     from nanolab.plans import one_shot_calibration
 
@@ -142,6 +147,7 @@ def test_multi_function_calibration_qualifies_trace_mixes_before_publication(
         config, environment(), run_dir=tmp_path / "run", repo_root=tmp_path
     )
     workflow.compile()
+    assert gate_calls == [config.one_shot]
     assert titles.index("Qualify cloud mixtures for synchronized trace") < titles.index(
         "Publish immutable local calibration profile"
     )

@@ -214,3 +214,65 @@ cells, at 360 seconds plus a three-second measurement lead, require at least
 add further time. These calibration costs are distinct from the 54 measured
 minutes of each experiment mode. All acquisition attempts and cleanup errors
 remain in the evidence, including attempts that cannot publish a qualification.
+
+Version 2 paired campaign protocols freeze all nine epoch indices and five exact
+function aliases. The public scenario writer emits nine one-epoch windows and
+720 seconds of warmup. Changed analysis, aliases, runtime settings, installed
+code, seed or load fail before resources are acquired. Every planned edge
+original enters the paired denominator; cloud-direct requests are separate.
+Reports expose every physical cell and summaries by function, node and epoch,
+using a complete balanced capacity record as a descriptive reference. No
+steady-state claim applies to the nine changing conditions. Legacy version 1
+protocols preserve their original interpretation.
+
+### Whole-VM and container telemetry for the synchronized campaign
+
+Strict multi-function campaigns collect one sample per second on **all five edges
+and the cloud**. A small VM-local Python sampler reads `/proc/stat`,
+`/proc/meminfo` and Docker cgroupv2 counters. It starts before k6 and remains active
+through the 720-second warmup and all nine 360-second epochs. Fluent Bit/Loki
+continues to collect application logs; it is not used as the resource evidence
+source.
+
+`rep-*/vm-resources/<node>.jsonl` contains UTC timestamps, monotonic time,
+run/mode/phase/epoch and function scope. VM CPU utilization is a fraction of the
+node's vCPU capacity (`1.0` means all vCPUs busy); used cores, iowait and steal
+are reported separately. Guest time is not counted twice. Memory total,
+available and used, and swap total/free/used are bytes. Used RAM is
+`MemTotal - MemAvailable`, not `MemTotal - MemFree`.
+
+Each sample also contains every running Docker container, its ID and PID start
+time, role (`control-plane`, `collector`, `function`, or `other`), function and
+replica. Container CPU is reported in used cores, VM fraction and quota
+fraction; memory current/peak/limit, swap and memory events are physical cgroup
+values. Throttling includes cumulative periods/count/microseconds and interval
+deltas. Restarted containers start a new counter baseline. The sampler's own
+CPU time and peak RSS are recorded separately. The VM measurement covers kernel,
+Docker, OS and observer work as well as the workload; control-plane metrics
+cannot substitute for it.
+
+Raw streams and stderr remain on the campaign host even when load or cleanup
+fails. `policy.json` binds the exact sampler SHA; `coverage.json` records raw
+SHA-256, expected/observed seconds, missing and duplicate seconds, unavailable
+CPU and collection/container errors for every node. Missing values remain
+unavailable, never zero. An incomplete whole-VM scope invalidates scientific
+run evidence. Reports show per-node CPU/RAM/swap and per-container CPU/RAM/
+throttling, with gaps and epoch boundaries; they also read raw files in failed
+runs without `evidence.json`. Calibration capacity trials and timing prefixes
+use the same sampler after its overhead gate passes.
+
+Before scientific VM acquisition, set
+`oneShot.observability.vmResourceOverhead: {path: ..., sha256: ...}` to a verified
+physical gate artifact. It must contain three complete paired observer-off/on
+trials with logging enabled on both sides, every node/function cell, <=5%
+goodput loss and p95 increase, verified raw observer receipts, matching resource
+and input scope, sampler SHA and NanoLab package fingerprint. The logging
+observer gate remains separate. Gates are not service calibration or timing
+qualification; administrative bootstrap bypass exists only in the internal
+Sonata topology builder, not in campaign YAML or public CLI options.
+
+The instrumented capacity path reserves a 45-second pre-load lead to start all
+six streams before the first scheduled request. Across 3,303 trials this adds
+41h17m15; capacity load plus these leads totals at least 123h51m45. Runtime
+preparation, streaming cleanup and provisioning add further time. The nine
+360-second campaign epochs and its separate 720-second warmup are unchanged.

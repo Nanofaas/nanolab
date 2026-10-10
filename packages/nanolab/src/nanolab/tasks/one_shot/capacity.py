@@ -31,6 +31,8 @@ def _run_capacity_trial(
     repetition: int,
     run_dir: Path,
     clock,
+    telemetry_enabled: bool | None = None,
+    preload_lead_seconds: float | None = None,
 ) -> list[dict]:
     """Retain every request, reject missing proof, and compensate owned processes."""
     # Imports are local because the public experiment module uses calibration's
@@ -46,6 +48,10 @@ def _run_capacity_trial(
     )
     from nanolab.tasks.one_shot.preflight import runtime_endpoint
 
+    if preload_lead_seconds is not None and (
+        not math.isfinite(preload_lead_seconds) or preload_lead_seconds < 2
+    ):
+        raise ValueError("capacity pre-load lead must be finite and >=2 seconds")
     run_dir.mkdir(parents=True, exist_ok=False)
     from nanolab.config.one_shot import resolve_node_functions
     from nanolab.tasks.one_shot.preflight import (
@@ -204,7 +210,23 @@ def _run_capacity_trial(
                     )
                     if warm["state"] != "complete":
                         raise ValueError("capacity replica warmup failed")
-    anchor = datetime.now(UTC) + timedelta(seconds=2)
+    from nanolab.one_shot.vm_resources import (
+        VmTelemetrySession,
+        capacity_telemetry_enabled,
+    )
+
+    use_telemetry = (
+        capacity_telemetry_enabled(settings)
+        if telemetry_enabled is None
+        else telemetry_enabled
+    )
+    lead = (
+        preload_lead_seconds
+        if preload_lead_seconds is not None
+        else (45 if use_telemetry else 2)
+    )
+    extra_budget = lead if lead > 2 else 0
+    anchor = datetime.now(UTC) + timedelta(seconds=lead)
     trace = TraceArtifact(
         nodes=list(effective),
         functions=functions,
@@ -229,9 +251,18 @@ def _run_capacity_trial(
         row.update(sdk=True, url=runtime_urls[node][name][replica] + "/invoke")
     write_immutable_artifact(run_dir / "schedule.json", canonical_bytes(schedule))
     run = SimpleNamespace(
-        topology=topology, run_dir=run_dir, runtime_replica_counts=counts
+        topology=topology,
+        run_dir=run_dir,
+        runtime_replica_counts=counts,
+        settings=settings,
+        trace=trace,
+        mode="capacity",
+        sdk_request_targets={
+            row["originalId"]: (row["origin"], row["function"], row["url"])
+            for row in schedule
+        },
     )
-    resource = generator_resource(run_dir=run_dir, vus=512, duration=90)
+    resource = generator_resource(run_dir=run_dir, vus=512, duration=90 + extra_budget)
     primary = None
 
     def compensate(callback, *args):
@@ -251,14 +282,33 @@ def _run_capacity_trial(
 
     try:
         with ExitStack() as stack:
+            telemetry = None
+            if use_telemetry:
+                write_immutable_artifact(
+                    run_dir / "manifest.json",
+                    canonical_bytes(
+                        {
+                            "purpose": "capacity-or-observer-only",
+                            "anchor": (anchor + timedelta(seconds=30)).isoformat(),
+                            "period_seconds": 60,
+                            "run_id": "capacity:" + run_dir.name,
+                            "parameters": {"generator": {"warmupSeconds": 30}},
+                        }
+                    ),
+                )
+                # The sampler starts before the same physical SDK load path.
+                telemetry = VmTelemetrySession(run, inputs)
+                stack.callback(compensate, telemetry.close)
             process = resource.acquire(inputs)
             stack.callback(compensate, resource.release, inputs, process)
             collector = LiveEvidenceCollector(run, inputs)
             stack.callback(compensate, collector.close)
-            deadline = time.monotonic() + 150
+            deadline = time.monotonic() + 150 + extra_budget
             while process.poll() is None:
                 inputs.resource(clock).require_healthy()
                 collector.require_healthy()
+                if telemetry is not None:
+                    telemetry.require_healthy()
                 if time.monotonic() >= deadline:
                     raise RuntimeError("capacity generator exceeded bounded drain")
                 time.sleep(0.25)
@@ -412,6 +462,8 @@ def run_capacity_trial(
     repetition: int,
     run_dir: Path,
     clock,
+    telemetry_enabled: bool | None = None,
+    preload_lead_seconds: float | None = None,
 ) -> list[dict]:
     """Keep the original error even during allocation, warmup or cgroup collection."""
     try:
@@ -425,6 +477,8 @@ def run_capacity_trial(
             repetition=repetition,
             run_dir=run_dir,
             clock=clock,
+            telemetry_enabled=telemetry_enabled,
+            preload_lead_seconds=preload_lead_seconds,
         )
     except BaseException as error:
         if run_dir.is_dir() and not (run_dir / "failure.txt").exists():
