@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import random
 from datetime import datetime, timedelta
+from decimal import Decimal
+from fractions import Fraction
 from typing import Literal, Self
 
 from pydantic import (
@@ -115,6 +117,12 @@ def oracle_entries(
     """Use the exact same intervals and rates as the request schedule."""
     if trace.node_roles and trace.node_roles[node] == "cloud-direct":
         return []
+    for window in trace.windows:
+        if any(
+            Fraction(str(rate)) % Fraction(str(trace.flow_quantum)) != 0
+            for rate in window[node].values()
+        ):
+            raise ValueError("oracle rate/count is not representable on exact grid")
     return [
         {
             "function": name,
@@ -175,7 +183,7 @@ def _quantized(rate: float, quantum: float, *, upward: bool) -> float:
         if upward
         else math.floor(rate / quantum + 1e-9)
     )
-    value = count * quantum
+    value = float(Decimal(count) * Decimal(str(quantum)))
     if value <= 0:
         raise ValueError("quantization loses positive node traffic")
     return value

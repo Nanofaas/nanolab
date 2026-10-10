@@ -330,6 +330,11 @@ def prepare_parallel_epoch(
             )
         except (httpx.HTTPError, ValueError, RuntimeError) as error:
             row.update(complete=False, error=str(error))
+            if isinstance(error, httpx.HTTPStatusError):
+                row.update(
+                    statusCode=error.response.status_code,
+                    responseBody=error.response.text,
+                )
         row["readyOffsetSeconds"] = time.monotonic() - launched
         return key, row
 

@@ -166,3 +166,50 @@ def test_imported_qualification_cannot_claim_unresolved_tail_quantile():
     altered = {**result.model_dump(), "quantile": 0.99}
     with pytest.raises(ValueError, match="few samples"):
         TimingQualification.model_validate(altered)
+
+
+def test_prepare_refusal_preserves_http_status_and_response_body(tmp_path, monkeypatch):
+    import json
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace
+
+    import httpx
+
+    from nanolab.tasks.one_shot.qualification import prepare_parallel_epoch
+
+    calls = []
+
+    def refuse(epoch, **kwargs):
+        calls.append(epoch)
+        response = httpx.Response(
+            400,
+            request=httpx.Request("POST", "http://edge/prepare"),
+            json={
+                "error": "INVALID_ONE_SHOT_INPUT",
+                "message": "oracle load is not on q grid",
+            },
+        )
+        response.raise_for_status()
+
+    client = SimpleNamespace(
+        base_url="http://edge",
+        http=object(),
+        prepare_epoch=refuse,
+        epoch_events=lambda _: [],
+    )
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.qualification.scrape_metrics", lambda *args: {}
+    )
+    start = datetime.now(UTC) + timedelta(seconds=3)
+    output = tmp_path / "timing.jsonl"
+    sample, _observed = prepare_parallel_epoch(
+        {"edge": client},  # pyright: ignore[reportArgumentType]
+        epoch=0,
+        starts_at=start,
+        ends_at=start + timedelta(seconds=60),
+        output=output,
+    )
+    row = json.loads(output.read_text())["nodes"]["edge"]
+    assert calls == [0] and sample.censored
+    assert row["statusCode"] == 400
+    assert json.loads(row["responseBody"])["message"] == "oracle load is not on q grid"

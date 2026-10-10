@@ -50,3 +50,28 @@ def test_oracle_remainder_and_incomplete_function_scope_are_rejected():
         TraceArtifact.model_validate(
             {**trace().model_dump(), "windows": [{"edge-0": {"work": 4}}]}
         )
+
+
+@pytest.mark.parametrize(
+    ("rate", "upward", "expected"),
+    [(0.93, True, 0.95), (1.41, False, 1.4), (3.9, True, 3.9)],
+)
+def test_quantized_oracle_rates_serialize_on_exact_decimal_grid(rate, upward, expected):
+    from decimal import Decimal
+
+    from nanolab.tasks.one_shot.trace import _quantized
+
+    actual = _quantized(rate, 0.05, upward=upward)
+    assert actual == expected
+    assert Decimal(str(actual)) % Decimal("0.05") == 0
+
+
+@pytest.mark.parametrize("rate", [0.9500000000000001, 3.9000000000000004])
+def test_oracle_export_rejects_binary_tail_outside_exact_grid(rate):
+    with pytest.raises(ValueError, match="oracle rate/count is not representable"):
+        oracle_entries(
+            trace(rate=rate, quantum=0.05),
+            node="edge-0",
+            generations={"work": 1},
+            anchor=datetime(2026, 10, 9, tzinfo=UTC),
+        )
