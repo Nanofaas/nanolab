@@ -95,20 +95,20 @@ oneShot:
   neighbors:
     edge-1:
     - edge-2
-    - edge-5
+    - edge-3
     edge-2:
     - edge-1
     - edge-3
-    - edge-5
     edge-3:
+    - edge-1
     - edge-2
     - edge-4
+    - edge-5
     edge-4:
     - edge-3
     - edge-5
     edge-5:
-    - edge-1
-    - edge-2
+    - edge-3
     - edge-4
   observability:
     logs:

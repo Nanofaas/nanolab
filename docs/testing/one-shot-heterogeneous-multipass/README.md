@@ -4,8 +4,9 @@ Status: implementation and operator preparation. **No measured qualification or
 main result is recorded yet.** This dossier is separate from the earlier
 homogeneous CLI and logging technology pilots.
 
-Five edges form the ring E1–E2–E3–E4–E5–E1 plus E2–E5; every edge also reaches a
-terminal cloud. VM allocations are 1/1/2/2/3/8 vCPU and 2/3/3/4/6/12 GiB RAM.
+Five edges form two planar triangles E1–E2–E3–E1 and E3–E4–E5–E3, sharing
+E3. Degrees are 2/2/4/2/2. Every edge also reaches a terminal cloud. VM allocations
+are 1/1/2/2/3/8 vCPU and 2/3/3/4/6/12 GiB RAM.
 Function CPU quotas are .35/.50/.60/.70/.85/1.0 with maximum warm replicas
 1/1/2/2/2/7 and 256 MiB per replica. Scientific control planes have an explicit
 .35 CPU / 512 MiB limit. Collectors have .1 CPU / 64 MiB, 256 MiB disk buffers;
@@ -87,5 +88,6 @@ For each mode at T=20s, 54T = 18 minutes of measured load, plus >=2T warmup and
 provisioning/cleanup. Main has 3N modes (at least 10h48 of measured load at that T),
 plus 18 pilot modes and calibration/qualification; actual T determines the final
 wall-time estimate. Preserve node logs before VM deletion, all raw requests and
-proofs, inventories, exact peers and failure artifacts. Restart the temporarily
-stopped preexisting `nanofaas-stack` VM on every campaign exit path.
+proofs, inventories, exact peers and failure artifacts. The operator permanently
+deleted the preexisting `nanofaas-stack` VM with explicit user authorization on 2026-10-10; retain its deletion receipt and preserve all other
+preexisting resources. No restart is required.

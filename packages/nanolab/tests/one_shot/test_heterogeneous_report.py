@@ -107,7 +107,13 @@ def test_heterogeneous_presets_ship_the_same_frozen_topology(stage):
         n.function_limits["one-shot-workload-rust"].cpu for n in settings.nodes
     ] == [0.35, 0.5, 0.6, 0.7, 0.85, 1]
     assert settings.neighbors is not None
-    assert settings.neighbors["edge-2"] == ["edge-1", "edge-3", "edge-5"]
+    assert settings.neighbors == {
+        "edge-1": ["edge-2", "edge-3"],
+        "edge-2": ["edge-1", "edge-3"],
+        "edge-3": ["edge-1", "edge-2", "edge-4", "edge-5"],
+        "edge-4": ["edge-3", "edge-5"],
+        "edge-5": ["edge-3", "edge-4"],
+    }
     assert settings.flow_quantum == 0.2
     assert settings.observability.logs.enabled
 
