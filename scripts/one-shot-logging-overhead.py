@@ -69,6 +69,45 @@ def accounting_valid(result: dict) -> bool:
     )
 
 
+# Docker's cumulative counters bracket the load, including backend CPU and block I/O.
+COUNTERS = r"""import http.client,json,socket,sys,urllib.parse
+class Docker(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);self.sock.settimeout(10);self.sock.connect('/var/run/docker.sock')
+def get(path):
+ c=Docker('localhost');c.request('GET',path);r=c.getresponse();body=r.read();c.close()
+ if r.status!=200:raise RuntimeError('Docker API '+str(r.status))
+ return json.loads(body)
+filters=json.loads(sys.argv[1]);result={}
+for c in get('/containers/json?filters='+urllib.parse.quote(json.dumps(filters))):
+ s=get('/containers/'+c['Id']+'/stats?stream=false&one-shot=true');io=s.get('blkio_stats',{}).get('io_service_bytes_recursive') or []
+ result[c['Id']]={'name':c['Names'][0],'cpuNs':s['cpu_stats']['cpu_usage']['total_usage'],'memoryBytes':s['memory_stats'].get('usage',0),'readBytes':sum(x['value'] for x in io if x['op'].lower()=='read'),'writeBytes':sum(x['value'] for x in io if x['op'].lower()=='write')}
+print(json.dumps(result))
+"""
+
+
+def resource_delta(before: dict, after: dict, *, elapsed_seconds: float) -> dict:
+    if elapsed_seconds <= 0 or before.keys() != after.keys() or not before:
+        raise ValueError("resource counter interval/containers changed")
+    result = {}
+    for key, start in before.items():
+        end = after[key]
+        changes = {
+            field: end[field] - start[field]
+            for field in ["cpuNs", "readBytes", "writeBytes"]
+        }
+        if any(value < 0 for value in changes.values()):
+            raise ValueError("resource counter reset")
+        result[key] = {
+            **changes,
+            "name": end.get("name", key),
+            "meanCores": changes["cpuNs"] / (elapsed_seconds * 1e9),
+            "memoryStartBytes": start["memoryBytes"],
+            "memoryEndBytes": end["memoryBytes"],
+        }
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--nanofaas", type=Path, required=True)
@@ -324,6 +363,57 @@ def main():
             ]
             for key, value in env.items():
                 argv += ["-e", key + "=" + value]
+            project = subprocess.check_output(
+                [
+                    "docker",
+                    "ps",
+                    "--filter",
+                    "publish=" + str(args.loki_port),
+                    "--format",
+                    '{{.Label "com.docker.compose.project"}}',
+                ],
+                text=True,
+            ).strip()
+            if not project.startswith("nanolab-logs-") or "\n" in project:
+                raise RuntimeError(
+                    "owned backend resource measurement identity unavailable"
+                )
+
+            def capture_resources():
+                nodes = {
+                    key: json.loads(
+                        node.command(
+                            (
+                                "python3",
+                                "-c",
+                                COUNTERS,
+                                json.dumps(
+                                    {"name": [cp_name, fn_name, "nanolab-logs-"]}
+                                ),
+                            )
+                        ).stdout
+                    )
+                    for key, node in topology.nodes.items()
+                }
+                nodes["backend"] = json.loads(
+                    subprocess.check_output(
+                        [
+                            "python3",
+                            "-c",
+                            COUNTERS,
+                            json.dumps(
+                                {"label": ["com.docker.compose.project=" + project]}
+                            ),
+                        ],
+                        text=True,
+                    )
+                )
+                return {"monotonicSeconds": time.monotonic(), "containers": nodes}
+
+            before = capture_resources()
+            (directory / "resources-before.json").write_text(
+                json.dumps(before, indent=2) + "\n"
+            )
             with (directory / "generator.log").open("w") as stream:
                 subprocess.run(
                     [*argv, str(script)],
@@ -332,6 +422,28 @@ def main():
                     check=True,
                     timeout=args.seconds + 60,
                 )
+            after = capture_resources()
+            (directory / "resources-after.json").write_text(
+                json.dumps(after, indent=2) + "\n"
+            )
+            elapsed = after["monotonicSeconds"] - before["monotonicSeconds"]
+            costs = {
+                key: resource_delta(
+                    value, after["containers"][key], elapsed_seconds=elapsed
+                )
+                for key, value in before["containers"].items()
+            }
+            (directory / "resource-costs.json").write_text(
+                json.dumps(
+                    {
+                        "intervalSeconds": elapsed,
+                        "measurement": "cumulative counters bracketing generator (includes sequential capture overhead); memory endpoints only",
+                        "nodes": costs,
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
             data = json.loads(summary.read_text())["metrics"]
             planned = sum(rates.values()) * args.seconds
             sent = data["generated"]["values"]["count"]
@@ -430,6 +542,7 @@ def main():
     report = {
         "purpose": "observer-interference-pilot",
         "scientificCampaignQualified": False,
+        "resourceCostMeasured": True,
         "arrivalProtocol": {
             "version": 2,
             "phaseOffsetsMs": "(iteration * 37 + 7) % 101",

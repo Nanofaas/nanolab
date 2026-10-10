@@ -37,11 +37,23 @@ is unchanged. Collectors add node, campaign, run, mode and role metadata; reques
 IDs are JSON fields, never Loki labels. Unknown epoch metadata is not inferred.
 
 Sonata keeps the collector alive through its platform/function consumers.
-On teardown it exports collector metrics, resource snapshots, logs and bounded
-Loki query results to `logging/<nodeId>/`, then writes hashes before removing only
-owned resources. `status.json` explicitly marks query truncation or failed export
-as `partial`. Export failure does not rewrite SDK completions or error accounting;
-cleanup failure remains a run error. The per-node query cap is 5000 entries, so
+On teardown it allows at most five two-second drain polls (each metrics request
+has a three-second timeout), then stops the collector with a 15-second grace
+period. It archives the stopped collector's SQLite state and buffered chunks to
+`logging/<nodeId>/collector-state.tar.gz` and verifies the transferred SHA-256
+before removing its state volume. This archive can retain records not yet in Loki;
+replay is an operator recovery action using the same collector configuration and
+can duplicate delivered records. It is not an automatically replayed log archive.
+
+Metrics, resource snapshots, collector logs and bounded Loki query results are
+also retained with hashes. `status.json` separates `exportStatus` from `collection`
+delivery counters and `stateArchive`. Missing counters, pending records, known
+drops, failed query/archive or truncation produce `partial`; a successful query
+alone cannot prove delivery. Counters describe records observed by the collector,
+not proof that every source line was observed. Archive failures are explicit run
+errors even though cleanup of owned ephemeral resources still runs; disk failure
+can prevent preservation. Export failure does not rewrite SDK completions or
+error accounting. The per-node query cap is 5000 entries, so
 large runs need external retention/query export as well. This is not a complete
 archive promise.
 
@@ -55,7 +67,11 @@ Before calibration, run the paired interference gate. The reproducible
 `scripts/one-shot-logging-overhead.py` pilot owns six heterogeneous Multipass VMs,
 uses existing Sonata bootstrap/lifetimes, identical CPU-bound input and fixed
 arrival rates for three off/on pairs. It records raw k6 samples, HTTP goodput/p95,
-generator deficit and Docker CPU/RAM/I/O snapshots, with all owned VM cleanup
+generator deficit and cumulative CPU/block-I/O counters bracketing each measured
+window for workloads, collectors and owned Loki/Grafana. Mean cores use that
+bracketing interval (including sequential sampling overhead); RAM readings are
+window endpoints, not peaks. Supplementary Docker snapshots are also retained,
+with all owned VM cleanup
 verified. Supply the tested NanoFaaS native/function image archive and private
 host endpoint. This pilot has one replica per node and P2P disabled: it does not
 qualify the complete scientific campaign. Repeat the gate on the frozen campaign

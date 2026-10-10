@@ -141,6 +141,47 @@ class LogSession:
     identity: dict
 
 
+def collection_evidence(metrics: str) -> dict:
+    """Conservatively distinguish delivery counters from query transport success."""
+    totals: dict[str, float] = {}
+    for line in metrics.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        parts = line.split()
+        key = parts[0].split("{", 1)[0]
+        try:
+            totals[key] = totals.get(key, 0) + float(parts[1])
+        except (ValueError, IndexError):
+            continue
+    required = [
+        "fluentbit_input_records_total",
+        "fluentbit_output_proc_records_total",
+        "fluentbit_output_dropped_records_total",
+    ]
+    if any(key not in totals for key in required):
+        return {"status": "unverified", "reason": "delivery counters unavailable"}
+    received, delivered, dropped = (totals[key] for key in required)
+    dropped += sum(
+        value
+        for key, value in totals.items()
+        if key
+        in {
+            "fluentbit_filter_drop_records_total",
+            "fluentbit_input_long_line_skipped_total",
+            "fluentbit_input_long_line_truncated_total",
+            "fluentbit_input_multiline_truncated_total",
+        }
+    )
+    pending = max(0, received - delivered - dropped)
+    return {
+        "status": "loss" if dropped else "pending" if pending else "drained",
+        "received": received,
+        "delivered": delivered,
+        "dropped": dropped,
+        "pending": pending,
+    }
+
+
 def collector_resource(
     node: NodeResource,
     logs: OneShotLogs,
@@ -165,25 +206,66 @@ def collector_resource(
     }
     created = False
     session = None
+    final_metrics = ""
+    archive_issue = None
+
+    def metrics_snapshot():
+        return node.command(
+            (
+                "python3",
+                "-c",
+                "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:2020/api/v1/metrics/prometheus',timeout=3).read().decode())",
+            )
+        ).stdout
+
+    def archive_state():
+        directory = run_dir / "logging" / node.config.id
+        directory.mkdir(parents=True, exist_ok=True)
+        mountpoint = node.command(
+            ("docker", "volume", "inspect", "--format={{.Mountpoint}}", volume)
+        ).stdout.strip()
+        if not mountpoint.startswith("/"):
+            raise RuntimeError("collector state mountpoint unavailable")
+        private = node.command(("mktemp", "-d")).stdout.strip()
+        if not private.startswith("/"):
+            raise RuntimeError("collector archive private directory unavailable")
+        remote = private + "/state.tar.gz"
+        node.command(("sudo", "tar", "-czf", remote, "-C", mountpoint, "."))
+        node.command(("sudo", "chmod", "644", remote))
+        archive = directory / "collector-state.tar.gz"
+        copied = node.provider.transfer_from(
+            node.request, source=remote, destination=archive
+        )
+        if copied.return_code or not archive.is_file() or not archive.stat().st_size:
+            raise RuntimeError("collector state archive transfer failed")
+        remote_hash = node.command(("sha256sum", remote)).stdout.split()[0]
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != remote_hash:
+            raise RuntimeError("collector state archive checksum mismatch")
+        node.command(("rm", "-f", remote))
+        node.command(("rmdir", private))
 
     def export():
         directory = run_dir / "logging" / node.config.id
         directory.mkdir(parents=True, exist_ok=True)
         status = {
             "status": "complete",
+            "exportStatus": "complete",
             "nodeId": node.config.id,
             "issues": [],
             "truncated": False,
+            "collection": collection_evidence(final_metrics),
+            "stateArchive": "verified" if archive_issue is None else "failed",
         }
-        try:
-            result = node.command(
-                (
-                    "python3",
-                    "-c",
-                    "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:2020/api/v1/metrics/prometheus',timeout=3).read().decode())",
-                )
+        if status["collection"]["status"] != "drained":
+            status["issues"].append(
+                "collection delivery is " + status["collection"]["status"]
             )
-            (directory / "collector-metrics.txt").write_text(result.stdout)
+        if archive_issue:
+            status["issues"].append(
+                "recoverable state archive failed: " + archive_issue
+            )
+        try:
+            (directory / "collector-metrics.txt").write_text(final_metrics)
             stats = node.command(
                 ("docker", "stats", "--no-stream", "--format={{json .}}", name)
             )
@@ -217,8 +299,15 @@ def collector_resource(
             status["truncated"] = count >= logs.export_limit
             if status["truncated"]:
                 status["issues"].append("Loki export limit reached; query is partial")
+                status["exportStatus"] = "partial"
+            if count < status["collection"].get("delivered", 0):
+                status["issues"].append(
+                    "query contains fewer records than collector delivery counter"
+                )
+                status["exportStatus"] = "partial"
         except Exception as error:
             status["issues"].append(str(error))
+            status["exportStatus"] = "partial"
         if status["issues"]:
             status["status"] = "partial"
         (directory / "status.json").write_text(json.dumps(status, indent=2) + "\n")
@@ -235,10 +324,33 @@ def collector_resource(
         )
 
     def release(_inputs, _value=None):
+        nonlocal final_metrics, archive_issue
         if not created:
             return
         # The platform/function resources depend on this collector: they stop first.
-        time.sleep(2)
+        # Bound tail/flush/retry, then stop before archiving SQLite/chunks.
+        for _ in range(5):
+            time.sleep(2)
+            try:
+                final_metrics = metrics_snapshot()
+                if collection_evidence(final_metrics)["status"] == "drained":
+                    break
+            except Exception:
+                break
+        stopped = node.provider.exec_argv(
+            node.request, ("docker", "stop", "-t", "15", name)
+        )
+        try:
+            if stopped.return_code:
+                raise RuntimeError("collector graceful stop failed")
+            archive_state()
+        except Exception as error:
+            archive_issue = str(error)
+            logging.getLogger(__name__).error(
+                "Recoverable collector state archive failed for %s: %s",
+                node.config.id,
+                error,
+            )
         try:
             export()
         except Exception as error:
@@ -253,6 +365,10 @@ def collector_resource(
         )
         if deleted.return_code and "no such volume" not in deleted.stderr.lower():
             raise RuntimeError("collector volume cleanup unconfirmed")
+        if archive_issue:
+            raise RuntimeError(
+                "collector state archive failed before owned cleanup: " + archive_issue
+            )
 
     def acquire(inputs: TaskInputs):
         nonlocal created, session

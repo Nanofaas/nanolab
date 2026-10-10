@@ -51,3 +51,20 @@ def test_boundary_extra_kept_but_failed_missing_or_dropped_fail_gate():
         {**good, "sent": 1, "completed": 1, "generatorDeficit": 1},
     ]:
         assert not pilot.accounting_valid(bad)
+
+
+def test_resource_cost_uses_cumulative_counters_not_post_load_cpu_percent():
+    before = {
+        "workload": {"cpuNs": 100, "readBytes": 10, "writeBytes": 20, "memoryBytes": 40}
+    }
+    after = {
+        "workload": {"cpuNs": 900, "readBytes": 14, "writeBytes": 30, "memoryBytes": 80}
+    }
+    delta = pilot.resource_delta(before, after, elapsed_seconds=2)
+    assert delta["workload"]["cpuNs"] == 800
+    assert delta["workload"]["readBytes"] == 4
+    assert delta["workload"]["writeBytes"] == 10
+    assert delta["workload"]["meanCores"] == 800 / 2e9
+    assert delta["workload"]["memoryEndBytes"] == 80
+    with pytest.raises(ValueError, match="counter"):
+        pilot.resource_delta(after, before, elapsed_seconds=2)

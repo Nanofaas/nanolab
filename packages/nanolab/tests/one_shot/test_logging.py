@@ -98,7 +98,15 @@ def test_external_backend_is_never_mutated(tmp_path, monkeypatch):
     assert endpoint == logs.endpoint
 
 
-def fake_collector(tmp_path, monkeypatch, *, running=True, export_error=False):
+def fake_collector(
+    tmp_path,
+    monkeypatch,
+    *,
+    running=True,
+    export_error=False,
+    metrics="",
+    archive_error=False,
+):
     import hashlib
     import json
     from types import SimpleNamespace
@@ -129,14 +137,26 @@ def fake_collector(tmp_path, monkeypatch, *, running=True, export_error=False):
             if export_error and argv[0] == "python3":
                 raise RuntimeError("metrics down")
             text = ""
+            if argv[:2] == ("mktemp", "-d"):
+                text = "/home/ubuntu/private"
+            if argv[0] == "python3":
+                text = metrics
+            if argv[:3] == ("docker", "volume", "inspect"):
+                text = "/var/lib/docker/volumes/owned/_data"
             if argv[:2] == ("sha256sum", "/home/ubuntu"):
                 raise AssertionError("unexpected path")
             if argv[0] == "sha256sum":
-                text = "\n".join(
-                    hashlib.sha256((assets / Path(value).name).read_bytes()).hexdigest()
-                    + "  "
-                    + value
-                    for value in argv[1:]
+                text = (
+                    hashlib.sha256(b"recoverable-state").hexdigest() + "  " + argv[1]
+                    if argv[1].endswith("state.tar.gz")
+                    else "\n".join(
+                        hashlib.sha256(
+                            (assets / Path(value).name).read_bytes()
+                        ).hexdigest()
+                        + "  "
+                        + value
+                        for value in argv[1:]
+                    )
                 )
             if argv[:2] == ("docker", "info"):
                 text = "json-file" if "LoggingDriver" in argv[-1] else "/var/lib/docker"
@@ -162,6 +182,13 @@ def fake_collector(tmp_path, monkeypatch, *, running=True, export_error=False):
             return SimpleNamespace(return_code=0, stdout="", stderr="")
 
         def transfer_to(self, *args, **kwargs):
+            return SimpleNamespace(return_code=0)
+
+        def transfer_from(self, *args, **kwargs):
+            commands.append(("archive-transfer",))
+            if archive_error:
+                raise OSError("archive disk full")
+            kwargs["destination"].write_bytes(b"recoverable-state")
             return SimpleNamespace(return_code=0)
 
     from pathlib import Path
@@ -199,6 +226,51 @@ def fake_collector(tmp_path, monkeypatch, *, running=True, export_error=False):
     return resource, inputs, commands
 
 
+def successful_query(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.logging.httpx.Client.get",
+        lambda *args, **kwargs: httpx.Response(
+            200,
+            request=httpx.Request("GET", "http://loki.test"),
+            json={"data": {"result": [{"values": [["1", "record"]]}]}},
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        "",
+        'fluentbit_input_records_total{name="tail.0"} 3\n'
+        'fluentbit_output_proc_records_total{name="loki.0"} 1\n'
+        'fluentbit_output_dropped_records_total{name="loki.0"} 1\n',
+        'fluentbit_input_records_total{name="tail.0"} 3\n'
+        'fluentbit_output_proc_records_total{name="loki.0"} 1\n'
+        'fluentbit_output_dropped_records_total{name="loki.0"} 0\n',
+    ],
+)
+def test_successful_query_is_not_proof_of_complete_collection(
+    tmp_path, monkeypatch, metrics
+):
+    import json
+
+    resource, inputs, commands = fake_collector(tmp_path, monkeypatch, metrics=metrics)
+    successful_query(monkeypatch)
+    value = resource.acquire(inputs)
+    resource.release(inputs, value)
+    directory = tmp_path / "run/logging/edge-0"
+    status = json.loads((directory / "status.json").read_text())
+    assert status["status"] == "partial"
+    assert status["exportStatus"] == "complete"
+    assert (directory / "collector-state.tar.gz").read_bytes() == b"recoverable-state"
+    archive_at = commands.index(("archive-transfer",))
+    assert archive_at < next(
+        i for i, argv in enumerate(commands) if argv[:3] == ("docker", "volume", "rm")
+    )
+
+
 def test_existing_metrics_endpoint_cannot_hide_a_dead_owned_agent(
     tmp_path, monkeypatch
 ):
@@ -224,9 +296,32 @@ def test_export_failure_is_partial_and_owned_cleanup_still_runs(tmp_path, monkey
     resource.release(inputs, value)
     status = json.loads((tmp_path / "run/logging/edge-0/status.json").read_text())
     assert status["status"] == "partial"
+    assert (tmp_path / "run/logging/edge-0/collector-state.tar.gz").exists()
     assert any(argv[:3] == ("docker", "rm", "-f") for argv in commands)
     assert any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
     assert not any(argv[:2] == ("docker", "compose") for argv in commands)
+
+
+def test_drained_collection_requires_delivery_counters_and_verified_archive(
+    tmp_path, monkeypatch
+):
+    import json
+
+    metrics = (
+        'fluentbit_input_records_total{name="tail.0"} 1\n'
+        'fluentbit_output_proc_records_total{name="loki.0"} 1\n'
+        'fluentbit_output_dropped_records_total{name="loki.0"} 0\n'
+    )
+    resource, inputs, commands = fake_collector(tmp_path, monkeypatch, metrics=metrics)
+    successful_query(monkeypatch)
+    value = resource.acquire(inputs)
+    resource.release(inputs, value)
+    status = json.loads((tmp_path / "run/logging/edge-0/status.json").read_text())
+    assert status["status"] == "complete"
+    assert status["collection"]["status"] == "drained"
+    assert status["stateArchive"] == "verified"
+    stop = next(i for i, argv in enumerate(commands) if argv[:2] == ("docker", "stop"))
+    assert stop < commands.index(("archive-transfer",))
 
 
 def test_measured_collector_config_is_in_profile_fingerprint():
@@ -293,14 +388,17 @@ def test_owned_backend_is_reserved_in_host_budget(monkeypatch, capacity):
 def test_export_disk_error_does_not_skip_owned_cleanup(tmp_path, monkeypatch):
     from pathlib import Path
 
-    resource, inputs, commands = fake_collector(tmp_path, monkeypatch)
+    resource, inputs, commands = fake_collector(
+        tmp_path, monkeypatch, archive_error=True
+    )
     value = resource.acquire(inputs)
 
     def disk_full(*args, **kwargs):
         raise OSError("export disk full")
 
     monkeypatch.setattr(Path, "write_text", disk_full)
-    resource.release(inputs, value)
+    with pytest.raises(RuntimeError, match="state archive"):
+        resource.release(inputs, value)
     assert any(argv[:3] == ("docker", "rm", "-f") for argv in commands)
     assert any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
 
