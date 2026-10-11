@@ -436,7 +436,9 @@ def qualify_overhead(pairs: list[dict], *, expected_cells: set[str]) -> dict:
                 raise ValueError("invalid telemetry overhead observation")
             loss = 1 - on["goodput"] / off["goodput"]
             inflation = on["p95Seconds"] / off["p95Seconds"] - 1
-            passed = loss <= 0.05 and inflation <= 0.05
+            # Ratios and subtraction can move an exact 5% boundary by a few ULPs.
+            roundoff = 8 * math.ulp(1.0)
+            passed = loss <= 0.05 + roundoff and inflation <= 0.05 + roundoff
             cells[key] = {
                 "goodputLoss": loss,
                 "p95Increase": inflation,

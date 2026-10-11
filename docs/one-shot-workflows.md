@@ -277,6 +277,13 @@ observer gate remains separate. Gates are not service calibration or timing
 qualification; administrative bootstrap bypass exists only in the internal
 Sonata topology builder, not in campaign YAML or public CLI options.
 
+The 5% boundary is inclusive. The numerical comparison allows eight ULPs at
+unity (approximately 1.8e-15 in the dimensionless cost ratio) for floating-point
+rounding, including rates computed from completion counts and window duration.
+This is not an allowance for measurement variability; observations above the
+boundary by more than rounding still fail, and short windows require separate
+assessment of sample counts and repeatability.
+
 The instrumented capacity path reserves a 45-second pre-load lead to start all
 six streams before the first scheduled request. Across 3,303 trials this adds
 41h17m15; capacity load plus these leads totals at least 123h51m45. Runtime

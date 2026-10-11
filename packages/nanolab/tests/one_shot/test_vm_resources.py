@@ -702,3 +702,42 @@ def test_pipe_only_transport_streams_before_exit_and_retains_terminal_bytes(
     assert (
         directory / "edge1.stderr"
     ).read_bytes() == b"x" * 131072 + b"terminal-partial"
+
+
+@pytest.mark.parametrize(
+    ("off_goodput", "on_goodput", "off_p95", "on_p95"),
+    [
+        (20.0, 19.0, 1.0, 1.0),
+        (20 / 60, 19 / 60, 1.0, 1.0),
+        (1940 / 60, 1843 / 60, 1.0, 1.0),
+        (20.0, 20.0, 1.0, 1.05),
+        (20.0, 19.0, 1.0, 1.05),
+    ],
+)
+def test_exact_five_percent_is_inclusive(off_goodput, on_goodput, off_p95, on_p95):
+    from nanolab.one_shot.vm_resources import qualify_overhead
+
+    pair = {
+        "off": {"cell": {"goodput": off_goodput, "p95Seconds": off_p95}},
+        "on": {"cell": {"goodput": on_goodput, "p95Seconds": on_p95}},
+    }
+    assert qualify_overhead([pair] * 3, expected_cells={"cell"})["qualified"]
+
+
+@pytest.mark.parametrize(
+    ("off_goodput", "on_goodput", "off_p95", "on_p95"),
+    [
+        (20.0, 19.0 - 1e-8, 1.0, 1.0),
+        (20.0, 20.0, 1.0, 1.05 + 1e-8),
+        (35.0, 33.0, 1.0, 1.0),
+        (20.0, 20.0, 1.0, 1.0606147477432402),
+    ],
+)
+def test_excess_cost_is_rejected(off_goodput, on_goodput, off_p95, on_p95):
+    from nanolab.one_shot.vm_resources import qualify_overhead
+
+    pair = {
+        "off": {"cell": {"goodput": off_goodput, "p95Seconds": off_p95}},
+        "on": {"cell": {"goodput": on_goodput, "p95Seconds": on_p95}},
+    }
+    assert not qualify_overhead([pair] * 3, expected_cells={"cell"})["qualified"]
