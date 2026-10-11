@@ -330,3 +330,10 @@ default four-slot budget can reject auction traffic when advertisements overlap.
 This resource setting applies equally to observer variants and scientific modes;
 auction deadlines and acceptance thresholds are unchanged. Rebuild the runtime
 distribution and freeze its updated recipe hash before acquiring new data.
+
+Physical evidence collection retries a proof GET once after a transport or OS
+read failure, including the final collection pass before teardown. Both failed
+reads remain in `collection-errors.jsonl`, with their read-attempt number.
+Invocation requests are never retried by this mechanism. HTTP refusals and
+invalid proof identities are not retried; a persistently unavailable proof
+remains censored. Rebuild the package and freeze its fingerprint before reuse.

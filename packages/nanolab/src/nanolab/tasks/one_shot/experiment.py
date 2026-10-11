@@ -884,13 +884,27 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
             for node_id, name, url in candidates:
                 if name != row["function"]:
                     continue
+                read_attempt = 1
                 try:
-                    response = http.get(
+                    proof_url = (
                         url
                         + "/runtime/executions/"
-                        + row.get("terminalExecutionId", row.get("executionId")),
-                        timeout=2,
+                        + row.get("terminalExecutionId", row.get("executionId"))
                     )
+                    try:
+                        response = http.get(proof_url, timeout=2)
+                    except (httpx.TransportError, OSError) as error:
+                        append_observation(
+                            run.run_dir / "collection-errors.jsonl",
+                            {
+                                "originalId": row["originalId"],
+                                "node": node_id,
+                                "readAttempt": read_attempt,
+                                "error": str(error),
+                            },
+                        )
+                        read_attempt = 2
+                        response = http.get(proof_url, timeout=2)
                     if response.status_code == 404:
                         continue
                     response.raise_for_status()
@@ -913,6 +927,7 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                         {
                             "originalId": row["originalId"],
                             "node": node_id,
+                            "readAttempt": read_attempt,
                             "error": str(error),
                         },
                     )

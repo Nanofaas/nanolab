@@ -9,6 +9,81 @@ import pytest
 from nanolab.tasks.one_shot.experiment import collect_runtime_evidence
 
 
+@pytest.mark.parametrize(
+    "failure", [OSError(9, "Bad file descriptor"), httpx.ReadError("closed socket")]
+)
+@pytest.mark.parametrize("persistent", [False, True])
+def test_final_proof_collection_retries_transport_read_once(
+    tmp_path, monkeypatch, failure, persistent
+):
+    """A transient final GET must not lose an otherwise verifiable completion."""
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        topology=SimpleNamespace(
+            resources=SimpleNamespace(nodes={"cloud": SimpleNamespace()}),
+            function_settings={"work": SimpleNamespace(max_replicas=1)},
+            endpoints={"cloud": "endpoint"},
+        ),
+        sdk_request_targets={"id": ("cloud", "work", "http://sdk/invoke")},
+    )
+    row = {
+        "originalId": "id",
+        "event": "result",
+        "phase": "campaign",
+        "executionId": "id",
+        "terminalExecutionId": "id",
+        "function": "work",
+        "sdk": True,
+        "url": "http://sdk/invoke",
+    }
+    reads = []
+
+    def handler(request):
+        assert request.method == "GET"
+        if request.url.path == "/runtime/executions/id":
+            reads.append(str(request.url))
+            if persistent or len(reads) == 1:
+                raise failure
+            return httpx.Response(
+                200,
+                json={
+                    "executionId": "id",
+                    "incarnation": "r",
+                    "dispatchAttempt": "1",
+                    "state": "RELEASED",
+                    "handlerStarted": True,
+                },
+            )
+        if request.url.path == "/runtime/status":
+            return httpx.Response(200, json={"physicalReleaseProof": True})
+        return httpx.Response(200, text="nanofaas_runtime_active_handlers 0\n")
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.runtime_endpoint",
+        lambda *_args, **_kwargs: ("http://sdk", {}),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.httpx.Client",
+            lambda **_: nullcontext(http),
+        )
+        collect_runtime_evidence(
+            run,
+            cast(Any, SimpleNamespace(resource=lambda _: "http://gateway:8080")),
+            [row],
+        )
+    assert reads == ["http://sdk/runtime/executions/id"] * 2
+    assert (tmp_path / "physical.jsonl").exists() is (not persistent)
+    errors = [
+        json.loads(line)
+        for line in (tmp_path / "collection-errors.jsonl").read_text().splitlines()
+    ]
+    assert any(str(failure) in error["error"] for error in errors)
+    if not persistent:
+        proof = json.loads((tmp_path / "physical.jsonl").read_text())
+        assert proof["originalId"] == "id" and proof["state"] == "RELEASED"
+
+
 @pytest.mark.parametrize("identity", ["remote", "wrong"])
 def test_live_collection_uses_remote_id_and_preserves_invalid_identity_diagnostic(
     tmp_path, monkeypatch, identity
