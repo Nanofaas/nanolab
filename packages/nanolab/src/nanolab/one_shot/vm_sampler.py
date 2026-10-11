@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import math
 import os
 import resource
 import signal
@@ -123,12 +124,105 @@ def correlate_sample(
     mode: str,
     functions: list[str],
     run_id: str,
+    host_anchor_monotonic: float | None = None,
+    clock_probes: list[dict] | None = None,
 ) -> dict:
-    """Correlate UTC directly to the frozen boundaries, including warmup."""
+    """Use bracketing monotonic clocks for v2, preserving ambiguous boundaries."""
     timestamp = datetime.fromisoformat(sample["timestampUtc"])
     if timestamp.tzinfo is None or anchor.tzinfo is None:
         raise ValueError("resource timestamps must have UTC timezone")
+    row = {**sample, "runId": run_id, "mode": mode, "functions": functions}
+    if host_anchor_monotonic is not None:
+        monotonic = sample.get("monotonicSeconds")
+        boot = sample.get("bootId")
+        probes = [
+            probe
+            for probe in clock_probes or []
+            if probe.get("node") == sample.get("node")
+            and probe.get("remoteBootId") == boot
+            and boot
+            and probe.get("errorType") is None
+            and all(
+                isinstance(probe.get(key), (int, float))
+                and not isinstance(probe[key], bool)
+                and math.isfinite(probe[key])
+                for key in (
+                    "remoteMonotonicSeconds",
+                    "beforeMonotonicSeconds",
+                    "afterMonotonicSeconds",
+                )
+            )
+            and probe["beforeMonotonicSeconds"] <= probe["afterMonotonicSeconds"]
+        ]
+        if not isinstance(monotonic, (int, float)) or not math.isfinite(monotonic):
+            probes = []
+        previous = [p for p in probes if p["remoteMonotonicSeconds"] <= monotonic]
+        following = [p for p in probes if p["remoteMonotonicSeconds"] >= monotonic]
+        if not previous or not following:
+            return {
+                **row,
+                "phase": "uncorrelated",
+                "epoch": None,
+                "timeFromAnchorSeconds": None,
+                "epochCandidates": [],
+                "correlationMethod": "host-guest-monotonic-brackets",
+                "correlationError": "missing bracketing probes or boot identity",
+            }
+        before = max(previous, key=lambda p: p["remoteMonotonicSeconds"])
+        after = min(following, key=lambda p: p["remoteMonotonicSeconds"])
+        lower = before["beforeMonotonicSeconds"] - host_anchor_monotonic
+        upper = after["afterMonotonicSeconds"] - host_anchor_monotonic
+        if lower > upper:
+            raise ValueError("inconsistent host/guest monotonic ordering")
+        before_mid = (
+            before["beforeMonotonicSeconds"] + before["afterMonotonicSeconds"]
+        ) / 2
+        after_mid = (
+            after["beforeMonotonicSeconds"] + after["afterMonotonicSeconds"]
+        ) / 2
+        span = after["remoteMonotonicSeconds"] - before["remoteMonotonicSeconds"]
+        fraction = (monotonic - before["remoteMonotonicSeconds"]) / span if span else 0
+        offset = (
+            before_mid + fraction * (after_mid - before_mid) - host_anchor_monotonic
+        )
+        candidates = {
+            resource_phase(lower, warmup, period, epochs),
+            resource_phase(upper, warmup, period, epochs),
+        }
+        for boundary in [
+            -warmup,
+            *(range(0, period * epochs + 1, period) if period else [0]),
+        ]:
+            if lower <= boundary <= upper:
+                candidates.add(resource_phase(boundary, warmup, period, epochs))
+        phase, epoch = resource_phase(offset, warmup, period, epochs)
+        if len(candidates) > 1:
+            phase, epoch = "ambiguous", None
+        return {
+            **row,
+            "phase": phase,
+            "epoch": epoch,
+            "timeFromAnchorSeconds": offset,
+            "correlationBoundsSeconds": [lower, upper],
+            "epochCandidates": sorted({e for _, e in candidates if e is not None}),
+            "phaseCandidates": sorted({p for p, _ in candidates}),
+            "correlationMethod": "host-guest-monotonic-brackets",
+        }
     offset = (timestamp - anchor).total_seconds()
+    phase, epoch = resource_phase(offset, warmup, period, epochs)
+    return {
+        **row,
+        "phase": phase,
+        "epoch": epoch,
+        "timeFromAnchorSeconds": offset,
+        "correlationMethod": "legacy-utc",
+    }
+
+
+def resource_phase(
+    offset: float, warmup: int, period: int, epochs: int
+) -> tuple[str, int | None]:
+    """Classify one point on the frozen experiment timeline."""
     phase, epoch = ("before", None)
     if -warmup <= offset < 0:
         phase, epoch = "warmup", -1
@@ -136,14 +230,7 @@ def correlate_sample(
         phase, epoch = "measurement", int(offset // period)
     elif offset >= period * epochs:
         phase = "after"
-    return {
-        **sample,
-        "runId": run_id,
-        "mode": mode,
-        "phase": phase,
-        "epoch": epoch,
-        "functions": functions,
-    }
+    return phase, epoch
 
 
 class DockerSocket(http.client.HTTPConnection):
@@ -248,6 +335,7 @@ def sample_loop(node: str, *, duration: float, context: dict | None = None) -> N
     started = time.monotonic()
     target = started
     previous_agent_cpu = None
+    boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     while running and time.monotonic() - started < duration:
         now = time.monotonic()
         wall = datetime.now(UTC).isoformat()
@@ -255,6 +343,7 @@ def sample_loop(node: str, *, duration: float, context: dict | None = None) -> N
             "schemaVersion": 1,
             "timestampUtc": wall,
             "monotonicSeconds": now,
+            "bootId": boot_id,
             "node": node,
             "errors": [],
             "containers": [],
@@ -351,6 +440,7 @@ def sample_loop(node: str, *, duration: float, context: dict | None = None) -> N
                 mode=context["mode"],
                 functions=context["functions"],
                 run_id=context["run_id"],
+                host_anchor_monotonic=context.get("host_anchor_monotonic"),
             )
         print(json.dumps(row, separators=(",", ":"), allow_nan=False), flush=True)
         target += 1

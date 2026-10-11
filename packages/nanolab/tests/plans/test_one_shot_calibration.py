@@ -65,6 +65,39 @@ def test_wrong_workflow_is_rejected_before_provisioning(tmp_path):
         )
 
 
+def test_logical_calibration_wires_diagnostic_clock_into_monitor_and_preflight(
+    tmp_path, monkeypatch
+):
+    from nanolab.plans import one_shot_calibration as module
+
+    config = scenario()
+    assert config.one_shot is not None
+    config.one_shot.protocol_version = 2
+    (tmp_path / "functions/rust/one-shot-workload").mkdir(parents=True)
+    monkeypatch.setenv("NANOFAAS_ROOT", str(tmp_path))
+    versions = []
+    original_clock = module.clock_health_resource
+    original_preflight = module.CollectTopologyTask
+
+    def clock(**kwargs):
+        versions.append(("monitor", kwargs.get("protocol_version", 1)))
+        return original_clock(**kwargs)
+
+    def preflight(*args, **kwargs):
+        versions.append(("preflight", kwargs.get("protocol_version", 1)))
+        return original_preflight(*args, **kwargs)
+
+    monkeypatch.setattr(module, "clock_health_resource", clock)
+    monkeypatch.setattr(module, "CollectTopologyTask", preflight)
+    build_one_shot_calibration_plan(
+        config,
+        environment(),
+        run_dir=tmp_path / "run",
+        repo_root=tmp_path,
+    ).compile()
+    assert versions == [("monitor", 2), ("preflight", 2)]
+
+
 def test_logging_compiles_one_collector_for_every_node(tmp_path, monkeypatch):
     data = scenario().model_dump(by_alias=True, exclude_unset=True)
     data["oneShot"]["functions"]["one-shot-workload-rust"]["cpu"] = 0.5

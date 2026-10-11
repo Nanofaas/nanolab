@@ -403,8 +403,9 @@ def test_capacity_collection_is_opted_into_by_qualified_resource_gate():
     assert capacity_telemetry_enabled(settings)
 
 
+@pytest.mark.parametrize("logical", [False, True])
 def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, logical
 ):
     from types import SimpleNamespace
 
@@ -456,6 +457,7 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
     )
     settings = SimpleNamespace(
         timing=SimpleNamespace(minimum_samples=1),
+        protocol_version=2 if logical else 1,
         flow_quantum=1,
         seed=7,
         purpose="workflow-validation",
@@ -474,6 +476,10 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
     assert actions.index("sampler-start") < actions.index("generator-start")
     assert actions.index("generator-stop") < actions.index("sampler-close")
     assert "sampler-health" in actions
+    if logical:
+        manifest = json.loads((tmp_path / "timing/manifest.json").read_text())
+        assert manifest["parameters"]["logicalSchedule"]["protocolVersion"] == 2
+        assert manifest["parameters"]["logicalSchedule"]["probeScope"] == "parent"
 
 
 def test_protocol_rejects_changed_vm_sampling_period(tmp_path, monkeypatch):

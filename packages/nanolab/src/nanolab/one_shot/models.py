@@ -53,6 +53,7 @@ class TimingQualification(BaseModel):
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     schema_version: Literal[1] = 1
+    protocol_version: Literal[1, 2] = 1
     provider: str
     purpose: Purpose
     environment_fingerprint: str

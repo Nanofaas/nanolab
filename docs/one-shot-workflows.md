@@ -345,7 +345,7 @@ establish execution completion. Parse structured codes, not vague substrings in
 an error message; a generic external error remains unresolved scientifically
 until the independent terminal proof is available.
 
-Clock monitoring measures all six VM probes in scientific calibration, qualification and experiments. Skew and measurement uncertainty remain mandatory for the terminal cloud. Health publication targets only edge negotiation APIs: the cloud intentionally disables them. A failed edge publication remains fatal; a missing cloud API is never used to bypass a failed clock measurement.
+Clock monitoring measures all six VM probes in scientific calibration, qualification and experiments. Legacy protocol v1 publishes edge clock health and enforces its UTC offset/uncertainty threshold, including cloud diagnostics. Protocol v2 keeps clock observations as diagnostic/correlation evidence: skew or a missing probe does not gate negotiation or request admission. Physical readiness, memory limits, peer identities and evidence-storage failures still fail preflight or collection as appropriate.
 
 The run-owned HTTP clock probe disables Nagle through the standard-library
 handler's `disable_nagle_algorithm` setting. Its separate header/body writes
@@ -353,7 +353,7 @@ otherwise introduce delayed-ACK latency on persistent connections, inflating
 the RTT-derived uncertainty even on loopback. A rejected uncertainty bound is
 not evidence of excessive clock skew: retain the measured offset and uncertainty
 separately in failed runs. This transport correction does not relax the clock
-threshold or retry an auction. Rebuild and freeze the packaged probe before
+threshold for v1 or retry an auction. Rebuild and freeze the packaged probe before
 acquiring new data.
 
 The multi-function Multipass presets round each function CPU quota down to a multiple of 0.01 CPU before freezing: 0.10 on edge-1/2, 0.14 on edge-3/4, 0.16 on edge-5 and 0.21 on cloud. runc's systemd driver rounds fractional percentages upward ([implementation](https://github.com/opencontainers/cgroups/blob/main/systemd/common.go)); a declared 0.149 CPU was observed as `15000 100000` in `cpu.max` during the v4 bootstrap. These representable limits preserve the 0.50 CPU control-plane/collector/OS reserve even at the maximum memory-feasible replica count. Strict cgroup validation is unchanged: Docker declarations and kernel limits must match, and all service/capacity profiles must be measured at these final quotas. Failed preflight evidence is retained.
@@ -381,14 +381,52 @@ The owned clock monitor preserves the selected offset/uncertainty sample in
 `clock.jsonl` and every individual HTTP attempt in `clock-probes.jsonl`.
 Raw attempts identify the node, zero-based attempt number within that measurement,
 local before/after UTC timestamps in epoch seconds, remote UTC timestamp, RTT
-and exception class. A failed attempt has no remote timestamp; its original
-exception still invalidates the monitor. Earlier attempts remain on disk.
+and exception class. Attempts also carry host monotonic before/after brackets,
+guest monotonic seconds and guest boot identity. RTT uses the host monotonic
+clock; any host UTC step widens UTC uncertainty. A failed attempt remains on
+disk. V1 fails immediately; v2 retains all attempts, selects a successful sample
+if available, otherwise writes a `MISSING` diagnostic with null measurements.
+Failure to write raw evidence still invalidates collection.
 A custom selected-output basename produces the corresponding `-probes.jsonl`
 companion. These records retain measurement uncertainty; they do not establish
 that the entire RTT is actual clock skew.
 
-This instrumentation does not change minimum-RTT selection, probe count,
-clock-health acceptance or the current runtime protocol. The native protocol
-still has UTC-dependent epoch checks. Algorithmic resilience to unsynchronized
-clocks requires a separately designed and qualified transition/admission
-protocol; raising the measurement threshold alone does not provide it.
+### Logical protocol v2
+
+The five-function live presets declare `oneShot.protocolVersion: 2`; omitted
+versions remain v1 for existing scenarios and archived artifacts. V2 requires
+NanoFaaS logical session APIs. NanoLab configures every edge with one shared
+session and UTC grid labels, negotiates the configured number of rounds in
+parallel, then explicitly activates the allocation at a host monotonic boundary.
+Fixed rounds are not reported as convergence. Each trigger is sent once, with
+raw negotiation/activation responses retained even if a later step fails.
+Timing qualification excludes the intentional wait between negotiation and
+activation; it includes both operational phases. Matrix cells and the final
+artifact record the protocol version. A v1 qualification cannot qualify v2.
+
+The manifest freezes the session, host boot identity and monotonic grid together
+with UTC labels. A reboot cannot reuse that grid. Preparation, activation and
+the load-task deadline use monotonic time. The existing k6 request schedule is
+still an external UTC workload contract: a host clock step can spoil pacing and
+invalidate the scientific data; this is distinct from v2 algorithm correctness.
+
+Whole-VM raw samples retain guest UTC, guest monotonic time and boot identity.
+Reports correlate v2 samples using the preceding and following host/guest
+monotonic probes. A bracket crossing a phase boundary produces explicit phase
+and epoch candidates; missing brackets or a reboot produce `uncorrelated`
+samples, never a UTC guess. This does not assume equal clock rates. Graphs use
+the interpolated host timeline projected on the frozen UTC anchor and preserve
+guest UTC in hover data. Coverage reports distinguish missing samples from
+uncertain phase assignments. The updated probe, sampler, package and protocol
+identity require a new fingerprint and fresh overhead/calibration/timing
+qualification; older runs remain evidence of their original configuration.
+
+The bundled release recipes also follow the current upstream catalogue:
+`forecasting` and `p2p-discovery` participate in the guarded `all` selection, and
+six one-shot Rust images join the default group (the generic workload plus the
+five campaign functions). The release matrix is now 9 JVM, 12 native and 33
+default images per architecture, 54 total. This updates future release inputs;
+older 48-image release evidence retains its original source. The deterministic
+handler-envelope scenario includes those six functions. NanoLab's metric
+catalogue collects the three node/peer P2P gauges without a function selector;
+forecasting publishes no separate Micrometer meters.

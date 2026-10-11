@@ -12,6 +12,12 @@ functions:
   - json-transform-javascript
   - json-transform-python
   - json-transform-rust
+  - one-shot-arithmetic-rust
+  - one-shot-matrix-rust
+  - one-shot-memory-rust
+  - one-shot-mixed-rust
+  - one-shot-sort-rust
+  - one-shot-workload-rust
   - qr-code-exec
   - qr-code-go
   - qr-code-java

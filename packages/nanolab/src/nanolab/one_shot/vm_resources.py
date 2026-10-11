@@ -33,10 +33,38 @@ def telemetry_policy() -> dict:
         "samplerSha256": hashlib.sha256(
             Path(vm_sampler.__file__).read_bytes()
         ).hexdigest(),
+        "phaseCorrelation": "v2-host-guest-monotonic-brackets-with-explicit-ambiguity",
     }
 
 
 correlate_sample = vm_sampler.correlate_sample
+
+
+def resource_clock_context(run_dir: Path) -> dict:
+    """Read original successful and failed probes without repairing raw files."""
+    manifest = run_dir / "manifest.json"
+    if not manifest.exists():
+        return {}
+    grid = json.loads(manifest.read_text()).get("parameters", {}).get("logicalSchedule")
+    if grid is None:
+        return {}
+    if grid.get("protocolVersion") != 2:
+        raise ValueError("unsupported resource correlation protocol")
+    scope = grid.get("probeScope", "run")
+    if scope not in {"run", "parent"}:
+        raise ValueError("unsupported resource clock probe scope")
+    probe_dir = run_dir.parent if scope == "parent" else run_dir
+    return {
+        "host_anchor_monotonic": grid["anchorMonotonicSeconds"],
+        "clock_probes": [
+            row
+            for path in (
+                probe_dir / "preflight-probes.jsonl",
+                probe_dir / "clock-probes.jsonl",
+            )
+            for row in read_samples(path)[0]
+        ],
+    }
 
 
 def read_samples(path: Path) -> tuple[list[dict], int]:
@@ -67,12 +95,26 @@ def summarize_resources(
     run_id: str,
 ) -> dict:
     """Count every expected one-second slot, including nodes with no raw file."""
+    policy_path = run_dir / "vm-resources" / "policy.json"
+    policy = (
+        json.loads(policy_path.read_text())
+        if policy_path.exists()
+        else telemetry_policy()
+    )
     result: dict[str, Any] = {
-        "policy": telemetry_policy(),
+        "policy": policy,
         "complete": True,
         "nodes": {},
     }
+    malformed_probes = sum(
+        read_samples(path)[1]
+        for path in (run_dir / "preflight-probes.jsonl", run_dir / "clock-probes.jsonl")
+    )
+    result["clockProbeMalformedLines"] = malformed_probes
+    if malformed_probes:
+        result["complete"] = False
     expected = set(range(-warmup, period * epochs))
+    clock_context = resource_clock_context(run_dir)
     for node in nodes:
         path = run_dir / "vm-resources" / (node + ".jsonl")
         rows, malformed = read_samples(path)
@@ -82,6 +124,7 @@ def summarize_resources(
         missing_containers = []
         invalid = []
         roles = set()
+        uncertain, uncorrelated = 0, 0
         for index, raw in enumerate(rows):
             try:
                 row = correlate_sample(
@@ -93,13 +136,14 @@ def summarize_resources(
                     mode=mode,
                     functions=functions,
                     run_id=run_id,
+                    **clock_context,
                 )
-                slot = int(
-                    (
-                        datetime.fromisoformat(row["timestampUtc"]) - anchor
-                    ).total_seconds()
-                    // 1
-                )
+                if row["phase"] == "uncorrelated":
+                    uncorrelated += 1
+                    continue
+                if row["phase"] == "ambiguous":
+                    uncertain += 1
+                slot = int(row["timeFromAnchorSeconds"] // 1)
                 if slot not in expected:
                     continue
                 if row.get("node") != node:
@@ -152,6 +196,7 @@ def summarize_resources(
             or invalid
             or container_errors
             or missing_containers
+            or uncorrelated
         )
         result["nodes"][node] = {
             "complete": complete,
@@ -160,6 +205,9 @@ def summarize_resources(
             "missingSeconds": missing,
             "duplicateSeconds": duplicates,
             "unavailableCpuSeconds": invalid,
+            "uncertainPhaseSamples": uncertain,
+            "uncorrelatedSamples": uncorrelated,
+            "phaseCorrelationComplete": not (uncertain or uncorrelated),
             "malformedLines": malformed,
             "errors": errors,
             "containerErrors": container_errors,
@@ -194,6 +242,11 @@ class VmTelemetrySession:
             "functions": list(run.settings.functions),
             "run_id": manifest["run_id"],
         }
+        grid = manifest["parameters"].get("logicalSchedule")
+        if grid is not None:
+            # Final offline correlation uses continuing probes, including later
+            # brackets; no UTC guess is attached to live v2 raw samples.
+            context["host_anchor_monotonic"] = grid["anchorMonotonicSeconds"]
         try:
             for node in run.topology.resources.nodes.values():
                 vm = inputs.resource(node.vm)
@@ -222,6 +275,7 @@ class VmTelemetrySession:
                     "process": None,
                     "readers": [],
                     "readerErrors": [],
+                    "lastWriteMonotonic": time.monotonic(),
                 }
                 self.sessions.append(session)
                 process = subprocess.Popen(
@@ -258,7 +312,7 @@ class VmTelemetrySession:
                 ):
                     reader = Thread(
                         target=self._drain,
-                        args=(source, destination, session["readerErrors"]),
+                        args=(source, destination, session),
                         daemon=True,
                     )
                     session["readers"].append(reader)
@@ -287,14 +341,16 @@ class VmTelemetrySession:
             raise
 
     @staticmethod
-    def _drain(source, destination, failures):
+    def _drain(source, destination, session):
         """Preserve every byte, including partial lines, as soon as it arrives."""
         try:
             with source:
                 while chunk := source.read1(65536):
                     destination.write(chunk)
+                    if destination is session["output"]:
+                        session["lastWriteMonotonic"] = time.monotonic()
         except Exception as error:
-            failures.append(str(error))
+            session["readerErrors"].append(str(error))
 
     def require_healthy(self):
         """Treat terminated or stalled streams as visible collection failures."""
@@ -308,7 +364,10 @@ class VmTelemetrySession:
                 )
             if process is not None and process.poll() is not None:
                 raise RuntimeError("VM telemetry stopped: " + session["node"].config.id)
-            if path.stat().st_size and time.time() - path.stat().st_mtime > 10:
+            if (
+                path.stat().st_size
+                and time.monotonic() - session["lastWriteMonotonic"] > 10
+            ):
                 raise RuntimeError("VM telemetry stalled: " + session["node"].config.id)
 
     def close(self, *, coverage_until: datetime | None = None):

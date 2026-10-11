@@ -147,6 +147,26 @@ def test_timing_fingerprint_or_terminal_headroom_failure_prevents_manifest(
     assert not (tmp_path / "schedule.json").exists()
 
 
+def test_logical_manifest_freezes_shared_session_and_host_monotonic_grid(
+    tmp_path, monkeypatch
+):
+    run, inputs = frozen_run(tmp_path, monkeypatch)
+    run.settings.protocol_version = 2
+    run.qualification.protocol_version = 2
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.time.monotonic", lambda: 100.0
+    )
+    manifest = run.run(inputs).value
+    assert manifest is not None
+    grid = manifest.parameters["logicalSchedule"]
+    assert isinstance(grid, dict)
+    assert grid["protocolVersion"] == 2
+    assert grid["anchorMonotonicSeconds"] == 125.0
+    assert grid["hostBootId"]
+    assert grid["sessionId"]
+    assert grid["capturedAtUtc"]
+
+
 @pytest.mark.parametrize("node_specific", [False, True])
 @pytest.mark.parametrize("mode", ["baseline", "oracle", "ewma"])
 def test_mode_uses_expected_public_apis_and_never_injects_decisions(

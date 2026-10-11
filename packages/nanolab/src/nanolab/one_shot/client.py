@@ -1,4 +1,4 @@
-"""Typed, revision-aware boundary to the frozen NanoFaaS v1 API."""
+"""Typed, revision-aware boundary to versioned NanoFaaS one-shot APIs."""
 
 from __future__ import annotations
 
@@ -21,6 +21,20 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+def _check_configuration(settings: dict[str, JsonValue]) -> None:
+    version = settings.get("schemaVersion")
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("unsupported configuration version")
+    if version == 2:
+        _session_path(settings.get("sessionId"))
+
+
+def _session_path(session: JsonValue) -> str:
+    if not isinstance(session, str) or not session.strip() or len(session) > 256:
+        raise ValueError("logical sessionId must contain 1..256 characters")
+    return "/v1/admin/offload/one-shot/sessions/" + quote(session, safe="")
+
+
 class RevisionSnapshot(ApiModel):
     """Configuration revision and the versioned settings accepted by the node."""
 
@@ -30,8 +44,7 @@ class RevisionSnapshot(ApiModel):
     @model_validator(mode="after")
     def check_version(self) -> Self:
         """Enforce the schema version carried by settings."""
-        if self.settings.get("schemaVersion") != 1:
-            raise ValueError("unsupported configuration version")
+        _check_configuration(self.settings)
         return self
 
 
@@ -64,7 +77,9 @@ class PeerEndpoint(ApiModel):
 class NodeStatus(ApiModel):
     """Versioned node state; an empty endpoint/plan means not yet available."""
 
-    schema_version: Literal[1] = Field(alias="schemaVersion")
+    schema_version: Literal[1, 2] = Field(alias="schemaVersion")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    automatic_armed: bool = Field(default=False, alias="automaticArmed")
     state: str
     busy: bool
     clock_healthy: bool = Field(alias="clockHealthy")
@@ -74,11 +89,18 @@ class NodeStatus(ApiModel):
     revision: int = Field(ge=0)
     active_plan: dict[str, JsonValue] = Field(alias="activePlan")
 
+    @model_validator(mode="after")
+    def check_session(self) -> Self:
+        """Logical state always identifies its session; v1 archives need none."""
+        if self.schema_version == 2:
+            _session_path(self.session_id)
+        return self
+
 
 class PlanActivation(ApiModel):
     """Prepare result, including readiness failures rather than just HTTP success."""
 
-    status: Literal["PREPARED", "DEGRADED", "FAILED"]
+    status: Literal["NEGOTIATED", "PREPARED", "DEGRADED", "FAILED"]
     plan: dict[str, JsonValue] | None
     desired_replicas: dict[str, int] = Field(alias="desiredReplicas")
     ready_replicas: dict[str, int] = Field(alias="readyReplicas")
@@ -183,9 +205,8 @@ class NanoFaasOneShotClient:
         self, settings: dict[str, JsonValue], *, revision: int
     ) -> RevisionSnapshot:
         """Send a versioned next-epoch configuration exactly once."""
-        if settings.get("schemaVersion") != 1:
-            raise ValueError("unsupported configuration version")
-        return RevisionSnapshot.model_validate(
+        _check_configuration(settings)
+        receipt = RevisionSnapshot.model_validate(
             self._request(
                 "PUT",
                 "/v1/admin/offload/one-shot/config",
@@ -193,6 +214,12 @@ class NanoFaasOneShotClient:
                 headers={"If-Match": str(revision)},
             ).json()
         )
+        if any(
+            receipt.settings.get(key) != settings.get(key)
+            for key in ("schemaVersion", "sessionId")
+        ):
+            raise ValueError("configuration receipt identity mismatch")
+        return receipt
 
     def prepare_epoch(
         self, epoch: int, *, starts_at: datetime, ends_at: datetime
@@ -206,6 +233,46 @@ class NanoFaasOneShotClient:
                 f"/v1/admin/offload/one-shot/epochs/{epoch}/prepare",
                 json={"startsAt": starts_at.isoformat(), "endsAt": ends_at.isoformat()},
             ).json()
+        )
+
+    def prepare_logical_epoch(
+        self,
+        session_id: str,
+        epoch: int,
+        *,
+        starts_at: datetime,
+        ends_at: datetime,
+        activation_delay_seconds: float,
+    ) -> PlanActivation:
+        """Negotiate v2 without activating physical replicas or retrying a trigger."""
+        path = _session_path(session_id)
+        if epoch < 0 or ends_at <= starts_at:
+            raise ValueError("invalid epoch window")
+        if (
+            not math.isfinite(activation_delay_seconds)
+            or not 0 < activation_delay_seconds <= 86400
+        ):
+            raise ValueError("activation delay must be finite and in (0, 86400]")
+        duration = f"{activation_delay_seconds:.9f}".rstrip("0").rstrip(".")
+        return PlanActivation.model_validate(
+            self._request(
+                "POST",
+                f"{path}/epochs/{epoch}/prepare",
+                json={
+                    "startsAt": starts_at.isoformat(),
+                    "endsAt": ends_at.isoformat(),
+                    "activationDelay": f"PT{duration}S",
+                },
+            ).json()
+        )
+
+    def activate_epoch(self, session_id: str, epoch: int) -> PlanActivation:
+        """Activate an already negotiated logical epoch exactly once."""
+        path = _session_path(session_id)
+        if epoch < 0:
+            raise ValueError("invalid epoch")
+        return PlanActivation.model_validate(
+            self._request("POST", f"{path}/epochs/{epoch}/activate").json()
         )
 
     def status(self) -> NodeStatus:

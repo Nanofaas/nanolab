@@ -7,7 +7,7 @@ import json
 import math
 import random
 import statistics
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -620,25 +620,62 @@ def render_paired_campaign(blocks, output: Path, *, seed: int, protocol=None) ->
 
 def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
     """Show full node CPU/RAM/swap and individual replica counters, with gaps."""
-    from nanolab.one_shot.vm_resources import read_samples
+    from nanolab.one_shot.vm_resources import (
+        correlate_sample,
+        read_samples,
+        resource_clock_context,
+    )
 
     charts = []
     anchor = datetime.fromisoformat(manifest.anchor)
+    clock_context = resource_clock_context(directory)
+    generator = cast(dict, manifest.parameters.get("generator") or {})
+    time_axis = (
+        "Host monotonic time projected on frozen UTC anchor" if clock_context else "UTC"
+    )
     for node in manifest.nodes:
         rows, _malformed = read_samples(directory / "vm-resources" / (node + ".jsonl"))
-        # Insert missing UTC seconds explicitly: Plotly must not connect a gap.
+        # Insert missing timeline seconds explicitly: Plotly must not connect a gap.
         timed = []
         previous = None
         for row in rows:
             try:
-                timestamp = datetime.fromisoformat(row["timestampUtc"])
+                if clock_context:
+                    row = correlate_sample(
+                        row,
+                        anchor=anchor,
+                        warmup=int(generator.get("warmupSeconds", 720)),
+                        period=int(manifest.period_seconds),
+                        epochs=9,
+                        mode=manifest.mode,
+                        functions=manifest.functions,
+                        run_id=manifest.run_id,
+                        **clock_context,
+                    )
+                    offset = row["timeFromAnchorSeconds"]
+                    timestamp = (
+                        anchor + timedelta(seconds=offset)
+                        if offset is not None
+                        else None
+                    )
+                else:
+                    timestamp = datetime.fromisoformat(row["timestampUtc"])
             except (KeyError, ValueError, TypeError):
                 continue
-            if previous is not None and (timestamp - previous).total_seconds() > 1.5:
-                timed.append({"timestampUtc": row["timestampUtc"]})
+            row = {
+                **row,
+                "plotTimestampUtc": timestamp.isoformat() if timestamp else None,
+            }
+            if (
+                previous is not None
+                and timestamp is not None
+                and (timestamp - previous).total_seconds() > 1.5
+            ):
+                timed.append({"plotTimestampUtc": row["plotTimestampUtc"]})
             timed.append(row)
             previous = timestamp
-        x = [row["timestampUtc"] for row in timed]
+        x = [row["plotTimestampUtc"] for row in timed]
+        raw_utc = [row.get("timestampUtc") for row in timed]
         cpu = go.Figure()
         for name, field in [
             ("VM busy / vCPU capacity", "cpuUtilization"),
@@ -646,12 +683,19 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
             ("Steal", "cpuStealFraction"),
         ]:
             cpu.add_scatter(
-                name=name, x=x, y=[row.get(field) for row in timed], connectgaps=False
+                name=name,
+                x=x,
+                y=[row.get(field) for row in timed],
+                connectgaps=False,
+                customdata=raw_utc,
+                hovertemplate=(
+                    "%{x}: %{y}<br>VM UTC: %{customdata}<extra>%{fullData.name}</extra>"
+                ),
             )
         cpu.update_layout(
             title="Whole VM CPU: " + node,
             yaxis_title="Fraction of vCPU capacity",
-            xaxis_title="UTC",
+            xaxis_title=time_axis,
         )
         memory = go.Figure()
         for field in [
@@ -667,7 +711,7 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
         memory.update_layout(
             title="Whole VM memory and swap: " + node,
             yaxis_title="Bytes",
-            xaxis_title="UTC",
+            xaxis_title=time_axis,
         )
         figures = [cpu, memory]
         identities = {
@@ -709,13 +753,11 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
                 )
                 figure.add_scatter(name=label, x=x, y=values, connectgaps=False)
             figure.update_layout(
-                title=title + ": " + node, yaxis_title=unit, xaxis_title="UTC"
+                title=title + ": " + node, yaxis_title=unit, xaxis_title=time_axis
             )
             figures.append(figure)
         for figure in figures:
             for epoch in range(10):
-                from datetime import timedelta
-
                 figure.add_vline(
                     x=(
                         anchor + timedelta(seconds=epoch * manifest.period_seconds)

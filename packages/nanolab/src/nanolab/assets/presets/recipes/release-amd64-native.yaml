@@ -9,8 +9,10 @@ controlPlane:
   - autoscaler
   - build-metadata
   - concurrency-control
+  - forecasting
   - k8s-deployment-provider
   - offload
+  - p2p-discovery
   - runtime-config
   - sync-queue
   build:

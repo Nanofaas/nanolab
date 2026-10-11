@@ -44,6 +44,9 @@ def test_actual_probe_disables_nagle_on_persistent_clock_connection(monkeypatch)
                 )
                 response.raise_for_status()
                 assert isinstance(response.json()["timestamp"], float)
+                assert response.json()["monotonicSeconds"] > 0
+                assert isinstance(response.json()["bootId"], str)
+                assert response.json()["bootId"]
         assert socket_options == [1]
     finally:
         server.shutdown()

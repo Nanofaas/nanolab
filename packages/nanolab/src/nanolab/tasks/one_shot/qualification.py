@@ -7,8 +7,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Lock
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
@@ -177,6 +178,7 @@ def configuration_for_node(
     epsilon: float,
     protocol: ProtocolSettings,
     anchor: datetime,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Translate declared identity and limits without deciding replicas or flows."""
     generations = client.status().catalog_generations
@@ -198,8 +200,11 @@ def configuration_for_node(
     }
 
     node = topology.resources.nodes[node_id]
+    if settings.protocol_version == 2 and not session_id:
+        raise ValueError("logical configuration requires a shared sessionId")
     return {
-        "schemaVersion": 1,
+        "schemaVersion": settings.protocol_version,
+        **({"sessionId": session_id} if settings.protocol_version == 2 else {}),
         "profileId": profile.profile_id,
         "environmentFingerprint": profile.environment_fingerprint,
         "purpose": settings.purpose,
@@ -307,14 +312,23 @@ def prepare_parallel_epoch(
     starts_at: datetime,
     ends_at: datetime,
     output: Path,
+    session_id: str | None = None,
+    activation_at: float | None = None,
+    clock: ClockMonitor | None = None,
 ) -> tuple[WallTimingSample, dict[str, Any]]:
     """Trigger each node once; save failures/events and bound the full global wall."""
+    if session_id is not None and (activation_at is None or clock is None):
+        raise ValueError(
+            "logical preparation needs a monotonic activation deadline and monitor"
+        )
     before = {
         key: scrape_metrics(client.http, client.base_url)
         for key, client in clients.items()
     }
     barrier = Barrier(len(clients) + 1)
     launched = time.monotonic()
+    activation_deadline = activation_at if activation_at is not None else launched
+    evidence_lock = Lock()
 
     def prepare(binding):
         key, client = binding
@@ -322,10 +336,22 @@ def prepare_parallel_epoch(
         began = time.monotonic()
         row: dict[str, Any] = {"triggerOffsetSeconds": began - launched}
         try:
-            result = client.prepare_epoch(epoch, starts_at=starts_at, ends_at=ends_at)
+            result = (
+                client.prepare_epoch(epoch, starts_at=starts_at, ends_at=ends_at)
+                if session_id is None
+                else client.prepare_logical_epoch(
+                    session_id,
+                    epoch,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    activation_delay_seconds=activation_deadline - began,
+                )
+            )
             row["result"] = result.model_dump(mode="json", by_alias=True)
             row["complete"] = (
-                result.status == "PREPARED"
+                result.status == "NEGOTIATED"
+                if session_id is not None
+                else result.status == "PREPARED"
                 and result.desired_replicas == result.ready_replicas
             )
         except (httpx.HTTPError, ValueError, RuntimeError) as error:
@@ -336,6 +362,17 @@ def prepare_parallel_epoch(
                     responseBody=error.response.text,
                 )
         row["readyOffsetSeconds"] = time.monotonic() - launched
+        if session_id is not None:
+            with evidence_lock:
+                append_observation(
+                    output.with_name(output.stem + "-negotiations.jsonl"),
+                    {
+                        "sessionId": session_id,
+                        "epoch": epoch,
+                        "node": key,
+                        **row,
+                    },
+                )
         return key, row
 
     with ThreadPoolExecutor(max_workers=len(clients)) as pool:
@@ -343,6 +380,53 @@ def prepare_parallel_epoch(
         barrier.wait(timeout=10)
         rows = dict(future.result() for future in futures)
     complete = all(row["complete"] for row in rows.values())
+    negotiation_wall = max(row["readyOffsetSeconds"] for row in rows.values())
+    activation_wall = 0.0
+    if session_id is not None:
+        for row in rows.values():
+            row["negotiationResult"] = row.pop("result", None)
+            row["negotiatedOffsetSeconds"] = row["readyOffsetSeconds"]
+        if clock is None:
+            raise ValueError("logical activation requires a clock monitor")
+        wait_until_monotonic(activation_deadline, clock=clock)
+        activation_started = time.monotonic()
+
+        def activate(binding):
+            key, client = binding
+            row = rows[key]
+            if not row["complete"]:
+                return
+            row["activationTriggerOffsetSeconds"] = time.monotonic() - launched
+            try:
+                result = client.activate_epoch(session_id, epoch)
+                row["result"] = result.model_dump(mode="json", by_alias=True)
+                row["complete"] = (
+                    result.status == "PREPARED"
+                    and result.desired_replicas == result.ready_replicas
+                )
+            except (httpx.HTTPError, ValueError, RuntimeError) as error:
+                row.update(complete=False, error=str(error))
+                if isinstance(error, httpx.HTTPStatusError):
+                    row.update(
+                        statusCode=error.response.status_code,
+                        responseBody=error.response.text,
+                    )
+            row["readyOffsetSeconds"] = time.monotonic() - launched
+            with evidence_lock:
+                append_observation(
+                    output.with_name(output.stem + "-activations.jsonl"),
+                    {
+                        "sessionId": session_id,
+                        "epoch": epoch,
+                        "node": key,
+                        **row,
+                    },
+                )
+
+        with ThreadPoolExecutor(max_workers=len(clients)) as pool:
+            list(pool.map(activate, clients.items()))
+        activation_wall = time.monotonic() - activation_started
+        complete = all(row["complete"] for row in rows.values())
     for key, client in clients.items():
         row = rows[key]
         try:
@@ -364,6 +448,7 @@ def prepare_parallel_epoch(
             row["collectionError"] = str(error)
             complete = False
     wall = max(row["readyOffsetSeconds"] for row in rows.values())
+    operational_wall = negotiation_wall + activation_wall
     observation = {
         "epoch": epoch,
         "startsAt": starts_at.isoformat(),
@@ -371,15 +456,32 @@ def prepare_parallel_epoch(
         "nodes": rows,
         "censored": not complete,
         "globalReadyWallSeconds": wall,
-        "auctionWallUpperBoundSeconds": wall if complete else None,
+        "auctionWallUpperBoundSeconds": operational_wall if complete else None,
         "method": "parallel-trigger-to-all-ready-conservative-auction-upper-bound",
     }
+    if session_id is not None:
+        observation.update(
+            protocolVersion=2,
+            sessionId=session_id,
+            globalOperationalWallSeconds=operational_wall,
+            negotiationWallSeconds=negotiation_wall,
+            activationWallSeconds=activation_wall,
+            readinessLagSeconds=max(0.0, launched + wall - activation_deadline),
+            method="parallel-logical-negotiation-plus-activation-excluding-scheduled-wait",
+        )
     append_observation(output, observation)
     return WallTimingSample(
-        auction_seconds=wall if complete else None,
-        ready_seconds=wall if complete else None,
+        auction_seconds=operational_wall if complete else None,
+        ready_seconds=operational_wall if complete else None,
         censored=not complete,
     ), observation
+
+
+def wait_until_monotonic(deadline: float, *, clock: ClockMonitor) -> None:
+    """Wait against one host monotonic deadline while checking owned collection."""
+    while (remaining := deadline - time.monotonic()) > 0:
+        clock.require_healthy()
+        time.sleep(min(0.25, remaining))
 
 
 def wait_until(instant: datetime, *, clock: ClockMonitor) -> None:
@@ -450,6 +552,8 @@ class QualifyTimingTask(Task[TimingQualification]):
         monitor = inputs.resource(self.clock)
         all_samples, cells = [], []
         epoch = 0
+        session_id = uuid4().hex if self.settings.protocol_version == 2 else None
+        grid_anchor = datetime.now(UTC)
         with httpx.Client(trust_env=False) as http:
             if self.settings.purpose == "scientific-experiment":
                 from nanolab.one_shot.capacity import comparison_replica_vectors
@@ -544,7 +648,8 @@ class QualifyTimingTask(Task[TimingQualification]):
                     lead=timing.lead_seconds,
                     epsilon=timing.epsilon,
                     protocol=timing.protocol,
-                    anchor=datetime.now(UTC),
+                    anchor=grid_anchor,
+                    session_id=session_id,
                 )
                 configure_node(
                     client,
@@ -574,8 +679,12 @@ class QualifyTimingTask(Task[TimingQualification]):
                     for number in range(timing.minimum_samples):
                         monitor.require_healthy()
                         loaded.require_healthy()
-                        starts = datetime.now(UTC) + timedelta(
-                            seconds=timing.lead_seconds
+                        activation_at = time.monotonic() + timing.lead_seconds
+                        starts = (
+                            grid_anchor + timedelta(seconds=epoch * period)
+                            if session_id is not None
+                            else datetime.now(UTC)
+                            + timedelta(seconds=timing.lead_seconds)
                         )
                         ends = starts + timedelta(seconds=period)
                         for key, client in clients.items():
@@ -612,6 +721,15 @@ class QualifyTimingTask(Task[TimingQualification]):
                             starts_at=starts,
                             ends_at=ends,
                             output=self.run_dir / "timing-samples.jsonl",
+                            **(
+                                {
+                                    "session_id": session_id,
+                                    "activation_at": activation_at,
+                                    "clock": monitor,
+                                }
+                                if session_id is not None
+                                else {}
+                            ),
                         )
                         append_observation(
                             self.run_dir / "matrix.jsonl",
@@ -627,7 +745,14 @@ class QualifyTimingTask(Task[TimingQualification]):
                         measured_through = time.time()
                         samples.append(sample)
                         epoch += 1
-                        wait_until(ends + timedelta(milliseconds=100), clock=monitor)
+                        if session_id is not None:
+                            wait_until_monotonic(
+                                activation_at + period + 0.1, clock=monitor
+                            )
+                        else:
+                            wait_until(
+                                ends + timedelta(milliseconds=100), clock=monitor
+                            )
                     load = loaded.audit(cutoff=measured_through)
                 result = select_timing(
                     samples,
@@ -643,6 +768,9 @@ class QualifyTimingTask(Task[TimingQualification]):
                     purpose=self.settings.purpose,
                     fingerprint=fingerprint,
                     profile_sha256=self.settings.profile.sha256,
+                )
+                result = result.model_copy(
+                    update={"protocol_version": self.settings.protocol_version}
                 )
                 if not load["valid"]:
                     result = result.model_copy(
@@ -689,6 +817,7 @@ class QualifyTimingTask(Task[TimingQualification]):
                 "lead_seconds": max(value.lead_seconds for value in values),
                 "quantile_seconds": max(value.quantile_seconds for value in values),
                 "protocol": timing.protocol.model_dump(by_alias=True),
+                "protocol_version": self.settings.protocol_version,
                 "matrix": cells,
                 "reason": None
                 if all(value.qualified for value in values)

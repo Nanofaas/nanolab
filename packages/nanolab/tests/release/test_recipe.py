@@ -24,8 +24,10 @@ MODULES = (
     "autoscaler",
     "build-metadata",
     "concurrency-control",
+    "forecasting",
     "k8s-deployment-provider",
     "offload",
+    "p2p-discovery",
     "runtime-config",
     "sync-queue",
 )
@@ -47,9 +49,9 @@ def _groups(profiles: Path = PROFILES, architecture: ImageArchitecture = "amd64"
 def test_release_profiles_cover_exact_guarded_matrix() -> None:
     groups = _groups()
     assert tuple(g.flavor for g in groups) == ("jvm", "native", "default")
-    assert tuple(len(g.cells) for g in groups) == (9, 12, 27)
+    assert tuple(len(g.cells) for g in groups) == (9, 12, 33)
     images = [c.image for g in groups for c in g.cells]
-    assert len(images) == len(set(images)) == 48
+    assert len(images) == len(set(images)) == 54
     assert "127.0.0.1:5000/nanofaas/java-lite-word-stats:v9.9.9-amd64-native" in images
     assert "127.0.0.1:5000/nanofaas/java-warm-echo:v9.9.9-amd64-jvm" in images
     assert "127.0.0.1:5000/nanofaas/watchdog:v9.9.9-amd64" in images
@@ -60,6 +62,12 @@ def test_release_profiles_cover_exact_guarded_matrix() -> None:
         "json-transform",
         "roman-numeral",
         "qr-code",
+        "one-shot-arithmetic",
+        "one-shot-matrix",
+        "one-shot-memory",
+        "one-shot-mixed",
+        "one-shot-sort",
+        "one-shot-workload",
     }
     assert "container" not in default["controlPlane"]
     assert default["controlPlane"]["build"]["mode"] == "jvm"
@@ -266,7 +274,7 @@ def _report(group) -> dict:
     }
 
 
-@pytest.mark.parametrize(("index", "count"), [(0, 9), (1, 12), (2, 27)])
+@pytest.mark.parametrize(("index", "count"), [(0, 9), (1, 12), (2, 33)])
 def test_release_distribution_maps_all_component_kinds(
     tmp_path: Path, index: int, count: int
 ) -> None:
@@ -469,7 +477,7 @@ def test_release_profiles_cover_both_architectures():
     amd = _groups()
     arm = _groups(architecture="arm64")
     for architecture, groups in (("amd64", amd), ("arm64", arm)):
-        assert tuple(len(g.cells) for g in groups) == (9, 12, 27)
+        assert tuple(len(g.cells) for g in groups) == (9, 12, 33)
         assert all(g.modules == MODULES for g in groups)
         assert all(c.architecture == architecture for g in groups for c in g.cells)
         assert [g.tag for g in groups] == [
@@ -493,7 +501,7 @@ def test_release_profiles_cover_both_architectures():
             "container" not in yaml.safe_load(groups[2].profile_bytes)["controlPlane"]
         )
     images = [c.image for g in (*amd, *arm) for c in g.cells]
-    assert len(images) == len(set(images)) == 96
+    assert len(images) == len(set(images)) == 108
     assert "127.0.0.1:5000/nanofaas/java-lite-word-stats:v9.9.9-arm64-native" in images
     assert "127.0.0.1:5000/nanofaas/java-warm-echo:v9.9.9-arm64-jvm" in images
     assert "127.0.0.1:5000/nanofaas/watchdog:v9.9.9-arm64" in images

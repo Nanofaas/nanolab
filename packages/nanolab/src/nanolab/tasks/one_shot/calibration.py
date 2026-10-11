@@ -234,6 +234,11 @@ def environment_identity(
     }
     if settings.strict_memory:
         identity["strictMemory"] = True
+    if settings.protocol_version == 2:
+        identity["oneShotProtocol"] = {
+            "schemaVersion": 2,
+            "clockPolicy": "monotonic-protocol-and-diagnostic-utc",
+        }
     if settings.purpose == "scientific-experiment":
         identity["nanolabPackageSha256"] = package_fingerprint()
         identity["controlPlaneLimits"] = {"cpu": 0.35, "memoryMiB": 512}

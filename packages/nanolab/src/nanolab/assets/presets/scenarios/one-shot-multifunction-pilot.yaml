@@ -8,6 +8,7 @@ functions:
 - one-shot-mixed-rust
 - one-shot-sort-rust
 oneShot:
+  protocolVersion: 2
   provider: multipass
   purpose: scientific-experiment
   nodes:

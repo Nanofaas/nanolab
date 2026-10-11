@@ -116,6 +116,7 @@ def build_one_shot_experiment_plan(
                 reporting_nodes=set(edges),
                 probes=topology.probes,
                 output=directory / "clock.jsonl",
+                protocol_version=settings.protocol_version,
             )
             requires = (*topology.requires, clock)
             preflight = CollectTopologyTask(
@@ -129,6 +130,7 @@ def build_one_shot_experiment_plan(
                 node_function_settings=topology.node_function_settings,
                 purpose=config.one_shot.purpose,
                 strict_memory=config.one_shot.strict_memory,
+                protocol_version=config.one_shot.protocol_version,
                 output=directory / "preflight.json",
             )
             freeze = FreezeManifestTask(

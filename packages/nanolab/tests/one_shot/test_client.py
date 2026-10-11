@@ -36,7 +36,7 @@ def test_status_rejects_unsupported_contract_version() -> None:
     with (
         httpx.Client(
             transport=httpx.MockTransport(
-                lambda _: httpx.Response(200, json={"schemaVersion": 2})
+                lambda _: httpx.Response(200, json={"schemaVersion": 3})
             )
         ) as http,
         pytest.raises(ValueError, match="schemaVersion"),
@@ -188,7 +188,7 @@ def test_invalid_requests_are_refused_before_transport():
     ) as http:
         client = NanoFaasOneShotClient("http://edge", http=http)
         with pytest.raises(ValueError, match="configuration version"):
-            client.configure({"schemaVersion": 2}, revision=0)
+            client.configure({"schemaVersion": 3}, revision=0)
         with pytest.raises(ValueError, match="epoch window"):
             client.prepare_epoch(-1, starts_at=now, ends_at=now)
         with pytest.raises(ValueError, match="pagination"):

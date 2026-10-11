@@ -167,12 +167,22 @@ def test_admission_refusal_requires_exact_gateway_target_and_status(message, tar
 
 @pytest.mark.parametrize("cloud_direct", [False, True])
 @pytest.mark.parametrize("censored", [False, True])
+@pytest.mark.parametrize("logical", [False, True])
 def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
-    tmp_path, monkeypatch, censored, cloud_direct
+    tmp_path, monkeypatch, censored, cloud_direct, logical
 ):
     from nanolab.tasks.one_shot.experiment import FreezeManifestTask
 
     result = manifest().model_copy(update={"mode": "oracle"})
+    if logical:
+        from pathlib import Path
+
+        result.parameters["logicalSchedule"] = {
+            "protocolVersion": 2,
+            "sessionId": "session",
+            "anchorMonotonicSeconds": 100.0,
+            "hostBootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+        }
     (tmp_path / "manifest.json").write_text(result.model_dump_json())
     node = SimpleNamespace(config=SimpleNamespace(memory_capacity_mib=128))
     topology = SimpleNamespace(
@@ -194,7 +204,10 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
                 windows=[{}],
                 period_seconds=20,
             ),
-            settings=SimpleNamespace(experiment=SimpleNamespace(fail_load=False)),
+            settings=SimpleNamespace(
+                experiment=SimpleNamespace(fail_load=False),
+                protocol_version=2 if logical else 1,
+            ),
             qualification=SimpleNamespace(margin_seconds=0.2, epsilon=0.1),
         ),
     )
@@ -242,6 +255,9 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
 
     def prepare(clients, **kwargs):
         assert set(clients) == {"edge-0"}
+        if logical:
+            assert kwargs["session_id"] == "session"
+            assert kwargs["activation_at"] == 100.0
         calls.append(kwargs["epoch"])
         return SimpleNamespace(
             censored=censored, ready_seconds=0.1, auction_seconds=0.1
@@ -253,6 +269,18 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.experiment.wait_until", lambda *_args, **_kwargs: None
     )
+    if logical:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.wait_until",
+            lambda *_args, **_kwargs: pytest.fail(
+                "v2 epoch trigger uses monotonic grid"
+            ),
+        )
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.wait_until_monotonic",
+            lambda *_args, **_kwargs: None,
+            raising=False,
+        )
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.experiment.collect_runtime_evidence",
         lambda *_args: None,

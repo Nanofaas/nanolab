@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -33,9 +34,10 @@ class NodeEvidence(BaseModel):
     peer_count: int = Field(ge=0)
     neighbor_ids: list[str] | None = None
     image_digests: dict[str, str]
-    clock_offset_seconds: float
-    clock_uncertainty_seconds: float = Field(ge=0)
-    rtt_seconds: float = Field(ge=0)
+    clock_offset_seconds: float | None
+    clock_uncertainty_seconds: float | None = Field(ge=0)
+    rtt_seconds: float | None = Field(ge=0)
+    clock_status: Literal["MEASURED", "MISSING"] = "MEASURED"
     bandwidth_mbps: float = Field(gt=0)
     os: str | None = None
     architecture: str | None = None
@@ -58,7 +60,12 @@ class TopologyEvidence(BaseModel):
     peer_graph: dict | None = None
 
 
-def validate_node(node: NodeEvidence, *, max_clock_skew_seconds: float) -> None:
+def validate_node(
+    node: NodeEvidence,
+    *,
+    max_clock_skew_seconds: float,
+    protocol_version: Literal[1, 2] = 1,
+) -> None:
     """Refuse unsupported physical or readiness assumptions before load."""
     if not node.ready:
         raise ValueError(f"{node.node_id} is not ready")
@@ -68,11 +75,14 @@ def validate_node(node: NodeEvidence, *, max_clock_skew_seconds: float) -> None:
         raise ValueError("replica memory exceeds VM memory budget")
     if node.concurrency != 1:
         raise ValueError("physical concurrency must equal one")
-    if (
-        abs(node.clock_offset_seconds) + node.clock_uncertainty_seconds
+    if protocol_version == 1 and (
+        node.clock_status != "MEASURED"
+        or node.clock_offset_seconds is None
+        or node.clock_uncertainty_seconds is None
+        or abs(node.clock_offset_seconds) + node.clock_uncertainty_seconds
         > max_clock_skew_seconds
     ):
-        raise ValueError("clock offset/uncertainty exceeds threshold")
+        raise ValueError("clock offset/uncertainty missing or exceeds threshold")
     if node.kind == "edge" and node.peer_count < 1:
         raise ValueError("edge has no discovered peer")
     if not node.image_digests or any(
@@ -139,41 +149,74 @@ def measure_http_clock(
     http: httpx.Client,
     repetitions: int = 10,
     record_probe: Callable[[dict], None] | None = None,
+    tolerate_failures: bool = False,
 ) -> tuple[float, float, datetime]:
-    """Use a persistent HTTP connection to bound remote UTC offset uncertainty."""
+    """Keep UTC diagnostics and monotonic brackets, including failed attempts."""
     samples = []
+    last_failure: Exception | None = None
     for attempt in range(repetitions):
         before = time.time()
-        after = None
+        before_mono = time.monotonic()
         remote = None
-        error = None
+        remote_mono = None
+        remote_boot = None
+        failure = None
         try:
             response = http.get(url + "/clock", timeout=1)
-            after = time.time()
             response.raise_for_status()
-            remote = float(response.json()["timestamp"])
-        except Exception as failure:
-            error = type(failure).__name__
-            raise
-        finally:
-            if after is None:
-                after = time.time()
-            if record_probe is not None:
-                record_probe(
-                    {
-                        "attempt": attempt,
-                        "beforeUtcSeconds": before,
-                        "afterUtcSeconds": after,
-                        "remoteUtcSeconds": remote,
-                        "rttSeconds": after - before,
-                        "errorType": error,
-                    }
-                )
-        if after is None or remote is None:
+            payload = response.json()
+            remote = float(payload["timestamp"])
+            if not math.isfinite(remote):
+                raise ValueError("non-finite remote clock")
+            if "monotonicSeconds" in payload:
+                remote_mono = float(payload["monotonicSeconds"])
+                remote_boot = payload["bootId"]
+                if (
+                    not math.isfinite(remote_mono)
+                    or remote_mono < 0
+                    or not isinstance(remote_boot, str)
+                    or not remote_boot
+                ):
+                    raise ValueError("invalid remote monotonic clock identity")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            failure = error
+            last_failure = error
+        after_mono = time.monotonic()
+        after = time.time()
+        rtt = after_mono - before_mono
+        jump = after - before - rtt
+        if record_probe is not None:
+            record_probe(
+                {
+                    "attempt": attempt,
+                    "beforeUtcSeconds": before,
+                    "afterUtcSeconds": after,
+                    "beforeMonotonicSeconds": before_mono,
+                    "afterMonotonicSeconds": after_mono,
+                    "remoteUtcSeconds": remote,
+                    "remoteMonotonicSeconds": remote_mono,
+                    "remoteBootId": remote_boot,
+                    "rttSeconds": rtt,
+                    "hostUtcJumpSeconds": jump,
+                    "errorType": type(failure).__name__ if failure else None,
+                }
+            )
+        if failure is not None:
+            if not tolerate_failures:
+                raise failure
+            continue
+        if remote is None:
             raise RuntimeError("clock probe completed without timestamps")
-        samples.append((after - before, remote - (before + after) / 2, remote))
-    rtt, offset, measured = min(samples)
-    return offset, rtt / 2, datetime.fromtimestamp(measured, UTC)
+        # A host UTC step widens UTC uncertainty, without corrupting the RTT
+        # or host/guest monotonic bracket used for experiment correlation.
+        uncertainty = (rtt + abs(jump)) / 2
+        samples.append((uncertainty, remote - (before + after) / 2, remote))
+    if not samples:
+        if last_failure is not None:
+            raise last_failure
+        raise ValueError("clock probe requires at least one successful attempt")
+    uncertainty, offset, measured = min(samples)
+    return offset, uncertainty, datetime.fromtimestamp(measured, UTC)
 
 
 def runtime_endpoint(
@@ -313,6 +356,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
             "workflow-validation", "scientific-experiment"
         ] = "workflow-validation",
         strict_memory: bool = False,
+        protocol_version: Literal[1, 2] = 1,
     ):
         """Bind explicit resource handles and expected physical identities."""
         self.collectors = collectors or {}
@@ -328,6 +372,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         self.node_function_settings = node_function_settings or {}
         self.purpose: Literal["workflow-validation", "scientific-experiment"] = purpose
         self.strict_memory = strict_memory
+        self.protocol_version: Literal[1, 2] = protocol_version
         self.resources, self.endpoints, self.probes = resources, endpoints, probes
         self.distribution, self.function_settings = distribution, function_settings
         self.output, self.max_clock_skew_seconds = output, max_clock_skew_seconds
@@ -385,12 +430,56 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                 self.observations[key] = {"inventory": inventory}
                 peer_count = 0
                 peers: list[str] = []
-                clock, uncertainty, measured_at = measure_http_clock(probe, http=http)
+                probe_rtts: list[float] = []
+
+                def record_probe(
+                    sample: dict,
+                    node_id: str = key,
+                    rtts: list[float] = probe_rtts,
+                ) -> None:
+                    raw_output = self.output.with_name(
+                        self.output.stem + "-probes.jsonl"
+                    )
+                    with raw_output.open("a") as raw:
+                        raw.write(json.dumps({"node": node_id, **sample}) + "\n")
+                    if (
+                        sample.get("errorType") is None
+                        and sample.get("remoteUtcSeconds") is not None
+                    ):
+                        rtts.append(sample["rttSeconds"])
+
+                clock_status = "MEASURED"
+                try:
+                    clock, uncertainty, measured_at = measure_http_clock(
+                        probe,
+                        http=http,
+                        record_probe=record_probe,
+                        tolerate_failures=self.protocol_version == 2,
+                    )
+                    self.observations[key]["clock"] = {
+                        "status": clock_status,
+                        "offsetSeconds": clock,
+                        "uncertaintySeconds": uncertainty,
+                        "measuredAt": measured_at.isoformat(),
+                    }
+                except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+                    if self.protocol_version == 1:
+                        raise
+                    clock_status = "MISSING"
+                    clock, uncertainty, measured_at = None, None, None
+                    self.observations[key]["clock"] = {
+                        "status": clock_status,
+                        "errorType": type(error).__name__,
+                        "error": str(error),
+                    }
                 if node.config.kind == "edge":
                     client = NanoFaasOneShotClient(url, http=http)
-                    client.update_clock_health(
-                        offset_seconds=clock, measured_at=measured_at
-                    )
+                    if self.protocol_version == 1:
+                        if clock is None or measured_at is None:
+                            raise ValueError("missing required v1 clock evidence")
+                        client.update_clock_health(
+                            offset_seconds=clock, measured_at=measured_at
+                        )
                     expected_neighbors = (
                         set(self.neighbor_graph[key])
                         if self.neighbor_graph
@@ -520,13 +609,18 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     image_digests=image_digests,
                     clock_offset_seconds=clock,
                     clock_uncertainty_seconds=uncertainty,
-                    rtt_seconds=2 * uncertainty,
+                    rtt_seconds=min(probe_rtts) if probe_rtts else None,
+                    clock_status=clock_status,
                     bandwidth_mbps=network["bytes"] * 8 / network["seconds"] / 1e6,
                     os=inventory["os"],
                     architecture=inventory["architecture"],
                     runtime_limits=runtime_limits or None,
                 )
-                validate_node(fact, max_clock_skew_seconds=self.max_clock_skew_seconds)
+                validate_node(
+                    fact,
+                    max_clock_skew_seconds=self.max_clock_skew_seconds,
+                    protocol_version=self.protocol_version,
+                )
                 if fact.cpus < node.config.cpus:
                     raise ValueError("VM CPU allocation mismatch")
                 evidence.append(fact)

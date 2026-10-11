@@ -126,9 +126,20 @@ class QualificationLoad:
             else None,
         )
         self.run.trace = trace
-        self.anchor = datetime.now(UTC) + timedelta(
-            seconds=45 if self.use_telemetry else 2
-        )
+        delay = 45 if self.use_telemetry else 2
+        captured_at = datetime.now(UTC)
+        self.logical_schedule = None
+        if getattr(settings, "protocol_version", 1) == 2:
+            self.logical_schedule = {
+                "protocolVersion": 2,
+                "anchorMonotonicSeconds": time.monotonic() + delay,
+                "probeScope": "parent",
+                "capturedAtUtc": captured_at.isoformat(),
+                "hostBootId": Path("/proc/sys/kernel/random/boot_id")
+                .read_text()
+                .strip(),
+            }
+        self.anchor = captured_at + timedelta(seconds=delay)
         self.schedule = request_schedule(
             trace,
             anchor=self.anchor,
@@ -161,7 +172,14 @@ class QualificationLoad:
                             "anchor": self.anchor.isoformat(),
                             "period_seconds": int(self.duration),
                             "run_id": "qualification:" + self.run_dir.name,
-                            "parameters": {"generator": {"warmupSeconds": 0}},
+                            "parameters": {
+                                "generator": {"warmupSeconds": 0},
+                                **(
+                                    {"logicalSchedule": self.logical_schedule}
+                                    if self.logical_schedule
+                                    else {}
+                                ),
+                            },
                         }
                     ),
                 )

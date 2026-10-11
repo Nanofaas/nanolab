@@ -9,8 +9,10 @@ controlPlane:
   - autoscaler
   - build-metadata
   - concurrency-control
+  - forecasting
   - k8s-deployment-provider
   - offload
+  - p2p-discovery
   - runtime-config
   - sync-queue
   build:
@@ -124,6 +126,30 @@ functions:
   sdk: rust
   container:
     image: rust-word-stats
+- name: one-shot-arithmetic
+  sdk: rust
+  container:
+    image: rust-one-shot-arithmetic
+- name: one-shot-matrix
+  sdk: rust
+  container:
+    image: rust-one-shot-matrix
+- name: one-shot-memory
+  sdk: rust
+  container:
+    image: rust-one-shot-memory
+- name: one-shot-mixed
+  sdk: rust
+  container:
+    image: rust-one-shot-mixed
+- name: one-shot-sort
+  sdk: rust
+  container:
+    image: rust-one-shot-sort
+- name: one-shot-workload
+  sdk: rust
+  container:
+    image: rust-one-shot-workload
 services:
 - name: watchdog
   sdk: dockerfile

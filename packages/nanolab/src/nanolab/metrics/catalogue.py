@@ -532,10 +532,19 @@ def _autoscaler_queries(function_name: str) -> Queries:
     )
 
 
+def _p2p_queries(_function_name: str) -> Queries:
+    """Collect node membership and peer RTT, which have no function label."""
+    return tuple(
+        PrometheusQuery(name, name + CONTROL_PLANE_SELECTOR)
+        for name in ("p2p_peers", "p2p_peers_active", "p2p_peer_rtt_ms")
+    )
+
+
 MODULE_QUERIES: Mapping[str, QueryBuilder] = {
     "async-queue": _async_queue_queries,
     "sync-queue": _sync_queue_queries,
     "autoscaler": _autoscaler_queries,
+    "p2p-discovery": _p2p_queries,
 }
 
 # Modules that publish nothing a snapshot should collect, listed so the coverage
@@ -549,6 +558,7 @@ MODULES_WITHOUT_QUERIES: frozenset[str] = frozenset(
         "build-metadata",
         "runtime-config",
         "offload",
+        "forecasting",  # No independent Micrometer meters; one-shot owns its timers.
         "k8s-deployment-provider",
         "container-deployment-provider",
         "containerd-deployment-provider",

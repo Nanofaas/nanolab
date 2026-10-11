@@ -290,6 +290,7 @@ class OneShotConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
+    protocol_version: Literal[1, 2] = Field(default=1, alias="protocolVersion")
     provider: Literal["multipass"]
     purpose: Literal["workflow-validation", "scientific-experiment"]
     nodes: list[OneShotNode] = Field(min_length=3)

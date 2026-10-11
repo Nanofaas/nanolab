@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import version
@@ -12,6 +14,7 @@ from importlib.resources import files
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any, cast
+from uuid import uuid4
 
 import httpx
 from pydantic import JsonValue, TypeAdapter
@@ -48,6 +51,7 @@ from nanolab.tasks.one_shot.qualification import (
     prepare_parallel_epoch,
     verify_profile_scope,
     wait_until,
+    wait_until_monotonic,
 )
 from nanolab.tasks.one_shot.trace import oracle_entries, request_schedule, warmup_trace
 from nanolab.tasks.one_shot.verification import (
@@ -69,6 +73,8 @@ def read_qualification(settings) -> TimingQualification:
     )
     if not result.qualified:
         raise ValueError("timing artifact is NOT_QUALIFIED")
+    if result.protocol_version != getattr(settings, "protocol_version", 1):
+        raise ValueError("timing protocol version mismatch")
     if (result.provider, result.purpose, result.profile_sha256) != (
         settings.provider,
         settings.purpose,
@@ -117,12 +123,14 @@ def read_qualification(settings) -> TimingQualification:
         if (
             not observed.qualified
             or (
+                observed.protocol_version,
                 observed.provider,
                 observed.purpose,
                 observed.profile_sha256,
                 observed.environment_fingerprint,
             )
             != (
+                result.protocol_version,
                 result.provider,
                 result.purpose,
                 result.profile_sha256,
@@ -133,6 +141,27 @@ def read_qualification(settings) -> TimingQualification:
         ):
             raise ValueError("timing matrix is not independently qualified")
     return result
+
+
+def logical_schedule(manifest: CampaignManifest) -> tuple[str, float]:
+    """Resolve the frozen host-local grid; a reboot cannot reuse monotonic times."""
+    grid = manifest.parameters.get("logicalSchedule")
+    if not isinstance(grid, dict) or grid.get("protocolVersion") != 2:
+        raise ValueError("logical schedule missing from frozen manifest")
+    session = grid.get("sessionId")
+    anchor = grid.get("anchorMonotonicSeconds")
+    if (
+        not isinstance(session, str)
+        or not session
+        or not isinstance(anchor, (int, float))
+        or isinstance(anchor, bool)
+        or not math.isfinite(anchor)
+        or anchor < 0
+        or grid.get("hostBootId")
+        != Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    ):
+        raise ValueError("invalid logical schedule or host boot identity mismatch")
+    return session, float(anchor)
 
 
 def verify_qualified_load(trace, qualification, *, aliases=None) -> None:
@@ -303,9 +332,10 @@ class FreezeManifestTask(Task[CampaignManifest]):
         )
         if warmup_seconds > (720 if concurrent else 120):
             raise ValueError("scientific warmup exceeds configured maximum")
-        anchor = datetime.now(UTC) + timedelta(
-            seconds=warmup_seconds + (60 if concurrent else 20)
-        )
+        captured_at = datetime.now(UTC)
+        captured_mono = time.monotonic()
+        delay = warmup_seconds + (60 if concurrent else 20)
+        anchor = captured_at + timedelta(seconds=delay)
         run_id = f"{self.trace.sha256[:12]}:{self.mode}:{self.repetition}"
         binding = read_campaign_binding(self.settings)
         if binding is not None:
@@ -371,6 +401,19 @@ class FreezeManifestTask(Task[CampaignManifest]):
                 for key, endpoint in self.topology.endpoints.items()
             },
         }
+        if self.settings.protocol_version == 2:
+            if self.qualification.protocol_version != 2:
+                raise ValueError("timing protocol version mismatch")
+            parameters["logicalSchedule"] = {
+                "protocolVersion": 2,
+                "sessionId": uuid4().hex,
+                "anchorMonotonicSeconds": captured_mono + delay,
+                "capturedMonotonicSeconds": captured_mono,
+                "capturedAtUtc": captured_at.isoformat(),
+                "hostBootId": Path("/proc/sys/kernel/random/boot_id")
+                .read_text()
+                .strip(),
+            }
         if isinstance(self.profile, CalibrationProfiles):
             parameters["nodeFunctions"] = {
                 node: {
@@ -559,6 +602,11 @@ class UploadForecastTask(Task[None]):
                     epsilon=run.qualification.epsilon,
                     protocol=protocol,
                     anchor=datetime.fromisoformat(manifest.anchor),
+                    session_id=(
+                        logical_schedule(manifest)[0]
+                        if run.settings.protocol_version == 2
+                        else None
+                    ),
                 )
                 configure_node(
                     client,
@@ -994,6 +1042,10 @@ class RunOneShotLoadTask(Task[None]):
         try:
             if run.settings.experiment.fail_load:
                 raise RuntimeError("injected load-task failure")
+            logical = getattr(run.settings, "protocol_version", 1) == 2
+            session_id, mono_anchor = (
+                logical_schedule(manifest) if logical else (None, 0.0)
+            )
             with httpx.Client(trust_env=False) as http:
                 clients = {
                     key: NanoFaasOneShotClient(
@@ -1005,9 +1057,16 @@ class RunOneShotLoadTask(Task[None]):
                 }
                 for epoch in range(len(run.trace.windows)):
                     start = anchor + timedelta(seconds=epoch * run.trace.period_seconds)
-                    wait_until(
-                        start - timedelta(seconds=manifest.lead_seconds), clock=clock
-                    )
+                    activation_at = mono_anchor + epoch * manifest.period_seconds
+                    if logical:
+                        wait_until_monotonic(
+                            activation_at - manifest.lead_seconds, clock=clock
+                        )
+                    else:
+                        wait_until(
+                            start - timedelta(seconds=manifest.lead_seconds),
+                            clock=clock,
+                        )
                     collector.require_healthy()
                     if telemetry is not None:
                         telemetry.require_healthy()
@@ -1020,6 +1079,15 @@ class RunOneShotLoadTask(Task[None]):
                             starts_at=start,
                             ends_at=start + timedelta(seconds=manifest.period_seconds),
                             output=run.run_dir / "epochs.jsonl",
+                            **(
+                                {
+                                    "session_id": session_id,
+                                    "activation_at": activation_at,
+                                    "clock": clock,
+                                }
+                                if logical
+                                else {}
+                            ),
                         )
                         for node_id, node in _observation["nodes"].items():
                             result = node.get("result")
@@ -1056,14 +1124,24 @@ class RunOneShotLoadTask(Task[None]):
             limit = anchor + timedelta(
                 seconds=len(run.trace.windows) * manifest.period_seconds + 35
             )
+            mono_limit = (
+                mono_anchor + len(run.trace.windows) * manifest.period_seconds + 35
+            )
             while process.poll() is None:
                 clock.require_healthy()
                 collector.require_healthy()
                 if telemetry is not None:
                     telemetry.require_healthy()
-                if datetime.now(UTC) > limit:
+                if (
+                    time.monotonic() > mono_limit
+                    if logical
+                    else datetime.now(UTC) > limit
+                ):
                     raise TimeoutError("load generator exceeded its bounded duration")
-                wait_until(datetime.now(UTC) + timedelta(seconds=0.1), clock=clock)
+                if logical:
+                    wait_until_monotonic(time.monotonic() + 0.1, clock=clock)
+                else:
+                    wait_until(datetime.now(UTC) + timedelta(seconds=0.1), clock=clock)
             if process.returncode:
                 raise RuntimeError(f"load generator failed: exit {process.returncode}")
         except BaseException as error:

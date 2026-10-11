@@ -59,9 +59,12 @@ def test_http_clock_uses_server_timestamp_and_measured_uncertainty(monkeypatch):
     from nanolab.tasks.one_shot.preflight import measure_http_clock
 
     stamps = iter([100.0, 100.002, 200.0, 200.02])
+    monotonic_stamps = iter([100.0, 100.002, 200.0, 200.02])
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.preflight.time",
-        SimpleNamespace(time=lambda: next(stamps)),
+        SimpleNamespace(
+            time=lambda: next(stamps), monotonic=lambda: next(monotonic_stamps)
+        ),
     )
     with httpx.Client(
         transport=httpx.MockTransport(
@@ -90,6 +93,7 @@ def test_http_clock_uses_server_timestamp_and_measured_uncertainty(monkeypatch):
         "swap",
         "cgroup",
         "strict-healthy",
+        "clock-jump",
         None,
     ],
 )
@@ -229,9 +233,20 @@ def test_collection_validates_measured_facts_and_preserves_failures(
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.preflight.httpx.Client", lambda **kwargs: http
     )
+
+    def clock_measurement(*args, **kwargs):
+        kwargs["record_probe"](
+            {
+                "remoteUtcSeconds": 100.001,
+                "errorType": None,
+                "rttSeconds": 0.002,
+                "hostUtcJumpSeconds": 18 if failure == "clock-jump" else 0,
+            }
+        )
+        return 0.001, 9.001 if failure == "clock-jump" else 0.001, datetime.now(UTC)
+
     monkeypatch.setattr(
-        "nanolab.tasks.one_shot.preflight.measure_http_clock",
-        lambda *args, **kwargs: (0.001, 0.001, datetime.now(UTC)),
+        "nanolab.tasks.one_shot.preflight.measure_http_clock", clock_measurement
     )
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.preflight.runtime_endpoint",
@@ -268,11 +283,12 @@ def test_collection_validates_measured_facts_and_preserves_failures(
         function_settings={"f": settings.functions["f"]},
         output=output,
         strict_memory=failure in {"swap", "cgroup", "strict-healthy"},
+        protocol_version=2 if failure == "clock-jump" else 1,
     )
     inputs = TaskInputs._for_resources(values, set(values))
     import json
 
-    if failure not in {None, "strict-healthy"}:
+    if failure not in {None, "strict-healthy", "clock-jump"}:
         reasons = {
             "release": "physical concurrency",
             "image": "digest",
@@ -292,6 +308,7 @@ def test_collection_validates_measured_facts_and_preserves_failures(
         result = task.run(inputs).value
         assert result is not None and len(result.nodes) == 3
         assert all(node.bandwidth_mbps > 0 for node in result.nodes)
+        assert all(node.rtt_seconds == pytest.approx(0.002) for node in result.nodes)
         if failure == "strict-healthy":
             assert all(node.runtime_limits for node in result.nodes)
     assert output.is_file()
@@ -493,10 +510,13 @@ def test_clock_probe_preserves_each_attempt_before_selecting_minimum(monkeypatch
     from nanolab.tasks.one_shot.preflight import measure_http_clock
 
     stamps = iter([100.0, 100.2, 200.0, 200.002])
+    monotonic_stamps = iter([100.0, 100.2, 200.0, 200.002])
     remotes = iter([100.1, 200.001])
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.preflight.time",
-        SimpleNamespace(time=lambda: next(stamps)),
+        SimpleNamespace(
+            time=lambda: next(stamps), monotonic=lambda: next(monotonic_stamps)
+        ),
     )
     attempts = []
     with httpx.Client(
@@ -527,9 +547,12 @@ def test_clock_probe_preserves_failed_attempt_and_raises(monkeypatch):
     from nanolab.tasks.one_shot.preflight import measure_http_clock
 
     stamps = iter([100.0, 101.0])
+    monotonic_stamps = iter([100.0, 101.0])
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.preflight.time",
-        SimpleNamespace(time=lambda: next(stamps)),
+        SimpleNamespace(
+            time=lambda: next(stamps), monotonic=lambda: next(monotonic_stamps)
+        ),
     )
     attempts = []
 

@@ -50,6 +50,7 @@ def build_one_shot_calibration_plan(
         },
         probes=topology.probes,
         output=run_dir / "clock.jsonl",
+        protocol_version=config.one_shot.protocol_version,
     )
     measure = MeasureServiceTask(topology, config.one_shot, run_dir, clock=clock)
     capacity = ValidateCapacityTask(topology, config.one_shot, run_dir, clock=clock)
@@ -68,6 +69,7 @@ def build_one_shot_calibration_plan(
                     node_function_settings=topology.node_function_settings,
                     purpose=config.one_shot.purpose,
                     strict_memory=config.one_shot.strict_memory,
+                    protocol_version=config.one_shot.protocol_version,
                     output=run_dir / "preflight.json",
                 ),
                 WarmupTask(topology, config.one_shot, run_dir, clock=clock),

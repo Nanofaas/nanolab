@@ -10,7 +10,7 @@ def test_changed_timing_artifact_is_refused_before_load(tmp_path):
     path = tmp_path / "timing.json"
     path.write_text("{}")
     settings = SimpleNamespace(
-        qualification=ArtifactReference(path=path, sha256="a" * 64)
+        protocol_version=1, qualification=ArtifactReference(path=path, sha256="a" * 64)
     )
     with pytest.raises(ValueError, match="hash mismatch"):
         read_qualification(settings)
@@ -34,6 +34,7 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
     resource = Resource(title="fake", acquire=lambda _: None, release=lambda *_: None)
     settings = SimpleNamespace(
         provider="multipass",
+        protocol_version=1,
         purpose="workflow-validation",
         strict_memory=False,
         seed=7,

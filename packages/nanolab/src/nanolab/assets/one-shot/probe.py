@@ -6,6 +6,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PAYLOAD = b"x" * (8 * 1024 * 1024)
+with open("/proc/sys/kernel/random/boot_id") as boot_identity:
+    BOOT_ID = boot_identity.read().strip()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -14,7 +16,8 @@ class Handler(BaseHTTPRequestHandler):
     disable_nagle_algorithm = True
     def do_GET(self):
         if self.path == "/clock":
-            data = json.dumps({"timestamp": time.time()}).encode()
+            data = json.dumps({"timestamp": time.time(),
+                "monotonicSeconds": time.monotonic(), "bootId": BOOT_ID}).encode()
         elif self.path == "/inventory":
             data = json.dumps({"cpus": os.cpu_count(), "architecture": platform.machine(),
                 "os": platform.platform(), "memoryMiB": int(open("/proc/meminfo").read().split()[1]) // 1024,

@@ -202,6 +202,14 @@ def test_every_module_is_classified() -> None:
     )
 
 
+def test_p2p_node_gauges_are_queried_without_function_label():
+    queries = queries_for("work", modules=("p2p-discovery",), hpa=False)
+    expected = {"p2p_peers", "p2p_peers_active", "p2p_peer_rtt_ms"}
+    found = {query.name: query for query in queries if query.name in expected}
+    assert set(found) == expected
+    assert all("function=" not in query.expr for query in found.values())
+
+
 @pytest.mark.nanofaas
 @pytest.mark.parametrize("module", sorted(MODULE_QUERIES))
 def test_a_queried_module_has_every_metric_it_publishes_collected(module: str) -> None:

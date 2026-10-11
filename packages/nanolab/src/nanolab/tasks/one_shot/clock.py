@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Collection
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
+from typing import Literal
 
 import httpx
 from sonata_engine import Resource, TaskInputs
@@ -69,6 +71,7 @@ def clock_health_resource(
     reporting_nodes: Collection[str] | None = None,
     interval_seconds: float = 10,
     max_skew_seconds: float = 0.1,
+    protocol_version: Literal[1, 2] = 1,
 ) -> Resource[ClockMonitor]:
     """Own periodic measured reports and preserve each original measurement time."""
     reports = frozenset(endpoints if reporting_nodes is None else reporting_nodes)
@@ -92,17 +95,45 @@ def clock_health_resource(
                         with raw_output.open("a") as evidence:
                             evidence.write(json.dumps({"node": node, **sample}) + "\n")
 
-                    offset, uncertainty, at = measure_http_clock(
-                        probe, http=http, repetitions=3, record_probe=record_probe
-                    )
+                    try:
+                        offset, uncertainty, at = measure_http_clock(
+                            probe,
+                            http=http,
+                            repetitions=3,
+                            record_probe=record_probe,
+                            tolerate_failures=protocol_version == 2,
+                        )
+                    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+                        if protocol_version == 1:
+                            raise
+                        with output.open("a") as evidence:
+                            evidence.write(
+                                json.dumps(
+                                    {
+                                        "node": key,
+                                        "status": "MISSING",
+                                        "offsetSeconds": None,
+                                        "uncertaintySeconds": None,
+                                        "measuredAt": None,
+                                        "observedAt": datetime.now(UTC).isoformat(),
+                                        "errorType": type(error).__name__,
+                                        "error": str(error),
+                                    }
+                                )
+                                + "\n"
+                            )
+                        continue
                     sample = {
                         "node": key,
+                        "status": "MEASURED",
                         "offsetSeconds": offset,
                         "uncertaintySeconds": uncertainty,
                         "measuredAt": at.isoformat(),
                     }
                     with output.open("a") as evidence:
                         evidence.write(json.dumps(sample) + "\n")
+                    if protocol_version == 2:
+                        continue
                     if abs(offset) + uncertainty > max_skew_seconds:
                         raise ValueError("measured clock unhealthy or too uncertain")
                     if key not in reports:

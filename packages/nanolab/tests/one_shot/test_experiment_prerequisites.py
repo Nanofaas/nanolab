@@ -12,6 +12,7 @@ def settings(tmp_path, *, broken):
     timing = TimingQualification(
         provider="multipass",
         purpose="workflow-validation",
+        protocol_version=1,
         environment_fingerprint="fp",
         profile_sha256="a" * 64,
         qualified=True,
@@ -76,3 +77,10 @@ def test_qualification_rejects_incomplete_or_mixed_scope_before_load(tmp_path, b
 
 def test_qualified_scope_is_accepted(tmp_path):
     assert read_qualification(settings(tmp_path, broken=None)).qualified
+
+
+def test_logical_run_refuses_legacy_timing_qualification(tmp_path):
+    config = settings(tmp_path, broken=None)
+    config.protocol_version = 2
+    with pytest.raises(ValueError, match="protocol version"):
+        read_qualification(config)

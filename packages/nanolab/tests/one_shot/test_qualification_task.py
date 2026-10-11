@@ -331,3 +331,43 @@ def test_qualification_freezes_owned_loaded_scope(tmp_path, monkeypatch):
     assert all(cast(dict, row["load"])["valid"] for row in result.matrix)
     assert calls.count(("load", "begin")) == calls.count(("load", "close")) == 2
     assert calls.count(("load", "health")) >= 20
+
+
+def test_logical_qualification_has_one_session_grid_and_versioned_cells(
+    tmp_path, monkeypatch
+):
+    from nanolab.tasks.one_shot import qualification as module
+
+    task, inputs, _calls = task_fixture(tmp_path, monkeypatch)
+    task.settings.protocol_version = 2
+    configurations, prepared = [], []
+    original_prepare = module.prepare_parallel_epoch
+
+    def configuration(*args, **kwargs):
+        configurations.append(kwargs)
+        return {}
+
+    def prepare(*args, **kwargs):
+        prepared.append(kwargs)
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(module, "configuration_for_node", configuration)
+    monkeypatch.setattr(module, "prepare_parallel_epoch", prepare)
+    monkeypatch.setattr(module, "wait_until_monotonic", lambda *a, **k: None)
+    monkeypatch.setattr(
+        module, "wait_until", lambda *a, **k: pytest.fail("v2 uses monotonic waits")
+    )
+    result = task.run(inputs).value
+    assert result is not None and result.protocol_version == 2
+    assert all(
+        cast(dict, row["result"])["protocol_version"] == 2 for row in result.matrix
+    )
+    session = configurations[0]["session_id"]
+    anchor = configurations[0]["anchor"]
+    assert session and all(
+        row["session_id"] == session and row["anchor"] == anchor
+        for row in configurations
+    )
+    assert all(
+        row["session_id"] == session and row["activation_at"] > 0 for row in prepared
+    )
