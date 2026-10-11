@@ -251,6 +251,12 @@ CPU time and peak RSS are recorded separately. The VM measurement covers kernel,
 Docker, OS and observer work as well as the workload; control-plane metrics
 cannot substitute for it.
 
+Multipass stdout and stderr use pipes, drained concurrently into unbuffered
+owned host files: direct regular-file output can stall the Multipass transport.
+Drain failures invalidate collection. Transports are reaped and both pipes are
+drained before raw files are synced and closed, retaining terminal partial lines.
+The frozen telemetry policy also identifies this transport.
+
 Raw streams and stderr remain on the campaign host even when load or cleanup
 fails. `policy.json` binds the exact sampler SHA; `coverage.json` records raw
 SHA-256, expected/observed seconds, missing and duplicate seconds, unavailable

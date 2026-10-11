@@ -10,6 +10,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+from threading import Thread
 from typing import Any
 from uuid import uuid4
 
@@ -28,6 +29,7 @@ def telemetry_policy() -> dict:
         "cpuUnit": "fraction-of-vcpu-capacity",
         "memoryUnit": "bytes",
         "warmupIncluded": True,
+        "transport": "multipass-pipes-with-owned-drain-threads",
         "samplerSha256": hashlib.sha256(
             Path(vm_sampler.__file__).read_bytes()
         ).hexdigest(),
@@ -218,6 +220,8 @@ class VmTelemetrySession:
                     "output": output,
                     "errors": errors,
                     "process": None,
+                    "readers": [],
+                    "readerErrors": [],
                 }
                 self.sessions.append(session)
                 process = subprocess.Popen(
@@ -241,10 +245,24 @@ class VmTelemetrySession:
                         "--context",
                         json.dumps(context),
                     ),
-                    stdout=output,
-                    stderr=errors,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
                 session["process"] = process
+                # Multipass requires pollable descriptors; regular output files
+                # hang its transport. Drain both pipes concurrently into raw files.
+                for source, destination in (
+                    (process.stdout, output),
+                    (process.stderr, errors),
+                ):
+                    reader = Thread(
+                        target=self._drain,
+                        args=(source, destination, session["readerErrors"]),
+                        daemon=True,
+                    )
+                    session["readers"].append(reader)
+                    reader.start()
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
                 self.require_healthy()
@@ -268,11 +286,26 @@ class VmTelemetrySession:
                 error.add_note("VM telemetry startup cleanup: " + str(cleanup))
             raise
 
+    @staticmethod
+    def _drain(source, destination, failures):
+        """Preserve every byte, including partial lines, as soon as it arrives."""
+        try:
+            with source:
+                while chunk := source.read1(65536):
+                    destination.write(chunk)
+        except Exception as error:
+            failures.append(str(error))
+
     def require_healthy(self):
         """Treat terminated or stalled streams as visible collection failures."""
         for session in self.sessions:
             process = session["process"]
             path = Path(session["output"].name)
+            if session["readerErrors"]:
+                raise RuntimeError(
+                    "VM telemetry raw write failed: "
+                    + "; ".join(session["readerErrors"])
+                )
             if process is not None and process.poll() is not None:
                 raise RuntimeError("VM telemetry stopped: " + session["node"].config.id)
             if path.stat().st_size and time.time() - path.stat().st_mtime > 10:
@@ -315,6 +348,13 @@ class VmTelemetrySession:
                 elif process is not None:
                     process.wait(timeout=5)
             finally:
+                # Process reaping produces EOF; readers must finish before fsync
+                # or closing raw files, otherwise terminal samples can be lost.
+                for reader in session["readers"]:
+                    reader.join(timeout=5)
+                    if reader.is_alive():
+                        failures.append("VM telemetry pipe drain did not stop")
+                failures.extend(session["readerErrors"])
                 for stream in (session["output"], session["errors"]):
                     try:
                         os.fsync(stream.fileno())

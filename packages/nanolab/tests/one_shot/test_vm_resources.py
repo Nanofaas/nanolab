@@ -252,11 +252,13 @@ def test_streams_start_before_load_and_failed_cleanup_reaps_all_transports(
     processes = []
 
     class Process:
-        def __init__(self, argv, stdout, stderr):
+        def __init__(self, argv, stdout, stderr, stdin):
             self.returncode = None
             self.waited = False
             processes.append(self)
-            stdout.write(
+            from io import BytesIO
+
+            self.stdout = BytesIO(
                 (
                     json.dumps(
                         {
@@ -268,6 +270,7 @@ def test_streams_start_before_load_and_failed_cleanup_reaps_all_transports(
                     + "\n"
                 ).encode()
             )
+            self.stderr = BytesIO()
 
         def poll(self):
             return self.returncode
@@ -615,3 +618,87 @@ def test_missing_container_counters_invalidate_resource_coverage(tmp_path):
     assert result["nodes"]["edge1"]["missingContainerSamples"] == [
         {"second": 0, "containerIds": ["cp"]}
     ]
+
+
+def test_pipe_only_transport_streams_before_exit_and_retains_terminal_bytes(
+    tmp_path, monkeypatch
+):
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    import nanolab.one_shot.vm_resources as module
+
+    # Multipass rejects nonpollable output descriptors. Use real child pipes,
+    # including a stderr payload larger than pipe capacity before the first row.
+    child = tmp_path / "pipe_only_transport.py"
+    child.write_text(
+        "import json, os, signal, stat, sys, time\n"
+        "if not all(stat.S_ISFIFO(os.fstat(fd).st_mode) for fd in (1, 2)):\n"
+        "    sys.exit(7)\n"
+        "def stop(*args):\n"
+        "    print(json.dumps({'node':'edge1','terminal':True}), flush=True)\n"
+        "    sys.stderr.write('terminal-partial'); sys.stderr.flush()\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        "sys.stderr.write('x' * 131072); sys.stderr.flush()\n"
+        "print(json.dumps({'node':'edge1','timestampUtc':"
+        "'2026-10-10T00:00:00+00:00','cpuUtilization':0.8}), flush=True)\n"
+        "while True: time.sleep(.1)\n"
+    )
+    processes = []
+    popen = subprocess.Popen
+
+    def start(_argv, **kwargs):
+        process = popen((sys.executable, "-u", str(child)), **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(module.subprocess, "Popen", start)
+
+    class Node:
+        config = SimpleNamespace(id="edge1")
+        request = SimpleNamespace(name="owned-edge1")
+        vm = object()
+        provider = SimpleNamespace(
+            transfer_to=lambda *args, **kwargs: SimpleNamespace(return_code=0)
+        )
+
+        def command(self, argv):
+            if argv[0] == "sha256sum":
+                return SimpleNamespace(stdout=telemetry_policy()["samplerSha256"])
+            processes[0].terminate()
+            return SimpleNamespace(stdout="")
+
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "anchor": "2026-10-10T00:00:00+00:00",
+                "period_seconds": 3,
+                "run_id": "transport",
+                "parameters": {"generator": {"warmupSeconds": 2}},
+            }
+        )
+    )
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        mode="ewma",
+        settings=SimpleNamespace(functions={"a": {}}),
+        trace=SimpleNamespace(windows=[{}], period_seconds=3),
+        topology=SimpleNamespace(resources=SimpleNamespace(nodes={"edge1": Node()})),
+    )
+    session = module.VmTelemetrySession(
+        run, SimpleNamespace(resource=lambda _: SimpleNamespace(home="/home/ubuntu"))
+    )
+    assert processes[0].poll() is None
+    directory = tmp_path / "vm-resources"
+    assert json.loads((directory / "edge1.jsonl").read_text())["node"] == "edge1"
+    session.close()
+    assert processes[0].returncode == 0
+    rows = [
+        json.loads(row) for row in (directory / "edge1.jsonl").read_text().splitlines()
+    ]
+    assert rows[-1]["terminal"] is True
+    assert (
+        directory / "edge1.stderr"
+    ).read_bytes() == b"x" * 131072 + b"terminal-partial"
