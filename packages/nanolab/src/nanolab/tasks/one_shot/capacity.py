@@ -9,6 +9,7 @@ from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 
@@ -236,7 +237,31 @@ def _run_capacity_trial(
         else (45 if use_telemetry else 2)
     )
     extra_budget = lead if lead > 2 else 0
-    anchor = datetime.now(UTC) + timedelta(seconds=lead)
+    captured_at = datetime.now(UTC)
+    captured_mono = time.monotonic()
+    anchor = captured_at + timedelta(seconds=lead)
+    parameters: dict[str, Any] = {"generator": {"warmupSeconds": warmup_seconds}}
+    monitor = None
+    if settings.protocol_version == 2:
+        monitor = inputs.resource(clock)
+        probe_directory = monitor.probe_directory
+        if (
+            probe_directory is None
+            or probe_directory.resolve() not in run_dir.resolve().parents
+        ):
+            raise ValueError("capacity clock probes must belong to a workflow ancestor")
+        parameters["logicalSchedule"] = {
+            "protocolVersion": 2,
+            "anchorMonotonicSeconds": captured_mono + lead + warmup_seconds,
+            "capturedMonotonicSeconds": captured_mono,
+            "capturedAtUtc": captured_at.isoformat(),
+            "hostBootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+            "probeScope": "parent",
+            "probeParentLevels": run_dir.resolve().parents.index(
+                probe_directory.resolve()
+            )
+            + 1,
+        }
     trace = TraceArtifact(
         nodes=list(effective),
         functions=functions,
@@ -268,7 +293,7 @@ def _run_capacity_trial(
                 "anchor": (anchor + timedelta(seconds=warmup_seconds)).isoformat(),
                 "period_seconds": measurement_seconds,
                 "run_id": "capacity:" + run_dir.name,
-                "parameters": {"generator": {"warmupSeconds": warmup_seconds}},
+                "parameters": parameters,
             }
         ),
     )
@@ -309,7 +334,9 @@ def _run_capacity_trial(
             telemetry = None
             if use_telemetry:
                 # The sampler starts before the same physical SDK load path.
-                telemetry = VmTelemetrySession(run, inputs)
+                telemetry = VmTelemetrySession(
+                    run, inputs, terminal_probe=monitor.refresh if monitor else None
+                )
                 stack.callback(compensate, telemetry.close)
             process = resource.acquire(inputs)
             stack.callback(compensate, resource.release, inputs, process)

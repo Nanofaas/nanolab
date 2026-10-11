@@ -60,9 +60,12 @@ def resource_clock_grid(run_dir: Path) -> dict | None:
 def resource_probe_paths(run_dir: Path) -> tuple[Path, Path]:
     """Use the same frozen probe scope for correlation and malformed records."""
     grid = resource_clock_grid(run_dir)
-    probe_dir = (
-        run_dir.parent if grid and grid.get("probeScope") == "parent" else run_dir
-    )
+    probe_dir = run_dir
+    if grid and grid.get("probeScope") == "parent":
+        levels = grid.get("probeParentLevels", 1)
+        if type(levels) is not int or not 1 <= levels <= len(run_dir.parents):
+            raise ValueError("invalid resource clock probe parent levels")
+        probe_dir = run_dir.parents[levels - 1]
     return probe_dir / "preflight-probes.jsonl", probe_dir / "clock-probes.jsonl"
 
 

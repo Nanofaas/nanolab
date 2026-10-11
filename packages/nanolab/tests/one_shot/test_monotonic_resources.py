@@ -220,3 +220,66 @@ def test_owned_sampler_stall_detection_uses_monotonic_write_progress(
             sampler.require_healthy()
     else:
         sampler.require_healthy()
+
+
+@pytest.mark.parametrize("levels", [0, -1, True, 1.5, 1000])
+def test_nested_probe_scope_rejects_invalid_ancestor_levels(tmp_path, levels):
+    from nanolab.one_shot.vm_resources import resource_probe_paths
+
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "parameters": {
+                    "logicalSchedule": {
+                        "protocolVersion": 2,
+                        "probeScope": "parent",
+                        "probeParentLevels": levels,
+                        "anchorMonotonicSeconds": 1000,
+                    }
+                }
+            }
+        )
+    )
+    with pytest.raises(ValueError, match=r"probe.*level"):
+        resource_probe_paths(tmp_path)
+
+
+def test_nested_capacity_scope_uses_original_workflow_probes_and_malformed_records(
+    tmp_path,
+):
+    from nanolab.one_shot.vm_resources import resource_clock_context
+
+    trial = tmp_path / "capacity" / "vector" / "trial"
+    trial.mkdir(parents=True)
+    (trial / "manifest.json").write_text(
+        json.dumps(
+            {
+                "parameters": {
+                    "logicalSchedule": {
+                        "protocolVersion": 2,
+                        "probeScope": "parent",
+                        "probeParentLevels": 3,
+                        "anchorMonotonicSeconds": 1000,
+                    }
+                }
+            }
+        )
+    )
+    raw = json.dumps(probe(1000, 70)) + "\n" + "partial-original-probe\n"
+    (tmp_path / "clock-probes.jsonl").write_text(raw)
+    context = resource_clock_context(trial)
+    assert context["clock_probes"] == [probe(1000, 70)]
+    result = summarize_resources(
+        trial,
+        anchor=datetime(2026, 10, 11, tzinfo=UTC),
+        warmup=0,
+        period=1,
+        epochs=1,
+        nodes=["edge"],
+        mode="capacity",
+        functions=["a"],
+        run_id="run",
+    )
+    assert result["clockProbeMalformedLines"] == 1
+    assert not result["complete"]
+    assert (tmp_path / "clock-probes.jsonl").read_text() == raw

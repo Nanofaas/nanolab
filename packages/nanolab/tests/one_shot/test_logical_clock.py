@@ -36,6 +36,7 @@ def test_v2_clock_diagnostics_keep_all_nodes_without_rejecting_load(
     monitor = owned.acquire(inputs)
     try:
         monitor.require_healthy()
+        assert monitor.probe_directory == tmp_path
     finally:
         monitor.close()
     rows = [

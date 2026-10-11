@@ -97,6 +97,8 @@ def test_collector_reservation_is_checked_against_feasible_replica_bound():
         "telemetry-off",
         "long-telemetry",
         "long-telemetry-off",
+        "logical-telemetry",
+        "logical-generator-error",
         "generator-error",
         "generator-cleanup-error",
         "swap",
@@ -117,6 +119,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
     from nanolab.tasks.one_shot import experiment
     from nanolab.tasks.one_shot.capacity import run_capacity_trial
 
+    logical = fault in {"logical-telemetry", "logical-generator-error"}
     long_window = fault in {"long-telemetry", "long-telemetry-off"}
     warmup_seconds = 120 if long_window else 30
     measurement_seconds = 360 if long_window else 60
@@ -124,6 +127,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
         {
             "provider": "multipass",
             "purpose": "workflow-validation",
+            "protocolVersion": 2 if logical else 1,
             "strictMemory": fault in {"swap", "oom"},
             "nodes": [
                 {"id": "e1", "kind": "edge"},
@@ -146,7 +150,11 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
         resources=SimpleNamespace(nodes={"e1": node}),
         function_aliases={"f0": "f0", "f1": "f1"},
     )
-    clock = SimpleNamespace(require_healthy=lambda: None)
+    clock = SimpleNamespace(
+        require_healthy=lambda: None,
+        probe_directory=tmp_path,
+        refresh=lambda: telemetry_actions.append("terminal-probe"),
+    )
     inputs = cast(
         Any,
         SimpleNamespace(
@@ -160,7 +168,10 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
     released = []
     process = SimpleNamespace(
         poll=lambda: 0,
-        returncode=1 if fault in {"generator-error", "generator-cleanup-error"} else 0,
+        returncode=1
+        if fault
+        in {"generator-error", "generator-cleanup-error", "logical-generator-error"}
+        else 0,
     )
     telemetry_actions = []
 
@@ -178,16 +189,18 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
         )
 
     monkeypatch.setattr(experiment, "generator_resource", generator)
-    monkeypatch.setattr(
-        "nanolab.one_shot.vm_resources.VmTelemetrySession",
-        lambda *args: (
-            telemetry_actions.append("sampler")
-            or SimpleNamespace(
-                close=lambda: telemetry_actions.append("sampler-close"),
-                require_healthy=lambda: None,
-            )
-        ),
-    )
+
+    def sampler(*args, terminal_probe=None):
+        telemetry_actions.append("sampler")
+
+        def close():
+            telemetry_actions.append("sampler-close")
+            if terminal_probe is not None:
+                terminal_probe()
+
+        return SimpleNamespace(close=close, require_healthy=lambda: None)
+
+    monkeypatch.setattr("nanolab.one_shot.vm_resources.VmTelemetrySession", sampler)
 
     def close():
         if fault == "generator-cleanup-error":
@@ -248,7 +261,9 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             200, json={"maxConcurrentHandlers": 1, "physicalReleaseProof": True}
         )
 
-    directory = tmp_path / "trial"
+    directory = (
+        tmp_path / "capacity" / "vector" / "trial" if logical else tmp_path / "trial"
+    )
 
     def originals(_path):
         schedule = json.loads((directory / "schedule.json").read_bytes())
@@ -319,7 +334,11 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             assert released == ([] if fault == "swap" else [True])
             assert (directory / "failure.txt").exists()
             return
-        if fault in {"generator-error", "generator-cleanup-error"}:
+        if fault in {
+            "generator-error",
+            "generator-cleanup-error",
+            "logical-generator-error",
+        }:
             with pytest.raises(RuntimeError, match="generator failed"):
                 run_capacity_trial(
                     topology,
@@ -335,6 +354,11 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             assert released == [True]
             assert "generator failed" in (directory / "failure.txt").read_text()
             assert (directory / "manifest.json").is_file()
+            if logical:
+                manifest = json.loads((directory / "manifest.json").read_bytes())
+                assert (
+                    manifest["parameters"]["logicalSchedule"]["probeParentLevels"] == 3
+                )
             return
         rows = run_capacity_trial(
             topology,
@@ -346,7 +370,8 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             repetition=0,
             run_dir=directory,
             clock="clock",
-            telemetry_enabled=fault in {"telemetry", "long-telemetry"},
+            telemetry_enabled=fault
+            in {"telemetry", "long-telemetry", "logical-telemetry"},
             preload_lead_seconds=45
             if fault in {"telemetry-off", "long-telemetry", "long-telemetry-off"}
             else None,
@@ -356,6 +381,29 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
     assert released == [True]
     assert (directory / "manifest.json").is_file()
     manifest = json.loads((directory / "manifest.json").read_bytes())
+    if logical:
+        from nanolab.one_shot.vm_resources import resource_probe_paths
+
+        grid = manifest["parameters"]["logicalSchedule"]
+        assert grid["protocolVersion"] == 2
+        assert grid["anchorMonotonicSeconds"] == pytest.approx(
+            grid["capturedMonotonicSeconds"] + 45 + warmup_seconds
+        )
+        assert grid["probeScope"] == "parent"
+        assert grid["probeParentLevels"] == 3
+        assert grid["hostBootId"]
+        assert resource_probe_paths(directory) == (
+            tmp_path / "preflight-probes.jsonl",
+            tmp_path / "clock-probes.jsonl",
+        )
+        assert telemetry_actions == [
+            "sampler",
+            "generator",
+            "sampler-close",
+            "terminal-probe",
+        ]
+    else:
+        assert "logicalSchedule" not in manifest["parameters"]
     assert manifest["period_seconds"] == measurement_seconds
     assert manifest["parameters"]["generator"]["warmupSeconds"] == warmup_seconds
     anchor = datetime.fromisoformat(manifest["anchor"]).timestamp()
@@ -376,6 +424,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
     assert all(row["replicaVector"] == {"f0": 1, "f1": 1} for row in rows)
     if fault in {
         None,
+        "logical-telemetry",
         "telemetry",
         "telemetry-off",
         "long-telemetry",

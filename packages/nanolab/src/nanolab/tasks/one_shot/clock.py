@@ -20,11 +20,18 @@ from nanolab.tasks.one_shot.preflight import measure_http_clock
 class ClockMonitor:
     """A run-owned refresh loop whose failure invalidates subsequent load."""
 
-    def __init__(self, refresh: Callable[[], None], *, interval_seconds: float):
+    def __init__(
+        self,
+        refresh: Callable[[], None],
+        *,
+        interval_seconds: float,
+        probe_directory: Path | None = None,
+    ):
         """Store the sampler without starting any background work."""
         if not math.isfinite(interval_seconds) or interval_seconds <= 0:
             raise ValueError("clock refresh interval must be positive")
         self.refresh = refresh
+        self.probe_directory = probe_directory
         self.interval_seconds = interval_seconds
         self._stop = Event()
         self._error: Exception | None = None
@@ -144,7 +151,9 @@ def clock_health_resource(
                     if not receipt.healthy:
                         raise ValueError("node rejected measured clock health")
 
-        monitor = ClockMonitor(refresh, interval_seconds=interval_seconds)
+        monitor = ClockMonitor(
+            refresh, interval_seconds=interval_seconds, probe_directory=output.parent
+        )
         monitor.start()
         return monitor
 

@@ -414,7 +414,13 @@ Whole-VM raw samples retain guest UTC, guest monotonic time and boot identity.
 After stopping and draining the VM samplers, v2 collection takes a terminal
 diagnostic probe before freezing coverage. Missing terminal probes leave the
 affected samples explicitly uncorrelated. Qualification prefixes count malformed
-probe records from the parent scope used for correlation.
+probe records from the parent scope used for correlation. Capacity and observer
+trials also freeze a v2 monotonic measurement anchor and the exact workflow
+ancestor that owns their probes (`probeParentLevels`, default one for existing
+parent-scoped manifests). Nested trials use those original probe files for both
+correlation and malformed-record accounting; they never copy or repair raw
+probes. Their terminal probe runs after sampler drainage, including failed
+trials. Legacy v1 manifests retain their original UTC interpretation.
 Reports correlate v2 samples using the preceding and following host/guest
 monotonic probes. A bracket crossing a phase boundary produces explicit phase
 and epoch candidates; missing brackets or a reboot produce `uncorrelated`
