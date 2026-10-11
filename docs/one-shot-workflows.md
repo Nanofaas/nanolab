@@ -284,6 +284,27 @@ This is not an allowance for measurement variability; observations above the
 boundary by more than rounding still fail, and short windows require separate
 assessment of sample counts and repeatability.
 
+Every capacity/observer SDK trial persists its UTC measurement anchor and
+warmup duration in its `manifest.json` before generator acquisition
+(`physical-window/manifest.json` for observer variants),
+including telemetry-off references and subsequent generator failures. Use that
+anchor to select measurement requests; the earliest randomly scheduled request
+is not the window boundary. Raw schedule phase labels alone do not separate
+the technical SDK warmup from measurement.
+
+The internal capacity-trial API accepts positive integer warmup and measurement
+durations, retaining 30/60-second defaults for calibration callers. Longer
+observer windows use the same durations for scheduling, generator drain bounds,
+physical-proof selection, telemetry coverage and trial statistics. These
+technical windows do not replace the nine scientific 360-second intervals.
+
+The multifunction 360-second qualification preset declares a 2-second auction
+budget and a 5-second preparation lead. The former 0.6-second budget censored a
+first auction on fresh VMs; the new values are a candidate to qualify, not a
+success verdict for those failed observations. Keep the first auction in the
+evidence, all failures, and the unchanged 5% period-fraction/zero-censorship
+timing gates. Solver, peer and preparation budgets remain 0.15/0.15/1 seconds.
+
 The instrumented capacity path reserves a 45-second pre-load lead to start all
 six streams before the first scheduled request. Across 3,303 trials this adds
 41h17m15; capacity load plus these leads totals at least 123h51m45. Runtime

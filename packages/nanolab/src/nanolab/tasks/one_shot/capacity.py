@@ -33,6 +33,8 @@ def _run_capacity_trial(
     clock,
     telemetry_enabled: bool | None = None,
     preload_lead_seconds: float | None = None,
+    warmup_seconds: int = 30,
+    measurement_seconds: int = 60,
 ) -> list[dict]:
     """Retain every request, reject missing proof, and compensate owned processes."""
     # Imports are local because the public experiment module uses calibration's
@@ -48,6 +50,14 @@ def _run_capacity_trial(
     )
     from nanolab.tasks.one_shot.preflight import runtime_endpoint
 
+    if any(
+        type(duration) is not int or duration <= 0
+        for duration in (warmup_seconds, measurement_seconds)
+    ):
+        raise ValueError(
+            "capacity warmup and measurement durations must be positive integers"
+        )
+    window_seconds = warmup_seconds + measurement_seconds
     if preload_lead_seconds is not None and (
         not math.isfinite(preload_lead_seconds) or preload_lead_seconds < 2
     ):
@@ -104,7 +114,7 @@ def _run_capacity_trial(
                 raise ValueError("invalid capacity replicas/rate")
             if (count == 0 and rate != 0) or (count > 0 and rate == 0):
                 raise ValueError("capacity active replica/rate scope mismatch")
-            rounded = round(rate * 90) / 90
+            rounded = round(rate * window_seconds) / window_seconds
             if rate > 0 and rounded <= 0:
                 raise ValueError("capacity arrival grid loses positive load")
             counts[node][function], effective[node][function] = count, rounded
@@ -230,8 +240,8 @@ def _run_capacity_trial(
     trace = TraceArtifact(
         nodes=list(effective),
         functions=functions,
-        period_seconds=90,
-        flow_quantum=1 / 90,
+        period_seconds=window_seconds,
+        flow_quantum=1 / window_seconds,
         seed=settings.seed,
         payloads={name: topology.function_settings[name].input for name in functions},
         windows=[effective],
@@ -250,6 +260,18 @@ def _run_capacity_trial(
         replica = int(row["originalId"].rsplit(":", 1)[1]) % counts[node][name]
         row.update(sdk=True, url=runtime_urls[node][name][replica] + "/invoke")
     write_immutable_artifact(run_dir / "schedule.json", canonical_bytes(schedule))
+    write_immutable_artifact(
+        run_dir / "manifest.json",
+        canonical_bytes(
+            {
+                "purpose": "capacity-or-observer-only",
+                "anchor": (anchor + timedelta(seconds=warmup_seconds)).isoformat(),
+                "period_seconds": measurement_seconds,
+                "run_id": "capacity:" + run_dir.name,
+                "parameters": {"generator": {"warmupSeconds": warmup_seconds}},
+            }
+        ),
+    )
     run = SimpleNamespace(
         topology=topology,
         run_dir=run_dir,
@@ -262,7 +284,9 @@ def _run_capacity_trial(
             for row in schedule
         },
     )
-    resource = generator_resource(run_dir=run_dir, vus=512, duration=90 + extra_budget)
+    resource = generator_resource(
+        run_dir=run_dir, vus=512, duration=window_seconds + extra_budget
+    )
     primary = None
 
     def compensate(callback, *args):
@@ -284,18 +308,6 @@ def _run_capacity_trial(
         with ExitStack() as stack:
             telemetry = None
             if use_telemetry:
-                write_immutable_artifact(
-                    run_dir / "manifest.json",
-                    canonical_bytes(
-                        {
-                            "purpose": "capacity-or-observer-only",
-                            "anchor": (anchor + timedelta(seconds=30)).isoformat(),
-                            "period_seconds": 60,
-                            "run_id": "capacity:" + run_dir.name,
-                            "parameters": {"generator": {"warmupSeconds": 30}},
-                        }
-                    ),
-                )
                 # The sampler starts before the same physical SDK load path.
                 telemetry = VmTelemetrySession(run, inputs)
                 stack.callback(compensate, telemetry.close)
@@ -303,7 +315,7 @@ def _run_capacity_trial(
             stack.callback(compensate, resource.release, inputs, process)
             collector = LiveEvidenceCollector(run, inputs)
             stack.callback(compensate, collector.close)
-            deadline = time.monotonic() + 150 + extra_budget
+            deadline = time.monotonic() + window_seconds + 60 + extra_budget
             while process.poll() is None:
                 inputs.resource(clock).require_healthy()
                 collector.require_healthy()
@@ -330,6 +342,9 @@ def _run_capacity_trial(
                 primary.add_note(f"failure diagnostic unavailable: {error}")
     rows = generator_rows(run_dir / "generator.jsonl")
     proofs = physical_attempts(run_dir / "physical.jsonl")
+    proof_by_id = {}
+    for proof in proofs:
+        proof_by_id.setdefault(proof["originalId"], []).append(proof)
     measurements = []
     for node, vector in counts.items():
         for function_name, replica_count in vector.items():
@@ -341,7 +356,7 @@ def _run_capacity_trial(
                 for row in schedule
                 if row["origin"] == node
                 and row["function"] == function_name
-                and row["scheduledAt"] >= anchor.timestamp() + 30
+                and row["scheduledAt"] >= anchor.timestamp() + warmup_seconds
             }
             emitted = [
                 row
@@ -357,11 +372,7 @@ def _run_capacity_trial(
             local_proofs = [proof for proof in proofs if proof["originalId"] in planned]
             completed, errors, durations, valid_output = set(), set(), [], True
             for row in outcomes:
-                physical = [
-                    proof
-                    for proof in local_proofs
-                    if proof["originalId"] == row["originalId"]
-                ]
+                physical = proof_by_id.get(row["originalId"], [])
                 result = classify_result(row, expected=str(expected), physical=physical)
                 if any(proof.get("function") != function_name for proof in physical):
                     valid_output = False
@@ -400,8 +411,8 @@ def _run_capacity_trial(
                 "rate": effective[node][function_name],
                 "requestedRate": rates[node].get(function_name, 0),
                 "repetition": repetition,
-                "warmupSeconds": 30,
-                "measurementSeconds": 60,
+                "warmupSeconds": warmup_seconds,
+                "measurementSeconds": measurement_seconds,
                 "planned": len(planned),
                 "emitted": len(emitted),
                 "physicalCompletions": len(completed),
@@ -464,6 +475,8 @@ def run_capacity_trial(
     clock,
     telemetry_enabled: bool | None = None,
     preload_lead_seconds: float | None = None,
+    warmup_seconds: int = 30,
+    measurement_seconds: int = 60,
 ) -> list[dict]:
     """Keep the original error even during allocation, warmup or cgroup collection."""
     try:
@@ -479,6 +492,8 @@ def run_capacity_trial(
             clock=clock,
             telemetry_enabled=telemetry_enabled,
             preload_lead_seconds=preload_lead_seconds,
+            warmup_seconds=warmup_seconds,
+            measurement_seconds=measurement_seconds,
         )
     except BaseException as error:
         if run_dir.is_dir() and not (run_dir / "failure.txt").exists():

@@ -95,6 +95,8 @@ def test_collector_reservation_is_checked_against_feasible_replica_bound():
         "late",
         "telemetry",
         "telemetry-off",
+        "long-telemetry",
+        "long-telemetry-off",
         "generator-error",
         "generator-cleanup-error",
         "swap",
@@ -106,6 +108,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
 ):
     import json
     from contextlib import nullcontext
+    from datetime import datetime
     from types import SimpleNamespace
     from typing import Any, cast
 
@@ -114,6 +117,9 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
     from nanolab.tasks.one_shot import experiment
     from nanolab.tasks.one_shot.capacity import run_capacity_trial
 
+    long_window = fault in {"long-telemetry", "long-telemetry-off"}
+    warmup_seconds = 120 if long_window else 30
+    measurement_seconds = 360 if long_window else 60
     settings = OneShotConfig.model_validate(
         {
             "provider": "multipass",
@@ -159,8 +165,13 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
     telemetry_actions = []
 
     def generator(**kwargs):
-        if fault in {"telemetry", "telemetry-off"}:
-            assert kwargs["duration"] == 135
+        if fault in {
+            "telemetry",
+            "telemetry-off",
+            "long-telemetry",
+            "long-telemetry-off",
+        }:
+            assert kwargs["duration"] == warmup_seconds + measurement_seconds + 45
         return SimpleNamespace(
             acquire=lambda _: telemetry_actions.append("generator") or process,
             release=lambda *args: released.append(True),
@@ -323,6 +334,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
                 )
             assert released == [True]
             assert "generator failed" in (directory / "failure.txt").read_text()
+            assert (directory / "manifest.json").is_file()
             return
         rows = run_capacity_trial(
             topology,
@@ -334,19 +346,44 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             repetition=0,
             run_dir=directory,
             clock="clock",
-            telemetry_enabled=fault == "telemetry",
-            preload_lead_seconds=45 if fault == "telemetry-off" else None,
+            telemetry_enabled=fault in {"telemetry", "long-telemetry"},
+            preload_lead_seconds=45
+            if fault in {"telemetry-off", "long-telemetry", "long-telemetry-off"}
+            else None,
+            warmup_seconds=warmup_seconds,
+            measurement_seconds=measurement_seconds,
         )
     assert released == [True]
+    assert (directory / "manifest.json").is_file()
+    manifest = json.loads((directory / "manifest.json").read_bytes())
+    assert manifest["period_seconds"] == measurement_seconds
+    assert manifest["parameters"]["generator"]["warmupSeconds"] == warmup_seconds
+    anchor = datetime.fromisoformat(manifest["anchor"]).timestamp()
+    schedule = json.loads((directory / "schedule.json").read_bytes())
+    assert min(row["scheduledAt"] for row in schedule) < anchor
+    assert anchor < max(row["scheduledAt"] for row in schedule)
+    for measurement in rows:
+        assert measurement["planned"] == sum(
+            row["function"] == measurement["function"] and row["scheduledAt"] >= anchor
+            for row in schedule
+        )
     assert {row["function"] for row in rows} == {"f0", "f1"}
     by_name = {row["function"]: row for row in rows}
-    assert by_name["f0"]["planned"] == 60
-    assert by_name["f1"]["planned"] == 120
+    assert by_name["f0"]["planned"] == measurement_seconds
+    assert by_name["f1"]["planned"] == 2 * measurement_seconds
+    assert all(row["measurementSeconds"] == measurement_seconds for row in rows)
+    assert all(row["warmupSeconds"] == warmup_seconds for row in rows)
     assert all(row["replicaVector"] == {"f0": 1, "f1": 1} for row in rows)
-    if fault in {None, "telemetry", "telemetry-off"}:
-        if fault == "telemetry":
+    if fault in {
+        None,
+        "telemetry",
+        "telemetry-off",
+        "long-telemetry",
+        "long-telemetry-off",
+    }:
+        if fault in {"telemetry", "long-telemetry"}:
             assert telemetry_actions == ["sampler", "generator", "sampler-close"]
-        if fault == "telemetry-off":
+        if fault in {"telemetry-off", "long-telemetry-off"}:
             assert telemetry_actions == ["generator"]
         assert all(
             row["validOutput"] and row["physicalCompletions"] == row["planned"]
@@ -358,6 +395,31 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             for row in rows
         )
     assert all(row["physicalCompletions"] <= row["emitted"] for row in rows)
+
+
+@pytest.mark.parametrize("duration", [0, -1, True, 0.5, float("nan"), float("inf")])
+@pytest.mark.parametrize("field", ["warmup", "measurement"])
+def test_capacity_window_rejects_invalid_durations_before_acquisition(
+    tmp_path, duration, field
+):
+    from nanolab.tasks.one_shot.capacity import run_capacity_trial
+
+    directory = tmp_path / "invalid-window"
+    with pytest.raises(ValueError, match="positive integer"):
+        run_capacity_trial(
+            None,
+            None,
+            None,
+            None,
+            replicas={},
+            rates={},
+            repetition=0,
+            run_dir=directory,
+            clock=None,
+            warmup_seconds=duration if field == "warmup" else 30,
+            measurement_seconds=duration if field == "measurement" else 60,
+        )
+    assert not directory.exists()
 
 
 def mixed_trials():

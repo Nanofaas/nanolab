@@ -278,10 +278,10 @@ oneShot:
     marginSeconds: 0.2
     readyMarginSeconds: 0.3
     epsilon: 0.05
-    measurementLeadSeconds: 3
+    measurementLeadSeconds: 5
     maxCensoredFraction: 0
     protocol:
-      auctionSeconds: 0.6
+      auctionSeconds: 2
       peerSeconds: 0.15
       solverSeconds: 0.15
       preparationSeconds: 1
