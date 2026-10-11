@@ -10,6 +10,8 @@ PAYLOAD = b"x" * (8 * 1024 * 1024)
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # Separate header/body writes must not add delayed-ACK latency to clock probes.
+    disable_nagle_algorithm = True
     def do_GET(self):
         if self.path == "/clock":
             data = json.dumps({"timestamp": time.time()}).encode()

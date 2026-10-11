@@ -319,6 +319,15 @@ until the independent terminal proof is available.
 
 Clock monitoring measures all six VM probes in scientific calibration, qualification and experiments. Skew and measurement uncertainty remain mandatory for the terminal cloud. Health publication targets only edge negotiation APIs: the cloud intentionally disables them. A failed edge publication remains fatal; a missing cloud API is never used to bypass a failed clock measurement.
 
+The run-owned HTTP clock probe disables Nagle through the standard-library
+handler's `disable_nagle_algorithm` setting. Its separate header/body writes
+otherwise introduce delayed-ACK latency on persistent connections, inflating
+the RTT-derived uncertainty even on loopback. A rejected uncertainty bound is
+not evidence of excessive clock skew: retain the measured offset and uncertainty
+separately in failed runs. This transport correction does not relax the clock
+threshold or retry an auction. Rebuild and freeze the packaged probe before
+acquiring new data.
+
 The multi-function Multipass presets round each function CPU quota down to a multiple of 0.01 CPU before freezing: 0.10 on edge-1/2, 0.14 on edge-3/4, 0.16 on edge-5 and 0.21 on cloud. runc's systemd driver rounds fractional percentages upward ([implementation](https://github.com/opencontainers/cgroups/blob/main/systemd/common.go)); a declared 0.149 CPU was observed as `15000 100000` in `cpu.max` during the v4 bootstrap. These representable limits preserve the 0.50 CPU control-plane/collector/OS reserve even at the maximum memory-feasible replica count. Strict cgroup validation is unchanged: Docker declarations and kernel limits must match, and all service/capacity profiles must be measured at these final quotas. Failed preflight evidence is retained.
 
 Oracle rates use decimal quantum multiplication before JSON serialization. The runtime requires an exact decimal grid, so float multiplication tails such as `19 * 0.05 == 0.9500000000000001` are invalid. Oracle export rejects those off-grid values rather than treating them as equal within a tolerance; generated rates serialize as `0.95`. Parallel epoch preparation retains HTTP refusal status and response body in raw timing observations, marks the sample censored and never retries the trigger.
