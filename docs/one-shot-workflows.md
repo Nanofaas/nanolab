@@ -374,3 +374,21 @@ reads remain in `collection-errors.jsonl`, with their read-attempt number.
 Invocation requests are never retried by this mechanism. HTTP refusals and
 invalid proof identities are not retried; a persistently unavailable proof
 remains censored. Rebuild the package and freeze its fingerprint before reuse.
+
+## Clock probe diagnostics
+
+The owned clock monitor preserves the selected offset/uncertainty sample in
+`clock.jsonl` and every individual HTTP attempt in `clock-probes.jsonl`.
+Raw attempts identify the node, zero-based attempt number within that measurement,
+local before/after UTC timestamps in epoch seconds, remote UTC timestamp, RTT
+and exception class. A failed attempt has no remote timestamp; its original
+exception still invalidates the monitor. Earlier attempts remain on disk.
+A custom selected-output basename produces the corresponding `-probes.jsonl`
+companion. These records retain measurement uncertainty; they do not establish
+that the entire RTT is actual clock skew.
+
+This instrumentation does not change minimum-RTT selection, probe count,
+clock-health acceptance or the current runtime protocol. The native protocol
+still has UTC-dependent epoch checks. Algorithmic resilience to unsynchronized
+clocks requires a separately designed and qualified transition/admission
+protocol; raising the measurement threshold alone does not provide it.

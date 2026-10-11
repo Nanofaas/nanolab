@@ -482,3 +482,69 @@ def test_cgroup_remote_failure_is_preserved():
             cast(NodeResource, SimpleNamespace(command=fail)),
             {"Id": "a" * 64, "State": {"Pid": 123, "Running": True}},
         )
+
+
+def test_clock_probe_preserves_each_attempt_before_selecting_minimum(monkeypatch):
+    """Dropping a slow probe would hide the uncertainty that needs diagnosis."""
+    from types import SimpleNamespace
+
+    import httpx
+
+    from nanolab.tasks.one_shot.preflight import measure_http_clock
+
+    stamps = iter([100.0, 100.2, 200.0, 200.002])
+    remotes = iter([100.1, 200.001])
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.preflight.time",
+        SimpleNamespace(time=lambda: next(stamps)),
+    )
+    attempts = []
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"timestamp": next(remotes)})
+        )
+    ) as http:
+        offset, uncertainty, at = measure_http_clock(
+            "http://node", http=http, repetitions=2, record_probe=attempts.append
+        )
+    assert len(attempts) == 2
+    assert attempts[0]["beforeUtcSeconds"] == 100.0
+    assert attempts[0]["afterUtcSeconds"] == 100.2
+    assert attempts[0]["remoteUtcSeconds"] == 100.1
+    assert attempts[0]["rttSeconds"] == pytest.approx(0.2)
+    assert attempts[1]["attempt"] == 1
+    assert uncertainty == pytest.approx(0.001)
+    assert offset == pytest.approx(0)
+    assert at.timestamp() == 200.001
+
+
+def test_clock_probe_preserves_failed_attempt_and_raises(monkeypatch):
+    """A failed request must leave evidence without becoming an accepted sample."""
+    from types import SimpleNamespace
+
+    import httpx
+
+    from nanolab.tasks.one_shot.preflight import measure_http_clock
+
+    stamps = iter([100.0, 101.0])
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.preflight.time",
+        SimpleNamespace(time=lambda: next(stamps)),
+    )
+    attempts = []
+
+    def fail(request):
+        raise httpx.ReadTimeout("probe timed out", request=request)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(fail)) as http,
+        pytest.raises(httpx.ReadTimeout),
+    ):
+        measure_http_clock(
+            "http://node", http=http, repetitions=3, record_probe=attempts.append
+        )
+    assert len(attempts) == 1
+    assert attempts[0]["beforeUtcSeconds"] == 100.0
+    assert attempts[0]["afterUtcSeconds"] == 101.0
+    assert attempts[0]["errorType"] == "ReadTimeout"
+    assert attempts[0]["remoteUtcSeconds"] is None

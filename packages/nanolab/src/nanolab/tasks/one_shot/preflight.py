@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -133,16 +134,43 @@ class PreflightTask(Task[TopologyEvidence]):
 
 
 def measure_http_clock(
-    url: str, *, http: httpx.Client, repetitions: int = 10
+    url: str,
+    *,
+    http: httpx.Client,
+    repetitions: int = 10,
+    record_probe: Callable[[dict], None] | None = None,
 ) -> tuple[float, float, datetime]:
     """Use a persistent HTTP connection to bound remote UTC offset uncertainty."""
     samples = []
-    for _ in range(repetitions):
+    for attempt in range(repetitions):
         before = time.time()
-        response = http.get(url + "/clock", timeout=1)
-        after = time.time()
-        response.raise_for_status()
-        remote = float(response.json()["timestamp"])
+        after = None
+        remote = None
+        error = None
+        try:
+            response = http.get(url + "/clock", timeout=1)
+            after = time.time()
+            response.raise_for_status()
+            remote = float(response.json()["timestamp"])
+        except Exception as failure:
+            error = type(failure).__name__
+            raise
+        finally:
+            if after is None:
+                after = time.time()
+            if record_probe is not None:
+                record_probe(
+                    {
+                        "attempt": attempt,
+                        "beforeUtcSeconds": before,
+                        "afterUtcSeconds": after,
+                        "remoteUtcSeconds": remote,
+                        "rttSeconds": after - before,
+                        "errorType": error,
+                    }
+                )
+        if after is None or remote is None:
+            raise RuntimeError("clock probe completed without timestamps")
         samples.append((after - before, remote - (before + after) / 2, remote))
     rtt, offset, measured = min(samples)
     return offset, rtt / 2, datetime.fromtimestamp(measured, UTC)

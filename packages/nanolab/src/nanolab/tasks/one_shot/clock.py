@@ -86,8 +86,14 @@ def clock_health_resource(
                 for key, endpoint, probe in addresses:
                     if monitor.stopping:
                         return
+
+                    def record_probe(sample: dict, node: str = key) -> None:
+                        raw_output = output.with_name(output.stem + "-probes.jsonl")
+                        with raw_output.open("a") as evidence:
+                            evidence.write(json.dumps({"node": node, **sample}) + "\n")
+
                     offset, uncertainty, at = measure_http_clock(
-                        probe, http=http, repetitions=3
+                        probe, http=http, repetitions=3, record_probe=record_probe
                     )
                     sample = {
                         "node": key,

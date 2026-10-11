@@ -133,3 +133,38 @@ def test_unknown_reporting_node_fails_before_acquisition(tmp_path):
             output=tmp_path / "clock.jsonl",
             reporting_nodes={"missing"},
         )
+
+
+def test_rejected_clock_keeps_all_raw_probe_attempts(tmp_path, monkeypatch):
+    """An inconclusive clock must retain all HTTP samples, not only its minimum."""
+    import time
+
+    endpoints, probes, inputs = resources()
+    client_class = httpx.Client
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.clock.httpx.Client",
+        lambda **kwargs: client_class(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(200, json={"timestamp": time.time() + 1})
+            ),
+            **kwargs,
+        ),
+    )
+    owned = clock_health_resource(
+        endpoints=endpoints,
+        probes=probes,
+        output=tmp_path / "clock.jsonl",
+        reporting_nodes=set(),
+    )
+    with pytest.raises(ValueError, match="unhealthy or too uncertain"):
+        owned.acquire(inputs)
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "clock-probes.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 3
+    assert {row["node"] for row in rows} == {"edge"}
+    assert [row["attempt"] for row in rows] == [0, 1, 2]
+    assert all(row["remoteUtcSeconds"] > row["afterUtcSeconds"] for row in rows)
+    assert all(row["errorType"] is None for row in rows)
+    assert (tmp_path / "clock.jsonl").exists()
