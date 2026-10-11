@@ -8,6 +8,7 @@ import math
 import os
 import subprocess
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from threading import Thread
@@ -40,28 +41,41 @@ def telemetry_policy() -> dict:
 correlate_sample = vm_sampler.correlate_sample
 
 
-def resource_clock_context(run_dir: Path) -> dict:
-    """Read original successful and failed probes without repairing raw files."""
+def resource_clock_grid(run_dir: Path) -> dict | None:
+    """Resolve the manifest's versioned clock scope for all probe consumers."""
     manifest = run_dir / "manifest.json"
     if not manifest.exists():
-        return {}
+        return None
     grid = json.loads(manifest.read_text()).get("parameters", {}).get("logicalSchedule")
     if grid is None:
-        return {}
+        return None
     if grid.get("protocolVersion") != 2:
         raise ValueError("unsupported resource correlation protocol")
     scope = grid.get("probeScope", "run")
     if scope not in {"run", "parent"}:
         raise ValueError("unsupported resource clock probe scope")
-    probe_dir = run_dir.parent if scope == "parent" else run_dir
+    return grid
+
+
+def resource_probe_paths(run_dir: Path) -> tuple[Path, Path]:
+    """Use the same frozen probe scope for correlation and malformed records."""
+    grid = resource_clock_grid(run_dir)
+    probe_dir = (
+        run_dir.parent if grid and grid.get("probeScope") == "parent" else run_dir
+    )
+    return probe_dir / "preflight-probes.jsonl", probe_dir / "clock-probes.jsonl"
+
+
+def resource_clock_context(run_dir: Path) -> dict:
+    """Read original successful and failed probes without repairing raw files."""
+    grid = resource_clock_grid(run_dir)
+    if grid is None:
+        return {}
     return {
         "host_anchor_monotonic": grid["anchorMonotonicSeconds"],
         "clock_probes": [
             row
-            for path in (
-                probe_dir / "preflight-probes.jsonl",
-                probe_dir / "clock-probes.jsonl",
-            )
+            for path in resource_probe_paths(run_dir)
             for row in read_samples(path)[0]
         ],
     }
@@ -107,8 +121,7 @@ def summarize_resources(
         "nodes": {},
     }
     malformed_probes = sum(
-        read_samples(path)[1]
-        for path in (run_dir / "preflight-probes.jsonl", run_dir / "clock-probes.jsonl")
+        read_samples(path)[1] for path in resource_probe_paths(run_dir)
     )
     result["clockProbeMalformedLines"] = malformed_probes
     if malformed_probes:
@@ -225,7 +238,9 @@ def summarize_resources(
 class VmTelemetrySession:
     """Stream VM-local samples to owned host files before generator acquisition."""
 
-    def __init__(self, run, inputs):
+    def __init__(
+        self, run, inputs, *, terminal_probe: Callable[[], None] | None = None
+    ):
         """Stage frozen sampler bytes and own every started transport."""
         self.run, self.inputs = run, inputs
         self.sessions: list[dict] = []
@@ -243,6 +258,7 @@ class VmTelemetrySession:
             "run_id": manifest["run_id"],
         }
         grid = manifest["parameters"].get("logicalSchedule")
+        self.terminal_probe = terminal_probe if grid is not None else None
         if grid is not None:
             # Final offline correlation uses continuing probes, including later
             # brackets; no UTC guess is attached to live v2 raw samples.
@@ -422,6 +438,11 @@ class VmTelemetrySession:
                     finally:
                         stream.close()
         self.closed = True
+        if self.terminal_probe is not None:
+            try:
+                self.terminal_probe()
+            except Exception as error:
+                failures.append("terminal clock probe failed: " + str(error))
         manifest_path = self.run.run_dir / "manifest.json"
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text())
@@ -463,13 +484,19 @@ class VmTelemetrySession:
             raise RuntimeError("VM telemetry cleanup failures: " + "; ".join(failures))
 
 
-def vm_telemetry_resource(run) -> Resource:
+def vm_telemetry_resource(run, *, clock: Resource | None = None) -> Resource:
     """Reuse the owned topology lifetime and preserve legacy non-Multipass runs."""
     return Resource(
         title="Own continuous whole-VM and container telemetry",
-        acquire=lambda inputs: VmTelemetrySession(run, inputs),
+        acquire=lambda inputs: VmTelemetrySession(
+            run,
+            inputs,
+            terminal_probe=inputs.resource(clock).refresh
+            if clock is not None
+            else None,
+        ),
         release=lambda _inputs, session: session.close(),
-        requires=run.topology.requires,
+        requires=(*run.topology.requires, *((clock,) if clock is not None else ())),
     )
 
 

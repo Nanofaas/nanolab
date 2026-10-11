@@ -411,6 +411,10 @@ still an external UTC workload contract: a host clock step can spoil pacing and
 invalidate the scientific data; this is distinct from v2 algorithm correctness.
 
 Whole-VM raw samples retain guest UTC, guest monotonic time and boot identity.
+After stopping and draining the VM samplers, v2 collection takes a terminal
+diagnostic probe before freezing coverage. Missing terminal probes leave the
+affected samples explicitly uncorrelated. Qualification prefixes count malformed
+probe records from the parent scope used for correlation.
 Reports correlate v2 samples using the preceding and following host/guest
 monotonic probes. A bracket crossing a phase boundary produces explicit phase
 and epoch candidates; missing brackets or a reboot produce `uncorrelated`

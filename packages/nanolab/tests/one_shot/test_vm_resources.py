@@ -417,14 +417,17 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
     )
 
     class Sampler:
-        def __init__(self, *args):
+        def __init__(self, *args, terminal_probe=None):
             actions.append("sampler-start")
+            self.terminal_probe = terminal_probe
 
         def require_healthy(self):
             actions.append("sampler-health")
 
         def close(self, **kwargs):
             actions.append("sampler-close")
+            if self.terminal_probe is not None:
+                self.terminal_probe()
 
     monkeypatch.setattr("nanolab.one_shot.vm_resources.VmTelemetrySession", Sampler)
     child = SimpleNamespace(poll=lambda: None)
@@ -469,7 +472,10 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
         cell=SimpleNamespace(rates={"edge1": {"a": 1}}, id="cell"),
         period=360,
         run_dir=tmp_path / "timing",
-        clock=SimpleNamespace(require_healthy=lambda: None),
+        clock=SimpleNamespace(
+            require_healthy=lambda: None,
+            refresh=lambda: actions.append("terminal-clock"),
+        ),
     )
     with pytest.raises(RuntimeError, match="original-auction"), load:
         raise RuntimeError("original-auction")
@@ -477,9 +483,12 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
     assert actions.index("generator-stop") < actions.index("sampler-close")
     assert "sampler-health" in actions
     if logical:
+        assert actions.index("sampler-close") < actions.index("terminal-clock")
         manifest = json.loads((tmp_path / "timing/manifest.json").read_text())
         assert manifest["parameters"]["logicalSchedule"]["protocolVersion"] == 2
         assert manifest["parameters"]["logicalSchedule"]["probeScope"] == "parent"
+    else:
+        assert "terminal-clock" not in actions
 
 
 def test_protocol_rejects_changed_vm_sampling_period(tmp_path, monkeypatch):

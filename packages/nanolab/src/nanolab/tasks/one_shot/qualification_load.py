@@ -183,7 +183,13 @@ class QualificationLoad:
                         }
                     ),
                 )
-                sampler = VmTelemetrySession(self.run, self.inputs)
+                sampler = VmTelemetrySession(
+                    self.run,
+                    self.inputs,
+                    terminal_probe=self.clock.refresh
+                    if self.logical_schedule
+                    else None,
+                )
                 self.telemetry = sampler
                 self.stack.callback(
                     lambda: sampler.close(coverage_until=datetime.now(UTC))

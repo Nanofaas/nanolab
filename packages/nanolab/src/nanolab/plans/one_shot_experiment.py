@@ -154,7 +154,7 @@ def build_one_shot_experiment_plan(
             )
             workflow.add(UploadForecastTask(freeze), requires=requires)
             telemetry = (
-                vm_telemetry_resource(freeze)
+                vm_telemetry_resource(freeze, clock=clock)
                 if settings.strict_memory and len(settings.functions) > 1
                 else None
             )
