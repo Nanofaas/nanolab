@@ -30,6 +30,8 @@ controlPlane:
         window: 1s
         max-age: 5m
       p2p:
+        # Four neighbor advertisements plus four concurrent auction requests.
+        max-concurrent-requests: 8
         enabled: true
         admin:
           enabled: true

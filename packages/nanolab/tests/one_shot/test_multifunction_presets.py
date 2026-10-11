@@ -66,3 +66,23 @@ def test_multifunction_cpu_limits_are_representable_and_fit_vm_reserve(stage):
             )
             # Preserve CP .35, collector .10 and OS .05 CPU on every node.
             assert cpu * feasible_replicas + Decimal("0.50") <= node.cpus
+
+
+def test_multifunction_transport_reserves_slots_for_discovery_and_auction():
+    scenario = yaml.safe_load(
+        files("nanolab")
+        .joinpath("assets/presets/scenarios/one-shot-multifunction-qualification.yaml")
+        .read_text()
+    )
+    recipe = yaml.safe_load(
+        files("nanolab")
+        .joinpath("assets/presets/recipes/one-shot-multifunction-jvm.yaml")
+        .read_text()
+    )
+    degree = max(len(peers) for peers in scenario["oneShot"]["neighbors"].values())
+    auction = scenario["oneShot"]["timing"]["protocol"]["parallelism"]
+    # Advertisements and one-shot share the same bounded transport semaphore.
+    capacity = recipe["controlPlane"]["config"]["nanofaas"]["p2p"].get(
+        "max-concurrent-requests", 4
+    )
+    assert capacity >= degree + auction

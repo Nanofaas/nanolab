@@ -322,3 +322,11 @@ Clock monitoring measures all six VM probes in scientific calibration, qualifica
 The multi-function Multipass presets round each function CPU quota down to a multiple of 0.01 CPU before freezing: 0.10 on edge-1/2, 0.14 on edge-3/4, 0.16 on edge-5 and 0.21 on cloud. runc's systemd driver rounds fractional percentages upward ([implementation](https://github.com/opencontainers/cgroups/blob/main/systemd/common.go)); a declared 0.149 CPU was observed as `15000 100000` in `cpu.max` during the v4 bootstrap. These representable limits preserve the 0.50 CPU control-plane/collector/OS reserve even at the maximum memory-feasible replica count. Strict cgroup validation is unchanged: Docker declarations and kernel limits must match, and all service/capacity profiles must be measured at these final quotas. Failed preflight evidence is retained.
 
 Oracle rates use decimal quantum multiplication before JSON serialization. The runtime requires an exact decimal grid, so float multiplication tails such as `19 * 0.05 == 0.9500000000000001` are invalid. Oracle export rejects those off-grid values rather than treating them as equal within a tolerance; generated rates serialize as `0.95`. Parallel epoch preparation retains HTTP refusal status and response body in raw timing observations, marks the sample censored and never retries the trigger.
+
+The strict five-function recipe reserves eight P2P transport slots: four for
+endpoint advertisements at the central node and four for concurrent auction
+requests. Both activities share the same bounded transport semaphore. The
+default four-slot budget can reject auction traffic when advertisements overlap.
+This resource setting applies equally to observer variants and scientific modes;
+auction deadlines and acceptance thresholds are unchanged. Rebuild the runtime
+distribution and freeze its updated recipe hash before acquiring new data.
