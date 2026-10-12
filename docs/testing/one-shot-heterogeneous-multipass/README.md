@@ -12,12 +12,20 @@ one hop and cloud is terminal. All six nodes run concurrently.
 |---|---:|---:|---:|---:|---:|
 | E1 | 1 | 2 | 320 | .100 | 5 |
 | E2 | 1 | 3 | 320 | .100 | 5 |
-| E3 | 2 | 3 | 640 | .149 | 10 |
-| E4 | 2 | 4 | 640 | .149 | 10 |
-| E5 | 3 | 6 | 960 | .166 | 15 |
-| Cloud | 8 | 12 | 2240 | .214 | 35 |
+| E3 | 2 | 3 | 640 | .140 | 10 |
+| E4 | 2 | 4 | 640 | .140 | 10 |
+| E5 | 3 | 6 | 960 | .160 | 15 |
+| Cloud | 8 | 12 | 2240 | .210 | 35 |
 
 These are candidate resources, pending final-quota/co-location verification.
+CPU quotas are floored to the frozen 0.01-core grid and checked against kernel
+`cpu.max`. The first v2 observer acquisitions additionally exposed an
+uncontrolled host with ten 2.808-GHz and ten 3.9-GHz cores: owned QEMU processes
+could use both families. The optional [controlled host CPU placement](../../one-shot-workflows.md#controlled-linux-host-cpu-placement)
+fixes each VM's family and records its affinity. Its implementation and proposed
+allocation still require a fresh physical overhead gate; existing failed v12
+pairs remain unqualified and are preserved without changing the five-percent
+criterion. No scientific calibration, timing, pilot or main result is implied.
 Five distinct Rust functions run everywhere: arithmetic, sorting, memory scan,
 integer matrix multiplication and a mixture of all four. Each has its own input,
 independent expected checksum and canonical identity. The preliminary owned-host

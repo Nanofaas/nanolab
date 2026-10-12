@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -32,6 +32,36 @@ class NodeFunctionLimits(BaseModel):
     cpu: float = Field(gt=0)
     memory_mib: int = Field(alias="memoryMiB", gt=0)
     max_replicas: int = Field(alias="maxReplicas", gt=0)
+
+
+CpuId = Annotated[int, Field(strict=True, ge=0)]
+
+
+class HostCpuTarget(BaseModel):
+    """An explicit homogeneous host CPU family for one VM."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    cpus: list[CpuId] = Field(min_length=1)
+    max_frequency_khz: int = Field(alias="maxFrequencyKHz", strict=True, gt=0)
+
+
+class HostCpuPlacement(BaseModel):
+    """Disjoint VM, operator and owned logging CPU reservations."""
+
+    model_config = ConfigDict(extra="forbid")
+    nodes: dict[str, HostCpuTarget] = Field(min_length=1)
+    operator_cpus: list[CpuId] = Field(alias="operatorCpus", min_length=1)
+    logging_cpus: list[CpuId] = Field(default_factory=list, alias="loggingCpus")
+
+    @model_validator(mode="after")
+    def validate_disjoint_cpus(self) -> Self:
+        """Reject overlap within or between any declared reservations."""
+        ids = [cpu for node in self.nodes.values() for cpu in node.cpus]
+        ids.extend(self.operator_cpus)
+        ids.extend(self.logging_cpus)
+        if len(ids) != len(set(ids)):
+            raise ValueError("host CPU reservations overlap")
+        return self
 
 
 class OneShotNode(BaseModel):
@@ -294,6 +324,9 @@ class OneShotConfig(BaseModel):
     provider: Literal["multipass"]
     purpose: Literal["workflow-validation", "scientific-experiment"]
     nodes: list[OneShotNode] = Field(min_length=3)
+    host_cpu_placement: HostCpuPlacement | None = Field(
+        default=None, alias="hostCpuPlacement"
+    )
     functions: dict[str, OneShotFunction] = Field(min_length=1)
     strict_memory: bool = Field(default=False, alias="strictMemory")
     profile: ArtifactReference | None = None
@@ -314,6 +347,20 @@ class OneShotConfig(BaseModel):
         """Prevent aliases of a node and require a distinct terminal cloud."""
         if len({node.id for node in self.nodes}) != len(self.nodes):
             raise ValueError("node identifiers must be unique")
+        if self.host_cpu_placement is not None:
+            placement = self.host_cpu_placement
+            if set(placement.nodes) != {node.id for node in self.nodes}:
+                raise ValueError("host CPU placement node coverage must be exact")
+            if any(
+                len(placement.nodes[node.id].cpus) != node.cpus for node in self.nodes
+            ):
+                raise ValueError("host CPU placement must match VM vCPU count")
+            if (
+                self.observability.logs.enabled
+                and self.observability.logs.backend_owned
+                and len(placement.logging_cpus) < 2
+            ):
+                raise ValueError("owned logging CPU reservation requires two host CPUs")
         if sum(node.kind == "cloud" for node in self.nodes) != 1:
             raise ValueError("one terminal cloud is required")
         if sum(node.kind == "edge" for node in self.nodes) < 2:

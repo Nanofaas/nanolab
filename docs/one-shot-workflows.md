@@ -440,3 +440,47 @@ older 48-image release evidence retains its original source. The deterministic
 handler-envelope scenario includes those six functions. NanoLab's metric
 catalogue collects the three node/peer P2P gauges without a function selector;
 forecasting publishes no separate Micrometer meters.
+
+## Controlled Linux host CPU placement
+
+`oneShot.hostCpuPlacement` optionally assigns disjoint physical CPU sets to
+every owned Multipass VM, the operator process and owned Loki/Grafana containers.
+Each node declares `cpus` and `maxFrequencyKHz`; the CPU count must match its VM
+vCPU count. `operatorCpus` and `loggingCpus` reserve separate host cores. Boolean,
+negative, duplicate, overlapping and incomplete assignments are rejected.
+Selected cores must be online, expose their maximum frequency, and retain the
+`performance` governor. Each VM's cores must match its declared frequency family.
+The runner reads these facts and does not change the host's frequency policy.
+
+For the measured twenty-core host, a concrete campaign allocation is:
+
+```yaml
+hostCpuPlacement:
+  nodes:
+    edge-1: {cpus: [0], maxFrequencyKHz: 2808000}
+    edge-2: {cpus: [10], maxFrequencyKHz: 2808000}
+    edge-3: {cpus: [11, 12], maxFrequencyKHz: 2808000}
+    edge-4: {cpus: [13, 14], maxFrequencyKHz: 2808000}
+    edge-5: {cpus: [1, 2, 3], maxFrequencyKHz: 2808000}
+    cloud: {cpus: [5, 6, 7, 15, 16, 17, 18, 19], maxFrequencyKHz: 3900000}
+  operatorCpus: [4]
+  loggingCpus: [8, 9]
+```
+
+This map is host specific; verify core identities before using it elsewhere.
+It preserves the seventeen VM vCPUs and existing function limits. The two
+logging cores retain the existing combined 1.5-CPU quota, leaving 0.5 CPU of
+host reserve. VM pinning requires noninteractive `sudo taskset`; the selector
+requires exactly one QEMU process whose disk path has the exact newly owned VM
+name as a component. Every QEMU thread's resulting mask is verified. Placement
+failure compensates the newly created VM. The operator's initial thread masks
+are restored on exit, including workers created during the run. Foreign VMs and
+external logging endpoints are not pinned.
+
+Preflight rechecks hardware, operator masks and all owned VM thread masks and
+records the evidence in `host_cpu_placement` and each node's `host_cpu_binding`.
+Owned logging masks are retained in `logging-host-placement.json`. The declared
+policy participates in the resource-scope hash; changing it requires a new
+software/operator freeze and fresh overhead, calibration and timing evidence.
+Without this optional policy, legacy workflows retain their existing behavior.
+CPU placement does not alter one-shot routing or its fixed-round semantics.

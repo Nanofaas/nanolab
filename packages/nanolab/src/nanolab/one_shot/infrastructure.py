@@ -16,7 +16,8 @@ from sonata_engine import Resource
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
 from nanolab.config import EnvironmentConfig
-from nanolab.config.one_shot import OneShotConfig, OneShotNode
+from nanolab.config.one_shot import HostCpuPlacement, OneShotConfig, OneShotNode
+from nanolab.one_shot import host_cpu
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
@@ -79,6 +80,8 @@ class OneShotResources:
     nodes: dict[str, NodeResource]
     generator: Resource[str]
     generator_location: str = "operator-host"
+    host_cpu_placement: HostCpuPlacement | None = None
+    host_cpu_facts: dict | None = None
 
     @property
     def vms(self) -> tuple[Resource[VmInfo], ...]:
@@ -178,6 +181,24 @@ def build_one_shot_resources(
         raise ValueError("invalid one-shot run namespace")
     nodes = {}
     root = repo_root or Path.cwd()
+    placement = config.host_cpu_placement
+    facts = host_cpu.validate_host_placement(placement) if placement else None
+    operator_state = {}
+
+    def acquire_operator(_inputs):
+        if placement:
+            operator_state["original"] = host_cpu.pin_operator(placement.operator_cpus)
+        return platform.node()
+
+    def release_operator(_inputs, _value):
+        if "original" in operator_state:
+            host_cpu.restore_operator(operator_state.pop("original"))
+
+    generator = Resource(
+        title=f"Acquire {namespace} operator-host generator",
+        acquire=acquire_operator,
+        release=release_operator,
+    )
     for node in config.nodes:
         request = VmRequest(
             lifecycle="multipass",
@@ -192,22 +213,35 @@ def build_one_shot_resources(
             title=f"Acquire {node.id} VM", request=request, provider=provider
         )
 
-        def acquire(inputs, *, original=base, owner=provider, expected=request):
+        target_cpus = placement.nodes[node.id].cpus if placement else None
+
+        def acquire(
+            inputs, *, original=base, owner=provider, expected=request, cpus=target_cpus
+        ):
             if owner.vm_exists(expected):
                 raise RuntimeError(f"refusing to adopt existing VM {expected.name}")
-            return original.acquire(inputs)
+            value = original.acquire(inputs)
+            try:
+                if cpus is not None:
+                    if expected.name is None:
+                        raise ValueError("owned VM name missing for host placement")
+                    host_cpu.pin_vm(expected.name, cpus)
+            except BaseException as error:
+                try:
+                    original.release(inputs, value)
+                except Exception as cleanup:
+                    error.add_note(f"owned VM placement compensation: {cleanup}")
+                raise
+            return value
 
         vm = Resource(
             title=base.title,
             acquire=acquire,
             release=base.release,
-            requires=base.requires,
+            requires=(*base.requires, generator) if placement else base.requires,
             revive=base.revive,
         )
         nodes[node.id] = NodeResource(node, request, vm, provider)
-    generator = Resource(
-        title=f"Acquire {namespace} operator-host generator",
-        acquire=lambda _inputs: platform.node(),
-        release=lambda _inputs, _value: None,
+    return OneShotResources(
+        nodes, generator, host_cpu_placement=placement, host_cpu_facts=facts
     )
-    return OneShotResources(nodes, generator)

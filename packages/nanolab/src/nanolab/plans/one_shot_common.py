@@ -467,7 +467,14 @@ def add_one_shot_platforms(
     logs = settings.observability.logs
     collectors = {}
     if logs.enabled:
-        backend = backend_resource(logs, root=repo_root, run_dir=run_dir)
+        placement = settings.host_cpu_placement
+        backend = backend_resource(
+            logs,
+            root=repo_root,
+            run_dir=run_dir,
+            host_cpus=placement.logging_cpus if placement else None,
+            operator=resources.generator if placement else None,
+        )
         collectors = {
             key: collector_resource(
                 node,

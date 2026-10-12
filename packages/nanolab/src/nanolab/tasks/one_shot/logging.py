@@ -26,7 +26,14 @@ def query_url(endpoint: str) -> str:
     return endpoint.removesuffix("/push") + "/query_range"
 
 
-def backend_resource(logs: OneShotLogs, *, root: Path, run_dir: Path) -> Resource[str]:
+def backend_resource(
+    logs: OneShotLogs,
+    *,
+    root: Path,
+    run_dir: Path,
+    host_cpus: list[int] | None = None,
+    operator: Resource | None = None,
+) -> Resource[str]:
     """Preserve external endpoints and own local backends only when requested."""
     endpoint_url = logs.endpoint
     if not endpoint_url:
@@ -109,6 +116,13 @@ def backend_resource(logs: OneShotLogs, *, root: Path, run_dir: Path) -> Resourc
 
     def acquire(_inputs):
         command("up", "-d")
+        if host_cpus is not None:
+            from nanolab.one_shot.host_cpu import pin_logging_project
+
+            facts = pin_logging_project(project, host_cpus)
+            (run_dir / "logging-host-placement.json").write_text(
+                json.dumps(facts, indent=2) + "\n"
+            )
         deadline = time.monotonic() + 90
         with httpx.Client(trust_env=False) as http:
             while time.monotonic() < deadline:
@@ -127,6 +141,7 @@ def backend_resource(logs: OneShotLogs, *, root: Path, run_dir: Path) -> Resourc
         acquire=acquire,
         release=release,
         compensate=release,
+        requires=(operator,) if operator is not None else (),
     )
 
 

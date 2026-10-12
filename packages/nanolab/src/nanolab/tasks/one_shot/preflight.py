@@ -42,6 +42,7 @@ class NodeEvidence(BaseModel):
     os: str | None = None
     architecture: str | None = None
     runtime_limits: dict[str, dict] | None = None
+    host_cpu_binding: dict | None = None
 
 
 class TopologyEvidence(BaseModel):
@@ -58,6 +59,7 @@ class TopologyEvidence(BaseModel):
     nodes: list[NodeEvidence]
     logging: dict | None = None
     peer_graph: dict | None = None
+    host_cpu_placement: dict | None = None
 
 
 def validate_node(
@@ -413,6 +415,18 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         from nanolab.one_shot.client import NanoFaasOneShotClient
 
         evidence = []
+        placement = self.resources.host_cpu_placement
+        if placement is not None:
+            from nanolab.one_shot.host_cpu import collect_host_placement
+
+            self.observations["hostCpuPolicy"] = placement.model_dump(by_alias=True)
+            self.observations["hostCpuPlacement"] = collect_host_placement(
+                placement,
+                {
+                    node_id: inputs.resource(node.vm).name
+                    for node_id, node in self.resources.nodes.items()
+                },
+            )
         built = inputs.resource(self.distribution)
         expected_images = {
             component.name: component.image.id
@@ -615,6 +629,9 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     os=inventory["os"],
                     architecture=inventory["architecture"],
                     runtime_limits=runtime_limits or None,
+                    host_cpu_binding=self.observations.get("hostCpuPlacement", {})
+                    .get("nodes", {})
+                    .get(key),
                 )
                 validate_node(
                     fact,
@@ -636,6 +653,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         topology = TopologyEvidence(
             purpose=self.purpose,
             peer_graph=self.observations.get("peerGraph"),
+            host_cpu_placement=self.observations.get("hostCpuPlacement"),
             measured_at=datetime.now(UTC),
             generator_location=self.resources.generator_location,
             nodes=evidence,

@@ -552,6 +552,10 @@ def resource_scope(settings) -> str:
         if settings.runtime_distribution
         else None,
     }
+    if settings.host_cpu_placement is not None:
+        value["hostCpuPlacement"] = settings.host_cpu_placement.model_dump(
+            by_alias=True
+        )
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
