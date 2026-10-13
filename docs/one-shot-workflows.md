@@ -771,3 +771,43 @@ an unexported collector volume and its containing owned VM remain, with the VM
 stopped and `logging/<node>/recovery.json` identifying the volume. Other owned
 resources still clean up through Sonata. Recovery is manual; no replay, retry,
 repair, relaunch or later deletion is automated.
+
+## Optional continuous-arrival observation
+
+The observation can replay a saved nonuniform calendar while keeping the original
+ORACLE mean-rate trace. Export `arrival-profile.json` offline from the approved
+curves in `dfaas-documents`, then add it during preparation:
+
+```bash
+uv run --frozen --no-sync --package nanolab python scripts/one-shot-observe.py prepare \
+  --tuning /path/to/load-tuning-02 \
+  --observations /path/to/observations.json \
+  --distribution /path/to/distribution.json \
+  --source /path/to/verified-runtime-source \
+  --arrival-profile /path/to/arrival-profile.json \
+  --output /path/to/new-continuous-freeze
+```
+
+Preparation validates and copies the self-contained profile into the new freeze,
+including its SHA-256. Execution validates it before infrastructure acquisition;
+it does not need the profile's original path. Every existing request retains its
+ID, node, function, payload and interval; only `scheduledAt` changes. The exported
+warmup preserves its duration and per-node/function counts and joins measurement
+without a rate jump. The existing k6 asset reads the resulting schedule directly.
+Without the option, the observation retains evenly spaced arrivals.
+
+Launch the prepared freeze with the normal single supervised command:
+
+```bash
+uv run --frozen --no-sync --package nanolab python /path/to/new-continuous-freeze/source-used.py run \
+  /path/to/new-continuous-freeze /path/to/new-continuous-run \
+  --archive /path/to/new-continuous-archive
+```
+
+The raw run/archive contains `arrival-profile.json`, `schedule.json`, the profile
+hash in manifest generator metadata and the existing actual emission timestamps.
+Compare emitted load and arrival lateness with the saved calendar; request errors
+and rejects remain experimental outcomes. No extra runner worker, mathematical
+dependency, resource quota or performance/clock exclusion criterion is added.
+Historical freezes require no editing and cannot enable the feature by changing
+an external profile after preparation.

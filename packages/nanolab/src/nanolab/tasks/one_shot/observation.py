@@ -31,6 +31,7 @@ from nanolab.one_shot.vm_resources import (
     read_samples,
     telemetry_policy,
 )
+from nanolab.tasks.one_shot.arrivals import read_frozen_arrival_profile, retime_schedule
 from nanolab.tasks.one_shot.artifacts import (
     canonical_bytes,
     write_immutable_artifact,
@@ -460,6 +461,13 @@ class ObservationFreeze(Task):
             "observerPrecheckSha256": sha(run.run_dir / "observer-precheck/cost.json"),
             "softwareFreezeSha256": sha(run.frozen_dir / "freeze.json"),
         }
+        arrival_document = read_frozen_arrival_profile(
+            run.frozen_dir,
+            run.frozen,
+            warmup_seconds=run.settings.experiment.warmup_seconds,
+        )
+        if arrival_document is not None:
+            parameters["generator"]["arrivalProfile"] = run.frozen["arrivalProfile"]
         manifest = CampaignManifest(
             provider="multipass",
             purpose="workflow-validation",
@@ -491,11 +499,22 @@ class ObservationFreeze(Task):
             run_id=manifest.run_id + ":warmup",
         )
         warm = [dict(row, phase="warmup", epoch=-1) for row in warm]
+        schedule = sorted(
+            warm + scheduled, key=lambda r: (r["scheduledAt"], r["originalId"])
+        )
+        if arrival_document is not None:
+            schedule = retime_schedule(
+                schedule, arrival_document, anchor_timestamp=anchor.timestamp()
+            )
+            # Retain the exact frozen input bytes, including its provenance hash.
+            target = run.run_dir / "arrival-profile.json"
+            with target.open("xb") as stream:
+                stream.write((run.frozen_dir / "arrival-profile.json").read_bytes())
         save(run.run_dir / "manifest.json", manifest.model_dump())
         save(run.run_dir / "trace.json", run.trace.model_dump())
         save(
             run.run_dir / "schedule.json",
-            sorted(warm + scheduled, key=lambda r: (r["scheduledAt"], r["originalId"])),
+            schedule,
         )
         event(
             run.run_dir,

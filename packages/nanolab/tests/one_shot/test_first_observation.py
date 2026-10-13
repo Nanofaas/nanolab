@@ -419,9 +419,10 @@ def test_observer_precheck_correlates_samples_with_parent_clock_probes(
     assert node["phaseCorrelationComplete"] is True
 
 
+@pytest.mark.parametrize("profiled", [False, True])
 @pytest.mark.parametrize("execute_load", [False, True])
 def test_real_observation_preparation_and_workflow_compile_without_acquiring_vms(
-    observer, tmp_path, monkeypatch, execute_load
+    observer, tmp_path, monkeypatch, execute_load, profiled
 ):
     import os
     from types import SimpleNamespace
@@ -437,11 +438,30 @@ def test_real_observation_preparation_and_workflow_compile_without_acquiring_vms
         output=tmp_path / "freeze",
         tuning=Path(tuning),
         distribution=Path(distribution),
-        observations=Path(reference).parent / "observed-demands.json",
+        observations=Path(
+            os.environ.get(
+                "ONE_SHOT_OBSERVATIONS",
+                str(Path(reference).parent / "observed-demands.json"),
+            )
+        ),
         source=Path(source),
     )
+    if profiled:
+        profile_input = os.environ.get("ONE_SHOT_ARRIVAL_PROFILE")
+        if not profile_input:
+            pytest.skip("requires exported continuous-arrival artifact")
+        args.arrival_profile = Path(profile_input)
     observer.prepare(args)
     frozen = json.loads((args.output / "freeze.json").read_text())
+    if profiled:
+        assert frozen["arrivalProfile"]["sha256"] == observer.sha(args.arrival_profile)
+        assert (
+            args.output / "arrival-profile.json"
+        ).read_bytes() == args.arrival_profile.read_bytes()
+        assert (args.output / "package/nanolab/tasks/one_shot/arrivals.py").is_file()
+    else:
+        assert "arrivalProfile" not in frozen
+
     assert frozen["qualified"] is False
     observer.verify_files(args.output, frozen)
     assert (args.output / "package/nanolab/assets/k6/one-shot.js").is_file()
@@ -720,3 +740,75 @@ def test_failure_fallback_counts_rejects_and_renders_after_writers_stop(
         json.loads((tmp_path / "result.json").read_text())["cause"]
         == "operational fault"
     )
+
+
+@pytest.mark.parametrize("invalid", ["semantic", "tampered"])
+def test_invalid_arrival_profile_stops_before_vm_inventory(
+    observer, tmp_path, monkeypatch, invalid
+):
+    from types import SimpleNamespace
+
+    from tests.one_shot.test_arrivals import arrival_case_data
+
+    # Reuse a small valid trace/profile fixture without provisioning anything.
+    trace, profile = arrival_case_data()
+    freeze = tmp_path / "freeze"
+    freeze.mkdir()
+    observation_tasks.save(freeze / "trace.json", trace.model_dump())
+    profile["traceSha256"] = observer.sha(freeze / "trace.json")
+    if invalid == "semantic":
+        profile["cells"][0]["offsetsSeconds"][0] = True
+    observation_tasks.save(freeze / "arrival-profile.json", profile)
+    digest = observer.sha(freeze / "arrival-profile.json")
+    observation_tasks.save(
+        freeze / "freeze.json",
+        {
+            "files": {"arrival-profile.json": digest},
+            "arrivalProfile": {"sha256": digest},
+        },
+    )
+    observation_tasks.save(
+        freeze / "operator-protocol.json",
+        {
+            "maxOperationalFraction": 1,
+            "maxAuctionFraction": 1,
+            "periodSeconds": 360,
+            "leadSeconds": 90,
+            "protocol": {"auctionSeconds": 60, "preparationSeconds": 10},
+        },
+    )
+    if invalid == "tampered":
+        (freeze / "arrival-profile.json").write_text("{}")
+
+    def forbidden(*a, **k):
+        pytest.fail("invalid profile entered operational workflow")
+
+    monkeypatch.setattr(observer.subprocess, "run", forbidden)
+    monkeypatch.setattr(signal, "signal", forbidden)
+    with pytest.raises(ValueError, match=r"arrival|frozen"):
+        observer.run_observation(
+            SimpleNamespace(freeze=freeze, output=tmp_path / "run", archive=None)
+        )
+    assert not (tmp_path / "run").exists()
+
+
+def test_invalid_arrival_profile_stops_prepare_before_output(observer, tmp_path):
+    from types import SimpleNamespace
+
+    from tests.one_shot.test_arrivals import arrival_case_data
+
+    trace, profile = arrival_case_data()
+    tuning = tmp_path / "tuning"
+    tuning.mkdir()
+    observation_tasks.save(tuning / "trace.json", trace.model_dump())
+    profile["traceSha256"] = observer.sha(tuning / "trace.json")
+    profile["cells"].pop()
+    path = tmp_path / "profile.json"
+    observation_tasks.save(path, profile)
+    with pytest.raises(ValueError, match="arrival"):
+        observer.prepare(
+            SimpleNamespace(
+                tuning=tuning, arrival_profile=path, output=tmp_path / "output"
+            )
+        )
+    assert not (tmp_path / "output").exists()

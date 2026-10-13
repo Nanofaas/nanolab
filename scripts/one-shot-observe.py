@@ -18,7 +18,6 @@ if __name__ == "__main__" and len(sys.argv) > 2 and sys.argv[1] == "run":
     sys.path.insert(0, str(Path(sys.argv[2]) / "package"))
 
 import yaml
-
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import OperationalLimits
 from nanolab.one_shot.supervision import (
@@ -28,6 +27,10 @@ from nanolab.one_shot.vm_resources import (
     telemetry_policy,
 )
 from nanolab.plans.one_shot_observation import build_one_shot_observation_plan
+from nanolab.tasks.one_shot.arrivals import (
+    read_frozen_arrival_profile,
+    validate_arrival_profile,
+)
 from nanolab.tasks.one_shot.artifacts import (
     package_fingerprint,
 )
@@ -140,7 +143,20 @@ def historical_statistics(observed):
 
 def prepare(args):
     """Capture the package, script and inputs without starting any VM."""
+    arrival_input = getattr(args, "arrival_profile", None)
+    arrival_document = None
+    if arrival_input is not None:
+        arrival_document = json.loads(arrival_input.read_text())
+        input_trace = args.tuning / "trace.json"
+        validate_arrival_profile(
+            arrival_document,
+            TraceArtifact.model_validate_json(input_trace.read_bytes()),
+            trace_sha256=sha(input_trace),
+            warmup_seconds=720,
+        )
     args.output.mkdir(parents=True, exist_ok=False)
+    if arrival_input is not None:
+        shutil.copyfile(arrival_input, args.output / "arrival-profile.json")
     for name in [
         "trace.json",
         "selected.json",
@@ -290,6 +306,9 @@ def prepare(args):
             if p.is_file()
         },
     }
+    if arrival_document is not None:
+        frozen["arrivalProfile"] = {"sha256": sha(args.output / "arrival-profile.json")}
+        read_frozen_arrival_profile(args.output, frozen)
     save(args.output / "freeze.json", frozen)
     print(
         json.dumps(
@@ -310,6 +329,7 @@ def run_observation(args):
     verify_files(args.freeze, frozen)
     protocol = json.loads((args.freeze / "operator-protocol.json").read_text())
     validate_operator_protocol(protocol)
+    read_frozen_arrival_profile(args.freeze, frozen)
     if (
         Path("/proc/sys/kernel/random/boot_id").read_text().strip()
         != frozen["hostBootId"]
@@ -400,6 +420,7 @@ def main():
     prep = commands.add_parser("prepare")
     for key in ["tuning", "observations", "distribution", "source", "output"]:
         prep.add_argument("--" + key, type=Path, required=True)
+    prep.add_argument("--arrival-profile", type=Path)
     launch = commands.add_parser("run")
     launch.add_argument("freeze", type=Path)
     launch.add_argument("output", type=Path)
