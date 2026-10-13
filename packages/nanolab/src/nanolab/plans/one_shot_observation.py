@@ -17,6 +17,8 @@ from nanolab.one_shot.vm_resources import (
     vm_telemetry_resource,
 )
 from nanolab.plans.one_shot_common import add_one_shot_platforms
+from nanolab.tasks.one_shot.arrivals import read_frozen_arrival_profile
+from nanolab.tasks.one_shot.artifacts import write_immutable_artifact
 from nanolab.tasks.one_shot.clock import clock_health_resource
 from nanolab.tasks.one_shot.experiment import (
     RunOneShotLoadTask,
@@ -59,6 +61,16 @@ def build_one_shot_observation_plan(
         and settings.experiment is not None
         and settings.operational_limits is not None
     )
+    arrival_profile = read_frozen_arrival_profile(
+        freeze_dir,
+        frozen,
+        warmup_seconds=settings.experiment.warmup_seconds,
+    )
+    if arrival_profile is not None:
+        write_immutable_artifact(
+            run_dir / "arrival-profile.json",
+            (freeze_dir / "arrival-profile.json").read_bytes(),
+        )
     workflow = Workflow("first-functional-oracle-observation")
     topology = add_one_shot_platforms(
         workflow,

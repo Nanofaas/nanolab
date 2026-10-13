@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import signal
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -25,12 +25,20 @@ from nanolab.tasks.one_shot import (
     preflight,
     qualification,
 )
-from nanolab.tasks.one_shot.trace import TraceArtifact, oracle_entries
+from nanolab.tasks.one_shot.artifacts import canonical_bytes
+from nanolab.tasks.one_shot.trace import (
+    TraceArtifact,
+    oracle_entries,
+    request_schedule,
+    warmup_trace,
+)
 from tests.one_shot.test_preflight import strict_cgroup_sample
 
 
 @pytest.mark.parametrize("profiled", [False, True])
-@pytest.mark.parametrize("failure", [None, "generator", "signal", "dependency"])
+@pytest.mark.parametrize(
+    "failure", [None, "generator", "signal", "dependency", "precheck"]
+)
 def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, profiled):
     raw, freeze, archive = (tmp_path / name for name in ("raw", "freeze", "archive"))
     raw.mkdir()
@@ -554,6 +562,12 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
         )
 
     monkeypatch.setattr(builder, "vm_telemetry_resource", telemetry)
+    if failure == "precheck":
+
+        def failed_precheck(self, inputs):
+            raise RuntimeError("injected observer precheck failure")
+
+        monkeypatch.setattr(observation.ObserverPrecheck, "run", failed_precheck)
     collector = SimpleNamespace(require_healthy=lambda: None, close=lambda: None)
     monkeypatch.setattr(
         builder,
@@ -622,33 +636,57 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
     )
     assert not acquired
     if failure:
-        with pytest.raises(Exception, match=r"generator|signal 15|resource"):
+        with pytest.raises(Exception, match=r"generator|signal 15|resource|precheck"):
             supervisor.run(workflow.run)
     else:
         supervisor.run(workflow.run)
-    manifest = json.loads((raw / "manifest.json").read_text())
-    schedule = json.loads((raw / "schedule.json").read_text())
     if profiled:
         assert (raw / "arrival-profile.json").read_bytes() == (
             freeze / "arrival-profile.json"
         ).read_bytes()
-        assert (
-            manifest["parameters"]["generator"]["arrivalProfile"]["sha256"]
-            == digest_profile
-        )
-        assert len(schedule) == 330
-        anchor = datetime.fromisoformat(manifest["anchor"]).timestamp()
-        assert all(
-            row["scheduledAt"] == anchor + row["epoch"] * 360 + 60
-            for row in schedule
-            if row["phase"] == "campaign"
-        )
-        assert {
-            row["scheduledAt"] - anchor for row in schedule if row["phase"] == "warmup"
-        } == {-600, -120}
-    else:
-        assert not (raw / "arrival-profile.json").exists()
-        assert "arrivalProfile" not in manifest["parameters"]["generator"]
+    manifest: dict = {}
+    if failure != "precheck":
+        manifest = json.loads((raw / "manifest.json").read_text())
+        schedule = json.loads((raw / "schedule.json").read_text())
+        if profiled:
+            assert (raw / "arrival-profile.json").read_bytes() == (
+                freeze / "arrival-profile.json"
+            ).read_bytes()
+            assert (
+                manifest["parameters"]["generator"]["arrivalProfile"]["sha256"]
+                == digest_profile
+            )
+            assert len(schedule) == 330
+            anchor = datetime.fromisoformat(manifest["anchor"]).timestamp()
+            assert all(
+                row["scheduledAt"] == anchor + row["epoch"] * 360 + 60
+                for row in schedule
+                if row["phase"] == "campaign"
+            )
+            assert {
+                row["scheduledAt"] - anchor
+                for row in schedule
+                if row["phase"] == "warmup"
+            } == {-600, -120}
+        else:
+            assert not (raw / "arrival-profile.json").exists()
+            assert "arrivalProfile" not in manifest["parameters"]["generator"]
+            anchor_utc = datetime.fromisoformat(manifest["anchor"])
+            endpoints = {
+                row["origin"]: row["url"].split("/v1/functions/")[0] for row in schedule
+            }
+            baseline = request_schedule(
+                trace, anchor=anchor_utc, endpoints=endpoints, run_id=manifest["run_id"]
+            )
+            warm = request_schedule(
+                warmup_trace(trace, seconds=720),
+                anchor=anchor_utc - timedelta(seconds=720),
+                endpoints=endpoints,
+                run_id=manifest["run_id"] + ":warmup",
+            )
+            baseline.extend(dict(row, phase="warmup", epoch=-1) for row in warm)
+            baseline.sort(key=lambda row: (row["scheduledAt"], row["originalId"]))
+            assert (raw / "schedule.json").read_bytes() == canonical_bytes(baseline)
     assert sorted(acquired) == sorted(released)
     assert len(released) == len(set(released))
     assert (archive / "result.json").exists()

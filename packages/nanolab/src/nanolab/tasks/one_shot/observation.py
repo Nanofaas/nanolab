@@ -507,9 +507,10 @@ class ObservationFreeze(Task):
                 schedule, arrival_document, anchor_timestamp=anchor.timestamp()
             )
             # Retain the exact frozen input bytes, including its provenance hash.
-            target = run.run_dir / "arrival-profile.json"
-            with target.open("xb") as stream:
-                stream.write((run.frozen_dir / "arrival-profile.json").read_bytes())
+            write_immutable_artifact(
+                run.run_dir / "arrival-profile.json",
+                (run.frozen_dir / "arrival-profile.json").read_bytes(),
+            )
         save(run.run_dir / "manifest.json", manifest.model_dump())
         save(run.run_dir / "trace.json", run.trace.model_dump())
         save(

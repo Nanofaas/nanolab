@@ -33,6 +33,7 @@ from nanolab.tasks.one_shot.arrivals import (
 )
 from nanolab.tasks.one_shot.artifacts import (
     package_fingerprint,
+    write_immutable_artifact,
 )
 from nanolab.tasks.one_shot.experiment import (
     physical_attempts,
@@ -329,7 +330,7 @@ def run_observation(args):
     verify_files(args.freeze, frozen)
     protocol = json.loads((args.freeze / "operator-protocol.json").read_text())
     validate_operator_protocol(protocol)
-    read_frozen_arrival_profile(args.freeze, frozen)
+    arrival_document = read_frozen_arrival_profile(args.freeze, frozen)
     if (
         Path("/proc/sys/kernel/random/boot_id").read_text().strip()
         != frozen["hostBootId"]
@@ -358,6 +359,11 @@ def run_observation(args):
     def execute():
         primary = None
         try:
+            if arrival_document is not None:
+                write_immutable_artifact(
+                    args.output / "arrival-profile.json",
+                    (args.freeze / "arrival-profile.json").read_bytes(),
+                )
             inventory("vms-before.json")
             config = ScenarioConfig.model_validate(
                 yaml.safe_load((args.freeze / "scenario.yaml").read_text())
