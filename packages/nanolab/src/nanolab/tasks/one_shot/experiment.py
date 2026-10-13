@@ -653,6 +653,8 @@ def generator_resource(
     settings=None,
 ) -> Resource[subprocess.Popen]:
     """Sonata owns the only k6 child, including termination after task failures."""
+    # k6 resolves open() relative to its JS module, not the operator's cwd.
+    run_dir = run_dir.resolve()
     streams = []
 
     def acquire(_inputs):

@@ -120,6 +120,16 @@ keeps its approved CPU/RAM quotas, balanced initial vectors and Rust workload.
 VM bootstrap waits for successful `cloud-init` before package installation;
 the owned run retains the original status output.
 
+Run directories may be relative to the operator's current directory and may
+contain spaces. The shared generator resource resolves its directory once when
+the workflow is constructed, then passes an absolute schedule filename to k6.
+This is necessary because k6 resolves JavaScript `open()` paths relative to the
+script, rather than the operator's directory. No machine-specific path is
+embedded in the package. Regression tests initialize the real k6 module through
+Sonata using relative and absolute directories, including a later cwd change;
+`k6 inspect` sends no HTTP requests. A corrected package requires a new freeze;
+existing freezes and failed-run archives remain unchanged.
+
 Profiles retain the historical sample counts, means and p95; deviation is
 computed from the same deduplicated physical samples, whose hash is verified.
 The native contract uses `synthetic=true` and `workflow-validation` to mark
