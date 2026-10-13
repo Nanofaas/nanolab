@@ -25,12 +25,13 @@ from nanolab.tasks.one_shot import (
     preflight,
     qualification,
 )
-from nanolab.tasks.one_shot.trace import TraceArtifact
+from nanolab.tasks.one_shot.trace import TraceArtifact, oracle_entries
 from tests.one_shot.test_preflight import strict_cgroup_sample
 
 
+@pytest.mark.parametrize("profiled", [False, True])
 @pytest.mark.parametrize("failure", [None, "generator", "signal", "dependency"])
-def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure):
+def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, profiled):
     raw, freeze, archive = (tmp_path / name for name in ("raw", "freeze", "archive"))
     raw.mkdir()
     freeze.mkdir()
@@ -136,6 +137,47 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure):
             "hostBootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
         },
     )
+    digest_profile = None
+    if profiled:
+        cells = [
+            {
+                "phase": "campaign",
+                "epoch": epoch,
+                "origin": node,
+                "function": name,
+                "offsetsSeconds": [epoch * 360 + 60],
+            }
+            for epoch in range(9)
+            for node in node_ids
+            for name in names
+        ]
+        cells.extend(
+            {
+                "phase": "warmup",
+                "epoch": -1,
+                "origin": node,
+                "function": name,
+                "offsetsSeconds": [-600, -120],
+            }
+            for node in node_ids
+            for name in names
+        )
+        save(
+            "arrival-profile.json",
+            {
+                "schemaVersion": 1,
+                "periodSeconds": 360,
+                "epochs": 9,
+                "warmupSeconds": 720,
+                "traceSha256": observation.sha(freeze / "trace.json"),
+                "cells": cells,
+            },
+        )
+        frozen = json.loads((freeze / "freeze.json").read_text())
+        digest_profile = observation.sha(freeze / "arrival-profile.json")
+        frozen["files"]["arrival-profile.json"] = digest_profile
+        frozen["arrivalProfile"] = {"sha256": digest_profile}
+        save("freeze.json", frozen)
     save(
         "operator-protocol.json",
         {
@@ -584,6 +626,29 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure):
             supervisor.run(workflow.run)
     else:
         supervisor.run(workflow.run)
+    manifest = json.loads((raw / "manifest.json").read_text())
+    schedule = json.loads((raw / "schedule.json").read_text())
+    if profiled:
+        assert (raw / "arrival-profile.json").read_bytes() == (
+            freeze / "arrival-profile.json"
+        ).read_bytes()
+        assert (
+            manifest["parameters"]["generator"]["arrivalProfile"]["sha256"]
+            == digest_profile
+        )
+        assert len(schedule) == 330
+        anchor = datetime.fromisoformat(manifest["anchor"]).timestamp()
+        assert all(
+            row["scheduledAt"] == anchor + row["epoch"] * 360 + 60
+            for row in schedule
+            if row["phase"] == "campaign"
+        )
+        assert {
+            row["scheduledAt"] - anchor for row in schedule if row["phase"] == "warmup"
+        } == {-600, -120}
+    else:
+        assert not (raw / "arrival-profile.json").exists()
+        assert "arrivalProfile" not in manifest["parameters"]["generator"]
     assert sorted(acquired) == sorted(released)
     assert len(released) == len(set(released))
     assert (archive / "result.json").exists()
@@ -600,6 +665,20 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure):
         assert all(not row["measurementComplete"] for row in epochs)
         configs = [data for _, path, data in calls if path.endswith("/config")]
         assert len(configs) == 5
+        uploads = [
+            (node, data)
+            for node, path, data in calls
+            if path.endswith("/forecasting/trace")
+        ]
+        assert len(uploads) == 5
+        for node, data in uploads:
+            assert data["entries"] == oracle_entries(
+                trace,
+                node=node,
+                generations=dict.fromkeys(names, 1),
+                anchor=datetime.fromisoformat(manifest["anchor"]),
+            )
+        assert len([path for _, path, _ in calls if path.endswith("/activate")]) == 45
         assert all(
             config["leadTime"] == "PT90.000000000S"
             and config["preparationBudget"] == "PT10.000000000S"
