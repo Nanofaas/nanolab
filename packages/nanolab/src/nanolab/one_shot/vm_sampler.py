@@ -370,6 +370,16 @@ def sample_loop(node: str, *, duration: float, context: dict | None = None) -> N
             containers = connection.get_json("/containers/json")
             identifiers = {item["Id"] for item in containers}
             row["expectedContainerIds"] = sorted(identifiers)
+            row["containerInventory"] = [
+                container_identity(
+                    {
+                        "Id": item["Id"],
+                        "Name": item["Names"][0],
+                        "Config": {"Labels": item.get("Labels")},
+                    }
+                )
+                for item in containers
+            ]
             inventory = {
                 key: value for key, value in inventory.items() if key in identifiers
             }

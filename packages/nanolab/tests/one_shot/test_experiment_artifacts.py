@@ -132,6 +132,24 @@ def test_manifest_freezes_same_trace_and_distinct_originals_before_load(
         run.run(inputs)
 
 
+@pytest.mark.parametrize("memory_mib", [128, 512])
+def test_manifest_allows_cpu_contention_but_still_enforces_memory_pool(
+    tmp_path, monkeypatch, memory_mib
+):
+    run, inputs = frozen_run(tmp_path, monkeypatch)
+    function = run.topology.function_settings["one-shot-workload"]
+    function.cpu = 3
+    function.memory_mib = memory_mib
+    if memory_mib == 512:
+        with pytest.raises(ValueError, match="RAM"):
+            run.run(inputs)
+        assert not (tmp_path / "manifest.json").exists()
+    else:
+        manifest = run.run(inputs).value
+        assert manifest is not None
+        assert manifest.parameters["functions"]["one-shot-workload"]["cpu"] == 3
+
+
 def test_timing_fingerprint_or_terminal_headroom_failure_prevents_manifest(
     tmp_path, monkeypatch
 ):

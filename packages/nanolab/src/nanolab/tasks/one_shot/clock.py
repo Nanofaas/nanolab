@@ -13,6 +13,7 @@ from typing import Literal
 import httpx
 from sonata_engine import Resource, TaskInputs
 
+from nanolab.config.one_shot import operational_limit
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.tasks.one_shot.preflight import measure_http_clock
 
@@ -26,6 +27,7 @@ class ClockMonitor:
         *,
         interval_seconds: float,
         probe_directory: Path | None = None,
+        join_seconds: float = 40,
     ):
         """Store the sampler without starting any background work."""
         if not math.isfinite(interval_seconds) or interval_seconds <= 0:
@@ -33,6 +35,7 @@ class ClockMonitor:
         self.refresh = refresh
         self.probe_directory = probe_directory
         self.interval_seconds = interval_seconds
+        self.join_seconds = join_seconds
         self._stop = Event()
         self._error: Exception | None = None
         self._thread: Thread | None = None
@@ -65,7 +68,7 @@ class ClockMonitor:
         """Stop refreshing before the associated endpoints are torn down."""
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=40)
+            self._thread.join(timeout=self.join_seconds)
             if self._thread.is_alive():
                 raise RuntimeError("one-shot clock sampler failed to stop")
 
@@ -79,6 +82,7 @@ def clock_health_resource(
     interval_seconds: float = 10,
     max_skew_seconds: float = 0.1,
     protocol_version: Literal[1, 2] = 1,
+    settings=None,
 ) -> Resource[ClockMonitor]:
     """Own periodic measured reports and preserve each original measurement time."""
     reports = frozenset(endpoints if reporting_nodes is None else reporting_nodes)
@@ -109,6 +113,9 @@ def clock_health_resource(
                             repetitions=3,
                             record_probe=record_probe,
                             tolerate_failures=protocol_version == 2,
+                            timeout_seconds=operational_limit(
+                                settings, "collection_http_seconds", 1
+                            ),
                         )
                     except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
                         if protocol_version == 1:
@@ -146,13 +153,20 @@ def clock_health_resource(
                     if key not in reports:
                         continue
                     receipt = NanoFaasOneShotClient(
-                        endpoint, http=http, timeout_seconds=2
+                        endpoint,
+                        http=http,
+                        timeout_seconds=operational_limit(
+                            settings, "collection_http_seconds", 2
+                        ),
                     ).update_clock_health(offset_seconds=offset, measured_at=at)
                     if not receipt.healthy:
                         raise ValueError("node rejected measured clock health")
 
         monitor = ClockMonitor(
-            refresh, interval_seconds=interval_seconds, probe_directory=output.parent
+            refresh,
+            join_seconds=operational_limit(settings, "worker_join_seconds", 40),
+            interval_seconds=interval_seconds,
+            probe_directory=output.parent,
         )
         monitor.start()
         return monitor

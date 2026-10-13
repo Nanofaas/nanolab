@@ -9,6 +9,7 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -17,7 +18,7 @@ import httpx
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.compensation import compensated_resource
 
-from nanolab.config.one_shot import OneShotLogs
+from nanolab.config.one_shot import OneShotLogs, operational_limit
 from nanolab.one_shot.infrastructure import NodeResource
 
 
@@ -33,6 +34,8 @@ def backend_resource(
     run_dir: Path,
     host_cpus: list[int] | None = None,
     operator: Resource | None = None,
+    settings=None,
+    supervision=None,
 ) -> Resource[str]:
     """Preserve external endpoints and own local backends only when requested."""
     endpoint_url = logs.endpoint
@@ -63,30 +66,85 @@ def backend_resource(
         "backend",
     ]
 
-    def command(*args, check=True):
+    def command(*args, check=True, timeout=None):
         return subprocess.run(
             argv + list(args),
             env=environment,
             capture_output=True,
             text=True,
             check=check,
-            timeout=90,
+            timeout=timeout or operational_limit(settings, "compose_seconds", 90),
         )
 
     def release(_inputs, _value=None):
         directory = run_dir / "logging"
+        archive_error = None
+        raw_export_failed = False
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            containers = command("ps", "-aq", "loki").stdout.split()
+            if containers:
+                if len(containers) != 1:
+                    raise RuntimeError("owned Loki identity is ambiguous")
+                # Collector dependencies release first. Stop the final writer
+                # before copying the entire store, including already sent chunks.
+                command("stop", "loki")
+                destination = directory / "backend-data"
+                destination.mkdir(exist_ok=False)
+                subprocess.run(
+                    ["docker", "cp", containers[0] + ":/loki/.", str(destination)],
+                    check=True,
+                    capture_output=True,
+                    timeout=operational_limit(settings, "compose_seconds", 90),
+                )
+                hashes = {}
+                for path in destination.rglob("*"):
+                    if path.is_file():
+                        with path.open("rb") as stream:
+                            hashes[str(path.relative_to(destination))] = (
+                                hashlib.file_digest(stream, "sha256").hexdigest()
+                            )
+                (directory / "backend-data-sha256.json").write_text(
+                    json.dumps(hashes, indent=2) + "\n"
+                )
+        except Exception as error:
+            archive_error = error
+            raw_export_failed = True
         try:
             directory.mkdir(parents=True, exist_ok=True)
             captured = command("logs", "--no-color", check=False)
             (directory / "backend.log").write_text(captured.stdout + captured.stderr)
         except Exception as error:
+            archive_error = archive_error or error
             logging.getLogger(__name__).warning("Backend log export failed: %s", error)
-        result = command("down", "-v", "--remove-orphans", check=False)
+        result = command(
+            "down",
+            *(() if raw_export_failed else ("-v",)),
+            "--remove-orphans",
+            check=False,
+        )
+        if raw_export_failed:
+            recovery = {
+                "atUtc": datetime.now(UTC).isoformat(),
+                "project": project,
+                "retained": "owned Docker volumes; services stopped",
+                "reason": str(archive_error),
+                "cleanupComplete": False,
+            }
+            logging.getLogger(__name__).error("Raw recovery required: %s", recovery)
+            try:
+                (directory / "backend-recovery.json").write_text(
+                    json.dumps(recovery, indent=2) + "\n"
+                )
+            except OSError as error:
+                if archive_error is not None:
+                    archive_error.add_note("recovery receipt: " + str(error))
         try:
             (directory / "backend-cleanup.log").write_text(
                 result.stdout + result.stderr
             )
         except OSError as error:
+            archive_error = archive_error or error
             logging.getLogger(__name__).warning(
                 "Backend cleanup receipt failed: %s", error
             )
@@ -111,8 +169,12 @@ def backend_resource(
             ],
             text=True,
         ).strip()
-        if result.returncode or remaining or volumes:
+        if result.returncode or remaining or (volumes and not raw_export_failed):
             raise RuntimeError("owned logging backend cleanup unconfirmed")
+        if archive_error is not None:
+            raise RuntimeError(
+                "owned Loki raw archive failed before cleanup"
+            ) from archive_error
 
     def acquire(_inputs):
         command("up", "-d")
@@ -123,26 +185,57 @@ def backend_resource(
             (run_dir / "logging-host-placement.json").write_text(
                 json.dumps(facts, indent=2) + "\n"
             )
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + operational_limit(
+            settings, "service_start_seconds", 90
+        )
         with httpx.Client(trust_env=False) as http:
             while time.monotonic() < deadline:
                 try:
                     http.get(
                         endpoint_url.split("/loki/api/v1/push")[0] + "/ready",
-                        timeout=2,
+                        timeout=operational_limit(
+                            settings, "collection_http_seconds", 2
+                        ),
                     ).raise_for_status()
                     return endpoint_url
                 except httpx.HTTPError:
                     time.sleep(0.5)
         raise RuntimeError("owned logging backend readiness failed")
 
-    return compensated_resource(
+    resource = compensated_resource(
         title="Own local Loki/Grafana logging backend",
         acquire=acquire,
         release=release,
         compensate=release,
         requires=(operator,) if operator is not None else (),
     )
+    if supervision is not None:
+
+        def probe(_value):
+            result = command(
+                "ps",
+                "--all",
+                "--format",
+                "json",
+                "loki",
+                timeout=operational_limit(settings, "collection_http_seconds", 10),
+            )
+            raw = result.stdout.strip()
+            rows = (
+                json.loads(raw)
+                if raw.startswith("[")
+                else [json.loads(line) for line in raw.splitlines()]
+            )
+            if len(rows) != 1 or rows[0].get("State") != "running":
+                raise RuntimeError("owned Loki backend stopped")
+
+        return supervision.service_resource(
+            resource,
+            "logging-backend",
+            probe,
+            join_seconds=operational_limit(settings, "worker_join_seconds", 40),
+        )
+    return resource
 
 
 @dataclass(frozen=True)
@@ -206,6 +299,7 @@ def collector_resource(
     root: Path,
     run_dir: Path,
     mode: str,
+    settings=None,
 ) -> Resource[LogSession]:
     """Own persistent buffering and export independently of SDK accounting."""
     token = uuid4().hex[:12]
@@ -229,7 +323,9 @@ def collector_resource(
             (
                 "python3",
                 "-c",
-                "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:2020/api/v1/metrics/prometheus',timeout=3).read().decode())",
+                "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:2020/api/v1/metrics/prometheus',timeout="
+                + str(operational_limit(settings, "collection_http_seconds", 3))
+                + ").read().decode())",
             )
         ).stdout
 
@@ -279,6 +375,7 @@ def collector_resource(
             status["issues"].append(
                 "recoverable state archive failed: " + archive_issue
             )
+        write_error = None
         try:
             (directory / "collector-metrics.txt").write_text(final_metrics)
             stats = node.command(
@@ -287,6 +384,9 @@ def collector_resource(
             (directory / "collector-stats.json").write_text(stats.stdout)
             observed = node.command(("docker", "logs", name))
             (directory / "collector.log").write_text(observed.stdout + observed.stderr)
+        except OSError as error:
+            write_error = write_error or error
+            status["issues"].append(str(error))
         except Exception as error:
             status["issues"].append(str(error))
         try:
@@ -320,6 +420,9 @@ def collector_resource(
                     "query contains fewer records than collector delivery counter"
                 )
                 status["exportStatus"] = "partial"
+        except OSError as error:
+            write_error = write_error or error
+            status["issues"].append(str(error))
         except Exception as error:
             status["issues"].append(str(error))
             status["exportStatus"] = "partial"
@@ -337,6 +440,8 @@ def collector_resource(
             )
             + "\n"
         )
+        if write_error is not None:
+            raise RuntimeError("collector export write failed") from write_error
 
     def release(_inputs, _value=None):
         nonlocal created, final_metrics, archive_issue
@@ -353,7 +458,14 @@ def collector_resource(
             except Exception:
                 break
         stopped = node.provider.exec_argv(
-            node.request, ("docker", "stop", "-t", "15", name)
+            node.request,
+            (
+                "docker",
+                "stop",
+                "-t",
+                str(int(operational_limit(settings, "process_drain_seconds", 15))),
+                name,
+            ),
         )
         try:
             if stopped.return_code:
@@ -361,14 +473,17 @@ def collector_resource(
             archive_state()
         except Exception as error:
             archive_issue = str(error)
+            node.recovery.append(f"collector volume {volume}: {archive_issue}")
             logging.getLogger(__name__).error(
                 "Recoverable collector state archive failed for %s: %s",
                 node.config.id,
                 error,
             )
+        export_error = None
         try:
             export()
         except Exception as error:
+            export_error = error
             logging.getLogger(__name__).warning(
                 "Log export failed for %s: %s", node.config.id, error
             )
@@ -378,19 +493,43 @@ def collector_resource(
             and "No such container" not in removed.stdout + removed.stderr
         ):
             raise RuntimeError("collector cleanup unconfirmed")
-        deleted = node.provider.exec_argv(
-            node.request, ("docker", "volume", "rm", volume)
-        )
-        if (
-            deleted.return_code
-            and "no such volume" not in (deleted.stdout + deleted.stderr).lower()
-        ):
-            raise RuntimeError("collector volume cleanup unconfirmed")
+        if archive_issue is None:
+            deleted = node.provider.exec_argv(
+                node.request, ("docker", "volume", "rm", volume)
+            )
+            if (
+                deleted.return_code
+                and "no such volume" not in (deleted.stdout + deleted.stderr).lower()
+            ):
+                raise RuntimeError("collector volume cleanup unconfirmed")
         created = False
         if archive_issue:
+            try:
+                (run_dir / "logging" / node.config.id / "recovery.json").write_text(
+                    json.dumps(
+                        {
+                            "node": node.config.id,
+                            "vm": getattr(node.request, "name", None),
+                            "volume": volume,
+                            "reason": archive_issue,
+                            "cleanupComplete": False,
+                        },
+                        indent=2,
+                    )
+                    + "\n"
+                )
+            except OSError as error:
+                logging.getLogger(__name__).error(
+                    "Recovery receipt unavailable: %s", error
+                )
             raise RuntimeError(
-                "collector state archive failed before owned cleanup: " + archive_issue
+                "collector state archive failed; volume and containing VM retained: "
+                + archive_issue
             )
+        if export_error is not None:
+            raise RuntimeError(
+                "collector export failed before owned cleanup"
+            ) from export_error
 
     def acquire(inputs: TaskInputs):
         nonlocal created, session
@@ -510,14 +649,18 @@ def collector_resource(
                 "bufferMiB": logs.buffer_mib,
             },
         )
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + operational_limit(
+            settings, "worker_start_seconds", 30
+        )
         while time.monotonic() < deadline:
             result = node.provider.exec_argv(
                 node.request,
                 (
                     "python3",
                     "-c",
-                    "import urllib.request;urllib.request.urlopen('http://127.0.0.1:2020/api/v1/metrics/prometheus',timeout=2).read()",
+                    "import urllib.request;urllib.request.urlopen('http://127.0.0.1:2020/api/v1/metrics/prometheus',timeout="
+                    + str(operational_limit(settings, "collection_http_seconds", 2))
+                    + ").read()",
                 ),
             )
             if not result.return_code:

@@ -97,7 +97,7 @@ def test_ambiguous_prepare_is_not_retried_and_keeps_censored_raw_evidence(
     }
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.qualification.scrape_metrics",
-        lambda *args: {},
+        lambda *args, **kwargs: {},
     )
     now = datetime.now(UTC)
     sample, observed = prepare_parallel_epoch(
@@ -198,7 +198,8 @@ def test_prepare_refusal_preserves_http_status_and_response_body(tmp_path, monke
         epoch_events=lambda _: [],
     )
     monkeypatch.setattr(
-        "nanolab.tasks.one_shot.qualification.scrape_metrics", lambda *args: {}
+        "nanolab.tasks.one_shot.qualification.scrape_metrics",
+        lambda *args, **kwargs: {},
     )
     start = datetime.now(UTC) + timedelta(seconds=3)
     output = tmp_path / "timing.jsonl"

@@ -68,15 +68,18 @@ def test_logging_fingerprint_excludes_run_identity_and_includes_budget():
     )
 
 
-def test_collector_must_leave_room_for_compute():
+def test_collector_memory_must_leave_room_for_function_pool():
+    data = settings(
+        {
+            "enabled": True,
+            "endpoint": "http://192.168.64.1:3100/loki/api/v1/push",
+            "memoryMiB": 1024,
+        }
+    ).model_dump(by_alias=True)
+    for node in data["nodes"]:
+        node["memoryMiB"] = 1024
     with pytest.raises(ValidationError, match="collector"):
-        settings(
-            {
-                "enabled": True,
-                "endpoint": "http://192.168.64.1:3100/loki/api/v1/push",
-                "cpu": 2,
-            }
-        )
+        OneShotConfig.model_validate(data)
 
 
 def test_external_backend_is_never_mutated(tmp_path, monkeypatch):
@@ -124,6 +127,10 @@ def fake_collector(
 
     class Node:
         provider: "Node"
+
+        def __init__(self):
+            self.recovery: list[str] = []
+
         config = SimpleNamespace(id="edge-0", kind="edge")
         request = object()
         vm = Resource(
@@ -400,7 +407,7 @@ def test_export_disk_error_does_not_skip_owned_cleanup(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="state archive"):
         resource.release(inputs, value)
     assert any(argv[:3] == ("docker", "rm", "-f") for argv in commands)
-    assert any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
+    assert not any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
 
 
 def test_compensation_does_not_repeat_completed_cleanup_after_archive_failure(
@@ -451,7 +458,9 @@ def test_backend_export_disk_error_does_not_skip_owned_cleanup(tmp_path, monkeyp
     monkeypatch.setattr(Path, "write_text", disk_full)
     resource = backend_resource(logs, root=tmp_path, run_dir=tmp_path)
     assert logs.endpoint is not None
-    resource.release(TaskInputs._for_resources({}, set()), logs.endpoint)
+    assert logs.endpoint is not None
+    with pytest.raises(RuntimeError, match="archive"):
+        resource.release(TaskInputs._for_resources({}, set()), logs.endpoint)
     assert any("down" in argv for argv in commands)
 
 
@@ -488,3 +497,72 @@ def test_owned_backend_requires_private_vm_facing_binding(bind):
                 "backendBind": bind,
             }
         )
+
+
+def test_backend_raw_is_stopped_and_archived_before_volume_removal(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from sonata_engine import TaskInputs
+
+    from nanolab.tasks.one_shot.logging import backend_resource
+
+    logs = settings(
+        {
+            "enabled": True,
+            "endpoint": "http://10.0.0.1:3100/loki/api/v1/push",
+            "backendOwned": True,
+            "backendBind": "10.0.0.1",
+        }
+    ).observability.logs
+    calls = []
+
+    def command(argv, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ["docker", "cp"]:
+            target = Path(argv[-1])
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "chunk").write_bytes(b"preserved Loki data")
+        return SimpleNamespace(
+            returncode=0, stdout="owned-loki\n" if "ps" in argv else "", stderr=""
+        )
+
+    monkeypatch.setattr("nanolab.tasks.one_shot.logging.subprocess.run", command)
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.logging.subprocess.check_output", lambda *a, **kw: ""
+    )
+    resource = backend_resource(logs, root=tmp_path, run_dir=tmp_path)
+    assert logs.endpoint is not None
+    resource.release(TaskInputs._for_resources({}, set()), logs.endpoint)
+    assert (
+        tmp_path / "logging/backend-data/chunk"
+    ).read_bytes() == b"preserved Loki data"
+    assert (tmp_path / "logging/backend-data-sha256.json").exists()
+    stop = next(i for i, c in enumerate(calls) if "stop" in c)
+    copy = next(i for i, c in enumerate(calls) if c[:2] == ["docker", "cp"])
+    down = next(i for i, c in enumerate(calls) if "down" in c)
+    assert stop < copy < down
+
+
+def test_collector_export_disk_failure_is_operational_after_cleanup(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    resource, inputs, commands = fake_collector(tmp_path, monkeypatch)
+    successful_query(monkeypatch)
+    value = resource.acquire(inputs)
+    original = Path.write_text
+
+    def disk_full(path, *args, **kwargs):
+        if path.name == "collector-metrics.txt":
+            raise OSError("export disk full")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", disk_full)
+    with pytest.raises(RuntimeError, match="export"):
+        resource.release(inputs, value)
+    assert any(argv[:3] == ("docker", "rm", "-f") for argv in commands)
+    assert any(argv[:3] == ("docker", "volume", "rm") for argv in commands)

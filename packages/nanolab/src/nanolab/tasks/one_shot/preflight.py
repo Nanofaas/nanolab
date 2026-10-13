@@ -12,6 +12,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from sonata_engine import Task, TaskInputs, TaskOutcome
 
+from nanolab.config.one_shot import operational_limit
 from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
 from nanolab.one_shot.topology import observe_neighbors
 
@@ -152,6 +153,7 @@ def measure_http_clock(
     repetitions: int = 10,
     record_probe: Callable[[dict], None] | None = None,
     tolerate_failures: bool = False,
+    timeout_seconds: float = 1,
 ) -> tuple[float, float, datetime]:
     """Keep UTC diagnostics and monotonic brackets, including failed attempts."""
     samples = []
@@ -164,7 +166,7 @@ def measure_http_clock(
         remote_boot = None
         failure = None
         try:
-            response = http.get(url + "/clock", timeout=1)
+            response = http.get(url + "/clock", timeout=timeout_seconds)
             response.raise_for_status()
             payload = response.json()
             remote = float(payload["timestamp"])
@@ -358,9 +360,12 @@ class CollectTopologyTask(Task[TopologyEvidence]):
             "workflow-validation", "scientific-experiment"
         ] = "workflow-validation",
         strict_memory: bool = False,
+        require_no_swap: bool = True,
         protocol_version: Literal[1, 2] = 1,
+        settings=None,
     ):
         """Bind explicit resource handles and expected physical identities."""
+        self.settings = settings
         self.collectors = collectors or {}
         self.neighbor_graph = neighbor_graph or {
             key: tuple(
@@ -374,6 +379,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         self.node_function_settings = node_function_settings or {}
         self.purpose: Literal["workflow-validation", "scientific-experiment"] = purpose
         self.strict_memory = strict_memory
+        self.require_no_swap = require_no_swap
         self.protocol_version: Literal[1, 2] = protocol_version
         self.resources, self.endpoints, self.probes = resources, endpoints, probes
         self.distribution, self.function_settings = distribution, function_settings
@@ -433,7 +439,9 @@ class CollectTopologyTask(Task[TopologyEvidence]):
             for component in built.components
             if component.kind == "function"
         }
-        with httpx.Client(trust_env=False) as http:
+        with httpx.Client(
+            trust_env=False, timeout=operational_limit(self.settings, "api_seconds", 30)
+        ) as http:
             for key, node in self.resources.nodes.items():
                 vm = inputs.resource(node.vm)
                 url = inputs.resource(self.endpoints[key])
@@ -469,6 +477,9 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                         http=http,
                         record_probe=record_probe,
                         tolerate_failures=self.protocol_version == 2,
+                        timeout_seconds=operational_limit(
+                            self.settings, "collection_http_seconds", 1
+                        ),
                     )
                     self.observations[key]["clock"] = {
                         "status": clock_status,
@@ -487,7 +498,13 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                         "error": str(error),
                     }
                 if node.config.kind == "edge":
-                    client = NanoFaasOneShotClient(url, http=http)
+                    client = NanoFaasOneShotClient(
+                        url,
+                        http=http,
+                        timeout_seconds=operational_limit(
+                            self.settings, "api_seconds", 30
+                        ),
+                    )
                     if self.protocol_version == 1:
                         if clock is None or measured_at is None:
                             raise ValueError("missing required v1 clock evidence")
@@ -503,7 +520,9 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                             if other.config.kind == "edge" and other.config.id != key
                         }
                     )
-                    deadline = time.monotonic() + 30
+                    deadline = time.monotonic() + operational_limit(
+                        self.settings, "replica_start_seconds", 30
+                    )
                     status = client.status()
                     while time.monotonic() < deadline:
                         status = client.status()
@@ -538,13 +557,20 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                 for function, expected in self.node_function_settings.get(
                     key, self.function_settings
                 ).items():
-                    deadline = time.monotonic() + 30
+                    deadline = time.monotonic() + operational_limit(
+                        self.settings, "replica_start_seconds", 30
+                    )
                     while True:
                         try:
                             runtime, observed = runtime_endpoint(
                                 node, function, inputs=inputs
                             )
-                            response = http.get(runtime + "/runtime/status", timeout=2)
+                            response = http.get(
+                                runtime + "/runtime/status",
+                                timeout=operational_limit(
+                                    self.settings, "collection_http_seconds", 2
+                                ),
+                            )
                             response.raise_for_status()
                             physical = response.json()
                             break
@@ -575,7 +601,10 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                         runtime_limits[function] = sample
                         self.observations[key]["runtimeLimits"] = runtime_limits
                         validate_strict_cgroup(
-                            sample, memory_mib=expected.memory_mib, cpu=expected.cpu
+                            sample,
+                            memory_mib=expected.memory_mib,
+                            cpu=expected.cpu,
+                            require_no_swap=self.require_no_swap,
                         )
                     spec_response = http.get(url + "/v1/functions/" + function)
                     spec_response.raise_for_status()
@@ -726,19 +755,25 @@ def collect_container_cgroup(node: NodeResource, observed: dict) -> dict:
     return sample
 
 
-def validate_strict_cgroup(sample: dict, *, memory_mib: int, cpu: float) -> None:
-    """Refuse wrong units, swap, missing evidence, unbounded CPU and prior OOM."""
+def validate_strict_cgroup(
+    sample: dict, *, memory_mib: int, cpu: float, require_no_swap: bool = True
+) -> None:
+    """Verify limits; an explicit observation can retain the known swap defect."""
     try:
         memory = int(sample["memory.max"])
-        swap = int(sample["memory.swap.max"])
+        swap = sample["memory.swap.max"]
+        if swap != "max":
+            swap = int(swap)
         current, peak = int(sample["memory.current"]), int(sample["memory.peak"])
         quota, period = map(int, sample["cpu.max"].split())
         events = dict(line.split() for line in sample["memory.events"].splitlines())
         oom, killed = int(events["oom"]), int(events["oom_kill"])
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("missing or invalid cgroup limit evidence") from error
-    if memory != memory_mib * 1024 * 1024 or swap != 0:
+    if memory != memory_mib * 1024 * 1024 or (require_no_swap and swap != 0):
         raise ValueError("cgroup memory or swap limit mismatch")
+    if swap != "max" and swap < 0:
+        raise ValueError("invalid cgroup swap evidence")
     if period <= 0 or quota <= 0 or abs(quota / period - cpu) > 1e-6:
         raise ValueError("cgroup CPU quota mismatch")
     if current < 0 or peak < current or oom != 0 or killed != 0:

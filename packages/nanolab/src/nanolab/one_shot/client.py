@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any, Literal, Self
 from urllib.parse import quote
@@ -97,6 +98,56 @@ class NodeStatus(ApiModel):
         return self
 
 
+class AssignmentDiagnostic(ApiModel):
+    """Local handshake observations; missing replies do not prove nondelivery."""
+
+    observed_at_utc: datetime = Field(alias="observedAtUtc")
+    monotonic_offset_seconds: float = Field(
+        alias="monotonicOffsetSeconds", ge=0, allow_inf_nan=False
+    )
+    session_id: str | None = Field(alias="sessionId")
+    node_id: str = Field(alias="nodeId")
+    epoch: int = Field(ge=0)
+    round: int = Field(ge=0)
+    assignment_id: str = Field(alias="assignmentId")
+    function: str
+    version: str
+    buyer_generation: int = Field(alias="buyerGeneration", ge=1)
+    seller_generation: int = Field(alias="sellerGeneration", ge=1)
+    buyer_id: str = Field(alias="buyerId")
+    buyer_incarnation: str = Field(alias="buyerIncarnation")
+    seller_id: str = Field(alias="sellerId")
+    seller_incarnation: str = Field(alias="sellerIncarnation")
+    negotiated_quantity: int = Field(alias="negotiatedQuantity", ge=0)
+    confirmed_quantity: int = Field(alias="confirmedQuantity", ge=0)
+    ready_received: bool = Field(alias="readyReceived")
+    ack_sent: bool = Field(alias="ackSent")
+    ack_received: bool = Field(alias="ackReceived")
+    ack_response_received: bool = Field(alias="ackResponseReceived")
+    reason: Literal[
+        "CONFIRMED",
+        "PARTIAL_READY",
+        "TIMEOUT",
+        "PEER_REFUSED",
+        "TRANSPORT_ERROR",
+        "READY_NOT_RECEIVED",
+        "ACK_NOT_RECEIVED",
+        "NOT_ATTEMPTED_TIME_WINDOW",
+    ]
+    residual_cloud_rate: float = Field(
+        alias="residualCloudRate", ge=0, allow_inf_nan=False
+    )
+
+    @model_validator(mode="after")
+    def validate_quantities(self) -> Self:
+        """Reject confirmations beyond the negotiated assignment quantity."""
+        if self.confirmed_quantity > self.negotiated_quantity:
+            raise ValueError("confirmed quantity exceeds negotiated assignment")
+        if self.node_id not in {self.buyer_id, self.seller_id}:
+            raise ValueError("diagnostic node is not an assignment endpoint")
+        return self
+
+
 class PlanActivation(ApiModel):
     """Prepare result, including readiness failures rather than just HTTP success."""
 
@@ -106,6 +157,7 @@ class PlanActivation(ApiModel):
     ready_replicas: dict[str, int] = Field(alias="readyReplicas")
     reason: str | None
     prepared_at: datetime = Field(alias="preparedAt")
+    diagnostics: list[AssignmentDiagnostic] = Field(default_factory=list)
 
 
 class EventEntry(ApiModel):
@@ -284,10 +336,17 @@ class NanoFaasOneShotClient:
     def epoch_events(
         self, epoch: int, *, after: int = 0, limit: int = 100, max_pages: int = 100
     ) -> list[EventPage]:
+        """Keep the complete-page list contract for existing qualification clients."""
+        return list(
+            self.iter_epoch_events(epoch, after=after, limit=limit, max_pages=max_pages)
+        )
+
+    def iter_epoch_events(
+        self, epoch: int, *, after: int = 0, limit: int = 100, max_pages: int = 100
+    ) -> Iterator[EventPage]:
         """Return all bounded pages and reject stalled cursors or truncation."""
         if epoch < 0 or after < 0 or not 1 <= limit <= 1000 or max_pages < 1:
             raise ValueError("invalid event pagination")
-        pages: list[EventPage] = []
         for _ in range(max_pages):
             page = EventPage.model_validate(
                 self._request(
@@ -300,9 +359,9 @@ class NanoFaasOneShotClient:
                 if entry.cursor <= after or entry.event["epoch"] != epoch:
                     raise ValueError("invalid event cursor or epoch")
                 after = entry.cursor
-            pages.append(page)
+            yield page
             if len(page.entries) < limit:
-                return pages
+                return
         raise ValueError("event collection exceeded page budget; evidence truncated")
 
     def update_clock_health(

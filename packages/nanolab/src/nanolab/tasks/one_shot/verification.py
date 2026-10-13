@@ -138,8 +138,11 @@ def verify_runtime_inventory(rows, *, functions, nodes, node_functions=None):
     return sorted(set(violations))
 
 
-def verify_epoch_flows(plans: dict, *, neighbor_graph=None) -> None:
+def verify_epoch_flows(
+    plans: dict, *, neighbor_graph=None, observation_only=False
+) -> list[dict]:
     """Match acknowledged one-hop peer assignments and conserve forecast rates."""
+    diagnostics = []
     for node, plan in plans.items():
         for name, function in plan["functions"].items():
             outbound = sum(
@@ -178,7 +181,18 @@ def verify_epoch_flows(plans: dict, *, neighbor_graph=None) -> None:
                         raise ValueError("peer assignment outside one-hop topology")
                     other = plans[peer]["functions"].get(name, {}).get(counterpart, [])
                     if row not in other:
+                        if observation_only and direction == "inbound":
+                            diagnostics.append(
+                                {
+                                    "kind": "unusedReservation",
+                                    "node": node,
+                                    "function": name,
+                                    "assignment": row,
+                                }
+                            )
+                            continue
                         raise ValueError("peer ready confirmation is not reciprocal")
+    return diagnostics
 
 
 def realized_utility(cells, *, functions, cloud) -> float | None:

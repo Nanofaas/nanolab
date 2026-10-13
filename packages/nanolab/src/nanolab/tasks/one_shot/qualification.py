@@ -293,13 +293,15 @@ def upload_window(
     return client.load_trace(trace, revision=revision).revision
 
 
-def scrape_metrics(http: httpx.Client, endpoint: str) -> dict[str, float]:
+def scrape_metrics(
+    http: httpx.Client, endpoint: str, *, timeout: float = 5
+) -> dict[str, float]:
     """Read complete wall-time timer counters separately from parallel CPU timers."""
     from urllib.parse import urlsplit
 
     address = urlsplit(endpoint)
     response = http.get(
-        f"http://{address.hostname}:9090/actuator/prometheus", timeout=5
+        f"http://{address.hostname}:9090/actuator/prometheus", timeout=timeout
     )
     response.raise_for_status()
     return parse_prometheus(response.text, (AUCTION_SUM, AUCTION_COUNT, SOLVER_SUM))
@@ -315,16 +317,32 @@ def prepare_parallel_epoch(
     session_id: str | None = None,
     activation_at: float | None = None,
     clock: ClockMonitor | None = None,
+    observation_only: bool = False,
+    settings=None,
 ) -> tuple[WallTimingSample, dict[str, Any]]:
     """Trigger each node once; save failures/events and bound the full global wall."""
     if session_id is not None and (activation_at is None or clock is None):
         raise ValueError(
             "logical preparation needs a monotonic activation deadline and monitor"
         )
-    before = {
-        key: scrape_metrics(client.http, client.base_url)
-        for key, client in clients.items()
-    }
+    from nanolab.config.one_shot import operational_limit
+
+    before = {}
+    before_errors = {}
+    for key, client in clients.items():
+        if observation_only:
+            before_errors[key] = "diagnostic reads deferred to autonomous collector"
+            continue
+        try:
+            before[key] = scrape_metrics(
+                client.http,
+                client.base_url,
+                timeout=operational_limit(settings, "collection_http_seconds", 5),
+            )
+        except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            if not observation_only:
+                raise
+            before_errors[key] = str(error)
     barrier = Barrier(len(clients) + 1)
     launched = time.monotonic()
     activation_deadline = activation_at if activation_at is not None else launched
@@ -332,9 +350,14 @@ def prepare_parallel_epoch(
 
     def prepare(binding):
         key, client = binding
-        barrier.wait(timeout=10)
+        barrier.wait(timeout=operational_limit(settings, "barrier_seconds", 10))
         began = time.monotonic()
-        row: dict[str, Any] = {"triggerOffsetSeconds": began - launched}
+        row: dict[str, Any] = {
+            "triggerOffsetSeconds": began - launched,
+            "measurementComplete": key not in before_errors,
+        }
+        if key in before_errors:
+            row["collectionError"] = before_errors[key]
         try:
             result = (
                 client.prepare_epoch(epoch, starts_at=starts_at, ends_at=ends_at)
@@ -377,7 +400,7 @@ def prepare_parallel_epoch(
 
     with ThreadPoolExecutor(max_workers=len(clients)) as pool:
         futures = [pool.submit(prepare, item) for item in clients.items()]
-        barrier.wait(timeout=10)
+        barrier.wait(timeout=operational_limit(settings, "barrier_seconds", 10))
         rows = dict(future.result() for future in futures)
     complete = all(row["complete"] for row in rows.values())
     negotiation_wall = max(row["readyOffsetSeconds"] for row in rows.values())
@@ -404,6 +427,13 @@ def prepare_parallel_epoch(
                     result.status == "PREPARED"
                     and result.desired_replicas == result.ready_replicas
                 )
+                row["fullyPrepared"] = row["complete"]
+                row["executionUsable"] = result.status in {
+                    "PREPARED",
+                    "DEGRADED",
+                } and bool(result.plan)
+                if observation_only:
+                    row["complete"] = row["executionUsable"]
             except (httpx.HTTPError, ValueError, RuntimeError) as error:
                 row.update(complete=False, error=str(error))
                 if isinstance(error, httpx.HTTPStatusError):
@@ -429,8 +459,37 @@ def prepare_parallel_epoch(
         complete = all(row["complete"] for row in rows.values())
     for key, client in clients.items():
         row = rows[key]
+        result = row.get("result") or {}
+        row.setdefault(
+            "fullyPrepared",
+            result.get("status") == "PREPARED"
+            and result.get("desiredReplicas") == result.get("readyReplicas"),
+        )
+        row.setdefault(
+            "executionUsable",
+            result.get("status") in {"PREPARED", "DEGRADED"}
+            and bool(result.get("plan")),
+        )
+        if observation_only:
+            row["complete"] = row["executionUsable"]
+            row.update(
+                measurementComplete=False,
+                auctionSeconds=None,
+                solverCpuSeconds=None,
+                eventPages=[],
+                diagnosticSource="metrics.jsonl/runtime-events.jsonl",
+            )
+            continue
         try:
-            after = scrape_metrics(client.http, client.base_url)
+            if key in before_errors:
+                raise ValueError(
+                    "initial metric sample unavailable: " + before_errors[key]
+                )
+            after = scrape_metrics(
+                client.http,
+                client.base_url,
+                timeout=operational_limit(settings, "collection_http_seconds", 5),
+            )
             count = after.get(AUCTION_COUNT, 0) - before[key].get(AUCTION_COUNT, 0)
             if count != 1:
                 raise ValueError("auction timer count did not advance exactly once")
@@ -438,7 +497,20 @@ def prepare_parallel_epoch(
             row["solverCpuSeconds"] = after.get(SOLVER_SUM, 0) - before[key].get(
                 SOLVER_SUM, 0
             )
-            pages = client.epoch_events(epoch)
+        except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            row["collectionError"] = str(error)
+            row["measurementComplete"] = False
+            if not observation_only:
+                complete = False
+        try:
+            pages = client.epoch_events(
+                epoch,
+                **(
+                    {"max_pages": int(operational_limit(settings, "event_pages", 100))}
+                    if observation_only
+                    else {}
+                ),
+            )
             row["eventPages"] = [
                 page.model_dump(mode="json", by_alias=True) for page in pages
             ]
@@ -446,7 +518,11 @@ def prepare_parallel_epoch(
                 raise ValueError("no epoch event evidence")
         except (httpx.HTTPError, ValueError, RuntimeError) as error:
             row["collectionError"] = str(error)
-            complete = False
+            row["measurementComplete"] = False
+            if not observation_only:
+                complete = False
+    if observation_only:
+        complete = all(row["executionUsable"] for row in rows.values())
     wall = max(row["readyOffsetSeconds"] for row in rows.values())
     operational_wall = negotiation_wall + activation_wall
     observation = {
@@ -455,6 +531,7 @@ def prepare_parallel_epoch(
         "endsAt": ends_at.isoformat(),
         "nodes": rows,
         "censored": not complete,
+        "measurementComplete": all(row["measurementComplete"] for row in rows.values()),
         "globalReadyWallSeconds": wall,
         "auctionWallUpperBoundSeconds": operational_wall if complete else None,
         "method": "parallel-trigger-to-all-ready-conservative-auction-upper-bound",

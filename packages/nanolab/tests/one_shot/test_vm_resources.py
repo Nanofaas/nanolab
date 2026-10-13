@@ -241,8 +241,9 @@ def test_failed_run_report_reads_vm_raw_without_completion_evidence(tmp_path):
     assert result["vmResources"]["nodes"]["cloud"]["missingSeconds"]
 
 
+@pytest.mark.parametrize("missing_initial", [False, True])
 def test_streams_start_before_load_and_failed_cleanup_reaps_all_transports(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, missing_initial
 ):
     from types import SimpleNamespace
 
@@ -320,9 +321,25 @@ def test_streams_start_before_load_and_failed_cleanup_reaps_all_transports(
         trace=SimpleNamespace(windows=[{}], period_seconds=3),
         topology=SimpleNamespace(resources=SimpleNamespace(nodes=nodes)),
     )
+    original = module.read_samples
+    if missing_initial:
+        run.supervision = object()
+        monotonic = [0.0]
+        monkeypatch.setattr(module.time, "monotonic", lambda: monotonic[0])
+        monkeypatch.setattr(
+            module.time,
+            "sleep",
+            lambda seconds: monotonic.__setitem__(0, monotonic[0] + seconds),
+        )
+        monkeypatch.setattr(module, "read_samples", lambda _: ([], 0))
     session = VmTelemetrySession(
         run, SimpleNamespace(resource=lambda _: SimpleNamespace(home="/home/ubuntu"))
     )
+    if missing_initial:
+        monkeypatch.setattr(module, "read_samples", original)
+        assert json.loads((tmp_path / "vm-resources/startup.json").read_text())[
+            "missingNodes"
+        ] == ["edge1", "cloud"]
     with pytest.raises(RuntimeError, match="cleanup failures"):
         session.close()
     assert all(p.waited for p in processes)
@@ -756,3 +773,34 @@ def test_excess_cost_is_rejected(off_goodput, on_goodput, off_p95, on_p95):
         "on": {"cell": {"goodput": on_goodput, "p95Seconds": on_p95}},
     }
     assert not qualify_overhead([pair] * 3, expected_cells={"cell"})["qualified"]
+
+
+def test_sampler_preserves_inventory_when_all_cgroup_reads_fail(monkeypatch, capsys):
+    from nanolab.one_shot import vm_sampler
+
+    class Socket:
+        def get_json(self, path):
+            if path == "/containers/json":
+                return [
+                    {
+                        "Id": "cp",
+                        "Names": ["/nanolab-one-shot-control-plane"],
+                        "Labels": {},
+                    },
+                    {"Id": "log", "Names": ["/nanolab-logs-edge"], "Labels": {}},
+                ]
+            raise OSError("container counters unavailable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(vm_sampler, "DockerSocket", Socket)
+    monkeypatch.setattr(vm_sampler.signal, "signal", lambda *_: None)
+    vm_sampler.sample_loop("edge", duration=0.01)
+    row = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert {item["role"] for item in row["containerInventory"]} == {
+        "control-plane",
+        "collector",
+    }
+    assert row["containers"] == []
+    assert len(row["errors"]) == 2

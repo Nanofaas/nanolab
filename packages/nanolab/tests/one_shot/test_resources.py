@@ -162,7 +162,79 @@ def test_runtime_plan_keeps_each_registration_on_its_own_vm(tmp_path, monkeypatc
     assert workflow.compile().tasks
 
 
+def test_platform_builder_watches_owned_services_without_acquiring(
+    tmp_path, monkeypatch
+):
+    from nanolab.config.scenario import ScenarioConfig
+    from nanolab.one_shot.supervision import CampaignSupervision
+    from nanolab.plans.one_shot_common import add_one_shot_platforms
+
+    settings = config().model_dump(by_alias=True)
+    settings["functions"] = {"one-shot-workload-rust": {"input": {}}}
+    settings["observability"] = {
+        "logs": {
+            "enabled": True,
+            "backendOwned": True,
+            "backendBind": "192.168.64.1",
+            "endpoint": "http://192.168.64.1:3100/loki/api/v1/push",
+        }
+    }
+    scenario = ScenarioConfig.model_validate(
+        {
+            "workflow": "one-shot-calibration",
+            "backend": "container",
+            "functions": ["one-shot-workload-rust"],
+            "oneShot": settings,
+        }
+    )
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "one-shot"}},
+        }
+    )
+    (tmp_path / "functions/rust/one-shot-workload").mkdir(parents=True)
+    supervisor = CampaignSupervision(tmp_path / "run")
+    assets = tmp_path / "deploy/observability"
+    assets.mkdir(parents=True)
+    for name in ("fluent-bit.conf", "parsers.conf"):
+        (assets / name).write_text("# fixture\n")
+    original = supervisor.service_resource
+    wrapped = {}
+
+    def watch(resource, name, probe, **kwargs):
+        result = original(resource, name, probe, **kwargs)
+        wrapped[name] = result
+        return result
+
+    monkeypatch.setattr(supervisor, "service_resource", watch)
+    workflow = Workflow("watch-wiring")
+    topology = add_one_shot_platforms(
+        workflow,
+        scenario,
+        environment,
+        run_dir=tmp_path,
+        repo_root=tmp_path,
+        supervision=supervisor,
+    )
+    assert set(wrapped) == {"logging-backend"} | {
+        f"{node}:{role}"
+        for node in ("edge-0", "edge-1", "cloud")
+        for role in ("collector", "control-plane")
+    }
+    for node in topology.resources.nodes:
+        assert topology.collectors[node] is wrapped[f"{node}:collector"]
+        assert topology.endpoints[node] is wrapped[f"{node}:control-plane"]
+        assert topology.collectors[node] in topology.endpoints[node].requires
+        assert wrapped["logging-backend"] in topology.collectors[node].requires
+    workflow.add(Observe(), requires=topology.requires)
+    assert workflow.compile().tasks
+    assert not supervisor.checks  # constructing/compiling never acquires services
+
+
 def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
     from sonata_engine import TaskInputs
 
     from nanolab.plans.one_shot_common import _bootstrap
@@ -176,6 +248,13 @@ def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
         config(), environment, run_id="test", repo_root=tmp_path
     )
     node = resources.nodes["edge-0"]
+    cloud_init_calls = []
+
+    def cloud_init(argv, **_kwargs):
+        cloud_init_calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout='{"status":"done"}', stderr="")
+
+    monkeypatch.setattr("nanolab.plans.one_shot_common.subprocess.run", cloud_init)
     operation = RemoteCommandOperation(
         operation_id="vm.provision_base",
         summary="bootstrap",
@@ -203,6 +282,7 @@ def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
         {node.vm},
     )
     resource.acquire(inputs)
+    assert cloud_init_calls[0][:3] == ("multipass", "exec", node.request.name)
     assert observed[0].argv[-1] == "10.0.0.9,"
 
 
@@ -277,8 +357,15 @@ def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypat
 @pytest.mark.parametrize("terminal_queueing", [False, True])
 @pytest.mark.parametrize("baseline", [False, True])
 @pytest.mark.parametrize("scientific", [False, True])
+@pytest.mark.parametrize("forecast_max_age_seconds", [None, 4110])
 def test_control_plane_namespace_and_compensated_cleanup(
-    tmp_path, monkeypatch, failure, terminal_queueing, baseline, scientific
+    tmp_path,
+    monkeypatch,
+    failure,
+    terminal_queueing,
+    baseline,
+    scientific,
+    forecast_max_age_seconds,
 ):
     from types import SimpleNamespace
 
@@ -357,6 +444,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
         run_dir=tmp_path,
         terminal_queueing=terminal_queueing,
         scientific=scientific,
+        forecast_max_age_seconds=forecast_max_age_seconds,
         baseline_depth=2 if baseline else None,
     )
 
@@ -385,6 +473,14 @@ def test_control_plane_namespace_and_compensated_cleanup(
         )
         assert "--nanofaas.admission.profile=SYNC_QUEUE" in launch
         assert "--nanofaas.metrics.profile=advanced" in launch
+        ages = [
+            argument
+            for argument in launch
+            if argument.startswith("--nanofaas.forecasting.max-age=")
+        ]
+        assert ages == (
+            ["--nanofaas.forecasting.max-age=4110s"] if forecast_max_age_seconds else []
+        )
         if baseline and not terminal_queueing:
             assert "--nanofaas.offload.target-url=http://10.0.0.1:8080" in launch
             assert "--sync-queue.max-depth=2" in launch

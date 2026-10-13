@@ -442,12 +442,80 @@ def _write(
     return output
 
 
+def assignment_observations(directory: Path) -> dict:
+    """Keep node-local quantities separate from actual request observations."""
+    from nanolab.one_shot.vm_resources import read_samples
+
+    cells = []
+    path = directory / "epochs.jsonl"
+    epochs, malformed_epochs = read_samples(path)
+    if path.exists():
+        for epoch in epochs:
+            for node, observed in epoch.get("nodes", {}).items():
+                result = observed.get("result") or {}
+                plan = result.get("plan") or {}
+                for function, allocation in plan.get("functions", {}).items():
+                    diagnostics = [
+                        d
+                        for d in result.get("diagnostics", [])
+                        if d["function"] == function
+                    ]
+                    cells.append(
+                        {
+                            "epoch": epoch["epoch"],
+                            "node": node,
+                            "function": function,
+                            "status": result.get("status"),
+                            "executionUsable": observed.get("executionUsable"),
+                            "fullyPrepared": observed.get("fullyPrepared"),
+                            "measurementComplete": observed.get("measurementComplete"),
+                            "assignments": len(diagnostics),
+                            "negotiatedQuantity": sum(
+                                d["negotiatedQuantity"] for d in diagnostics
+                            ),
+                            "confirmedQuantity": sum(
+                                d["confirmedQuantity"] for d in diagnostics
+                            ),
+                            "unconfirmedQuantity": sum(
+                                d["negotiatedQuantity"] - d["confirmedQuantity"]
+                                for d in diagnostics
+                            ),
+                            "plannedCloudRate": allocation.get("cloudRate"),
+                            "diagnostics": diagnostics,
+                        }
+                    )
+    unused, malformed_unused = read_samples(directory / "assignment-observations.jsonl")
+    return {
+        "cells": cells,
+        "unusedReservations": unused,
+        "malformedLines": {
+            "epochs.jsonl": malformed_epochs,
+            "assignment-observations.jsonl": malformed_unused,
+        },
+        "units": (
+            "assignment quantities in flow quanta; plannedCloudRate in requests/s; "
+            "actual requests in returnedResponses"
+        ),
+        "perspective": (
+            "node-local observations; do not sum buyer and seller "
+            "as distinct assignments"
+        ),
+    }
+
+
 def render_report(
     manifest: CampaignManifest, evidence: RunEvidence | None, output: Path
 ) -> Path:
     """Produce standalone interactive HTML and the same numerical JSON."""
     summary = summarize(manifest, evidence)
     resource_charts = []
+    summary["observationOnly"] = manifest.parameters.get("observationOnly") is True
+    summary["operationalOutcome"] = (
+        json.loads((output.parent / "result.json").read_text())
+        if (output.parent / "result.json").exists()
+        else {"state": "not-finalized"}
+    )
+    summary["assignmentObservations"] = assignment_observations(output.parent)
     schedule_path = output.parent / "schedule.json"
     if schedule_path.exists():
         from nanolab.one_shot.returned_errors import summarize_responses
@@ -476,7 +544,9 @@ def render_report(
             )
             + "</p>"
         )
-    if manifest.parameters.get("vmTelemetry"):
+    if manifest.parameters.get("vmTelemetry") or any(
+        (output.parent / "vm-resources").glob("*.jsonl")
+    ):
         from nanolab.one_shot.vm_resources import summarize_resources
 
         generator = cast(dict, manifest.parameters.get("generator") or {})
@@ -485,7 +555,11 @@ def render_report(
             anchor=datetime.fromisoformat(manifest.anchor),
             warmup=int(generator.get("warmupSeconds", 720)),
             period=int(manifest.period_seconds),
-            epochs=9,
+            epochs=int(
+                cast(dict, manifest.parameters.get("logicalSchedule") or {}).get(
+                    "epochCount", 9
+                )
+            ),
             nodes=manifest.nodes,
             mode=manifest.mode,
             functions=manifest.functions,
@@ -646,7 +720,11 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
                         anchor=anchor,
                         warmup=int(generator.get("warmupSeconds", 720)),
                         period=int(manifest.period_seconds),
-                        epochs=9,
+                        epochs=int(
+                            cast(
+                                dict, manifest.parameters.get("logicalSchedule") or {}
+                            ).get("epochCount", 9)
+                        ),
                         mode=manifest.mode,
                         functions=manifest.functions,
                         run_id=manifest.run_id,
@@ -767,3 +845,22 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
                 )
             charts.append(figure.to_html(full_html=False, include_plotlyjs=False))
     return charts
+
+
+def finalize_operational_outcome(directory: Path, outcome: dict) -> None:
+    """Update the saved summary after writer shutdown, preserving existing charts."""
+    summary_path, report_path = directory / "report.json", directory / "report.html"
+    if not summary_path.exists() or not report_path.exists():
+        return
+    previous = summary_path.read_text().rstrip("\n")
+    summary = json.loads(previous)
+    summary["operationalOutcome"] = dict(outcome)
+    current = json.dumps(summary, indent=2, allow_nan=False)
+    document = report_path.read_text()
+    old = "<pre>" + html.escape(previous) + "</pre>"
+    if old not in document:
+        raise ValueError("report summary differs from saved evidence")
+    report_path.write_text(
+        document.replace(old, "<pre>" + html.escape(current) + "</pre>", 1)
+    )
+    summary_path.write_text(current + "\n")

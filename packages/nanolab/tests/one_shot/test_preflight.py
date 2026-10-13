@@ -485,6 +485,36 @@ def test_strict_limits_accept_actual_bytes_zero_swap_and_cpu_quota():
     validate_strict_cgroup(strict_cgroup_sample(), memory_mib=64, cpu=0.25)
 
 
+def test_observation_can_retain_known_swap_loss_without_rewriting_sample():
+    from nanolab.tasks.one_shot.preflight import validate_strict_cgroup
+
+    sample = strict_cgroup_sample()
+    sample["memory.swap.max"] = "max"
+    validate_strict_cgroup(sample, memory_mib=64, cpu=0.25, require_no_swap=False)
+    assert sample["memory.swap.max"] == "max"
+    with pytest.raises(ValueError, match="cgroup"):
+        validate_strict_cgroup(sample, memory_mib=64, cpu=0.25)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("memory.max", "max"),
+        ("cpu.max", "max 100000"),
+        ("memory.events", "oom 1\noom_kill 1"),
+        ("memory.swap.max", "garbage"),
+    ],
+)
+def test_observed_swap_does_not_relax_ram_cpu_oom_or_evidence(field, value):
+    from nanolab.tasks.one_shot.preflight import validate_strict_cgroup
+
+    sample = strict_cgroup_sample()
+    sample["memory.swap.max"] = "max"
+    sample[field] = value
+    with pytest.raises(ValueError, match="cgroup"):
+        validate_strict_cgroup(sample, memory_mib=64, cpu=0.25, require_no_swap=False)
+
+
 def test_cgroup_remote_failure_is_preserved():
     from types import SimpleNamespace
 

@@ -17,7 +17,11 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.application.execution import build_role_bindings
 from nanolab.config import EnvironmentConfig, ScenarioConfig
-from nanolab.config.one_shot import OneShotFunction, resolve_node_functions
+from nanolab.config.one_shot import (
+    OneShotFunction,
+    operational_limit,
+    resolve_node_functions,
+)
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.one_shot.infrastructure import (
     NodeExecutor,
@@ -87,9 +91,42 @@ class OneShotTopology:
         )
 
 
-def _bootstrap(node: NodeResource, root: Path) -> Resource[None]:
+def _bootstrap(
+    node: NodeResource, root: Path, *, run_dir: Path | None = None, settings=None
+) -> Resource[None]:
     def acquire(inputs: TaskInputs) -> None:
         vm = inputs.resource(node.vm)
+        ready = subprocess.run(
+            (
+                "multipass",
+                "exec",
+                vm.name,
+                "--",
+                "sudo",
+                "cloud-init",
+                "status",
+                "--wait",
+                "--format",
+                "json",
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=operational_limit(settings, "cloud_init_seconds", 600),
+        )
+        if run_dir is not None:
+            (run_dir / f"{node.config.id}-cloud-init.json").write_text(
+                json.dumps(
+                    {
+                        "returncode": ready.returncode,
+                        "stdout": ready.stdout,
+                        "stderr": ready.stderr,
+                    }
+                )
+                + "\n"
+            )
+        if ready.returncode != 0 or json.loads(ready.stdout).get("status") != "done":
+            raise RuntimeError(f"{node.config.id}: cloud-init is not complete")
         request = node.request.model_copy(
             update={"host": vm.host, "user": vm.user, "home": vm.home}
         )
@@ -123,6 +160,8 @@ def _control_plane(
     neighbor_graph: dict[str, tuple[str, ...]] | None = None,
     scientific: bool = False,
     strict_memory: bool = False,
+    forecast_max_age_seconds: int | None = None,
+    settings=None,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
 
@@ -269,6 +308,11 @@ def _control_plane(
             f"--nanofaas.forecasting.node-id={node.config.id}",
             f"--nanofaas.forecasting.provider={forecast_provider}",
             "--nanofaas.forecasting.window=1s",
+            *(
+                [f"--nanofaas.forecasting.max-age={forecast_max_age_seconds}s"]
+                if forecast_max_age_seconds is not None
+                else []
+            ),
             f"--nanofaas.offload.one-shot.enabled={boolean}",
             "--sync-queue.enabled="
             + str(
@@ -300,15 +344,23 @@ def _control_plane(
                 for index, host in enumerate(peers)
             )
         node.command(tuple(args))
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + operational_limit(
+            settings, "service_start_seconds", 90
+        )
         with httpx.Client(trust_env=False) as http:
             while time.monotonic() < deadline:
                 try:
                     http.get(
-                        f"http://{vm.host}:9090/actuator/health/readiness", timeout=2
+                        f"http://{vm.host}:9090/actuator/health/readiness",
+                        timeout=operational_limit(
+                            settings, "collection_http_seconds", 2
+                        ),
                     ).raise_for_status()
                     http.get(
-                        f"http://{vm.host}:8080/v1/functions", timeout=2
+                        f"http://{vm.host}:8080/v1/functions",
+                        timeout=operational_limit(
+                            settings, "collection_http_seconds", 2
+                        ),
                     ).raise_for_status()
                     return f"http://{vm.host}:8080"
                 except httpx.HTTPError:
@@ -341,6 +393,8 @@ def add_one_shot_platforms(
     terminal_queueing: bool = False,
     baseline: bool = False,
     observer_bootstrap: bool = False,
+    forecast_max_age_seconds: int | None = None,
+    supervision=None,
 ) -> OneShotTopology:
     """Compose existing staged recipes, bootstrap and function resources per VM."""
     settings = config.one_shot
@@ -462,7 +516,8 @@ def add_one_shot_platforms(
     )
 
     bootstraps = {
-        key: _bootstrap(node, repo_root) for key, node in resources.nodes.items()
+        key: _bootstrap(node, repo_root, run_dir=run_dir, settings=settings)
+        for key, node in resources.nodes.items()
     }
     logs = settings.observability.logs
     collectors = {}
@@ -474,6 +529,8 @@ def add_one_shot_platforms(
             run_dir=run_dir,
             host_cpus=placement.logging_cpus if placement else None,
             operator=resources.generator if placement else None,
+            settings=settings,
+            supervision=supervision,
         )
         collectors = {
             key: collector_resource(
@@ -484,9 +541,50 @@ def add_one_shot_platforms(
                 root=repo_root,
                 run_dir=run_dir,
                 mode="BASELINE" if baseline else forecast_provider,
+                settings=settings,
             )
             for key, node in resources.nodes.items()
         }
+
+    def watch_container(resource, node, role, name_for):
+        if supervision is None:
+            return resource
+
+        def probe(value):
+            observed = subprocess.run(
+                [
+                    "multipass",
+                    "exec",
+                    node.request.name,
+                    "--",
+                    "docker",
+                    "inspect",
+                    "--format={{.State.Running}}",
+                    name_for(value),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=operational_limit(settings, "collection_http_seconds", 10),
+            )
+            if observed.returncode or observed.stdout.strip() != "true":
+                raise RuntimeError(
+                    f"{node.config.id}: owned {role} not running: {observed.stderr}"
+                )
+
+        return supervision.service_resource(
+            resource,
+            node.config.id + ":" + role,
+            probe,
+            join_seconds=operational_limit(settings, "worker_join_seconds", 40),
+        )
+
+    collectors = {
+        key: watch_container(
+            resource, resources.nodes[key], "collector", lambda value: value.container
+        )
+        for key, resource in collectors.items()
+    }
 
     endpoints = {
         key: _control_plane(
@@ -501,6 +599,8 @@ def add_one_shot_platforms(
             archive=archive,
             run_dir=run_dir,
             forecast_provider=forecast_provider,
+            forecast_max_age_seconds=forecast_max_age_seconds,
+            settings=settings,
             terminal_queueing=terminal_queueing,
             baseline_depth=max(
                 fn.max_replicas for fn in resolve_node_functions(settings, key).values()
@@ -509,6 +609,15 @@ def add_one_shot_platforms(
             else None,
         )
         for key, node in resources.nodes.items()
+    }
+    endpoints = {
+        key: watch_container(
+            resource,
+            resources.nodes[key],
+            "control-plane",
+            lambda _value: "nanolab-one-shot-control-plane",
+        )
+        for key, resource in endpoints.items()
     }
     probes = {key: node_probe_resource(node) for key, node in resources.nodes.items()}
 

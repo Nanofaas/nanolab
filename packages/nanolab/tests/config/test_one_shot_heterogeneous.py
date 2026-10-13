@@ -49,15 +49,16 @@ def test_effective_limits_are_node_specific():
     assert model.functions["f"].max_replicas == 2
 
 
-def test_replica_pool_cannot_exceed_cpu_budget():
+def test_replica_cpu_limits_can_exceed_vm_capacity_without_being_changed():
     data = settings()
     data["nodes"][0].update(
         cpus=2,
         memoryCapacityMiB=768,
         functionLimits={"f": {"cpu": 1, "memoryMiB": 256, "maxReplicas": 3}},
     )
-    with pytest.raises(ValueError, match="CPU"):
-        config.OneShotConfig.model_validate(data)
+    model = config.OneShotConfig.model_validate(data)
+    function = config.resolve_node_functions(model, "edge-1")["f"]
+    assert (function.cpu, function.memory_mib, function.max_replicas) == (1, 256, 3)
 
 
 def test_unknown_function_override_is_rejected():

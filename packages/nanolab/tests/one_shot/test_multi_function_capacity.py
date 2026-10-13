@@ -1,6 +1,4 @@
-"""Memory-feasible allocation bounds preserve CPU and platform reservations."""
-
-from copy import deepcopy
+"""Memory feasibility preserves user CPU limits, including shared-CPU contention."""
 
 import pytest
 from pydantic import ValidationError
@@ -41,9 +39,9 @@ def test_individual_maxima_do_not_imply_simultaneous_cpu_overcommit():
     assert len(settings.functions) == 5
 
 
-def test_memory_feasible_cpu_overcommit_is_still_rejected():
-    with pytest.raises(ValidationError, match="CPU"):
-        OneShotConfig.model_validate(multi_settings(cpu=0.21))
+def test_memory_feasible_replicas_allow_summed_cpu_limits_above_vm_capacity():
+    settings = OneShotConfig.model_validate(multi_settings(cpu=0.21))
+    assert {fn.cpu for fn in settings.functions.values()} == {0.21}
 
 
 def test_initial_five_functions_must_fit_simultaneously():
@@ -52,7 +50,7 @@ def test_initial_five_functions_must_fit_simultaneously():
         OneShotConfig.model_validate(data)
 
 
-def test_control_plane_and_os_are_reserved_before_accepting_replica_cpu():
+def test_function_cpu_limit_is_not_reduced_for_platform_accounting():
     data = multi_settings()
     data["functions"] = {
         "only": {
@@ -62,12 +60,12 @@ def test_control_plane_and_os_are_reserved_before_accepting_replica_cpu():
             "maxReplicas": 1,
         }
     }
-    with pytest.raises(ValidationError, match=r"CPU|reservation"):
-        OneShotConfig.model_validate(data)
+    settings = OneShotConfig.model_validate(data)
+    assert settings.functions["only"].cpu == 0.7
 
 
-def test_collector_reservation_is_checked_against_feasible_replica_bound():
-    data = multi_settings(cpu=0.09)
+def test_collector_does_not_force_lower_function_cpu_limits():
+    data = multi_settings(cpu=0.21)
     data["observability"] = {
         "logs": {
             "enabled": True,
@@ -78,10 +76,25 @@ def test_collector_reservation_is_checked_against_feasible_replica_bound():
     }
     settings = OneShotConfig.model_validate(data)
     assert settings.observability.logs.enabled
-    unsafe = deepcopy(data)
-    unsafe["functions"]["f0"]["cpu"] = 0.11
-    with pytest.raises(ValidationError, match=r"CPU|reservation"):
-        OneShotConfig.model_validate(unsafe)
+    assert settings.observability.logs.cpu == 0.1
+    assert {fn.cpu for fn in settings.functions.values()} == {0.21}
+
+
+def test_larger_memory_pool_keeps_cpu_quotas_for_heterogeneous_functions():
+    data = multi_settings(pool=832)
+    for fn, memory in zip(
+        data["functions"].values(), [64, 128, 256, 128, 256], strict=True
+    ):
+        fn.update(memoryMiB=memory, maxReplicas=832 // memory)
+    settings = OneShotConfig.model_validate(data)
+    assert [fn.memory_mib for fn in settings.functions.values()] == [
+        64,
+        128,
+        256,
+        128,
+        256,
+    ]
+    assert {fn.cpu for fn in settings.functions.values()} == {0.1}
 
 
 @pytest.mark.parametrize(

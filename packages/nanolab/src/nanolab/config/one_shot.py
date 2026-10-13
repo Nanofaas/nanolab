@@ -315,6 +315,47 @@ class OneShotObservability(BaseModel):
     )
 
 
+class OperationalLimits(BaseModel):
+    """Observation procedure limits, independent of experimental resources."""
+
+    model_config = ConfigDict(
+        extra="forbid", allow_inf_nan=False, populate_by_name=True
+    )
+    lead_seconds: float = Field(default=90, alias="leadSeconds", gt=0)
+    max_operational_fraction: float = Field(
+        default=1, alias="maxOperationalFraction", gt=0, le=1
+    )
+    api_seconds: float = Field(default=180, alias="apiSeconds", gt=0)
+    barrier_seconds: float = Field(default=60, alias="barrierSeconds", gt=0)
+    cloud_init_seconds: float = Field(default=1800, alias="cloudInitSeconds", gt=0)
+    service_start_seconds: float = Field(default=300, alias="serviceStartSeconds", gt=0)
+    compose_seconds: float = Field(default=300, alias="composeSeconds", gt=0)
+    worker_start_seconds: float = Field(default=120, alias="workerStartSeconds", gt=0)
+    replica_start_seconds: float = Field(default=300, alias="replicaStartSeconds", gt=0)
+    bootstrap_invocation_seconds: float = Field(
+        default=120, alias="bootstrapInvocationSeconds", gt=0
+    )
+    collection_http_seconds: float = Field(
+        default=10, alias="collectionHttpSeconds", gt=0
+    )
+    generator_drain_seconds: float = Field(
+        default=180, alias="generatorDrainSeconds", gt=0
+    )
+    worker_join_seconds: float = Field(default=300, alias="workerJoinSeconds", gt=0)
+    process_drain_seconds: float = Field(default=30, alias="processDrainSeconds", gt=0)
+    process_exit_seconds: float = Field(default=30, alias="processExitSeconds", gt=0)
+    event_pages: int = Field(default=1000, alias="eventPages", ge=1)
+    schedule_setup_seconds: float = Field(
+        default=90, alias="scheduleSetupSeconds", gt=0
+    )
+
+
+def operational_limit(settings: object | None, name: str, default: float) -> float:
+    """Use frozen observation limits while preserving explicit legacy defaults."""
+    limits = getattr(settings, "operational_limits", None)
+    return getattr(limits, name) if limits is not None else default
+
+
 class OneShotConfig(BaseModel):
     """Provider/purpose boundaries and prerequisites checked before provisioning."""
 
@@ -341,6 +382,9 @@ class OneShotConfig(BaseModel):
     calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
     timing: TimingSettings | None = None
     experiment: ExperimentSettings | None = None
+    operational_limits: OperationalLimits | None = Field(
+        default=None, alias="operationalLimits"
+    )
 
     @model_validator(mode="after")
     def validate_topology(self) -> Self:
@@ -379,18 +423,6 @@ class OneShotConfig(BaseModel):
                 raise ValueError(
                     "initial function replicas must fit simultaneously in memory pool"
                 )
-            reserved_cpu = (
-                0.4
-                if self.strict_memory and self.purpose == "scientific-experiment"
-                else 0
-            )
-            if (
-                replica_cpu_bound(node.memory_capacity_mib, functions) + reserved_cpu
-                > node.cpus + 1e-9
-            ):
-                raise ValueError(
-                    "replica pool/platform reservation exceeds node CPU budget"
-                )
             if (
                 self.strict_memory
                 and self.purpose == "scientific-experiment"
@@ -410,18 +442,6 @@ class OneShotConfig(BaseModel):
         if self.observability.logs.enabled:
             collector = self.observability.logs
             for node in self.nodes:
-                peak_cpu = replica_cpu_bound(
-                    node.memory_capacity_mib, resolve_node_functions(self, node.id)
-                )
-                reserved_cpu = (
-                    0.4
-                    if self.strict_memory and self.purpose == "scientific-experiment"
-                    else 0
-                )
-                if peak_cpu + reserved_cpu + collector.cpu > node.cpus + 1e-9:
-                    raise ValueError(
-                        "collector CPU reservation exceeds node compute budget"
-                    )
                 reserved_memory = (
                     640
                     if self.strict_memory and self.purpose == "scientific-experiment"
@@ -435,15 +455,6 @@ class OneShotConfig(BaseModel):
                         "collector memory reservation leaves no platform memory"
                     )
         return self
-
-
-def replica_cpu_bound(pool_mib: int, functions: dict[str, OneShotFunction]) -> float:
-    """Upper bound all memory-feasible allocations, never assume maxima coexist."""
-    return min(
-        sum(function.cpu * function.max_replicas for function in functions.values()),
-        pool_mib
-        * max(function.cpu / function.memory_mib for function in functions.values()),
-    )
 
 
 def resolve_node_functions(

@@ -266,3 +266,53 @@ def test_cloud_direct_counts_are_separate_from_edge_offload_and_goodput():
     assert summary["throughputOriginalsPerSecond"] == 0.5
     assert summary["cloudDirect"] == {"planned": 100, "completed": 100, "errors": 0}
     assert summary["platformThroughputOriginalsPerSecond"] == 5.5
+
+
+def test_archived_vm_raw_enables_charts_without_manifest_flag(tmp_path, monkeypatch):
+    raw = tmp_path / "vm-resources"
+    raw.mkdir()
+    (raw / "edge-0.jsonl").write_text("{}\n")
+    observed = []
+    monkeypatch.setattr(
+        "nanolab.one_shot.report.resource_figures",
+        lambda *args: observed.append(True) or [],
+    )
+    monkeypatch.setattr(
+        "nanolab.one_shot.vm_resources.summarize_resources",
+        lambda *args, **kwargs: {"complete": False},
+    )
+    render_report(
+        manifest().model_copy(update={"anchor": "2026-10-13T00:00:00+00:00"}),
+        None,
+        tmp_path / "report.html",
+    )
+    assert observed == [True]
+
+
+def test_assignment_report_retains_valid_rows_before_truncated_tail(tmp_path):
+    from nanolab.one_shot.report import assignment_observations
+
+    complete = {
+        "epoch": 0,
+        "nodes": {
+            "edge": {
+                "result": {
+                    "status": "DEGRADED",
+                    "plan": {"functions": {"f": {"cloudRate": 1}}},
+                    "diagnostics": [],
+                }
+            }
+        },
+    }
+    (tmp_path / "epochs.jsonl").write_text(json.dumps(complete) + '\n{"epoch":')
+    (tmp_path / "assignment-observations.jsonl").write_text(
+        '{"kind":"unusedReservation"}\n{"kind":'
+    )
+    summary = assignment_observations(tmp_path)
+    assert len(summary["cells"]) == 1
+    assert len(summary["unusedReservations"]) == 1
+    assert summary["malformedLines"] == {
+        "epochs.jsonl": 1,
+        "assignment-observations.jsonl": 1,
+    }
+    assert (tmp_path / "epochs.jsonl").read_text().endswith('{"epoch":')

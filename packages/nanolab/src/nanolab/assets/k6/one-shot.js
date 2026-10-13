@@ -24,6 +24,7 @@ export default function () {
   });
   let body = {};
   try {body = result.json();} catch (_) {}
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) body = {};
   const output = (row.sdk ? /^\s*([0-9]+)\s*$/ : /"output"\s*:\s*([0-9]+)/).exec(result.body || '');
   console.log(JSON.stringify({...row, event:'result', emittedAt, finishedAt:Date.now()/1000,
     latencySeconds:result.timings.duration/1000, statusCode:result.status, responseBody:result.body,

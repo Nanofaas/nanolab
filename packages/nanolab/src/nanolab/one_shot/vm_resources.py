@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Thread
 from typing import Any
@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from sonata_engine import Resource
 
+from nanolab.config.one_shot import operational_limit
 from nanolab.one_shot import vm_sampler
 from nanolab.tasks.one_shot.artifacts import canonical_bytes, write_immutable_artifact
 
@@ -261,6 +262,13 @@ class VmTelemetrySession:
             "run_id": manifest["run_id"],
         }
         grid = manifest["parameters"].get("logicalSchedule")
+        self.expected_end = (
+            grid["anchorMonotonicSeconds"]
+            + len(run.trace.windows) * run.trace.period_seconds
+            + operational_limit(run.settings, "generator_drain_seconds", 180)
+            if grid is not None
+            else float("inf")
+        )
         self.terminal_probe = terminal_probe if grid is not None else None
         if grid is not None:
             # Final offline correlation uses continuing probes, including later
@@ -311,9 +319,21 @@ class VmTelemetrySession:
                         node.config.id,
                         "--duration",
                         str(
-                            720
+                            max(
+                                0,
+                                grid["anchorMonotonicSeconds"]
+                                + len(run.trace.windows) * run.trace.period_seconds
+                                - time.monotonic(),
+                            )
+                            + operational_limit(
+                                run.settings, "generator_drain_seconds", 180
+                            )
+                            if grid is not None
+                            else context["warmup"]
                             + len(run.trace.windows) * run.trace.period_seconds
-                            + 180
+                            + operational_limit(
+                                run.settings, "generator_drain_seconds", 180
+                            )
                         ),
                         "--context",
                         json.dumps(context),
@@ -336,7 +356,9 @@ class VmTelemetrySession:
                     )
                     session["readers"].append(reader)
                     reader.start()
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + operational_limit(
+                run.settings, "worker_start_seconds", 30
+            )
             while time.monotonic() < deadline:
                 self.require_healthy()
                 if all(
@@ -346,8 +368,26 @@ class VmTelemetrySession:
                     break
                 time.sleep(0.1)
             else:
-                raise TimeoutError(
-                    "VM telemetry startup did not produce all node samples"
+                if getattr(run, "supervision", None) is None:
+                    raise TimeoutError(
+                        "VM telemetry startup did not produce all node samples"
+                    )
+                self.require_healthy()
+                write_immutable_artifact(
+                    directory / "startup.json",
+                    canonical_bytes(
+                        {
+                            "atUtc": datetime.now(UTC).isoformat(),
+                            "measurementComplete": False,
+                            "missingNodes": [
+                                s["node"].config.id
+                                for s in self.sessions
+                                if not read_samples(
+                                    directory / (s["node"].config.id + ".jsonl")
+                                )[0]
+                            ],
+                        }
+                    ),
                 )
             write_immutable_artifact(
                 directory / "policy.json", canonical_bytes(telemetry_policy())
@@ -381,10 +421,15 @@ class VmTelemetrySession:
                     "VM telemetry raw write failed: "
                     + "; ".join(session["readerErrors"])
                 )
-            if process is not None and process.poll() is not None:
+            code = process.poll() if process is not None else None
+            if code is not None and (
+                code != 0
+                or time.monotonic() < getattr(self, "expected_end", float("inf"))
+            ):
                 raise RuntimeError("VM telemetry stopped: " + session["node"].config.id)
             if (
-                path.stat().st_size
+                getattr(self.run, "supervision", None) is None
+                and path.stat().st_size
                 and time.monotonic() - session["lastWriteMonotonic"] > 10
             ):
                 raise RuntimeError("VM telemetry stalled: " + session["node"].config.id)
@@ -403,14 +448,26 @@ class VmTelemetrySession:
                 node.command(("sudo", "python3", session["remote"], "--stop"))
                 if process is not None:
                     try:
-                        process.wait(timeout=10)
+                        process.wait(
+                            timeout=operational_limit(
+                                self.run.settings, "process_drain_seconds", 10
+                            )
+                        )
                     except subprocess.TimeoutExpired:
                         process.terminate()
                         try:
-                            process.wait(timeout=5)
+                            process.wait(
+                                timeout=operational_limit(
+                                    self.run.settings, "process_exit_seconds", 5
+                                )
+                            )
                         except subprocess.TimeoutExpired:
                             process.kill()
-                            process.wait(timeout=5)
+                            process.wait(
+                                timeout=operational_limit(
+                                    self.run.settings, "process_exit_seconds", 5
+                                )
+                            )
                         raise RuntimeError(
                             "remote VM telemetry stop unconfirmed"
                         ) from None
@@ -419,17 +476,33 @@ class VmTelemetrySession:
                 if process is not None and process.poll() is None:
                     process.terminate()
                     try:
-                        process.wait(timeout=5)
+                        process.wait(
+                            timeout=operational_limit(
+                                self.run.settings, "process_exit_seconds", 5
+                            )
+                        )
                     except subprocess.TimeoutExpired:
                         process.kill()
-                        process.wait(timeout=5)
+                        process.wait(
+                            timeout=operational_limit(
+                                self.run.settings, "process_exit_seconds", 5
+                            )
+                        )
                 elif process is not None:
-                    process.wait(timeout=5)
+                    process.wait(
+                        timeout=operational_limit(
+                            self.run.settings, "process_exit_seconds", 5
+                        )
+                    )
             finally:
                 # Process reaping produces EOF; readers must finish before fsync
                 # or closing raw files, otherwise terminal samples can be lost.
                 for reader in session["readers"]:
-                    reader.join(timeout=5)
+                    reader.join(
+                        timeout=operational_limit(
+                            self.run.settings, "process_exit_seconds", 5
+                        )
+                    )
                     if reader.is_alive():
                         failures.append("VM telemetry pipe drain did not stop")
                 failures.extend(session["readerErrors"])

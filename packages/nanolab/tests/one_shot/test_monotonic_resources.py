@@ -202,6 +202,7 @@ def test_owned_sampler_stall_detection_uses_monotonic_write_progress(
     path = tmp_path / "edge.jsonl"
     path.write_text("{}\n")
     sampler = VmTelemetrySession.__new__(VmTelemetrySession)
+    sampler.run = SimpleNamespace()
     sampler.sessions = [
         {
             "node": SimpleNamespace(config=SimpleNamespace(id="edge")),
@@ -283,3 +284,34 @@ def test_nested_capacity_scope_uses_original_workflow_probes_and_malformed_recor
     assert result["clockProbeMalformedLines"] == 1
     assert not result["complete"]
     assert (tmp_path / "clock-probes.jsonl").read_text() == raw
+
+
+@pytest.mark.parametrize(
+    ("now", "code", "expected"), [(99, 0, False), (101, 0, True), (101, 7, False)]
+)
+def test_sampler_natural_end_uses_frozen_horizon(
+    tmp_path, monkeypatch, now, code, expected
+):
+    from types import SimpleNamespace
+
+    from nanolab.one_shot.vm_resources import VmTelemetrySession
+
+    path = tmp_path / "raw.jsonl"
+    path.write_text("{}\n")
+    session = VmTelemetrySession.__new__(VmTelemetrySession)
+    session.run = SimpleNamespace(supervision=object())
+    session.expected_end = 100
+    session.sessions = [
+        {
+            "process": SimpleNamespace(poll=lambda: code),
+            "output": SimpleNamespace(name=str(path)),
+            "readerErrors": [],
+            "node": SimpleNamespace(config=SimpleNamespace(id="edge")),
+        }
+    ]
+    monkeypatch.setattr("nanolab.one_shot.vm_resources.time.monotonic", lambda: now)
+    if expected:
+        session.require_healthy()
+    else:
+        with pytest.raises(RuntimeError, match="stopped"):
+            session.require_healthy()

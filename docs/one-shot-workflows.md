@@ -20,6 +20,163 @@ active handler per replica. NanoLab owns its generator process, collectors,
 clock monitors, function containers, control planes and VMs; Sonata releases
 them in reverse order on success and failure.
 
+Function CPU quotas are per-container upper limits, not dedicated CPU
+reservations. NanoLab preserves the configured quotas when the function memory
+pool changes and allows their sum across replicas to exceed the VM's vCPU
+count, including when logging is enabled. Busy containers then share the
+available CPU. Memory-pool admission and actual per-container CPU/RAM checks
+remain enforced. Record VM CPU utilization, container throttling and execution
+times to assess contention after the run; CPU contention calibration is not a
+prerequisite for the first functional experiment.
+
+The five-function presets use memory limits of arithmetic64, sort128,
+memory256, matrix128 and mixed256 MiB. Pools are 832/832/1664/1664/2496/5824 MiB
+for edge-1 through edge-5 and cloud, preserving 1/1/2/2/3/7 initial replicas of
+each function. Individual replica maxima follow `floor(pool / function RAM)`.
+To prepare a new copy from an earlier scenario with the existing balanced vector:
+
+```sh
+python scripts/one-shot-function-memory.py --input original.yaml --output prospective.yaml
+```
+
+The script validates both configurations, keeps CPU quotas, workload inputs and
+VM dimensions, and records source/scenario/script/package hashes in
+`prospective.memory.json`. It refuses existing output files and provisions no
+VMs. The receipt is unqualified and marks load tuning as pending. Earlier service
+observations retain their original 64-MiB scope; this configuration change does
+not turn them into newly measured service times.
+
+## Tune the first functional load with the Python reference
+
+The saved `scripts/one-shot-tune-load.py` coordinator uses the existing NanoLab
+environment and invokes cases in the isolated DFaaSOptimizer environment pinned
+at `71899f720a4ffffd070ebf7ddc5b74afddfde9c5`. It verifies every Python source
+against its archived bytes and records interpreter/dependency versions. Reuse
+the prepared reference and the provenance-labelled observed service estimates:
+
+```sh
+python scripts/one-shot-tune-load.py tune \
+  --scenario prospective.yaml \
+  --observations observed-demands.json \
+  --reference /path/to/preparation/reference \
+  --reference-python /path/to/preparation/python-env/bin/python \
+  --output /path/to/new-load-tuning
+```
+
+This runs the original LSP/LSPr_x solver and bid/grant/memory-start helpers for
+exactly eight rounds, with aggregate bids, epsilon0.01, eta/zeta/latency/fairness
+weights zero, beta1 and target utilization0.9, matching the base auction options.
+There is no convergence claim, assignment replacement, hierarchy, VM deployment
+or performance qualification. The cloud is outside the edge auction and retains
+seven replicas per function in the current layout.
+
+The sweep tests factors1.5/2/3/4/6/8/12/16 relative to balanced-vector capacities.
+Five single-edge hotspots emphasize different functions; two further conditions
+combine hotspots in both triangles and on E1/E3/E5. Opening E2/arithmetic and
+closing E5/sort replace the earlier quiet control/recovery windows, following
+the October12 request for horizontal offload in every interval. Select the
+first tested factor with actual neighbor grants; the seven central windows
+also require residual load requested at cloud. The complete selected trace must
+have peer offload in all nine windows, with one source sending to at least two
+distinct receiving edges in at least two windows. Count destinations across
+functions: multiple functions sent to one edge count as one receiver. Cloud
+traffic is separate. `offload-coverage.json` lists every directed peer route,
+its per-function rates and the multi-receiver origins. If no candidate fits,
+stop and retain diagnostics; do not silently substitute a failing pattern.
+These are workload choices, not acceptance thresholds for the subsequent
+measurements.
+
+Every candidate retains exact inputs, eight-round transcripts, replica vectors,
+local/neighbor/cloud-requested flow and command diagnostics. The selected shared
+trace has thirty positive rates per window on the0.05 requests/s grid, nine
+360-second periods and54 minutes planned across all six nodes simultaneously.
+The export includes CSV, a prospective scenario and temporal plots. Output
+directories must be new; the first failed external step stops the sweep without
+retry. Future runs execute the saved source snapshot to preserve its fingerprint.
+
+## First unqualified ORACLE observation
+
+`scripts/one-shot-observe.py` prepares and executes the first functional run.
+It reuses Sonata's owned VM/platform/logging lifecycle, the shared k6 ingress
+schedule, native public one-shot APIs, physical proof collection and continuous
+whole-VM/container telemetry. It does not fabricate capacity or timing
+qualifications and does not enter the public qualified comparison workflow.
+
+```sh
+python scripts/one-shot-observe.py prepare \
+  --tuning /path/to/load-tuning-02 \
+  --observations /path/to/observed-demands.json \
+  --distribution /path/to/distribution.json \
+  --source /path/to/nanofaas-checkout \
+  --output /path/to/new-freeze
+python /path/to/new-freeze/source-used.py run \
+  /path/to/new-freeze /path/to/new-run --archive /path/to/permanent-archive
+```
+
+Preparation copies the exact package, script, recipe, runtime descriptor, trace
+and observations and hashes all saved bytes. Execution imports the captured
+package, checks dependencies/host boot identity and rejects drift. Every node
+keeps its approved CPU/RAM quotas, balanced initial vectors and Rust workload.
+VM bootstrap waits for successful `cloud-init` before package installation;
+the owned run retains the original status output.
+
+Profiles retain the historical sample counts, means and p95; deviation is
+computed from the same deduplicated physical samples, whose hash is verified.
+The native contract uses `synthetic=true` and `workflow-validation` to mark
+prospective RAM/replica adaptations as unqualified, with the original data scope
+retained alongside the profiles. These are observed estimates, not invented
+service times or qualified capacity curves. Deployment still uses the strict
+resource settings; that adapter tag is not a statistical claim.
+
+Before warmup, a 60-second idle collection records sampler/collector CPU and
+memory cost, retaining all raw counters. It does not estimate the paired effect
+on function goodput/latency and has no 5% acceptance gate. The nested
+`observer-precheck/manifest.json` declares `probeScope: parent` and
+`probeParentLevels: 1`, so temporal correlation reads the main run's clock
+probes. Reanalysis of a failed run must use a separate derived directory;
+retain the original manifest and raw samples unchanged. The run then covers
+720 seconds of warmup and nine simultaneous 360-second windows:54 minutes of
+measurement. All originals go through the NanoFaaS ingress; bootstrap warm
+invocations are separately labelled SDK checks. Error/reject counts and ratios
+use the preserved scheduled/emitted denominators, by phase/node/function/epoch.
+
+The declared arrival-lateness limit is3600 seconds. Both the operational and
+auction fractions are0.20, the maximum admitted by the pinned native runtime.
+Preparation freezes both values; execution validates them and the declared
+operational budget before inventory, workflow construction or VM acquisition.
+The functional observation overrides physical preparation to 10 seconds as
+requested by the user on 13 October. The 4-second auction plus 10-second
+preparation require a 14-second lead; the protocol and runtime manifest use
+the same derived lead. Previous freezes retain their original values. The sum
+fits the period fraction. The first attempt's invalid0.99 settings remain in its
+original archive; a corrected run requires a new freeze.
+`RunOneShotLoadTask(enforce_timing_budget=False)`
+records complete slow epochs in this observation; censored/missing preparations,
+invalid ready plans, transport/process/collector failures still stop execution.
+The qualified comparison path keeps its default timing enforcement. Legacy
+comparison diagnostics remain visible in the unqualified report and do not
+turn measured performance into an acceptance gate. Known swap-limit loss is
+explicitly allowed; actual RAM/CPU/OOM controls and raw swap values remain.
+
+Output directories must be new. The first operational failure stops the owned
+workflow without retry; raw artifacts are copied and hash-checked into the
+requested permanent archive after resource cleanup.
+
+The load task declares telemetry directly in its `requires`, alongside the
+generator, collector and topology resources. Sonata limits task access to direct
+declarations even when a resource is already acquired through a prerequisite.
+The observation integration test executes the load task through Sonata with
+simulated resources and the compiled workflow's actual dependency list; it
+checks task access and cleanup before any VM acquisition. Compilation alone
+does not exercise this resource boundary.
+
+The cloud capacity assessment is separate from actual acceptance: retain excess
+load as a prediction, not observed rejects or successes. Historical64-MiB
+service estimates remain unqualified for different replica vectors and RAM
+limits. The static model does not simulate CPU contention, carried queues,
+network delays or cold starts; physical saturation, completion/error rates and
+differences from NanoFaaS are measured afterwards.
+
 The default JVM recipe includes `offload`, `forecasting`, `p2p`, `container-provider`
 and `sync-queue`. A supplied `runtimeDistribution` reference must identify a
 distribution built with the same recipe and modules. The terminal cloud
@@ -356,7 +513,13 @@ separately in failed runs. This transport correction does not relax the clock
 threshold for v1 or retry an auction. Rebuild and freeze the packaged probe before
 acquiring new data.
 
-The multi-function Multipass presets round each function CPU quota down to a multiple of 0.01 CPU before freezing: 0.10 on edge-1/2, 0.14 on edge-3/4, 0.16 on edge-5 and 0.21 on cloud. runc's systemd driver rounds fractional percentages upward ([implementation](https://github.com/opencontainers/cgroups/blob/main/systemd/common.go)); a declared 0.149 CPU was observed as `15000 100000` in `cpu.max` during the v4 bootstrap. These representable limits preserve the 0.50 CPU control-plane/collector/OS reserve even at the maximum memory-feasible replica count. Strict cgroup validation is unchanged: Docker declarations and kernel limits must match, and all service/capacity profiles must be measured at these final quotas. Failed preflight evidence is retained.
+The existing multi-function Multipass presets use CPU quotas on a multiple of
+0.01 CPU: 0.10 on edge-1/2, 0.14 on edge-3/4, 0.16 on edge-5 and 0.21 on cloud.
+A declared 0.149 CPU was observed as `15000 100000` in `cpu.max` during the v4
+bootstrap. These are existing preset values, not quotas recalculated when the
+memory pool changes. Strict cgroup validation still compares Docker declarations
+and kernel limits per container. Measured profiles retain their original
+configuration scope; failed preflight evidence is retained.
 
 Oracle rates use decimal quantum multiplication before JSON serialization. The runtime requires an exact decimal grid, so float multiplication tails such as `19 * 0.05 == 0.9500000000000001` are invalid. Oracle export rejects those off-grid values rather than treating them as equal within a tolerance; generated rates serialize as `0.95`. Parallel epoch preparation retains HTTP refusal status and response body in raw timing observations, marks the sample censored and never retries the trigger.
 
@@ -484,3 +647,117 @@ policy participates in the resource-scope hash; changing it requires a new
 software/operator freeze and fresh overhead, calibration and timing evidence.
 Without this optional policy, legacy workflows retain their existing behavior.
 CPU placement does not alter one-shot routing or its fixed-round semantics.
+
+
+## Autonomous supervision of the frozen functional observation
+
+After preparing the freeze, launch everything with one command in the NanoLab Python environment:
+
+```sh
+.venv/bin/python /path/to/freeze/source-used.py run \
+  /path/to/freeze /path/to/new-run --archive /path/to/new-archive
+```
+
+The frozen runner provisions the six owned VMs through Sonata, waits for cloud-init, starts services and logging, checks replicas and cgroups, measures observer cost, starts VM/container sampling and k6, runs the warmup and all nine 360-second intervals, writes the report and releases its owned resources. Sonata events cover acquisition, execution and compensation; an internal health thread runs during blocking waits without agent polling. It uses the configured operator CPU assignment applied by the existing CPU-placement resource.
+
+Progress appears automatically as UTC JSON lines on stdout. The run directory contains atomic `status.json`, append-only `supervision.jsonl`, and final `result.json` with state, first cause, exit code, cleanup anomalies and archive verification. Heartbeats distinguish normal waiting from a completed stage; they are a reporting cadence, not a deadline or performance gate. During load they include mode, function scope and epoch from the frozen schedule. Supervisor thread CPU time is recorded alongside precheck VM sampler and collector cost observations.
+
+An unexpected generator exit before all scheduled requests finish, a nonzero exit, a collector/sampler process failure, or a missing required control-plane/log collector in a valid sampler inventory stops the procedure once. Function request failures and HTTP rejects are counted separately in `responses.json`; function scaling, missing samples and uncertain clocks do not introduce exclusion criteria. Missing VM/container samples remain visible in raw files and coverage reports. SIGINT/SIGTERM trigger owned compensation, with exit130/143; operational failure returns exit1. No repair, retry or automatic relaunch occurs.
+
+Archive copy and SHA verification start after load writers and the supervisor thread have stopped and joined. Final control-file updates are copied and verified serially; failed runs retain raw evidence. Watching stdout or opening status.json is optional: supervision and cleanup work even when neither agent nor human reads them. Capture stdout using the normal terminal/log facility for remote sessions; the command does not install an external messaging notification service.
+
+
+The observation runner derives `nanofaas.forecasting.max-age` from the frozen
+load horizon: 720 seconds warmup + 90 seconds schedule setup + 9 × 360 seconds
+measurement + the 180-second generator allowance = 4,230 seconds.
+The value and its basis are captured in operator-protocol.json and passed
+explicitly to the control-plane startup command. A trace uploaded once remains
+usable throughout these nine windows. The recipe's 5-minute default expired
+before the first preparation in Observation03; native expiry, generation and
+contiguous-window checks remain intact. The observation-readiness changes require rebuilding the runtime image and
+creating a new freeze; historical distributions remain unchanged.
+
+After compensation the runner also renders a missing report from retained raw
+files and saves responses.json when a run fails, preserving the original cause
+if report generation itself fails. Request rejects and errors therefore remain
+counted separately from the final operational exit code.
+
+
+A shared-iterations generator can return exit0 before the nominal last boundary
+when every scheduled original has emitted and returned. HTTP rejects/errors
+count as returned work. This is normal completion; collectors and VM/container
+telemetry remain active until the full ninth interval ends. Missing emitted or
+returned rows after the frozen boundary remain experimental observations. The
+status and heartbeat report setup, warmup, campaign epochs0–8 and drain from the
+same frozen grid. A late health fault during thread joining still writes result
+and archive; a first signal during archive copy is deferred until evidence is
+preserved and retains exit130/143. Later signals do not replace the first cause.
+
+
+### Incomplete confirmations in an observation
+
+The package builder `build_one_shot_observation_plan` constructs the actual Sonata
+workflow. Preparation/fingerprint verification happens offline; the run command
+uses real resource dependencies, compensation and task execution. The CLI entry
+point delegates composition to this builder. It does not implement another engine.
+
+An activation with `DEGRADED` and a usable plan continues through all nine epochs.
+`executionUsable`, `fullyPrepared` and `measurementComplete` are independent facts.
+A missing metric remains missing. `FAILED`, an absent plan, invalid ownership,
+unauthorized outbound assignments, impossible evidence writes or a required process
+failure still stop the procedure. The qualified comparison workflow retains its
+separate acceptance rules; this observation never claims qualification.
+
+`epochs.jsonl` retains node-local READY/ACK diagnostics, including identities,
+generations, negotiated/confirmed quantities and the locally observed reason.
+An ACK response lost at the buyer does not prove non-delivery at the seller.
+`assignment-observations.jsonl` records unused inbound reservations. Reported
+assignment quantities are flow quanta; planned cloud load is requests/second;
+actual returned requests and their denominators are in `responses.json`. Do not
+sum buyer and seller observations as distinct assignments. Partial terminal rows
+are counted without changing the raw files.
+
+Operational limits live in `OperationalLimits` and are frozen in scenario,
+operator protocol and manifest: auction60s, solver/peer5s, physical preparation10s,
+lead90s, API180s, prepare barrier60s, cloud-init1800s, service/Compose300s,
+collector/sampler startup120s, replica startup300s, bootstrap invocation/proof120s,
+collection HTTP10s, generator allowance180s, worker join300s and process drain,
+exit and reader join30s. Runtime event retention remains10,000; streaming export
+uses at most1,000 pages of100 and saves completed pages before a later read error.
+No clock-skew or performance exclusion gate is added. Missing initial sampler
+samples are reported if its process remains alive. The precheck measures current
+collection cost before warmup; it does not apply the separate5% qualification gate.
+
+Eight rounds, VM/function CPU/RAM, strict pools, handler concurrency, request30s
+timeout, VU512, request retry0, workload, warmup720s and9×360s remain unchanged.
+
+The fingerprint verifies the full nonignored runtime source inventory (including
+new untracked assets), frozen package/recipes, and Sonata/provider implementation
+bytes and dependency versions. Drift is rejected before provisioning. Progress
+and final outcome are automatic; reading status is optional. After writer shutdown,
+the supervisor updates the report's terminal outcome and verifies its archived
+copy along with all raw data.
+
+
+### Diagnostic collection and preservation failures
+
+Observational metric/event HTTP reads run through the existing background
+collector, outside the epoch preparation/activation driver. Epoch rows retain
+measured operational wall time; unavailable timer values are null and reference
+`metrics.jsonl` and `runtime-events.jsonl` for posterior analysis. A slow diagnostic
+endpoint therefore cannot consume the next epoch's lead time.
+
+The collector checks cancellation before requests, retries, candidates and each
+batch of 16 proof lookups. A best-effort pass reuses the configured 30-second
+process drain allowance and records incomplete collection on expiry. Final
+normal snapshots use the same allowance and omit originals already proven
+RELEASED. After a procedure fault, analysis uses retained raw files instead of
+starting another potentially slow network collection. Persistence failures
+propagate as operational errors; reporting errors are notes on the original cause.
+
+A failed sole-copy raw export produces a nonzero result and incomplete cleanup:
+owned Loki services stop but their volumes remain with `logging/backend-recovery.json`;
+an unexported collector volume and its containing owned VM remain, with the VM
+stopped and `logging/<node>/recovery.json` identifying the volume. Other owned
+resources still clean up through Sonata. Recovery is manual; no replay, retry,
+repair, relaunch or later deletion is automated.

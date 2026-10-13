@@ -212,3 +212,41 @@ def test_false_drain_and_invalid_receipt_are_distinct():
             else:
                 with pytest.raises(ValueError, match="drain receipt"):
                     client.drain_and_release()
+
+
+def test_event_stream_exposes_completed_page_before_transport_failure():
+    event = {
+        "schemaVersion": 1,
+        "nodeId": "edge",
+        "incarnation": "i",
+        "epoch": 0,
+        "round": 0,
+        "type": "START",
+        "monotonicOffsetNanos": 0,
+        "at": "2026-10-09T10:00:00Z",
+        "status": "START",
+        "censored": False,
+        "correlationId": "c",
+    }
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        if len(calls) > 1:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "schemaVersion": 1,
+                "contentHash": "sha256:" + "a" * 64,
+                "entries": [{"cursor": 1, "event": event, "operationalNanos": 0}],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        client = NanoFaasOneShotClient("http://edge", http=http)
+        pages = client.iter_epoch_events(0, limit=1)
+        assert next(pages).entries[0].cursor == 1
+        with pytest.raises(httpx.HTTPStatusError):
+            next(pages)
+    assert calls[-1].url.params["after"] == "1"

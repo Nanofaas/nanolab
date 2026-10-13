@@ -25,7 +25,9 @@ created, stopped or deleted. For an owned backend on the operator host, set
 `backendOwned: true` and `backendBind` to that host's private VM-facing IPv4 address.
 Loki/Grafana use NanoFaaS's `deploy/observability/compose.yaml`, persistent named
 volumes, fixed images, CPU 1.5 and RAM 768 MiB in total; reserve those resources
-outside the VMs. Collector CPU/RAM must fit each node's compute/memory budget.
+outside the VMs. Collector RAM is included in the node's memory accounting.
+Collector CPU is a per-container limit and may share the VM's CPU with function
+replicas; enabling logging does not require lowering function CPU quotas.
 Backend disk reserve includes 72-hour retention and must be monitored separately.
 
 Use a NanoFaaS source tree containing the logging deployment assets. Every VM
@@ -51,8 +53,8 @@ delivery counters and `stateArchive`. Missing counters, pending records, known
 drops, failed query/archive or truncation produce `partial`; a successful query
 alone cannot prove delivery. Counters describe records observed by the collector,
 not proof that every source line was observed. Archive failures are explicit run
-errors even though cleanup of owned ephemeral resources still runs; disk failure
-can prevent preservation. Export failure does not rewrite SDK completions or
+errors. Other owned resources still clean up; a failed sole-copy state export
+retains its volume and containing VM for manual recovery rather than deleting raw. Export failure does not rewrite SDK completions or
 error accounting. The per-node query cap is 5000 entries, so
 large runs need external retention/query export as well. This is not a complete
 archive promise.
@@ -89,3 +91,27 @@ identical deterministic 0–100 ms phase offsets in all windows. The original
 fixed-phase series failed the 5% p95 gate and remains archived; its tightly
 clustered per-node timings shifted between windows. This protocol revision
 does not change images, payloads, rates or logging budgets.
+
+
+The frozen functional observation binds a Sonata supervision sink before provisioning and runs one owned health thread independently of CLI polling. `supervision.jsonl`, `status.json`, and `result.json` complement existing collector and VM/container evidence. Archive verification starts only after all writers join. Required-service liveness reuses sampler Docker inventories; missing samples remain reported evidence. See [launch command and lifecycle](one-shot-workflows.md#autonomous-supervision-of-the-frozen-functional-observation).
+
+
+For the frozen observation, control-plane, Fluent Bit and owned Loki liveness
+watchers cover each resource's acquired lifetime, including warm instances and
+precheck. Service checks use the configured collection timeout; sampler liveness
+uses Docker inventory independently of cgroup counter availability.
+
+Collector release stops its writer and verifies the transferred buffering state.
+After all collectors release, owned Loki is stopped and `/loki` is copied with a
+SHA-256 inventory before Compose volumes are removed. A limited or failed query
+is labelled partial; the stopped raw store preserves delivered chunks beyond the
+query limit, including streams sharing timestamps. Failed raw export or evidence
+writes produce a nonzero operational result. If the raw copy fails, Loki services
+stop and owned volumes remain with `backend-recovery.json`. If collector state
+cannot be exported, its volume remains and its owned VM is stopped and retained;
+`logging/<node>/recovery.json` and the final cleanup notes identify the storage.
+All other owned resources clean up normally. Recovery is manual, without retry
+or replay. A disk failure can prevent writing a receipt; it does not authorize
+deletion of the sole raw copy. External Loki
+is never stopped or deleted by NanoLab. Final archive copying runs after all
+writers join, with no concurrent archive mutation.

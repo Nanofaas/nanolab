@@ -77,9 +77,13 @@ def test_load_failure_keeps_original_error_and_collects_even_if_collection_fails
     )
     with pytest.raises(RuntimeError, match="injected load-task failure"):
         RunOneShotLoadTask(freeze, "generator", "collector").run(inputs)
-    assert actions == ["collector-close", "terminate", "wait", "collect", "evidence"]
+    assert actions == ["collector-close", "terminate", "wait", "evidence"]
     assert "injected load-task failure" in (tmp_path / "load-status.jsonl").read_text()
-    assert "collection refused" in (tmp_path / "collection-errors.jsonl").read_text()
+    if collector_fails:
+        assert (
+            "collector cleanup failed"
+            in (tmp_path / "collection-errors.jsonl").read_text()
+        )
 
 
 def test_generator_parser_does_not_treat_empty_or_summary_as_load(tmp_path):
@@ -166,10 +170,20 @@ def test_admission_refusal_requires_exact_gateway_target_and_status(message, tar
 
 
 @pytest.mark.parametrize("cloud_direct", [False, True])
+@pytest.mark.parametrize("enforce_budget", [False, True])
+@pytest.mark.parametrize("slow", [False, True])
 @pytest.mark.parametrize("censored", [False, True])
 @pytest.mark.parametrize("logical", [False, True])
+@pytest.mark.parametrize("supervised", [False, True])
 def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
-    tmp_path, monkeypatch, censored, cloud_direct, logical
+    tmp_path,
+    monkeypatch,
+    censored,
+    cloud_direct,
+    logical,
+    slow,
+    enforce_budget,
+    supervised,
 ):
     from nanolab.tasks.one_shot.experiment import FreezeManifestTask
 
@@ -212,12 +226,16 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
         ),
     )
     calls = []
+    waits = []
+    if supervised:
+        freeze.supervision = SimpleNamespace(unwatch=lambda _: None)
+        freeze.generator_complete = lambda: True
 
     class Child:
         returncode = None
 
         def poll(self):
-            if calls:
+            if calls or supervised:
                 self.returncode = 0
             return self.returncode
 
@@ -260,7 +278,9 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
             assert kwargs["activation_at"] == 100.0
         calls.append(kwargs["epoch"])
         return SimpleNamespace(
-            censored=censored, ready_seconds=0.1, auction_seconds=0.1
+            censored=censored,
+            ready_seconds=10 if slow else 0.1,
+            auction_seconds=10 if slow else 0.1,
         ), {"nodes": {"edge-0": {"result": {"plan": plan}}}}
 
     monkeypatch.setattr(
@@ -278,22 +298,27 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
         )
         monkeypatch.setattr(
             "nanolab.tasks.one_shot.experiment.wait_until_monotonic",
-            lambda *_args, **_kwargs: None,
+            lambda deadline, **_kwargs: waits.append(deadline),
             raising=False,
         )
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.experiment.collect_runtime_evidence",
-        lambda *_args: None,
+        lambda *_args, **_kwargs: None,
     )
     task = RunOneShotLoadTask(
-        cast(FreezeManifestTask, freeze), "generator", "collector"
+        cast(FreezeManifestTask, freeze),
+        "generator",
+        "collector",
+        enforce_timing_budget=enforce_budget,
     )
-    if censored:
+    if censored or (slow and enforce_budget):
         with pytest.raises(RuntimeError, match="qualified wall"):
             task.run(inputs)
     else:
         task.run(inputs)
     assert calls == [0]
+    if logical and supervised and not (censored or (slow and enforce_budget)):
+        assert waits[-1] == 120.0
 
 
 def test_proxy_admission_error_is_terminal_without_an_invented_sdk_receipt():
@@ -370,5 +395,5 @@ def test_artifact_write_failure_keeps_primary_load_error_and_attempts_cleanup(
     )
     with pytest.raises(RuntimeError, match="injected load-task failure") as error:
         RunOneShotLoadTask(freeze, "generator", "collector").run(inputs)
-    assert actions == ["close", "terminate", "wait", "collect", "evidence"]
+    assert actions == ["close", "terminate", "wait", "evidence"]
     assert any("No space left" in note for note in error.value.__notes__)

@@ -8,14 +8,26 @@ Five edges form two planar triangles E1–E2–E3–E1 and E3–E4–E5–E3, sh
 Degrees are 2/2/4/2/2. Every edge also reaches a terminal cloud; peer offload is
 one hop and cloud is terminal. All six nodes run concurrently.
 
+The October 12 revision targets a first functional ORACLE experiment with
+outcomes assessed afterwards. The statistical acquisition gates below remain
+historical, not prerequisites of this first run. CPU quotas remain configured
+per-container maxima; their sum may exceed VM capacity. CPU contention
+calibration is deferred, while VM CPU/RAM and container throttling are observed.
+
 | Node | vCPU | VM RAM GiB | Function pool MiB | CPU per replica | Individual maximum |
 |---|---:|---:|---:|---:|---:|
-| E1 | 1 | 2 | 320 | .100 | 5 |
-| E2 | 1 | 3 | 320 | .100 | 5 |
-| E3 | 2 | 3 | 640 | .140 | 10 |
-| E4 | 2 | 4 | 640 | .140 | 10 |
-| E5 | 3 | 6 | 960 | .160 | 15 |
-| Cloud | 8 | 12 | 2240 | .210 | 35 |
+| E1 | 1 | 2 | 832 | .100 | 13 / 6 / 3 / 6 / 3 |
+| E2 | 1 | 3 | 832 | .100 | 13 / 6 / 3 / 6 / 3 |
+| E3 | 2 | 3 | 1664 | .140 | 26 / 13 / 6 / 13 / 6 |
+| E4 | 2 | 4 | 1664 | .140 | 26 / 13 / 6 / 13 / 6 |
+| E5 | 3 | 6 | 2496 | .160 | 39 / 19 / 9 / 19 / 9 |
+| Cloud | 8 | 12 | 5824 | .210 | 91 / 45 / 22 / 45 / 22 |
+
+Memory limits, and individual maxima in the table, follow the order arithmetic,
+sort, memory, matrix, mixed: **64 / 128 / 256 / 128 / 256 MiB**. The larger pools
+preserve the balanced initial vectors of 1/1/2/2/3/7 replicas per function by
+node. Individual maxima cannot coexist when their combined RAM exceeds the pool.
+VM dimensions and per-replica CPU quotas are unchanged.
 
 These are candidate resources, pending final-quota/co-location verification.
 CPU quotas are floored to the frozen 0.01-core grid and checked against kernel
@@ -29,20 +41,37 @@ criterion. No scientific calibration, timing, pilot or main result is implied.
 Five distinct Rust functions run everywhere: arithmetic, sorting, memory scan,
 integer matrix multiplication and a mixture of all four. Each has its own input,
 independent expected checksum and canonical identity. The preliminary owned-host
-memory gate selected 64 MiB for all five, with 50 physically released correct
-samples each, peaks below 48 MiB and swap disabled. This is not a VM D profile.
-Docker Memory=MemorySwap=M gives a hard RAM cap and no swap, and the native planner
-charges the full cap. Individual maxima cannot all be allocated simultaneously.
-Balanced initial vectors are 1/1/2/2/3/7 replicas per function by node.
+memory gate used 64 MiB for all five, with 50 physically released correct
+samples each, peaks below 48 MiB and swap disabled. These are historical samples,
+not new measurements at the heterogeneous limits. Docker Memory=MemorySwap=M
+declares a hard RAM cap and no swap; the diagnosed systemd/cgroups defect can
+reset the kernel swap limit to `max`. The user accepts this known defect for the
+first run, with actual limits/usage retained. The native planner charges the full
+RAM cap regardless of actual use.
 
-Each VM reserves .35 CPU / 512 MiB for its JVM control plane, .1 CPU / 64 MiB for
-Fluent Bit, and .05 CPU / 128 MiB for OS accounting. The 20-CPU operator host
+Each VM configures .35 CPU / 512 MiB for its JVM control plane, .1 CPU / 64 MiB for
+Fluent Bit, and .05 CPU / 128 MiB for OS accounting. These CPU limits are not
+dedicated reservations within the VM. The 20-CPU operator host
 budgets 17 VM vCPU, 1.5 CPU / 768 MiB for owned Loki/Grafana and one CPU for
 operation. JSON logging is on for scientific calibration, pilot and main.
 
 ## Frozen load and analysis
 
-Nine windows each contain exactly one 360-second round: control, five seeded
+For the first functional ORACLE run, the revised October12 Python tuning
+evaluated72 candidates and selected factors1.5/2/6/4/3/4/3/1.5/1.5 for opening
+E2/arithmetic, E5/E1/E2/E3/E4, both triangles, diffuse E1/E3/E5 and closing
+E5/sort. Each window has30 positive rates and lasts360s. Planned original edge
+arrivals:83628; cloud-direct arrivals9270 are separate. The bounded eight-round
+reference predicts61614 local,17046 neighbor and4968 cloud-requested edge
+requests. Those are predictions, not actual completions. All nine windows have
+peer offload and a source with at least two distinct receiving peers. The seven
+central windows retain exactly their earlier rates and round transcripts; both
+offload kinds occur there. The fluid cloud assessment shows no capacity excess.
+VM saturation and request rejects/errors remain outcomes to observe in the real
+run. Source timings are the original64-MiB observations, not remeasured at the
+new limits. The old statistical design below does not qualify these estimates.
+
+The older packaged statistical template below uses control, five seeded
 single-node hotspots, hotspots on E2/E4, diffuse overload on E1/E3/E5, recovery.
 Each window contains all 30 positive node/function flows. Offered rates differ by
 function, node and time and come from complete measured balanced-vector records.

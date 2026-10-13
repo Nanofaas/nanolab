@@ -7,7 +7,7 @@ import os
 import platform
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -16,7 +16,12 @@ from sonata_engine import Resource
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
 from nanolab.config import EnvironmentConfig
-from nanolab.config.one_shot import HostCpuPlacement, OneShotConfig, OneShotNode
+from nanolab.config.one_shot import (
+    HostCpuPlacement,
+    OneShotConfig,
+    OneShotNode,
+    operational_limit,
+)
 from nanolab.one_shot import host_cpu
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.provisioning.resources import provisioned_vm
@@ -31,6 +36,7 @@ class NodeResource:
     request: VmRequest
     vm: Resource[VmInfo]
     provider: Any
+    recovery: list[str] = field(default_factory=list, compare=False)
 
     def command(self, argv: tuple[str, ...], *, remote_dir: str | None = None):
         """Execute on this node and retain transport failures as failures."""
@@ -214,6 +220,7 @@ def build_one_shot_resources(
         )
 
         target_cpus = placement.nodes[node.id].cpus if placement else None
+        recovery: list[str] = []
 
         def acquire(
             inputs, *, original=base, owner=provider, expected=request, cpus=target_cpus
@@ -234,14 +241,33 @@ def build_one_shot_resources(
                 raise
             return value
 
+        def release(
+            inputs, value, *, original=base, expected=request, retained=recovery
+        ):
+            if retained:
+                if expected.name is None:
+                    raise RuntimeError("owned VM name missing for raw recovery")
+                subprocess.run(
+                    ("multipass", "stop", expected.name),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=operational_limit(config, "process_exit_seconds", 30),
+                )
+                raise RuntimeError(
+                    f"owned VM {expected.name} stopped and retained for raw recovery: "
+                    + "; ".join(retained)
+                )
+            original.release(inputs, value)
+
         vm = Resource(
             title=base.title,
             acquire=acquire,
-            release=base.release,
+            release=release,
             requires=(*base.requires, generator) if placement else base.requires,
             revive=base.revive,
         )
-        nodes[node.id] = NodeResource(node, request, vm, provider)
+        nodes[node.id] = NodeResource(node, request, vm, provider, recovery)
     return OneShotResources(
         nodes, generator, host_cpu_placement=placement, host_cpu_facts=facts
     )

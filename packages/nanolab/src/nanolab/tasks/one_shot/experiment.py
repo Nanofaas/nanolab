@@ -20,7 +20,7 @@ import httpx
 from pydantic import JsonValue, TypeAdapter
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
-from nanolab.config.one_shot import ProtocolSettings, TimingCell
+from nanolab.config.one_shot import ProtocolSettings, TimingCell, operational_limit
 from nanolab.one_shot.campaign import read_campaign_binding
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import (
@@ -62,6 +62,8 @@ from nanolab.tasks.one_shot.verification import (
     verify_runtime_inventory,
     verify_warmup,
 )
+
+GENERATOR_DRAIN_SECONDS = 60
 
 
 def read_qualification(settings) -> TimingQualification:
@@ -304,11 +306,8 @@ class FreezeManifestTask(Task[CampaignManifest]):
             memory = sum(
                 static[node.id][name] * fn.memory_mib for name, fn in functions.items()
             )
-            cpu = sum(static[node.id][name] * fn.cpu for name, fn in functions.items())
-            if memory > node.memory_capacity_mib or cpu > node.cpus:
-                raise ValueError(
-                    "static comparison replicas exceed node RAM/CPU budget"
-                )
+            if memory > node.memory_capacity_mib:
+                raise ValueError("static comparison replicas exceed node RAM budget")
         cloud_profile = cast(Any, profile_for_node(self.profile, cloud.id))
         measured = {row["function"]: row for row in cloud_profile.functions}
         cloud_functions = node_functions.get(cloud.id, self.topology.function_settings)
@@ -646,22 +645,41 @@ class UploadForecastTask(Task[None]):
 
 
 def generator_resource(
-    *, run_dir: Path, vus: int, duration: float, telemetry: Resource | None = None
+    *,
+    run_dir: Path,
+    vus: int,
+    duration: float,
+    telemetry: Resource | None = None,
+    settings=None,
 ) -> Resource[subprocess.Popen]:
     """Sonata owns the only k6 child, including termination after task failures."""
     streams = []
 
     def acquire(_inputs):
-        output = (run_dir / "generator.jsonl").open("w")
-        errors = (run_dir / "generator.stderr").open("w")
-        streams.extend((output, errors))
-        environment = {
-            **os.environ,
-            "ONE_SHOT_SCHEDULE": str(run_dir / "schedule.json"),
-            "ONE_SHOT_VUS": str(vus),
-            "ONE_SHOT_DURATION": f"{int(duration + 60)}s",
-        }
         try:
+            output = (run_dir / "generator.jsonl").open("w")
+            streams.append(output)
+            errors = (run_dir / "generator.stderr").open("w")
+            streams.append(errors)
+            remaining = duration
+            if getattr(settings, "operational_limits", None) is not None:
+                manifest = json.loads((run_dir / "manifest.json").read_text())
+                grid = manifest["parameters"]["logicalSchedule"]
+                remaining = max(
+                    0,
+                    grid["anchorMonotonicSeconds"]
+                    + grid["epochCount"] * manifest["period_seconds"]
+                    - time.monotonic(),
+                )
+            drain = operational_limit(
+                settings, "generator_drain_seconds", GENERATOR_DRAIN_SECONDS
+            )
+            environment = {
+                **os.environ,
+                "ONE_SHOT_SCHEDULE": str(run_dir / "schedule.json"),
+                "ONE_SHOT_VUS": str(vus),
+                "ONE_SHOT_DURATION": f"{math.ceil(remaining + drain)}s",
+            }
             return subprocess.Popen(
                 (
                     "k6",
@@ -684,10 +702,14 @@ def generator_resource(
         if process.poll() is None:
             process.terminate()
             try:
-                process.wait(timeout=5)
+                process.wait(
+                    timeout=operational_limit(settings, "process_exit_seconds", 5)
+                )
             except subprocess.TimeoutExpired:
                 process.kill()
-                process.wait(timeout=5)
+                process.wait(
+                    timeout=operational_limit(settings, "process_exit_seconds", 5)
+                )
         for stream in streams:
             stream.close()
 
@@ -751,6 +773,7 @@ class LiveEvidenceCollector:
         self.run, self.inputs = run, inputs
         self.stop = Event()
         self.error = None
+        self.event_cursors = {}
         self.thread = Thread(target=self.loop, name="one-shot-evidence", daemon=False)
         self.thread.start()
 
@@ -770,10 +793,93 @@ class LiveEvidenceCollector:
                     and row["event"] == "result"
                     and row["originalId"] not in seen
                 ]
-                collect_runtime_evidence(self.run, self.inputs, rows)
+                collect_runtime_evidence(
+                    self.run,
+                    self.inputs,
+                    rows,
+                    stop=self.stop,
+                    deadline=time.monotonic()
+                    + operational_limit(
+                        getattr(self.run, "settings", None), "process_drain_seconds", 30
+                    ),
+                )
+                self.collect_events()
             except Exception as error:
                 self.error = error
                 return
+
+    def collect_events(self):
+        """Export runtime events incrementally without enlarging native retention."""
+        settings = getattr(self.run, "settings", None)
+        if getattr(settings, "operational_limits", None) is None:
+            return
+        manifest = CampaignManifest.model_validate_json(
+            (self.run.run_dir / "manifest.json").read_bytes()
+        )
+        if manifest.parameters.get("observationOnly") is not True:
+            return
+        _session, anchor = logical_schedule(manifest)
+        epoch = math.floor(
+            (time.monotonic() + manifest.lead_seconds - anchor)
+            / manifest.period_seconds
+        )
+        if epoch < 0:
+            return
+        epoch = min(epoch, len(self.run.trace.windows) - 1)
+        with httpx.Client(trust_env=False) as http:
+            for node in self.run.topology.neighbor_graph:
+                if self.stop.is_set():
+                    return
+                client = NanoFaasOneShotClient(
+                    self.inputs.resource(self.run.topology.endpoints[node]),
+                    http=http,
+                    timeout_seconds=operational_limit(
+                        settings, "collection_http_seconds", 10
+                    ),
+                )
+                for current in range(max(0, epoch - 1), epoch + 1):
+                    after = self.event_cursors.get((node, current), 0)
+                    try:
+                        pages = client.iter_epoch_events(
+                            current,
+                            after=after,
+                            max_pages=int(
+                                operational_limit(settings, "event_pages", 100)
+                            ),
+                        )
+                        for page in pages:
+                            if self.stop.is_set():
+                                return
+                            if not page.entries:
+                                continue
+                            append_observation(
+                                self.run.run_dir / "runtime-events.jsonl",
+                                {
+                                    "atUtc": datetime.now(UTC).isoformat(),
+                                    "node": node,
+                                    "epoch": current,
+                                    "after": after,
+                                    "page": page.model_dump(mode="json", by_alias=True),
+                                    "retentionCoverage": (
+                                        "not-provable-from-cursor-alone"
+                                    ),
+                                },
+                            )
+                            after = page.entries[-1].cursor
+                            self.event_cursors[node, current] = after
+                    except (httpx.HTTPError, ValueError, RuntimeError) as error:
+                        append_observation(
+                            self.run.run_dir / "runtime-events.jsonl",
+                            {
+                                "atUtc": datetime.now(UTC).isoformat(),
+                                "node": node,
+                                "epoch": current,
+                                "after": after,
+                                "collectionError": str(error),
+                                "measurementComplete": False,
+                            },
+                        )
+                        continue
 
     def require_healthy(self):
         """Surface failures of the independent evidence sampler."""
@@ -785,7 +891,13 @@ class LiveEvidenceCollector:
     def close(self):
         """Join the owned collector before releasing any runtime resource."""
         self.stop.set()
-        self.thread.join(timeout=40)
+        self.thread.join(
+            timeout=operational_limit(
+                getattr(getattr(self, "run", None), "settings", None),
+                "worker_join_seconds",
+                40,
+            )
+        )
         if self.thread.is_alive():
             raise RuntimeError("live evidence collector cleanup unconfirmed")
 
@@ -800,10 +912,35 @@ def evidence_collector_resource(run, generator) -> Resource[LiveEvidenceCollecto
     )
 
 
-def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
+def collect_runtime_evidence(
+    run,
+    inputs,
+    rows: list[dict],
+    *,
+    stop: Event | None = None,
+    deadline: float | None = None,
+) -> None:
     """Preserve independent physical proof, metrics and cleanup diagnostics."""
     runtimes = []
     sampled_at = datetime.now(UTC).isoformat()
+
+    def cancelled():
+        return (stop is not None and stop.is_set()) or (
+            deadline is not None and time.monotonic() >= deadline
+        )
+
+    def read_timeout():
+        configured = operational_limit(
+            getattr(run, "settings", None), "collection_http_seconds", 2
+        )
+        return (
+            configured
+            if deadline is None
+            else min(configured, max(0.001, deadline - time.monotonic()))
+        )
+
+    if cancelled():
+        return
     with httpx.Client(trust_env=False) as http:
         if getattr(run.topology, "neighbor_graph", None):
             snapshot = observe_neighbors(
@@ -818,6 +955,8 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                 run.run_dir / "peer-graph.jsonl", {"at": sampled_at, "nodes": snapshot}
             )
         for node_id, node in run.topology.resources.nodes.items():
+            if cancelled():
+                break
             functions = getattr(run.topology, "node_function_settings", {}).get(
                 node_id, run.topology.function_settings
             )
@@ -844,6 +983,8 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                         function.max_replicas if fixed is None else fixed.get(name, 0)
                     )
                     for replica in range(1, count + 1):
+                        if cancelled():
+                            break
                         try:
                             url, container = runtime_endpoint(
                                 node, name, inputs=inputs, replica=replica
@@ -860,8 +1001,13 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                                 },
                             )
             for name, replica, url, container in candidates:
+                if cancelled():
+                    break
                 try:
-                    status = http.get(url + "/runtime/status", timeout=2)
+                    status = http.get(
+                        url + "/runtime/status",
+                        timeout=read_timeout(),
+                    )
                     status.raise_for_status()
                     runtimes.append((node_id, name, url))
                     append_observation(
@@ -876,7 +1022,12 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                             "status": status.json(),
                         },
                     )
-                    metrics = http.get(url + "/metrics", timeout=2)
+                    if cancelled():
+                        break
+                    metrics = http.get(
+                        url + "/metrics",
+                        timeout=read_timeout(),
+                    )
                     metrics.raise_for_status()
                     append_observation(
                         run.run_dir / "metrics.jsonl",
@@ -891,7 +1042,7 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                     (
                         run.run_dir / f"{node_id}-{name}-{replica}-metrics.txt"
                     ).write_text(metrics.text)
-                except Exception as error:
+                except (httpx.HTTPError, ValueError, RuntimeError) as error:
                     append_observation(
                         run.run_dir / "collection-errors.jsonl",
                         {
@@ -904,7 +1055,9 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
 
         def lookup(row):
             proofs = []
-            if not row.get("terminalExecutionId", row.get("executionId")):
+            if cancelled() or not row.get(
+                "terminalExecutionId", row.get("executionId")
+            ):
                 return proofs
             targets = getattr(run, "sdk_request_targets", {})
             target = targets.get(row["originalId"])
@@ -930,6 +1083,8 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                     if runtime == (node_id, name, target_url.removesuffix("/invoke"))
                 ]
             for node_id, name, url in candidates:
+                if cancelled():
+                    break
                 if name != row["function"]:
                     continue
                 read_attempt = 1
@@ -940,7 +1095,10 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                         + row.get("terminalExecutionId", row.get("executionId"))
                     )
                     try:
-                        response = http.get(proof_url, timeout=2)
+                        response = http.get(
+                            proof_url,
+                            timeout=read_timeout(),
+                        )
                     except (httpx.TransportError, OSError) as error:
                         append_observation(
                             run.run_dir / "collection-errors.jsonl",
@@ -951,8 +1109,13 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                                 "error": str(error),
                             },
                         )
+                        if cancelled():
+                            return proofs
                         read_attempt = 2
-                        response = http.get(proof_url, timeout=2)
+                        try:
+                            response = http.get(proof_url, timeout=read_timeout())
+                        except OSError as error:
+                            raise httpx.ReadError(str(error)) from error
                     if response.status_code == 404:
                         continue
                     response.raise_for_status()
@@ -969,7 +1132,7 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                             "runtimeUrl": url,
                         }
                     )
-                except Exception as error:
+                except (httpx.HTTPError, ValueError, RuntimeError) as error:
                     append_observation(
                         run.run_dir / "collection-errors.jsonl",
                         {
@@ -982,21 +1145,25 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
             return proofs
 
         with ThreadPoolExecutor(max_workers=16) as executor:
-            for proofs in executor.map(
-                lookup,
-                [
+            for offset in range(0, len(rows), 16):
+                if cancelled():
+                    break
+                batch = [
                     row
-                    for row in rows
+                    for row in rows[offset : offset + 16]
                     if row["event"] == "result" and row["phase"] == "campaign"
-                ],
-            ):
-                for proof in proofs:
-                    append_observation(run.run_dir / "physical.jsonl", proof)
+                ]
+                for proofs in executor.map(lookup, batch):
+                    for proof in proofs:
+                        append_observation(run.run_dir / "physical.jsonl", proof)
         for node_id, endpoint in run.topology.endpoints.items():
+            if cancelled():
+                break
             try:
                 url = inputs.resource(endpoint)
                 response = http.get(
-                    url.replace(":8080", ":9090") + "/actuator/prometheus", timeout=2
+                    url.replace(":8080", ":9090") + "/actuator/prometheus",
+                    timeout=read_timeout(),
                 )
                 response.raise_for_status()
                 append_observation(
@@ -1008,11 +1175,20 @@ def collect_runtime_evidence(run, inputs, rows: list[dict]) -> None:
                     },
                 )
                 (run.run_dir / f"{node_id}-metrics.txt").write_text(response.text)
-            except Exception as error:
+            except (httpx.HTTPError, ValueError, RuntimeError) as error:
                 append_observation(
                     run.run_dir / "collection-errors.jsonl",
                     {"node": node_id, "error": str(error)},
                 )
+    if cancelled():
+        append_observation(
+            run.run_dir / "collection-errors.jsonl",
+            {
+                "atUtc": datetime.now(UTC).isoformat(),
+                "measurementComplete": False,
+                "reason": "collection stopped or snapshot deadline reached",
+            },
+        )
 
 
 class RunOneShotLoadTask(Task[None]):
@@ -1020,10 +1196,19 @@ class RunOneShotLoadTask(Task[None]):
 
     title = "Run original load and collect best-effort physical evidence"
 
-    def __init__(self, freeze, generator, collector, telemetry=None):
+    def __init__(
+        self,
+        freeze,
+        generator,
+        collector,
+        telemetry=None,
+        *,
+        enforce_timing_budget=True,
+    ):
         """Bind the owned generator and already frozen topology."""
         self.freeze, self.generator, self.collector = freeze, generator, collector
         self.telemetry = telemetry
+        self.enforce_timing_budget = enforce_timing_budget
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
         """Never retry an ambiguous prepare; collect evidence even on failure."""
@@ -1033,6 +1218,7 @@ class RunOneShotLoadTask(Task[None]):
         )
         anchor = datetime.fromisoformat(manifest.anchor)
         process, clock = inputs.resource(self.generator), inputs.resource(run.clock)
+        observation_only = manifest.parameters.get("observationOnly") is True
         collector = inputs.resource(self.collector)
         telemetry = (
             inputs.resource(self.telemetry) if self.telemetry is not None else None
@@ -1049,7 +1235,11 @@ class RunOneShotLoadTask(Task[None]):
             with httpx.Client(trust_env=False) as http:
                 clients = {
                     key: NanoFaasOneShotClient(
-                        inputs.resource(run.topology.endpoints[key]), http=http
+                        inputs.resource(run.topology.endpoints[key]),
+                        http=http,
+                        timeout_seconds=operational_limit(
+                            run.settings, "api_seconds", 30
+                        ),
                     )
                     for key in run.trace.nodes
                     if not getattr(run.trace, "node_roles", None)
@@ -1070,7 +1260,11 @@ class RunOneShotLoadTask(Task[None]):
                     collector.require_healthy()
                     if telemetry is not None:
                         telemetry.require_healthy()
-                    if process.poll() is not None:
+                    if process.poll() is not None and not (
+                        getattr(run, "supervision", None) is not None
+                        and process.returncode == 0
+                        and run.generator_complete()
+                    ):
                         raise RuntimeError("generator stopped before scheduled epochs")
                     if run.mode != "baseline":
                         sample, _observation = prepare_parallel_epoch(
@@ -1079,6 +1273,11 @@ class RunOneShotLoadTask(Task[None]):
                             starts_at=start,
                             ends_at=start + timedelta(seconds=manifest.period_seconds),
                             output=run.run_dir / "epochs.jsonl",
+                            **(
+                                {"observation_only": True, "settings": run.settings}
+                                if observation_only
+                                else {}
+                            ),
                             **(
                                 {
                                     "session_id": session_id,
@@ -1105,27 +1304,51 @@ class RunOneShotLoadTask(Task[None]):
                         }
                         if len(plans) != len(clients):
                             raise ValueError("missing native ready allocation")
-                        verify_epoch_flows(
+                        flow_observations = verify_epoch_flows(
                             plans,
                             neighbor_graph=getattr(run.topology, "neighbor_graph", None)
                             or None,
+                            **({"observation_only": True} if observation_only else {}),
                         )
+                        if flow_observations:
+                            append_observation(
+                                run.run_dir / "assignment-observations.jsonl",
+                                {"epoch": epoch, "observations": flow_observations},
+                            )
                         if (
                             sample.censored
                             or sample.ready_seconds is None
-                            or sample.ready_seconds > manifest.lead_seconds
                             or sample.auction_seconds is None
-                            or sample.auction_seconds + run.qualification.margin_seconds
-                            > run.qualification.epsilon * manifest.period_seconds
+                            or (
+                                self.enforce_timing_budget
+                                and not observation_only
+                                and (
+                                    sample.ready_seconds > manifest.lead_seconds
+                                    or sample.auction_seconds
+                                    + run.qualification.margin_seconds
+                                    > run.qualification.epsilon
+                                    * manifest.period_seconds
+                                )
+                            )
                         ):
                             raise RuntimeError(
                                 "epoch exceeds its qualified wall/readiness budget"
                             )
+            if logical and getattr(run, "supervision", None) is not None:
+                # A completed shared-iterations generator can finish before the
+                # boundary. Keep collectors alive through the complete last slot.
+                wait_until_monotonic(
+                    mono_anchor + len(run.trace.windows) * manifest.period_seconds,
+                    clock=clock,
+                )
             limit = anchor + timedelta(
-                seconds=len(run.trace.windows) * manifest.period_seconds + 35
+                seconds=len(run.trace.windows) * manifest.period_seconds
+                + operational_limit(run.settings, "generator_drain_seconds", 35)
             )
             mono_limit = (
-                mono_anchor + len(run.trace.windows) * manifest.period_seconds + 35
+                mono_anchor
+                + len(run.trace.windows) * manifest.period_seconds
+                + operational_limit(run.settings, "generator_drain_seconds", 35)
             )
             while process.poll() is None:
                 clock.require_healthy()
@@ -1149,6 +1372,10 @@ class RunOneShotLoadTask(Task[None]):
             primary_error = error
             raise
         finally:
+            supervision = getattr(run, "supervision", None)
+            if supervision is not None:
+                for name in ("generator", "collector", "sampler"):
+                    supervision.unwatch(name)
             secondary = []
 
             def attempt(action):
@@ -1161,10 +1388,18 @@ class RunOneShotLoadTask(Task[None]):
                 if process.poll() is None:
                     process.terminate()
                     try:
-                        process.wait(timeout=5)
+                        process.wait(
+                            timeout=operational_limit(
+                                run.settings, "process_exit_seconds", 5
+                            )
+                        )
                     except subprocess.TimeoutExpired:
                         process.kill()
-                        process.wait(timeout=5)
+                        process.wait(
+                            timeout=operational_limit(
+                                run.settings, "process_exit_seconds", 5
+                            )
+                        )
 
             attempt(collector.close)
             attempt(stop_child)
@@ -1176,11 +1411,27 @@ class RunOneShotLoadTask(Task[None]):
                     {"failure": failure, "exitCode": process.returncode},
                 )
             )
-            attempt(
-                lambda: collect_runtime_evidence(
-                    run, inputs, generator_rows(run.run_dir / "generator.jsonl")
-                )
-            )
+            if primary_error is None and not secondary:
+
+                def final_snapshot():
+                    proven = {
+                        row["originalId"]
+                        for row in physical_attempts(run.run_dir / "physical.jsonl")
+                        if row.get("state") == "RELEASED"
+                    }
+                    collect_runtime_evidence(
+                        run,
+                        inputs,
+                        [
+                            row
+                            for row in generator_rows(run.run_dir / "generator.jsonl")
+                            if row["originalId"] not in proven
+                        ],
+                        deadline=time.monotonic()
+                        + operational_limit(run.settings, "process_drain_seconds", 30),
+                    )
+
+                attempt(final_snapshot)
             if primary_error is not None:
                 attempt(lambda: collect_original_evidence(run, inputs))
             for error in secondary[:]:

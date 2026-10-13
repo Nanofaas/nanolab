@@ -10,6 +10,7 @@ const context = vm.createContext({
 const modules = {
   'k6/http': {default:{post:(_url, _body, options) => {
     headers=options.headers;
+    if ('testResponse' in row) return {status:row.testStatus ?? 200, body:JSON.stringify(row.testResponse), json:() => row.testResponse,headers:{},timings:{duration:100}};
     return {status:200, body:row.sdk ? '10654779122033555500' : '{"executionId":"api-id","status":"success","output":10654779122033555500}',
       json:() => row.sdk ? 10654779122033555500 : {executionId:'api-id',status:'success'}, headers:{},timings:{duration:100}};
   }}},

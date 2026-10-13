@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.one_shot.capacity import comparison_replica_vectors
 
 
 @pytest.mark.parametrize("stage", ["calibration", "qualification", "pilot"])
@@ -20,18 +21,36 @@ def test_multifunction_templates_are_strict_and_block_unfilled_artifacts(stage):
     assert len(config.functions) == len(settings.functions) == 5
     assert [node.cpus for node in settings.nodes] == [1, 1, 2, 2, 3, 8]
     assert [node.memory_capacity_mib for node in settings.nodes] == [
-        320,
-        320,
-        640,
-        640,
-        960,
-        2240,
+        832,
+        832,
+        1664,
+        1664,
+        2496,
+        5824,
     ]
     assert [
         next(iter(node.function_limits.values())).max_replicas
         for node in settings.nodes
-    ] == [5, 5, 10, 10, 15, 35]
-    assert {fn.memory_mib for fn in settings.functions.values()} == {64}
+    ] == [13, 13, 26, 26, 39, 91]
+    expected_memory = {
+        "one-shot-arithmetic-rust": 64,
+        "one-shot-sort-rust": 128,
+        "one-shot-memory-rust": 256,
+        "one-shot-matrix-rust": 128,
+        "one-shot-mixed-rust": 256,
+    }
+    assert {
+        name: fn.memory_mib for name, fn in settings.functions.items()
+    } == expected_memory
+    for node in settings.nodes:
+        assert {
+            name: limit.memory_mib for name, limit in node.function_limits.items()
+        } == expected_memory
+    initial = comparison_replica_vectors(
+        settings, {name: name for name in settings.functions}
+    )
+    for node, count in zip(settings.nodes, [1, 1, 2, 2, 3, 7], strict=True):
+        assert set(initial[node.id].values()) == {count}
     assert settings.observability.logs.enabled
     assert (
         settings.runtime_distribution is not None
@@ -50,22 +69,20 @@ def test_multifunction_templates_are_strict_and_block_unfilled_artifacts(stage):
 
 
 @pytest.mark.parametrize("stage", ["calibration", "qualification", "pilot"])
-def test_multifunction_cpu_limits_are_representable_and_fit_vm_reserve(stage):
+def test_multifunction_cpu_limits_remain_configured_and_representable(stage):
     path = files("nanolab").joinpath(
         "assets/presets/scenarios/one-shot-multifunction-" + stage + ".yaml"
     )
     settings = ScenarioConfig.model_validate(yaml.safe_load(path.read_text())).one_shot
     assert settings is not None
-    for node in settings.nodes:
+    for node, expected in zip(
+        settings.nodes, [0.10, 0.10, 0.14, 0.14, 0.16, 0.21], strict=True
+    ):
         for limit in node.function_limits.values():
             # systemd/runc rounds CPU quota per second to 10ms, i.e. 0.01 CPU.
             cpu = Decimal(str(limit.cpu))
             assert cpu % Decimal("0.01") == 0
-            feasible_replicas = min(
-                limit.max_replicas, node.memory_capacity_mib // limit.memory_mib
-            )
-            # Preserve CP .35, collector .10 and OS .05 CPU on every node.
-            assert cpu * feasible_replicas + Decimal("0.50") <= node.cpus
+            assert limit.cpu == expected
 
 
 def test_multifunction_transport_reserves_slots_for_discovery_and_auction():
