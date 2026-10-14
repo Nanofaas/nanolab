@@ -502,10 +502,6 @@ class CampaignSupervision:
         except (OSError, ValueError) as error:
             errors.append(error)
         try:
-            finalize_operational_outcome(self.output, self.state)
-        except (OSError, ValueError) as error:
-            errors.append(error)
-        try:
             self._write_status()
         except (OSError, ValueError) as error:
             errors.append(error)
@@ -526,6 +522,26 @@ class CampaignSupervision:
                     assert self.primary is not None
                     self.primary.add_note(
                         "result persistence " + name + ": " + str(error)
+                    )
+            self._terminal_outcome()
+
+        # Reports receive the outcome after terminal receipt errors have
+        # been promoted, even when this run has no archive destination.
+        try:
+            finalize_operational_outcome(self.output, self.state)
+        except (OSError, ValueError) as error:
+            if self.primary is None:
+                self.primary = error
+            self.primary.add_note("result persistence: " + str(error))
+            self._terminal_outcome()
+            for name in ("result.json", "status.json"):
+                try:
+                    (self.output / name).write_text(
+                        json.dumps(self.state, indent=2) + "\n"
+                    )
+                except OSError as reporting:
+                    self.primary.add_note(
+                        "result persistence " + name + ": " + str(reporting)
                     )
             self._terminal_outcome()
 

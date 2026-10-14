@@ -1004,3 +1004,33 @@ def test_archive_failure_survives_unwritable_failure_receipts(
         receipt = json.loads((archive / name).read_text())
         assert receipt["state"] == "failed" and receipt["archiveVerified"] is False
         assert "raw failure receipt unavailable" in str(receipt["notes"])
+
+
+@pytest.mark.parametrize("blocked", ["result.json", "status.json"])
+def test_terminal_persistence_failure_updates_writable_reports(tmp_path, blocked):
+    """A real failed terminal write must invalidate every writable report."""
+    from nanolab.one_shot.report import render_report
+    from tests.one_shot.test_report import manifest
+
+    supervisor = CampaignSupervision(tmp_path, cadence=100)
+
+    def action():
+        render_report(manifest(), None, tmp_path / "report.html")
+        if blocked == "status.json":
+            (tmp_path / blocked).unlink()
+        (tmp_path / blocked).mkdir()
+
+    with pytest.raises(OSError, match="Is a directory"):
+        supervisor.run(action)
+    report = json.loads((tmp_path / "report.json").read_text())
+    outcome = report["operationalOutcome"]
+    assert outcome["state"] == "failed" and outcome["exitCode"] == 1
+    assert outcome["archiveVerified"] is False
+    assert "result persistence" in str(outcome["notes"])
+    assert (
+        "&quot;state&quot;: &quot;failed&quot;"
+        in (tmp_path / "report.html").read_text()
+    )
+    assert supervisor.primary is not None and outcome["cause"] == str(
+        supervisor.primary
+    )
