@@ -126,3 +126,56 @@ resource ownership, process faults, interruption and cleanup without VMs.
 This change affects the next prepared package fingerprint. Previously frozen
 packages and archived experimental results are not rewritten. The separate Loki
 HTTP-500 delivery problem is not fixed by this collector scheduling change.
+
+## Owned Loki ingestion health
+
+The owned local backend now writes and queries a uniquely identifiable diagnostic
+line after `/ready` first succeeds, then on the existing five-second supervised
+service cadence. Its stable `nanolab_backend_probe` label is separate from node,
+function and request logs. A failed push or missing query result is an operational
+fault: no retry/restart, preserve raw data, release only owned resources, archive
+and return failure. Request rejects are unrelated and remain experiment outcomes.
+`logging/backend-probes.jsonl` records UTC and HTTP outcomes; a fault also saves
+`backend-metrics-on-failure.txt`. A live container or `/ready` 200 alone is not
+proof of successful ingestion. Every probe also requires a finite WAL failure
+counter and zero recorded `loki_ingester_wal_disk_full_failures_total` errors.
+Loki can swallow WAL ENOSPC while keeping logs queryable in memory, so a successful
+write/query alone is insufficient. Missing, invalid or positive WAL failure
+metrics stop the workflow; this is a real storage error, not a performance gate.
+
+For the campaign-owned backend only, a saved Compose override explicitly sets
+`-ingester.wal-disk-full-threshold=0` and keeps WAL explicitly enabled. Loki 3.7.8 otherwise rejects WAL pushes
+once its filesystem occupancy reaches 90%, even if that shared host filesystem
+still has substantial free space. Its error text is misleadingly identical to
+an ingester shutting down. The override disables this percentage heuristic;
+WAL persistence stays enabled, CPU/RAM limits are unchanged, and real write/read
+failures and WAL disk-full errors remain fatal through the ingestion probe. External backends and the
+shared deployment template are not modified. The generated override is archived
+with the run and its policy is included in the next package fingerprint.
+
+The retained historical run does not include the Loki disk gauge at fault onset,
+so a disk-triggered rejection is a plausible mechanism, not a reconstructed disk
+measurement for that run. An isolated fault injection reproduces `/ready` 200
+plus push 500 with exactly that error when the WAL disk threshold is exceeded.
+See the pinned primary sources:
+[WAL policy](https://github.com/grafana/loki/blob/v3.7.8/pkg/ingester/wal.go) and
+[push rejection](https://github.com/grafana/loki/blob/v3.7.8/pkg/ingester/ingester.go)
+and [WAL ENOSPC handling](https://github.com/grafana/loki/blob/v3.7.8/pkg/ingester/instance.go#L247-L263).
+
+A saved real-container smoke workflow reuses `backend_resource`, Sonata and the
+existing supervisor with no VMs, functions or k6 traffic:
+
+```bash
+uv run --frozen --all-packages --all-groups python scripts/one-shot-logging-smoke.py \
+  --runtime-source /path/to/matching/nanofaas/source \
+  --host-address YOUR_EXISTING_PRIVATE_HOST_ADDRESS \
+  --output /new/logging-smoke-directory
+```
+
+It requires the already cached pinned Loki/Grafana images, writes/query-checks
+through background probes, stops writers before copying backend storage,
+verifies the archive and removes owned containers/volumes. The output and sibling
+`-archive` directory must be new. The private host address is explicit, respecting
+the existing campaign endpoint validator. This diagnostic does not launch a
+one-shot experiment. Simulated tests also execute the fault path through Sonata,
+verifying first-fault cleanup and archiving without a restart.

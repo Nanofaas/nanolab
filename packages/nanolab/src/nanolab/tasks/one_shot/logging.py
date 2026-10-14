@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import subprocess
 import time
@@ -20,6 +21,7 @@ from sonata_tasks.compensation import compensated_resource
 
 from nanolab.config.one_shot import OneShotLogs, operational_limit
 from nanolab.one_shot.infrastructure import NodeResource
+from nanolab.tasks.loadtest.soak import parse_prometheus
 
 
 def query_url(endpoint: str) -> str:
@@ -55,6 +57,9 @@ def backend_resource(
         LOKI_LISTEN_PORT=str(endpoint.port or 80),
         GRAFANA_PORT="0",
     )
+    directory = run_dir / "logging"
+    override = directory / "backend-compose.override.json"
+    started = False
     argv = [
         "docker",
         "compose",
@@ -62,6 +67,8 @@ def backend_resource(
         project,
         "-f",
         str(root / "deploy/observability/compose.yaml"),
+        "-f",
+        str(override),
         "--profile",
         "backend",
     ]
@@ -77,6 +84,8 @@ def backend_resource(
         )
 
     def release(_inputs, _value=None):
+        if not started and _value is None:
+            return
         directory = run_dir / "logging"
         archive_error = None
         raw_export_failed = False
@@ -176,7 +185,112 @@ def backend_resource(
                 "owned Loki raw archive failed before cleanup"
             ) from archive_error
 
+    def verify_ingestion():
+        timestamp = str(time.time_ns())
+        message = "nanolab backend probe " + timestamp
+        labels = {"nanolab_backend_probe": project}
+        row = {"atUtc": datetime.now(UTC).isoformat(), "state": "checking"}
+        timeout = operational_limit(settings, "collection_http_seconds", 10)
+        with httpx.Client(trust_env=False) as http:
+            metrics = None
+            metrics_attempted = False
+            metrics_url = endpoint_url.split("/loki/api/v1/push")[0] + "/metrics"
+            try:
+                response = http.post(
+                    endpoint_url,
+                    json={
+                        "streams": [
+                            {"stream": labels, "values": [[timestamp, message]]}
+                        ]
+                    },
+                    timeout=timeout,
+                )
+                row["pushStatus"] = response.status_code
+                if response.status_code != 204:
+                    raise RuntimeError(
+                        f"Loki push HTTP {response.status_code}: {response.text}"
+                    )
+                response = http.get(
+                    query_url(endpoint_url),
+                    params={
+                        "query": '{nanolab_backend_probe="' + project + '"}',
+                        "start": timestamp,
+                        "end": str(int(timestamp) + 1),
+                        "limit": 1,
+                    },
+                    timeout=timeout,
+                )
+                row["queryStatus"] = response.status_code
+                response.raise_for_status()
+                body = response.json()
+                if body.get("status") != "success" or not any(
+                    value == [timestamp, message]
+                    for stream in body.get("data", {}).get("result", [])
+                    for value in stream.get("values", [])
+                ):
+                    raise RuntimeError("Loki probe write is not queryable")
+                # Loki deliberately accepts ENOSPC writes into memory. A visible
+                # canary must not hide a failed WAL persistence operation.
+                metrics_attempted = True
+                metrics = http.get(metrics_url, timeout=timeout)
+                metrics.raise_for_status()
+                counters = parse_prometheus(
+                    metrics.text, ("loki_ingester_wal_disk_full_failures_total",)
+                )
+                failures = counters.get("loki_ingester_wal_disk_full_failures_total")
+                if failures is None or not math.isfinite(failures) or failures < 0:
+                    row["walDiskFullFailures"] = None
+                    raise RuntimeError(
+                        "Loki WAL failure counter unavailable or invalid"
+                    )
+                row["walDiskFullFailures"] = failures
+                if failures:
+                    raise RuntimeError(
+                        f"Loki WAL disk-full write failures recorded: {failures}"
+                    )
+                row["state"] = "passed"
+            except Exception as error:
+                row.update(state="failed", error=str(error))
+                try:
+                    if not metrics_attempted:
+                        metrics = http.get(metrics_url, timeout=timeout)
+                        metrics.raise_for_status()
+                    if metrics is not None:
+                        (directory / "backend-metrics-on-failure.txt").write_text(
+                            metrics.text
+                        )
+                except Exception as metrics_error:
+                    row["metricsError"] = str(metrics_error)
+                raise RuntimeError(
+                    "owned Loki ingestion probe failed: " + str(error)
+                ) from error
+            finally:
+                with (directory / "backend-probes.jsonl").open("a") as stream:
+                    stream.write(json.dumps(row) + "\n")
+
     def acquire(_inputs):
+        nonlocal started
+        directory.mkdir(parents=True, exist_ok=True)
+        # Campaigns share the host filesystem with VM images. A percent-full cutoff
+        # can reject every log despite ample free bytes; retain WAL and check real IO.
+        override.write_text(
+            json.dumps(
+                {
+                    "services": {
+                        "loki": {
+                            "command": [
+                                "-config.file=/etc/loki/config.yaml",
+                                "-ingester.wal-disk-full-threshold=0",
+                                "-ingester.wal-enabled=true",
+                            ]
+                        }
+                    }
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        started = True
         command("up", "-d")
         if host_cpus is not None:
             from nanolab.one_shot.host_cpu import pin_logging_project
@@ -197,9 +311,11 @@ def backend_resource(
                             settings, "collection_http_seconds", 2
                         ),
                     ).raise_for_status()
-                    return endpoint_url
                 except httpx.HTTPError:
                     time.sleep(0.5)
+                    continue
+                verify_ingestion()
+                return endpoint_url
         raise RuntimeError("owned logging backend readiness failed")
 
     resource = compensated_resource(
@@ -228,6 +344,7 @@ def backend_resource(
             )
             if len(rows) != 1 or rows[0].get("State") != "running":
                 raise RuntimeError("owned Loki backend stopped")
+            verify_ingestion()
 
         return supervision.service_resource(
             resource,
