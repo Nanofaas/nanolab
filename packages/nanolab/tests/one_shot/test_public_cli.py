@@ -35,9 +35,11 @@ def test_cli_routes_one_shot_to_dedicated_builder_with_run_directory(
     assert calls == [{"run_dir": tmp_path / "run", "repo_root": tmp_path}]
 
 
+@pytest.mark.parametrize("reference", ["relative", "absolute", "omitted", "missing", "bad-sha"])
 def test_relative_prerequisite_paths_resolve_from_scenario_not_operator_directory(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, reference
 ):
+    import hashlib
     preset = (
         Path(__file__).parents[2]
         / "src/nanolab/assets/presets/scenarios/one-shot-experiment.yaml"
@@ -49,14 +51,37 @@ def test_relative_prerequisite_paths_resolve_from_scenario_not_operator_director
     }
     directory = tmp_path / "scenarios"
     directory.mkdir()
+    telemetry = directory / "overhead.json"
+    telemetry.write_text('{"offline":"telemetry"}')
+    content = telemetry.read_bytes()
+    if reference != "omitted":
+        data["oneShot"].setdefault("observability", {})["vmResourceOverhead"] = {
+            "path": str(telemetry) if reference == "absolute" else "overhead.json",
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        if reference == "missing":
+            telemetry.unlink()
+        elif reference == "bad-sha":
+            telemetry.write_text("tampered")
     path = directory / "comparison.yaml"
     path.write_text(yaml.safe_dump(data))
-    monkeypatch.chdir(tmp_path)
-    config = _scenario(path)
-    assert config.one_shot is not None
-    for name in ["profile", "qualification", "runtime_distribution"]:
-        artifact = getattr(config.one_shot, name)
-        assert artifact.path.is_absolute() and artifact.path.parent == directory
+    for cwd in (directory, tmp_path):
+        monkeypatch.chdir(cwd)
+        config = _scenario(path)
+        assert config.one_shot is not None
+        for name in ["profile", "qualification", "runtime_distribution"]:
+            artifact = getattr(config.one_shot, name)
+            assert artifact.path.is_absolute() and artifact.path.parent == directory
+        artifact = config.one_shot.observability.vm_resource_overhead
+        if reference == "omitted":
+            assert artifact is None
+        elif reference in {"missing", "bad-sha"}:
+            assert artifact is not None
+            with pytest.raises(FileNotFoundError if reference == "missing" else ValueError):
+                artifact.read_verified()
+        else:
+            assert artifact is not None
+            assert artifact.read_verified() == content
 
 
 def test_public_cli_does_not_provision_legacy_stack_before_one_shot_preflight(

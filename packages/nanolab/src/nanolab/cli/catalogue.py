@@ -55,6 +55,7 @@ def _scenario(path: Path) -> ScenarioConfig:
             config.one_shot.profile,
             config.one_shot.qualification,
             config.one_shot.runtime_distribution,
+            config.one_shot.observability.vm_resource_overhead,
         ):
             if artifact is not None:
                 artifact.path = (path.resolve().parent / artifact.path).resolve()
