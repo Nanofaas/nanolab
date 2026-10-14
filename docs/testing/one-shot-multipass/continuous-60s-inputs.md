@@ -2,9 +2,8 @@
 
 `one-shot-rewindow.py` reuses the saved continuous arrival calendar and spline
 coefficients. It integrates each minute to build a new oracle, without
-resampling requests or starting a campaign. Existing workflows and scripts are
-unchanged. The original `one-shot-observe.py` does not yet accept this schema-v2
-preparation as an executable campaign freeze.
+resampling requests or starting a campaign. The observation workflow accepts the derived schema-v2 calendar while preserving
+the v1/uniform paths. Runtime preparation is a separate explicit step.
 
 Run with Python 3.12+ through the script's pinned NumPy/SciPy environment:
 
@@ -42,9 +41,11 @@ separate; `runtimeReady` deliberately remains false.
 The prepared campaign bundle and readable routing/memory CSVs live in the
 private `Nanofaas/dfaas-documents` repository, under
 `experiments/one-shot-continuous-60s-2026-10-14/`.
-Runtime timing policy is deferred: the inherited maximum auction 60 s plus
-preparation 10 s does not satisfy the current 60 s period check. No timeout or
-native policy has been changed to bypass that check.
+The updated manual logical observation mode accepts 60-second decisions with
+the existing auction 60 s, preparation 10 s and lead 90 s settings. Qualified
+and automatic modes retain their timing checks. Actual activation/expiry
+deadlines remain in force; recorded maxima are not a promise that each epoch
+will finish. The generator continues independently during negotiation.
 
 Tests reuse the existing environments; no package installation is needed:
 
@@ -57,3 +58,43 @@ uv run --frozen --all-packages --all-groups pytest \
   packages/nanolab/tests/one_shot/test_rewindow.py \
   packages/nanolab/tests/one_shot/test_reference_load.py
 ```
+
+## Freeze and execute the observation
+
+Prepare the updated recipe distribution from the matching clean NanoFaaS source
+with the existing `assembleRecipe` task. Then use the existing preparation script:
+
+```bash
+uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py prepare \
+  --tuning /path/to/one-minute-preparation \
+  --arrival-profile /path/to/one-minute-preparation/arrival-profile.json \
+  --parent-freeze /path/to/original-continuous-freeze \
+  --observations /path/to/original-continuous-freeze/observations.json \
+  --distribution /path/to/new-runtime-distribution/distribution.json \
+  --source /path/to/new-runtime-source \
+  --output /path/to/new-freeze
+```
+
+Preparation checks the parent's archived inventory independently of its retired
+external checkout/environment. The new freeze binds the current runtime, package,
+dependencies, oracle and calendar. It records `timingPolicy=observe` and keeps
+all prior resource and timeout values. No load or VM is started by preparation.
+
+One command then owns provisioning, collection, load, supervision, reporting,
+archiving and cleanup:
+
+```bash
+uv run --frozen --all-packages --all-groups python /path/to/new-freeze/source-used.py run \
+  /path/to/new-freeze /path/to/new-run --archive /path/to/new-run-archive
+```
+
+The saved entry point loads its frozen package. No agent polling or manual CPU
+pinning is required. Progress is emitted on stdout and `status.json`. Raw epoch
+negotiations/activations and `epoch-observations.jsonl` retain incomplete plans,
+readiness lag and operation times; the run is not stopped by a missing auction
+plan alone. Available plans still receive conservation, memory and topology
+checks; confirmations involving a missing peer plan remain unverified evidence.
+Owned process failures and SIGINT/SIGTERM still stop, archive and clean up.
+Request rejects/errors remain separate measured results. Existing plan expiry
+and routing/transition behavior is preserved; an expired plan is not extended
+just to make an epoch look successful.

@@ -76,15 +76,15 @@ def validate_operator_protocol(protocol):
         + protocol["protocol"]["preparationSeconds"]
     )
     if (
-        budget > protocol["periodSeconds"] * protocol["maxOperationalFraction"]
-        or budget > protocol["leadSeconds"]
-    ):
+        protocol.get("timingPolicy") != "observe"
+        and budget > protocol["periodSeconds"] * protocol["maxOperationalFraction"]
+    ) or budget > protocol["leadSeconds"]:
         raise ValueError(
             "native operational budget must fit the period fraction and lead time"
         )
 
 
-def bind_scenario(source, distribution):
+def bind_scenario(source, distribution, *, trace=None):
     """Keep resource quotas and rates, bind the existing runtime."""
     result = copy.deepcopy(source)
     settings = result["oneShot"]
@@ -100,6 +100,16 @@ def bind_scenario(source, distribution):
         "path": str(distribution.resolve()),
         "sha256": sha(distribution),
     }
+    if trace is not None:
+        settings["timing"]["matrix"] = [
+            {
+                "id": trace.phase_ids[i] if trace.phase_ids else f"epoch-{i}",
+                "rates": window,
+            }
+            for i, window in enumerate(trace.windows)
+        ]
+        settings["timing"]["periodCandidatesSeconds"] = [trace.period_seconds]
+        settings["timing"]["maxTraceResolutionSeconds"] = trace.period_seconds
     settings["experiment"] = {
         "windows": [{**row, "epochs": 1} for row in settings["timing"]["matrix"]],
         "repetitions": 1,
@@ -142,6 +152,18 @@ def historical_statistics(observed):
     return result
 
 
+def verify_parent_archive(root: Path, expected_fingerprint: str) -> None:
+    """Check archived provenance without requiring a retired source/environment."""
+    if sha(root / "freeze.json") != expected_fingerprint:
+        raise ValueError("parent archive fingerprint mismatch")
+    frozen = json.loads((root / "freeze.json").read_text())
+    for name, expected in frozen["files"].items():
+        path = (root / name).resolve()
+        path.relative_to(root.resolve())
+        if sha(path) != expected:
+            raise ValueError("parent archive bytes changed: " + name)
+
+
 def prepare(args):
     """Capture the package, script and inputs without starting any VM."""
     arrival_input = getattr(args, "arrival_profile", None)
@@ -155,6 +177,16 @@ def prepare(args):
             trace_sha256=sha(input_trace),
             warmup_seconds=720,
         )
+    derived = arrival_document is not None and arrival_document["schemaVersion"] == 2
+    parent = getattr(args, "parent_freeze", None)
+    if derived:
+        if parent is None:
+            raise ValueError("derived replay requires --parent-freeze")
+        verify_parent_archive(parent, arrival_document["parent"]["freezeSha256"])
+        provenance = json.loads((args.tuning / "provenance.json").read_text())
+        for name, item in provenance["files"].items():
+            if sha(args.tuning / name) != item["sha256"]:
+                raise ValueError("derived preparation bytes changed: " + name)
     args.output.mkdir(parents=True, exist_ok=False)
     if arrival_input is not None:
         shutil.copyfile(arrival_input, args.output / "arrival-profile.json")
@@ -162,7 +194,7 @@ def prepare(args):
         "trace.json",
         "selected.json",
         "input-context.json",
-        "offload-coverage.json",
+        *([] if derived else ["offload-coverage.json"]),
     ]:
         shutil.copyfile(args.tuning / name, args.output / name)
     shutil.copyfile(args.observations, args.output / "observations.json")
@@ -179,8 +211,23 @@ def prepare(args):
         args.output / "recipe.yaml",
     )
     scenario = bind_scenario(
-        yaml.safe_load((args.tuning / "load-scenario.yaml").read_text()),
+        yaml.safe_load(
+            (
+                (parent / "scenario.yaml")
+                if derived
+                else (args.tuning / "load-scenario.yaml")
+            ).read_text()
+        ),
         args.output / "distribution.json",
+        **(
+            {
+                "trace": TraceArtifact.model_validate_json(
+                    (args.output / "trace.json").read_bytes()
+                )
+            }
+            if derived
+            else {}
+        ),
     )
     scenario["recipeProfile"] = str((args.output / "recipe.yaml").resolve())
     with (args.output / "scenario.yaml").open("x") as stream:
@@ -193,8 +240,8 @@ def prepare(args):
     )
     trace = TraceArtifact.model_validate_json((args.output / "trace.json").read_text())
     if (
-        len(trace.windows) != 9
-        or trace.period_seconds != 360
+        (not derived and (len(trace.windows) != 9 or trace.period_seconds != 360))
+        or (derived and (len(trace.windows) != 54 or trace.period_seconds != 60))
         or len(trace.nodes) != 6
         or len(trace.functions) != 5
     ):
@@ -202,8 +249,34 @@ def prepare(args):
     selected = json.loads((args.output / "selected.json").read_text())
     if [r["rates"] for r in selected] != trace.windows:
         raise ValueError("selected loads differ from trace")
+    if derived:
+        save(
+            args.output / "offload-coverage.json",
+            {
+                "observationOnly": True,
+                "epochs": len(selected),
+                "intervalsWithPeerOffload": sum(
+                    row["summary"]["neighborRps"] > 0 for row in selected
+                ),
+                "note": "Predicted coverage is recorded; no load selection or exclusion gate",
+            },
+        )
+        for name in (
+            "means.json",
+            "means.csv",
+            "oracle-verification.json",
+            "reference-environment.json",
+            "provenance.json",
+        ):
+            shutil.copyfile(
+                args.tuning / name,
+                args.output
+                / (
+                    "preparation-provenance.json" if name == "provenance.json" else name
+                ),
+            )
     coverage = json.loads((args.output / "offload-coverage.json").read_text())
-    if (
+    if not derived and (
         coverage["intervalsWithPeerOffload"] != 9
         or coverage["intervalsWithMultipleNeighbors"] < 2
     ):
@@ -229,7 +302,7 @@ def prepare(args):
     protocol = {
         "qualified": False,
         "purpose": "operator-declared-protocol-not-timing-qualification",
-        "periodSeconds": 360,
+        "periodSeconds": trace.period_seconds,
         "leadSeconds": settings.operational_limits.lead_seconds,
         "operationalLimits": settings.operational_limits.model_dump(by_alias=True),
         "maxOperationalFraction": NATIVE_MAX_TIMING_FRACTION,
@@ -248,6 +321,8 @@ def prepare(args):
             "warmup + schedule setup + all epochs + existing generator drain"
         ),
     }
+    if derived:
+        protocol["timingPolicy"] = "observe"
     validate_operator_protocol(protocol)
     save(args.output / "operator-protocol.json", protocol)
     deps = {
@@ -427,6 +502,7 @@ def main():
     for key in ["tuning", "observations", "distribution", "source", "output"]:
         prep.add_argument("--" + key, type=Path, required=True)
     prep.add_argument("--arrival-profile", type=Path)
+    prep.add_argument("--parent-freeze", type=Path)
     launch = commands.add_parser("run")
     launch.add_argument("freeze", type=Path)
     launch.add_argument("output", type=Path)

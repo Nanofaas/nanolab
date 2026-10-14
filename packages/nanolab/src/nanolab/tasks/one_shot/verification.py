@@ -139,7 +139,7 @@ def verify_runtime_inventory(rows, *, functions, nodes, node_functions=None):
 
 
 def verify_epoch_flows(
-    plans: dict, *, neighbor_graph=None, observation_only=False
+    plans: dict, *, neighbor_graph=None, observation_only=False, unavailable_nodes=None
 ) -> list[dict]:
     """Match acknowledged one-hop peer assignments and conserve forecast rates."""
     diagnostics = []
@@ -170,14 +170,23 @@ def verify_epoch_flows(
                     peer = (
                         row["sellerId"] if direction == "outbound" else row["buyerId"]
                     )
-                    if (
-                        peer == node
-                        or peer not in plans
-                        or (
-                            neighbor_graph is not None
-                            and peer not in neighbor_graph.get(node, [])
-                        )
+                    if peer == node or (
+                        neighbor_graph is not None
+                        and peer not in neighbor_graph.get(node, [])
                     ):
+                        raise ValueError("peer assignment outside one-hop topology")
+                    if peer not in plans:
+                        if observation_only and peer in (unavailable_nodes or set()):
+                            diagnostics.append(
+                                {
+                                    "kind": "unobservedPeerConfirmation",
+                                    "node": node,
+                                    "peer": peer,
+                                    "function": name,
+                                    "assignment": row,
+                                }
+                            )
+                            continue
                         raise ValueError("peer assignment outside one-hop topology")
                     other = plans[peer]["functions"].get(name, {}).get(counterpart, [])
                     if row not in other:

@@ -35,11 +35,17 @@ from nanolab.tasks.one_shot.trace import (
 from tests.one_shot.test_preflight import strict_cgroup_sample
 
 
-@pytest.mark.parametrize("profiled", [False, True])
 @pytest.mark.parametrize(
-    "failure", [None, "generator", "signal", "dependency", "precheck"]
+    ("period", "epoch_count", "profiled"),
+    [(360, 9, False), (360, 9, True), (60, 54, True)],
 )
-def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, profiled):
+@pytest.mark.parametrize(
+    "failure",
+    [None, "generator", "signal", "dependency", "precheck", "auction", "interrupt"],
+)
+def test_real_nine_epoch_observation_workflow(
+    tmp_path, monkeypatch, failure, profiled, period, epoch_count
+):
     raw, freeze, archive = (tmp_path / name for name in ("raw", "freeze", "archive"))
     raw.mkdir()
     freeze.mkdir()
@@ -72,7 +78,7 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
         name: {"input": payload, "cpu": 0.25, "memoryMiB": memory, "maxReplicas": 16}
         for name, payload, memory in zip(names, payloads, memories, strict=True)
     }
-    rates = {node: dict.fromkeys(names, 1 / 360) for node in node_ids}
+    rates = {node: dict.fromkeys(names, 1 / period) for node in node_ids}
     graph = {
         "edge-1": ["edge-2", "edge-3"],
         "edge-2": ["edge-1", "edge-3"],
@@ -86,7 +92,7 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
             "purpose": "workflow-validation",
             "protocolVersion": 2,
             "strictMemory": True,
-            "flowQuantum": 1 / 360,
+            "flowQuantum": 1 / period,
             "nodes": [
                 {
                     "id": node,
@@ -99,8 +105,8 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
             "neighbors": graph,
             "operationalLimits": OperationalLimits().model_dump(by_alias=True),
             "timing": {
-                "periodCandidatesSeconds": [360],
-                "maxTraceResolutionSeconds": 360,
+                "periodCandidatesSeconds": [period],
+                "maxTraceResolutionSeconds": period,
                 "protocol": {
                     "auctionSeconds": 60,
                     "peerSeconds": 5,
@@ -110,7 +116,9 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
                 "matrix": [{"id": "load", "rates": rates}],
             },
             "experiment": {
-                "windows": [{"id": f"load-{i}", "rates": rates} for i in range(9)],
+                "windows": [
+                    {"id": f"load-{i}", "rates": rates} for i in range(epoch_count)
+                ],
                 "warmupSeconds": 720,
                 "warmupRate": 1,
                 "generatorVus": 512,
@@ -121,13 +129,13 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
     trace = TraceArtifact(
         nodes=node_ids,
         functions=names,
-        period_seconds=360,
-        flow_quantum=1 / 360,
+        period_seconds=period,
+        flow_quantum=1 / period,
         seed=7,
         payloads=cast(
             dict[str, dict[str, JsonValue]], dict(zip(names, payloads, strict=True))
         ),
-        windows=[rates] * 9,
+        windows=[rates] * epoch_count,
         node_roles={n: "cloud-direct" if n == "cloud" else "edge" for n in node_ids},
     )
     digest = "sha256:" + "a" * 64
@@ -153,9 +161,9 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
                 "epoch": epoch,
                 "origin": node,
                 "function": name,
-                "offsetsSeconds": [epoch * 360 + 60],
+                "offsetsSeconds": [epoch * period + period / 6],
             }
-            for epoch in range(9)
+            for epoch in range(epoch_count)
             for node in node_ids
             for name in names
         ]
@@ -173,9 +181,10 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
         save(
             "arrival-profile.json",
             {
-                "schemaVersion": 1,
-                "periodSeconds": 360,
-                "epochs": 9,
+                "schemaVersion": 2 if period == 60 else 1,
+                "curveTimeScaleSeconds": 360,
+                "periodSeconds": period,
+                "epochs": epoch_count,
                 "warmupSeconds": 720,
                 "traceSha256": observation.sha(freeze / "trace.json"),
                 "cells": cells,
@@ -233,13 +242,20 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
 
     def sleep(seconds):
         now[0] += seconds
-        if failure == "signal" and not signalled and (raw / "manifest.json").exists():
+        if (
+            failure in ("signal", "interrupt")
+            and not signalled
+            and (raw / "manifest.json").exists()
+        ):
             anchor = json.loads((raw / "manifest.json").read_text())["parameters"][
                 "logicalSchedule"
             ]["anchorMonotonicSeconds"]
             if now[0] >= anchor + 720:
                 signalled.append(True)
-                os.kill(os.getpid(), signal.SIGTERM)
+                os.kill(
+                    os.getpid(),
+                    signal.SIGINT if failure == "interrupt" else signal.SIGTERM,
+                )
 
     clock = SimpleNamespace(
         monotonic=lambda: now[0], sleep=sleep, time=lambda: wall + now[0]
@@ -420,20 +436,37 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
         elif path.endswith("/events"):
             return httpx.Response(503)
         elif path.endswith("/prepare") or path.endswith("/activate"):
+            if (
+                failure == "auction"
+                and path.endswith("/prepare")
+                and node == "edge-2"
+                and int(path.split("/")[-2]) == 2
+            ):
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "FAILED",
+                        "plan": None,
+                        "desiredReplicas": {},
+                        "readyReplicas": {},
+                        "reason": "auction deadline",
+                        "preparedAt": VirtualDate.now(UTC).isoformat(),
+                    },
+                )
             epoch = int(path.split("/")[-2])
             preparing = path.endswith("/prepare")
             plan = {
                 "nodeId": node,
-                "flowQuantum": 1 / 360,
+                "flowQuantum": 1 / period,
                 "functions": {
                     fn: {
                         "readyReplicas": 1,
                         "memoryMiB": settings.functions[fn].memory_mib,
                         "utilization": 0.8,
                         "demandSeconds": 0.1,
-                        "forecastRate": 1 / 360,
+                        "forecastRate": 1 / period,
                         "localRate": 0,
-                        "cloudRate": 1 / 360,
+                        "cloudRate": 1 / period,
                         "inbound": [],
                         "outbound": [],
                     }
@@ -471,7 +504,7 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
                         "ackReceived": False,
                         "ackResponseReceived": False,
                         "reason": "TRANSPORT_ERROR",
-                        "residualCloudRate": 1 / 360,
+                        "residualCloudRate": 1 / period,
                     }
                 ]
                 if not preparing and node in {"edge-1", "edge-2"}
@@ -610,7 +643,7 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
         def poll(self):
             if failure == "generator" and now[0] >= self.anchor + 720:
                 self.returncode = 7
-            elif now[0] >= self.anchor + 9 * 360:
+            elif now[0] >= self.anchor + epoch_count * period:
                 self.returncode = 0
             return self.returncode
 
@@ -635,8 +668,10 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
         supervision=supervisor,
     )
     assert not acquired
-    if failure:
-        with pytest.raises(Exception, match=r"generator|signal 15|resource|precheck"):
+    if failure not in (None, "auction"):
+        with pytest.raises(
+            Exception, match=r"generator|signal 15|signal 2|resource|precheck"
+        ):
             supervisor.run(workflow.run)
     else:
         supervisor.run(workflow.run)
@@ -656,10 +691,10 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
                 manifest["parameters"]["generator"]["arrivalProfile"]["sha256"]
                 == digest_profile
             )
-            assert len(schedule) == 330
+            assert len(schedule) == (epoch_count + 2) * 30
             anchor = datetime.fromisoformat(manifest["anchor"]).timestamp()
             assert all(
-                row["scheduledAt"] == anchor + row["epoch"] * 360 + 60
+                row["scheduledAt"] == anchor + row["epoch"] * period + period / 6
                 for row in schedule
                 if row["phase"] == "campaign"
             )
@@ -692,14 +727,22 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
     assert (archive / "result.json").exists()
     result = json.loads((archive / "result.json").read_text())
     assert result["exitCode"] == (
-        0 if failure is None else 143 if failure == "signal" else 1
+        0
+        if failure in (None, "auction")
+        else 143
+        if failure == "signal"
+        else 130
+        if failure == "interrupt"
+        else 1
     )
-    if failure is None:
+    if failure in (None, "auction"):
         epochs = [
             json.loads(line) for line in (raw / "epochs.jsonl").read_text().splitlines()
         ]
-        assert [row["epoch"] for row in epochs] == list(range(9))
-        assert all(not row["censored"] for row in epochs)
+        assert [row["epoch"] for row in epochs] == list(range(epoch_count))
+        assert sum(row["censored"] for row in epochs) == (
+            1 if failure == "auction" else 0
+        )
         assert all(not row["measurementComplete"] for row in epochs)
         configs = [data for _, path, data in calls if path.endswith("/config")]
         assert len(configs) == 5
@@ -716,17 +759,21 @@ def test_real_nine_epoch_observation_workflow(tmp_path, monkeypatch, failure, pr
                 generations=dict.fromkeys(names, 1),
                 anchor=datetime.fromisoformat(manifest["anchor"]),
             )
-        assert len([path for _, path, _ in calls if path.endswith("/activate")]) == 45
+        assert len(
+            [path for _, path, _ in calls if path.endswith("/activate")]
+        ) == epoch_count * 5 - (1 if failure == "auction" else 0)
         assert all(
             config["leadTime"] == "PT90.000000000S"
             and config["preparationBudget"] == "PT10.000000000S"
             for config in configs
         )
         assert all(config["negotiation"]["maxRounds"] == 8 for config in configs)
+        assert all(config["period"] == f"PT{period:.9f}S" for config in configs)
+        assert manifest["period_seconds"] == period
         report = json.loads((raw / "report.json").read_text())
         cells = report["assignmentObservations"]["cells"]
         missing_ack = [cell for cell in cells if cell["diagnostics"]]
-        assert len(missing_ack) == 18  # Two node perspectives for nine epochs.
+        assert len(missing_ack) == epoch_count * 2 - (1 if failure == "auction" else 0)
         assert all(cell["unconfirmedQuantity"] == 1 for cell in missing_ack)
         assert all(
             cell["diagnostics"][0]["reason"] == "TRANSPORT_ERROR"

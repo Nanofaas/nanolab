@@ -1302,22 +1302,60 @@ class RunOneShotLoadTask(Task[None]):
                         plans = {
                             node: observation["result"]["plan"]
                             for node, observation in _observation["nodes"].items()
-                            if observation.get("result", {}).get("plan")
+                            if (observation.get("result") or {}).get("plan")
                         }
-                        if len(plans) != len(clients):
+                        if not observation_only and len(plans) != len(clients):
                             raise ValueError("missing native ready allocation")
+                        missing_nodes = set(clients) - set(plans)
                         flow_observations = verify_epoch_flows(
                             plans,
                             neighbor_graph=getattr(run.topology, "neighbor_graph", None)
                             or None,
-                            **({"observation_only": True} if observation_only else {}),
+                            **(
+                                {
+                                    "observation_only": True,
+                                    "unavailable_nodes": missing_nodes,
+                                }
+                                if observation_only
+                                else {}
+                            ),
                         )
+                        if missing_nodes:
+                            flow_observations.append(
+                                {
+                                    "kind": "incompletePlanSet",
+                                    "missingNodes": sorted(missing_nodes),
+                                }
+                            )
                         if flow_observations:
                             append_observation(
                                 run.run_dir / "assignment-observations.jsonl",
                                 {"epoch": epoch, "observations": flow_observations},
                             )
-                        if (
+                        if observation_only:
+                            append_observation(
+                                run.run_dir / "epoch-observations.jsonl",
+                                {
+                                    "atUtc": datetime.now(UTC).isoformat(),
+                                    "epoch": epoch,
+                                    "censored": sample.censored,
+                                    "missingPlanNodes": sorted(
+                                        set(clients) - set(plans)
+                                    ),
+                                    "readySeconds": sample.ready_seconds,
+                                    "auctionSeconds": sample.auction_seconds,
+                                    "readinessLagSeconds": _observation.get(
+                                        "readinessLagSeconds"
+                                    ),
+                                    "negotiationWallSeconds": _observation.get(
+                                        "negotiationWallSeconds"
+                                    ),
+                                    "activationWallSeconds": _observation.get(
+                                        "activationWallSeconds"
+                                    ),
+                                },
+                            )
+                        if not observation_only and (
                             sample.censored
                             or sample.ready_seconds is None
                             or sample.auction_seconds is None

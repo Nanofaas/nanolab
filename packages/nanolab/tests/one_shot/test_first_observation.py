@@ -812,3 +812,61 @@ def test_invalid_arrival_profile_stops_prepare_before_output(observer, tmp_path)
             )
         )
     assert not (tmp_path / "output").exists()
+
+
+def test_minute_observation_records_timing_instead_of_rejecting_maxima(observer):
+    protocol = {
+        "maxOperationalFraction": 1,
+        "maxAuctionFraction": 1,
+        "periodSeconds": 60,
+        "leadSeconds": 90,
+        "protocol": {"auctionSeconds": 60, "preparationSeconds": 10},
+    }
+    with pytest.raises(ValueError, match="operational budget"):
+        observer.validate_operator_protocol(protocol)
+    protocol["timingPolicy"] = "observe"
+    observer.validate_operator_protocol(protocol)
+    assert protocol["protocol"] == {"auctionSeconds": 60, "preparationSeconds": 10}
+
+
+def test_derived_scenario_changes_grid_but_keeps_resources_and_timeouts(
+    observer, tmp_path
+):
+    from tests.one_shot.test_arrivals import minute_replay_case
+
+    trace, _, _ = minute_replay_case()
+    source = {
+        "oneShot": {
+            "nodes": [{"id": "a", "cpus": 2}],
+            "functions": {"f": {"cpu": 0.25, "memoryMiB": 64}},
+            "timing": {"matrix": [{"id": "old", "rates": {"a": {"f": 1}}}]},
+        }
+    }
+    distribution = tmp_path / "distribution.json"
+    distribution.write_text("{}")
+    scenario = observer.bind_scenario(source, distribution, trace=trace)
+    assert scenario["oneShot"]["nodes"] == source["oneShot"]["nodes"]
+    assert scenario["oneShot"]["functions"] == source["oneShot"]["functions"]
+    assert len(scenario["oneShot"]["experiment"]["windows"]) == 54
+    assert scenario["oneShot"]["timing"]["periodCandidatesSeconds"] == [60]
+    assert scenario["oneShot"]["timing"]["protocol"]["auctionSeconds"] == 60
+    assert scenario["oneShot"]["timing"]["protocol"]["preparationSeconds"] == 10
+
+
+def test_parent_archive_integrity_does_not_require_retired_environments(
+    observer, tmp_path
+):
+    content = tmp_path / "trace.json"
+    content.write_text("{}")
+    parent = {
+        "files": {"trace.json": observer.sha(content)},
+        "source": "/retired/checkout",
+        "sourceFiles": {"missing.java": "old"},
+        "dependencyFiles": {"/retired/environment/site-packages/module.py": "old"},
+    }
+    (tmp_path / "freeze.json").write_text(json.dumps(parent))
+    fingerprint = observer.sha(tmp_path / "freeze.json")
+    observer.verify_parent_archive(tmp_path, fingerprint)
+    content.write_text('{"changed":true}')
+    with pytest.raises(ValueError, match=r"parent.*bytes"):
+        observer.verify_parent_archive(tmp_path, fingerprint)

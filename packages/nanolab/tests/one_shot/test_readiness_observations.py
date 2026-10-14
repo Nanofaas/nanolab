@@ -111,3 +111,46 @@ def test_unused_seller_reservation_is_recorded_but_unauthorized_outbound_fails()
     b["inbound"] = []
     with pytest.raises(ValueError, match="reciprocal"):
         verify_epoch_flows(plans, observation_only=True)
+
+
+def test_missing_peer_does_not_hide_invalid_available_plan():
+    assignment = {
+        "id": "g",
+        "buyerId": "a",
+        "sellerId": "b",
+        "quantity": 1,
+        "readyConfirmed": True,
+    }
+    function = {
+        "forecastRate": 1,
+        "localRate": 0,
+        "cloudRate": 0,
+        "inbound": [],
+        "outbound": [assignment],
+    }
+    plans = {"a": {"flowQuantum": 1, "functions": {"f": function}}}
+    diagnostics = verify_epoch_flows(
+        plans,
+        neighbor_graph={"a": ["b"]},
+        observation_only=True,
+        unavailable_nodes={"b"},
+    )
+    assert diagnostics[0]["kind"] == "unobservedPeerConfirmation"
+    function["localRate"] = 2
+    with pytest.raises(ValueError, match="conserve"):
+        verify_epoch_flows(
+            plans,
+            neighbor_graph={"a": ["b"]},
+            observation_only=True,
+            unavailable_nodes={"b"},
+        )
+    function["localRate"] = 0
+    with pytest.raises(ValueError, match="topology"):
+        verify_epoch_flows(
+            plans,
+            neighbor_graph={"a": []},
+            observation_only=True,
+            unavailable_nodes={"b"},
+        )
+    with pytest.raises(ValueError, match="topology"):
+        verify_epoch_flows(plans, neighbor_graph={"a": ["b"]})

@@ -179,3 +179,75 @@ def test_frozen_profile_is_portable_and_requires_its_identity(arrival_case, tmp_
     del frozen["arrivalProfile"]
     with pytest.raises(ValueError, match="arrival"):
         read_frozen_arrival_profile(relocated, frozen)
+
+
+def minute_replay_case():
+    from nanolab.tasks.one_shot.rewindow import rewindow_profile
+
+    source, original = arrival_case_data()
+    original["measurementCurves"] = {
+        node + "/" + name: {} for node in source.nodes for name in source.functions
+    }
+    document, _ = rewindow_profile(original, period_seconds=60, integral=lambda *_: 1)
+    trace = TraceArtifact(
+        nodes=source.nodes,
+        functions=source.functions,
+        payloads=source.payloads,
+        period_seconds=60,
+        flow_quantum=0.05,
+        seed=source.seed,
+        windows=[{"a": {"f": 0.05, "g": 0}, "cloud": {"f": 0, "g": 0}}] * 54,
+    )
+    document["traceSha256"] = "a" * 64
+    return trace, document, original
+
+
+def test_minute_calendar_is_independent_of_oracle_counts_and_keeps_warmup():
+    from nanolab.tasks.one_shot.arrivals import schedule_from_arrival_profile
+
+    trace, document, original = minute_replay_case()
+    validate_arrival_profile(document, trace, trace_sha256="a" * 64, warmup_seconds=720)
+    anchor = datetime(2026, 10, 14, tzinfo=UTC)
+    schedule = schedule_from_arrival_profile(
+        trace,
+        document,
+        anchor=anchor,
+        endpoints={"a": "http://a", "cloud": "http://cloud"},
+        run_id="minute",
+    )
+    assert len(schedule) == sum(len(c["offsetsSeconds"]) for c in original["cells"])
+    assert len({r["originalId"] for r in schedule}) == len(schedule)
+    for node in trace.nodes:
+        old = sorted(
+            offset
+            for c in original["cells"]
+            if c["origin"] == node
+            for offset in c["offsetsSeconds"]
+        )
+        actual = sorted(
+            r["scheduledAt"] - anchor.timestamp()
+            for r in schedule
+            if r["origin"] == node
+        )
+        assert actual == pytest.approx(old, abs=1e-6)
+    assert all(r["epoch"] == -1 for r in schedule if r["phase"] == "warmup")
+    assert any(r["origin"] == "cloud" for r in schedule if r["phase"] == "campaign")
+
+
+@pytest.mark.parametrize("mutation", ["scope", "order", "boundary", "curve-scale"])
+def test_minute_calendar_rejects_invalid_structure(mutation):
+    trace, document, _ = minute_replay_case()
+    if mutation == "scope":
+        document["cells"].pop()
+    elif mutation == "curve-scale":
+        document["curveTimeScaleSeconds"] = 0
+    else:
+        cell = next(c for c in document["cells"] if len(c["offsetsSeconds"]) >= 2)
+        if mutation == "order":
+            cell["offsetsSeconds"].reverse()
+        else:
+            cell["offsetsSeconds"][-1] = (cell["epoch"] + 1) * 60
+    with pytest.raises(ValueError, match=r"scope|offset|scale|profile"):
+        validate_arrival_profile(
+            document, trace, trace_sha256="a" * 64, warmup_seconds=720
+        )

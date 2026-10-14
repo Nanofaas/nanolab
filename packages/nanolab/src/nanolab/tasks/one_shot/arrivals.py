@@ -24,8 +24,19 @@ def validate_arrival_profile(
     """Check complete scope, source identity, counts and finite ordered offsets."""
     if not isinstance(document, dict):
         raise ValueError("arrival profile must be an object")
+    version = document.get("schemaVersion")
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("unsupported arrival profile schemaVersion")
+    if version == 2:
+        scale = document.get("curveTimeScaleSeconds")
+        if (
+            isinstance(scale, bool)
+            or not isinstance(scale, (int, float))
+            or not math.isfinite(scale)
+            or scale <= 0
+        ):
+            raise ValueError("invalid arrival profile curve time scale")
     for name, value in [
-        ("schemaVersion", 1),
         ("periodSeconds", trace.period_seconds),
         ("epochs", len(trace.windows)),
         ("warmupSeconds", warmup_seconds),
@@ -74,7 +85,7 @@ def validate_arrival_profile(
         seen.add(key)
         count, start, end = expected[key]
         offsets = cell.get("offsetsSeconds")
-        if not isinstance(offsets, list) or len(offsets) != count:
+        if not isinstance(offsets, list) or (version == 1 and len(offsets) != count):
             raise ValueError("arrival profile cell request count mismatch")
         previous = None
         for offset in offsets:
@@ -141,3 +152,41 @@ def read_frozen_arrival_profile(
         warmup_seconds=warmup_seconds,
     )
     return document
+
+
+def schedule_from_arrival_profile(
+    trace: TraceArtifact,
+    document: dict,
+    *,
+    anchor,
+    endpoints: dict[str, str],
+    run_id: str,
+) -> list[dict]:
+    """Build originals from a validated replay calendar, independently of forecasts."""
+    rows = []
+    for cell in document["cells"]:
+        phase, epoch, node, name = _key(cell)
+        for index, offset in enumerate(cell["offsetsSeconds"]):
+            rows.append(
+                {
+                    "originalId": f"{run_id}:{phase}:{epoch}:{node}:{name}:{index}",
+                    "origin": node,
+                    "function": name,
+                    "epoch": epoch,
+                    "phase": phase,
+                    **(
+                        {"originRole": trace.node_roles[node]}
+                        if trace.node_roles
+                        else {}
+                    ),
+                    **(
+                        {"phaseId": trace.phase_ids[epoch]}
+                        if trace.phase_ids and epoch >= 0
+                        else {}
+                    ),
+                    "scheduledAt": anchor.timestamp() + offset,
+                    "url": endpoints[node] + f"/v1/functions/{name}:invoke",
+                    "input": trace.payloads[name],
+                }
+            )
+    return sorted(rows, key=lambda row: (row["scheduledAt"], row["originalId"]))

@@ -31,7 +31,11 @@ from nanolab.one_shot.vm_resources import (
     read_samples,
     telemetry_policy,
 )
-from nanolab.tasks.one_shot.arrivals import read_frozen_arrival_profile, retime_schedule
+from nanolab.tasks.one_shot.arrivals import (
+    read_frozen_arrival_profile,
+    retime_schedule,
+    schedule_from_arrival_profile,
+)
 from nanolab.tasks.one_shot.artifacts import (
     canonical_bytes,
     write_immutable_artifact,
@@ -436,7 +440,7 @@ class ObservationFreeze(Task):
             "scientificQualified": False,
             "profileScope": run.frozen["serviceScope"],
             "generator": {
-                "warmupSeconds": 720,
+                "warmupSeconds": run.settings.experiment.warmup_seconds,
                 "vus": 512,
                 "maxArrivalLatenessSeconds": 3600,
             },
@@ -479,7 +483,7 @@ class ObservationFreeze(Task):
             seed=run.trace.seed,
             nodes=run.trace.nodes,
             functions=run.trace.functions,
-            period_seconds=360,
+            period_seconds=run.trace.period_seconds,
             lead_seconds=protocol["leadSeconds"],
             flow_quantum=run.trace.flow_quantum,
             modes=["oracle"],
@@ -489,24 +493,36 @@ class ObservationFreeze(Task):
             parameters=parameters,
         )
         endpoints = {n: inputs.resource(r) for n, r in run.topology.endpoints.items()}
-        scheduled = request_schedule(
-            run.trace, anchor=anchor, endpoints=endpoints, run_id=manifest.run_id
-        )
-        warm = request_schedule(
-            warmup_trace(run.trace, seconds=720),
-            anchor=anchor - timedelta(seconds=720),
-            endpoints=endpoints,
-            run_id=manifest.run_id + ":warmup",
-        )
-        warm = [dict(row, phase="warmup", epoch=-1) for row in warm]
-        schedule = sorted(
-            warm + scheduled, key=lambda r: (r["scheduledAt"], r["originalId"])
-        )
-        if arrival_document is not None:
-            schedule = retime_schedule(
-                schedule, arrival_document, anchor_timestamp=anchor.timestamp()
+        if arrival_document is not None and arrival_document["schemaVersion"] == 2:
+            schedule = schedule_from_arrival_profile(
+                run.trace,
+                arrival_document,
+                anchor=anchor,
+                endpoints=endpoints,
+                run_id=manifest.run_id,
             )
-            # Retain the exact frozen input bytes, including its provenance hash.
+            scheduled = [row for row in schedule if row["phase"] == "campaign"]
+            warm = [row for row in schedule if row["phase"] == "warmup"]
+        else:
+            scheduled = request_schedule(
+                run.trace, anchor=anchor, endpoints=endpoints, run_id=manifest.run_id
+            )
+            warm = request_schedule(
+                warmup_trace(run.trace, seconds=run.settings.experiment.warmup_seconds),
+                anchor=anchor
+                - timedelta(seconds=run.settings.experiment.warmup_seconds),
+                endpoints=endpoints,
+                run_id=manifest.run_id + ":warmup",
+            )
+            warm = [dict(row, phase="warmup", epoch=-1) for row in warm]
+            schedule = sorted(
+                warm + scheduled, key=lambda r: (r["scheduledAt"], r["originalId"])
+            )
+            if arrival_document is not None:
+                schedule = retime_schedule(
+                    schedule, arrival_document, anchor_timestamp=anchor.timestamp()
+                )
+        if arrival_document is not None:
             write_immutable_artifact(
                 run.run_dir / "arrival-profile.json",
                 (run.frozen_dir / "arrival-profile.json").read_bytes(),
@@ -563,7 +579,7 @@ class ConfigureOracle(Task):
                     node,
                     client=client,
                     cloud_uri=inputs.resource(run.topology.endpoints[cloud]),
-                    period=360,
+                    period=manifest.period_seconds,
                     lead=manifest.lead_seconds,
                     epsilon=run.qualification.epsilon,
                     protocol=run.settings.timing.protocol,
