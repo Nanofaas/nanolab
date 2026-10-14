@@ -98,3 +98,31 @@ Owned process failures and SIGINT/SIGTERM still stop, archive and clean up.
 Request rejects/errors remain separate measured results. Existing plan expiry
 and routing/transition behavior is preserved; an expired plan is not extended
 just to make an epoch look successful.
+
+## Physical evidence collection after the minute-run diagnosis
+
+The live collector preserves its pending-original order across collection slices.
+Lookups visited in a slice move behind the unvisited originals, including when a
+proof lookup returned 404 or its replica disappeared. A row whose lookup did not
+start before the deadline remains at the front for the following slice. New k6
+results are admitted once, and originals with released proofs leave the queue.
+This prevents an unrecoverable old prefix from repeatedly consuming every slice.
+The existing slice duration, HTTP limits, worker count and process-failure policy
+are unchanged; no backlog threshold stops a campaign.
+
+`evidence-collection.jsonl` records UTC time, visited originals, pending originals
+and originals with a collected released proof after every completed pass. This
+is diagnostic progress, not a count of failed requests or an acceptance gate.
+Physical collection still cannot recover in-memory proofs that a removed replica
+has already lost. All k6 request/response records remain the primary outcome
+source; incomplete independent evidence remains explicitly incomplete.
+
+The regression test exercises the real collector loop and bounded parallel lookup
+with simulated HTTP and virtual time. It checks an irrecoverable prefix, fresh
+proofs already available and proofs arriving during collection, and that expired
+slices do not report lookups that never ran. Existing workflow tests cover Sonata
+resource ownership, process faults, interruption and cleanup without VMs.
+
+This change affects the next prepared package fingerprint. Previously frozen
+packages and archived experimental results are not rewritten. The separate Loki
+HTTP-500 delivery problem is not fixed by this collector scheduling change.
