@@ -811,3 +811,51 @@ and rejects remain experimental outcomes. No extra runner worker, mathematical
 dependency, resource quota or performance/clock exclusion criterion is added.
 Historical freezes require no editing and cannot enable the feature by changing
 an external profile after preparation.
+
+## Operational failures, finalization and configuration
+
+The first operational failure is the structured cause in terminal receipts.
+Service acquisition preserves an initial readiness failure or interruption even
+if closing the probe worker and releasing the service also fail. Both cleanup
+operations are attempted once; later failures are exception notes. Sonata keeps
+declared dependency order and compensates only acquired resources. Primary
+SIGINT and SIGTERM outcomes retain exit codes 130 and 143.
+
+The observation launcher attempts final VM inventory and offline reporting
+independently. An inventory error is recorded in `inventory-failure.json` when
+storage permits; an error writing that receipt does not skip the report attempt.
+Later inventory, receipt and renderer failures become notes on the first cause.
+The supervisor updates any produced report with the terminal operational outcome.
+Request rejects and errors remain experimental observations.
+
+After owned writers stop, the supervisor claims a new archive destination and
+copies and verifies raw evidence with SHA-256. An existing archive destination
+is never overwritten. A failed copy or final verification leaves
+`archiveVerified=false` and invalidates terminal receipts and reports in raw and
+owned archive locations wherever they are writable. This diagnostic finalization
+never repairs corrupted measurement files, retries verification, or relaunches
+the workflow. Corrupted archive evidence and intact raw measurements are retained.
+If storage rejects failure receipts or report updates, consistency cannot be
+promised for those files; available raw receipts and final stdout record the
+persistence or archive-invalidation limitation while preserving the first cause.
+
+Scenario CLI artifact references, including the optional
+`oneShot.observability.vmResourceOverhead`, resolve relative to the scenario file.
+Absolute references remain supported. Missing files and incorrect SHA-256 values
+still fail through the existing verified artifact reader. The observation
+launcher's own bootstrap and telemetry precheck follow their existing path.
+
+One-shot images are selected through `recipeProfile` and the runtime distribution.
+Omitted image fields, `controlPlaneImage: null` and `functionImages: {}` are valid
+defaults. A control-plane image value or nonempty function-image mapping fails
+validation before acquisition with:
+
+```text
+one-shot does not support controlPlaneImage or functionImages overrides; select images through recipeProfile and the runtime distribution
+```
+
+Generic comparison/loadtest image overrides retain their supported behavior.
+Future observations must prepare a new freeze with the fixed package and launcher.
+The package fingerprint covers the supervisor, catalogue and scenario code;
+execution also verifies the active launcher against the saved `source-used.py`
+hash. Existing freezes, historical results and their drift checks remain intact.
