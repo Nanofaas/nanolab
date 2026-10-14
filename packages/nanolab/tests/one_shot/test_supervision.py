@@ -1034,3 +1034,89 @@ def test_terminal_persistence_failure_updates_writable_reports(tmp_path, blocked
     assert supervisor.primary is not None and outcome["cause"] == str(
         supervisor.primary
     )
+
+
+@pytest.mark.parametrize("signum", [None, signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize("archived", [False, True])
+@pytest.mark.parametrize("workflow_fails", [False, True])
+def test_signal_during_report_finalization_updates_saved_outcomes(
+    tmp_path, monkeypatch, capsys, signum, archived, workflow_fails
+):
+    """Persist late real signals without changing primary failure or cleanup."""
+    import html
+    import re
+    from pathlib import Path
+
+    from nanolab.one_shot.report import render_report
+    from tests.one_shot.test_report import manifest
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive" if archived else None
+    raw.mkdir()
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    releases, delivered = [], []
+    resource = Resource(
+        title="Simulated owned VM",
+        acquire=lambda _: "vm",
+        release=lambda _, value: releases.append(value),
+    )
+
+    def action(inputs):
+        assert inputs.resource(resource) == "vm"
+        (raw / "measurement.txt").write_text("retained measurement")
+        render_report(manifest(), None, raw / "report.html")
+        if workflow_fails:
+            raise RuntimeError("primary workflow failed")
+
+    workflow = Workflow("signal-during-finalization")
+    workflow.add(Action(action), requires=(resource,))
+    write = Path.write_text
+
+    def write_and_signal(path, data, *args, **kwargs):
+        if (
+            signum is not None
+            and path == raw / "report.html"
+            and supervisor.finishing
+            and not delivered
+        ):
+            delivered.append(signum)
+            os.kill(os.getpid(), signum)
+        return write(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write_and_signal)
+    if signum is not None or workflow_fails:
+        with pytest.raises(
+            RuntimeError,
+            match="primary workflow failed" if workflow_fails else "interrupted",
+        ):
+            supervisor.run(workflow.run)
+    else:
+        supervisor.run(workflow.run)
+    code = 1 if workflow_fails else 128 + signum if signum is not None else 0
+    final = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert final["exitCode"] == code
+    assert releases == ["vm"]
+    assert delivered == ([] if signum is None else [signum])
+    for directory in (raw, archive):
+        if directory is None:
+            continue
+        outcomes = [
+            json.loads((directory / name).read_text())
+            for name in ("result.json", "status.json")
+        ]
+        outcomes.append(
+            json.loads((directory / "report.json").read_text())["operationalOutcome"]
+        )
+        document = (directory / "report.html").read_text()
+        outcomes.append(
+            json.loads(
+                html.unescape(re.findall(r"<pre>(.*?)</pre>", document, re.S)[0])
+            )["operationalOutcome"]
+        )
+        for outcome in outcomes:
+            assert outcome["exitCode"] == code
+            assert outcome["cause"] == final["cause"]
+            assert outcome["state"] == ("failed" if code else "completed")
+        assert (directory / "measurement.txt").read_text() == "retained measurement"
+    if archive is not None:
+        assert final["archiveVerified"] is True
+        supervisor._verify_archive()

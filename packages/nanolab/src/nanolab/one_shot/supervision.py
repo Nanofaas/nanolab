@@ -372,6 +372,12 @@ class CampaignSupervision:
         self._terminal_outcome()
         self.record("campaign.writers-joined")
         self._write_result()
+        if self.primary is None and self.interruption is not None:
+            # A signal can arrive during report persistence even without an
+            # archive. Persist this newly observed outcome before copying.
+            self._terminal_outcome()
+            self.record("signal.deferred", cause=str(self.primary))
+            self._write_result()
         archive_owned = False
         if self.archive is not None:
             try:
