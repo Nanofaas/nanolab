@@ -870,3 +870,166 @@ def test_parent_archive_integrity_does_not_require_retired_environments(
     content.write_text('{"changed":true}')
     with pytest.raises(ValueError, match=r"parent.*bytes"):
         observer.verify_parent_archive(tmp_path, fingerprint)
+
+
+def offline_observation(observer, tmp_path, monkeypatch, *, primary=None):
+    """Prepare a valid frozen launcher and real Sonata workflow with fake resources."""
+    import os
+    import shutil
+    from types import SimpleNamespace
+
+    from sonata_engine import Resource
+
+    from tests.one_shot.test_report import manifest
+    from tests.one_shot.test_supervision import Action
+
+    freeze, raw = tmp_path / "freeze", tmp_path / "raw"
+    freeze.mkdir()
+    observer.save(
+        freeze / "freeze.json",
+        {
+            "files": {},
+            "hostBootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+            "nanolabPackageSha256": observer.package_fingerprint(),
+            "python": observer.sys.version,
+            "dependencies": {},
+        },
+    )
+    observer.save(
+        freeze / "operator-protocol.json",
+        {
+            "maxOperationalFraction": 1,
+            "maxAuctionFraction": 1,
+            "periodSeconds": 360,
+            "leadSeconds": 90,
+            "protocol": {"auctionSeconds": 60, "preparationSeconds": 10},
+        },
+    )
+    preset = (
+        Path(__file__).parents[2] / "src/nanolab/assets/presets/scenarios"
+        / "one-shot-calibration.yaml"
+    )
+    shutil.copyfile(preset, freeze / "scenario.yaml")
+    releases = []
+    resource = Resource(
+        title="Simulated observation VM", acquire=lambda _: "vm",
+        release=lambda _, value: releases.append(value),
+    )
+
+    def action(inputs):
+        assert inputs.resource(resource) == "vm"
+        (raw / "manifest.json").write_text(manifest().model_dump_json())
+        if isinstance(primary, int):
+            os.kill(os.getpid(), primary)
+        elif primary is not None:
+            raise RuntimeError(primary)
+
+    workflow = Workflow("offline-observation")
+    workflow.add(Action(action), requires=(resource,))
+    monkeypatch.setattr(
+        observer, "build_one_shot_observation_plan", lambda *a, **k: workflow
+    )
+    return SimpleNamespace(freeze=freeze, output=raw, archive=None), releases
+
+
+@pytest.mark.parametrize("inventory_fails", [False, True])
+def test_final_inventory_failure_still_renders_offline_report(
+    observer, tmp_path, monkeypatch, inventory_fails
+):
+    from types import SimpleNamespace
+
+    args, releases = offline_observation(observer, tmp_path, monkeypatch)
+    inventories = []
+
+    def inventory(*a, **k):
+        inventories.append(True)
+        if len(inventories) == 2 and inventory_fails:
+            raise OSError("final inventory failed")
+        return SimpleNamespace(stdout='{"list":[]}')
+
+    monkeypatch.setattr(observer.subprocess, "run", inventory)
+    if inventory_fails:
+        with pytest.raises(OSError, match="final inventory failed"):
+            observer.run_observation(args)
+    else:
+        observer.run_observation(args)
+    assert releases == ["vm"] and len(inventories) == 2
+    assert (args.output / "inventory-failure.json").exists() is inventory_fails
+    result = json.loads((args.output / "result.json").read_text())
+    report = json.loads((args.output / "report.json").read_text())
+    assert (args.output / "report.html").exists()
+    assert result["state"] == ("failed" if inventory_fails else "completed")
+    assert report["operationalOutcome"]["state"] == result["state"]
+    assert result["cause"] == ("final inventory failed" if inventory_fails else None)
+
+
+@pytest.mark.parametrize("primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize("receipt_fails", [False, True])
+def test_finalization_preserves_first_failure(
+    observer, tmp_path, monkeypatch, primary, receipt_fails
+):
+    from types import SimpleNamespace
+
+    args, releases = offline_observation(
+        observer, tmp_path, monkeypatch, primary=primary
+    )
+    inventories, reports = [], []
+    save = observer.save
+    render = observer.retain_offline_report
+
+    def inventory(*a, **k):
+        inventories.append(True)
+        if len(inventories) == 2:
+            raise OSError("final inventory failed")
+        return SimpleNamespace(stdout='{"list":[]}')
+
+    def save_receipt(path, data):
+        if path.name == "inventory-failure.json" and receipt_fails:
+            raise OSError("inventory receipt failed")
+        save(path, data)
+
+    def render_then_fail(directory):
+        reports.append(True)
+        render(directory)
+        raise OSError("renderer failed")
+
+    monkeypatch.setattr(observer.subprocess, "run", inventory)
+    monkeypatch.setattr(observer, "save", save_receipt)
+    monkeypatch.setattr(observer, "retain_offline_report", render_then_fail)
+    cause = (
+        "interrupted" if isinstance(primary, int) else primary or "final inventory failed"
+    )
+    with pytest.raises((RuntimeError, OSError), match=cause):
+        observer.run_observation(args)
+    result = json.loads((args.output / "result.json").read_text())
+    assert cause in result["cause"]
+    assert result["exitCode"] == (128 + primary if isinstance(primary, int) else 1)
+    assert ("inventory receipt failed" in str(result["notes"])) is receipt_fails
+    assert "renderer failed" in str(result["notes"])
+    if primary is not None:
+        assert "final inventory failed" in str(result["notes"])
+    assert reports == [True] and releases == ["vm"]
+    assert json.loads((args.output / "report.json").read_text())["operationalOutcome"][
+        "cause"
+    ] == result["cause"]
+
+
+def test_renderer_failure_after_success_is_terminal_failure(observer, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    args, releases = offline_observation(observer, tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        observer.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout='{"list":[]}')
+    )
+    attempts = []
+
+    def render(_):
+        attempts.append(True)
+        raise OSError("renderer failed")
+
+    monkeypatch.setattr(observer, "retain_offline_report", render)
+    with pytest.raises(OSError, match="renderer failed"):
+        observer.run_observation(args)
+    assert attempts == [True] and releases == ["vm"]
+    result = json.loads((args.output / "result.json").read_text())
+    assert result["cause"] == "renderer failed" and result["state"] == "failed"

@@ -472,24 +472,27 @@ def run_observation(args):
                 event(args.output, "workflow-failed", error=repr(error))
             except Exception as reporting:
                 error.add_note("failure event: " + str(reporting))
-            raise
         finally:
             try:
                 inventory("vms-after.json")
             except Exception as error:
+                if primary is None:
+                    primary = error
+                else:
+                    primary.add_note("post-run inventory: " + str(error))
                 try:
                     save(args.output / "inventory-failure.json", {"error": repr(error)})
                 except Exception as reporting:
-                    (primary or error).add_note("inventory receipt: " + str(reporting))
-                if primary is None:
-                    raise
-                primary.add_note("post-run inventory: " + str(error))
+                    primary.add_note("inventory receipt: " + str(reporting))
             try:
                 retain_offline_report(args.output)
             except Exception as error:
                 if primary is None:
-                    raise
-                primary.add_note("offline report: " + str(error))
+                    primary = error
+                else:
+                    primary.add_note("offline report: " + str(error))
+        if primary is not None:
+            raise primary
 
     supervision.run(execute)
 
