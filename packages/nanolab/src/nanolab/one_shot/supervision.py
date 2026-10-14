@@ -371,8 +371,9 @@ class CampaignSupervision:
         self.primary = self.fault or primary or self.interruption
         self._terminal_outcome()
         self.record("campaign.writers-joined")
+        persisted_interruption = self.interruption
         self._write_result()
-        if self.primary is None and self.interruption is not None:
+        if self.interruption is not persisted_interruption:
             # A signal can arrive during report persistence even without an
             # archive. Persist this newly observed outcome before copying.
             self._terminal_outcome()
@@ -396,13 +397,14 @@ class CampaignSupervision:
                     "archive.verified",
                     interruption=str(self.interruption) if self.interruption else None,
                 )
+                persisted_interruption = self.interruption
                 self._write_result()
                 if not self.state["archiveVerified"]:
                     assert self.primary is not None
                     raise self.primary
                 self._copy_archive_controls()
                 self._verify_archive()
-                if self.primary is None and self.interruption is not None:
+                if self.interruption is not persisted_interruption:
                     self._terminal_outcome()
                     self.record("signal.deferred", cause=str(self.primary))
                     self._write_result()
@@ -481,6 +483,9 @@ class CampaignSupervision:
             except (OSError, ValueError) as error:
                 assert self.primary is not None
                 self.primary.add_note("archive invalidation report: " + str(error))
+                if self.primary is not error:
+                    for note in getattr(error, "__notes__", ()):
+                        self.primary.add_note(note)
 
     def _require_writers_stopped(self):
         for writer in self.writers:
@@ -541,6 +546,9 @@ class CampaignSupervision:
         except (OSError, ValueError) as error:
             self.primary = self.primary or self.interruption or error
             self.primary.add_note("result persistence: " + str(error))
+            if self.primary is not error:
+                for note in getattr(error, "__notes__", ()):
+                    self.primary.add_note(note)
             self.state["archiveVerified"] = False
             self._terminal_outcome()
             # One diagnostic pass promotes the earlier report snapshot to the
@@ -549,6 +557,9 @@ class CampaignSupervision:
                 finalize_operational_outcome(self.output, self.state)
             except (OSError, ValueError) as reporting:
                 self.primary.add_note("report finalization: " + str(reporting))
+                if self.primary is not reporting:
+                    for note in getattr(reporting, "__notes__", ()):
+                        self.primary.add_note(note)
             self._terminal_outcome()
             for name in ("result.json", "status.json"):
                 try:

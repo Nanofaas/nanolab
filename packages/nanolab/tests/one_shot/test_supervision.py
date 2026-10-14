@@ -1266,3 +1266,125 @@ def test_archive_report_invalidation_attempts_other_writable_outputs(
     assert summary["operationalOutcome"]["state"] == "failed"
     for directory in (raw, archive):
         assert json.loads((directory / "result.json").read_text())["state"] == "failed"
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize("blocked_at", ["result.json", "status.json.tmp"])
+@pytest.mark.parametrize("stage", ["raw", "archive"])
+def test_signal_during_receipt_write_persists_changed_snapshot(
+    tmp_path, monkeypatch, capsys, signum, blocked_at, stage
+):
+    from pathlib import Path
+
+    from nanolab.one_shot.report import render_report
+    from tests.one_shot.test_report import embedded_summary, manifest
+
+    raw, archive = (
+        tmp_path / "raw",
+        tmp_path / "archive" if stage == "archive" else None,
+    )
+    raw.mkdir()
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    write = Path.write_text
+    delivered, releases, writing = [], [], []
+    persist = supervisor._write_result
+
+    def persist_receipts():
+        writing.append(True)
+        try:
+            persist()
+        finally:
+            writing.pop()
+
+    monkeypatch.setattr(supervisor, "_write_result", persist_receipts)
+    resource = Resource(
+        title="Owned fake VM",
+        acquire=lambda _: "vm",
+        release=lambda _, value: releases.append(value),
+    )
+
+    def interrupt_write(path, data, *a, **kw):
+        if (
+            writing
+            and supervisor.finishing
+            and not delivered
+            and path == raw / blocked_at
+            and (supervisor.state["archiveVerified"] if stage == "archive" else True)
+        ):
+            delivered.append(signum)
+            os.kill(os.getpid(), signum)
+        return write(path, data, *a, **kw)
+
+    monkeypatch.setattr(Path, "write_text", interrupt_write)
+    workflow = Workflow("signal-during-receipt-persistence")
+    workflow.add(
+        Action(lambda _: render_report(manifest(), None, raw / "report.html")),
+        requires=(resource,),
+    )
+    with pytest.raises(RuntimeError, match="interrupted"):
+        supervisor.run(workflow.run)
+    final = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert final["exitCode"] == 128 + signum
+    assert releases == ["vm"] and delivered == [signum]
+    for directory in (raw, archive):
+        if directory is None:
+            continue
+        for name in ("result.json", "status.json", "report.json", "report.html"):
+            text = (directory / name).read_text()
+            outcome = (
+                embedded_summary(text)["operationalOutcome"]
+                if name.endswith("html")
+                else json.loads(text)
+            )
+            if name == "report.json":
+                outcome = outcome["operationalOutcome"]
+            assert outcome["exitCode"] == 128 + signum
+            assert outcome["state"] == "failed" and outcome["cause"] == final["cause"]
+    if archive is not None:
+        supervisor._verify_archive()
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_primary_failure_retains_both_report_channel_limitations(
+    tmp_path, monkeypatch, capsys, archived
+):
+    from pathlib import Path
+
+    from nanolab.one_shot.report import render_report
+    from tests.one_shot.test_report import manifest
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive" if archived else None
+    raw.mkdir()
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    write = Path.write_text
+    attempts = []
+
+    def reject_reports(path, data, *a, **kw):
+        if (
+            supervisor.finishing
+            and path.parent == raw
+            and path.name in {"report.html", "report.json"}
+        ):
+            attempts.append(path.name)
+            raise OSError(path.name + " unavailable")
+        return write(path, data, *a, **kw)
+
+    def fail(_):
+        render_report(manifest(), None, raw / "report.html")
+        raise RuntimeError("primary workflow failed")
+
+    monkeypatch.setattr(Path, "write_text", reject_reports)
+    workflow = Workflow("primary-with-two-report-failures")
+    workflow.add(Action(fail))
+    with pytest.raises(RuntimeError, match="primary workflow failed"):
+        supervisor.run(workflow.run)
+    final = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert final["cause"] == "primary workflow failed" and final["exitCode"] == 1
+    assert {"report.html", "report.json"} <= set(attempts)
+    for outcome in (
+        final,
+        json.loads((raw / "result.json").read_text()),
+        json.loads((raw / "status.json").read_text()),
+    ):
+        assert "report.html unavailable" in str(outcome["notes"])
+        assert "report.json unavailable" in str(outcome["notes"])
