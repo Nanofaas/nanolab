@@ -642,3 +642,135 @@ def test_terminal_outcome_updates_report_before_verified_archive(tmp_path, fails
         assert outcome["exitCode"] == int(fails)
         assert outcome["archiveVerified"] is True
         assert "not-finalized" not in (directory / "report.html").read_text()
+
+
+@pytest.mark.parametrize("close_fails", [False, True])
+@pytest.mark.parametrize("release_fails", [False, True])
+def test_service_initial_probe_failure_survives_cleanup_errors(
+    tmp_path, monkeypatch, close_fails, release_fails
+):
+    from nanolab.tasks.one_shot.clock import ClockMonitor
+
+    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    released = []
+    close = ClockMonitor.close
+
+    def failing_close(worker):
+        close(worker)
+        if close_fails:
+            raise RuntimeError("secondary close failed")
+
+    def release(_, value):
+        released.append(value)
+        if release_fails:
+            raise RuntimeError("secondary delete failed")
+
+    def probe(value):
+        assert value == "service"
+        (tmp_path / "raw.txt").write_text("retained")
+        raise RuntimeError("primary readiness failed")
+
+    monkeypatch.setattr(ClockMonitor, "close", failing_close)
+    watched = supervisor.service_resource(
+        Resource(title="Service", acquire=lambda _: "service", release=release),
+        "service",
+        probe,
+    )
+    workflow = Workflow("initial-probe")
+    workflow.add(Action(lambda _: pytest.fail("must not run")), requires=(watched,))
+    with pytest.raises(RuntimeError, match="primary readiness failed") as caught:
+        supervisor.run(workflow.run)
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["cause"] == "primary readiness failed"
+    assert result["notes"] == getattr(caught.value, "__notes__", [])
+    for fails, message in (
+        (close_fails, "secondary close failed"),
+        (release_fails, "secondary delete failed"),
+    ):
+        assert (message in str(result["notes"])) is fails
+    assert released == ["service"]
+    assert (tmp_path / "raw.txt").read_text() == "retained"
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+def test_service_cleanup_preserves_interruption_and_dependencies(
+    tmp_path, monkeypatch, signum
+):
+    from nanolab.tasks.one_shot.clock import ClockMonitor
+
+    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    calls = []
+    base = Resource(
+        title="VM", acquire=lambda _: calls.append("acquire vm") or "vm",
+        release=lambda _, value: calls.append("release " + value),
+    )
+    unused = Resource(
+        title="Unacquired", acquire=lambda _: pytest.fail("unused"),
+        release=lambda *_: pytest.fail("unowned release"),
+    )
+    close = ClockMonitor.close
+
+    def failing_close(worker):
+        close(worker)
+        raise RuntimeError("secondary close failed")
+
+    def acquire(inputs):
+        assert inputs.resource(base) == "vm"
+        calls.append("acquire service")
+        return "service"
+
+    def release(_, value):
+        calls.append("release " + value)
+        raise RuntimeError("secondary delete failed")
+
+    def interrupt(_):
+        os.kill(os.getpid(), signum)
+
+    monkeypatch.setattr(ClockMonitor, "close", failing_close)
+    service = supervisor.service_resource(
+        Resource(title="Service", acquire=acquire, release=release, requires=(base,)),
+        "service", interrupt,
+    )
+    assert service.requires == (base,)
+    workflow = Workflow("probe-interruption")
+    workflow.add(Action(lambda _: None), requires=(service,))
+    workflow.add(Action(lambda _: None), requires=(unused,))
+    with pytest.raises(RuntimeError, match="interrupted"):
+        supervisor.run(workflow.run)
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["exitCode"] == 128 + signum
+    assert "secondary close failed" in str(result["notes"])
+    assert "secondary delete failed" in str(result["notes"])
+    assert calls == ["acquire vm", "acquire service", "release service", "release vm"]
+
+
+def test_service_normal_release_retains_first_cleanup_error(tmp_path, monkeypatch):
+    from nanolab.tasks.one_shot.clock import ClockMonitor
+
+    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    released = []
+    close = ClockMonitor.close
+
+    first = RuntimeError("first close failed")
+
+    def failing_close(worker):
+        close(worker)
+        raise first
+
+    def release(_, value):
+        released.append(value)
+        raise RuntimeError("secondary delete failed")
+
+    monkeypatch.setattr(ClockMonitor, "close", failing_close)
+    service = supervisor.service_resource(
+        Resource(title="Service", acquire=lambda _: "service", release=release),
+        "service", lambda _: None,
+    )
+    workflow = Workflow("normal-release")
+    workflow.add(Action(lambda inputs: inputs.resource(service)), requires=(service,))
+    with pytest.raises(RuntimeError, match="first close failed") as caught:
+        supervisor.run(workflow.run)
+    assert "first close failed" in str(caught.value)
+    assert "secondary delete failed" in str(first.__notes__)
+    assert released == ["service"]
+    assert not supervisor.checks

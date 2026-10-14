@@ -200,25 +200,43 @@ class CampaignSupervision:
             try:
                 worker.start()
                 self.watch(name, lambda: check_background_worker(worker), writer=worker)
-            except BaseException:
+            except BaseException as error:
                 try:
                     worker.close()
-                finally:
+                except BaseException as cleanup:
+                    error.add_note("worker cleanup: " + str(cleanup))
+                try:
                     if resource.release is not None:
                         resource.release(inputs, value)
+                except BaseException as cleanup:
+                    error.add_note("service cleanup: " + str(cleanup))
                 raise
             return value
 
         def release(inputs, value):
+            primary = None
             try:
-                try:
-                    self.unwatch(name)
-                finally:
-                    if worker is not None:
-                        worker.close()
-            finally:
+                self.unwatch(name)
+            except BaseException as error:
+                primary = error
+            try:
+                if worker is not None:
+                    worker.close()
+            except BaseException as error:
+                if primary is None:
+                    primary = error
+                else:
+                    primary.add_note("worker cleanup: " + str(error))
+            try:
                 if resource.release is not None:
                     resource.release(inputs, value)
+            except BaseException as error:
+                if primary is None:
+                    primary = error
+                else:
+                    primary.add_note("service cleanup: " + str(error))
+            if primary is not None:
+                raise primary
 
         return replace(resource, acquire=acquire, release=release)
 
