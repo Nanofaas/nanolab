@@ -94,6 +94,7 @@ def test_strict_memory_is_explicit_and_disabled_for_legacy_scenarios():
 
 
 def valid_scenario(workflow):
+    """Build a valid scenario with its workflow prerequisites."""
     data = scenario(workflow)
     if workflow != "one-shot-calibration":
         data["oneShot"]["profile"] = {"path": "profile.json", "sha256": "a" * 64}
@@ -103,38 +104,54 @@ def valid_scenario(workflow):
 
 
 @pytest.mark.parametrize(
-    "workflow", ["one-shot-calibration", "one-shot-qualification", "one-shot-experiment"]
+    "workflow",
+    ["one-shot-calibration", "one-shot-qualification", "one-shot-experiment"],
 )
 @pytest.mark.parametrize(
     "overrides",
     [
         {"controlPlaneImage": "unused.invalid/control-plane:nonexistent"},
-        {"functionImages": {"one-shot-workload-rust": "unused.invalid/function:nonexistent"}},
+        {
+            "functionImages": {
+                "one-shot-workload-rust": "unused.invalid/function:nonexistent"
+            }
+        },
         {
             "controlPlaneImage": "unused.invalid/control-plane:nonexistent",
-            "functionImages": {"one-shot-workload-rust": "unused.invalid/function:nonexistent"},
+            "functionImages": {
+                "one-shot-workload-rust": "unused.invalid/function:nonexistent"
+            },
         },
     ],
 )
 def test_one_shot_rejects_unconsumed_image_overrides(workflow, overrides):
+    """One shot rejects unconsumed image overrides."""
     data = valid_scenario(workflow)
     data.update(overrides)
     with pytest.raises(
         ValidationError,
-        match="one-shot does not support controlPlaneImage or functionImages overrides; "
+        match="one-shot does not support controlPlaneImage or functionImages "
+        "overrides; "
         "select images through recipeProfile and the runtime distribution",
     ):
         ScenarioConfig.model_validate(data)
 
 
 @pytest.mark.parametrize(
-    "workflow", ["one-shot-calibration", "one-shot-qualification", "one-shot-experiment"]
+    "workflow",
+    ["one-shot-calibration", "one-shot-qualification", "one-shot-experiment"],
 )
 @pytest.mark.parametrize(
-    "defaults", [{}, {"controlPlaneImage": None}, {"functionImages": {}},
-                 {"controlPlaneImage": None, "functionImages": {}}]
+    "defaults",
+    [
+        {},
+        {"controlPlaneImage": None},
+        {"functionImages": {}},
+        {"controlPlaneImage": None, "functionImages": {}},
+    ],
 )
 def test_one_shot_accepts_serialized_image_defaults(workflow, defaults):
+    """One shot accepts serialized image defaults."""
     data = valid_scenario(workflow)
     data.update(defaults)
     config = ScenarioConfig.model_validate(data)

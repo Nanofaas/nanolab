@@ -906,13 +906,15 @@ def offline_observation(observer, tmp_path, monkeypatch, *, primary=None):
         },
     )
     preset = (
-        Path(__file__).parents[2] / "src/nanolab/assets/presets/scenarios"
+        Path(__file__).parents[2]
+        / "src/nanolab/assets/presets/scenarios"
         / "one-shot-calibration.yaml"
     )
     shutil.copyfile(preset, freeze / "scenario.yaml")
     releases = []
     resource = Resource(
-        title="Simulated observation VM", acquire=lambda _: "vm",
+        title="Simulated observation VM",
+        acquire=lambda _: "vm",
         release=lambda _, value: releases.append(value),
     )
 
@@ -936,6 +938,7 @@ def offline_observation(observer, tmp_path, monkeypatch, *, primary=None):
 def test_final_inventory_failure_still_renders_offline_report(
     observer, tmp_path, monkeypatch, inventory_fails
 ):
+    """Final inventory failure still renders offline report."""
     from types import SimpleNamespace
 
     args, releases = offline_observation(observer, tmp_path, monkeypatch)
@@ -963,11 +966,14 @@ def test_final_inventory_failure_still_renders_offline_report(
     assert result["cause"] == ("final inventory failed" if inventory_fails else None)
 
 
-@pytest.mark.parametrize("primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize(
+    "primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM]
+)
 @pytest.mark.parametrize("receipt_fails", [False, True])
 def test_finalization_preserves_first_failure(
     observer, tmp_path, monkeypatch, primary, receipt_fails
 ):
+    """Finalization preserves first failure."""
     from types import SimpleNamespace
 
     args, releases = offline_observation(
@@ -997,7 +1003,9 @@ def test_finalization_preserves_first_failure(
     monkeypatch.setattr(observer, "save", save_receipt)
     monkeypatch.setattr(observer, "retain_offline_report", render_then_fail)
     cause = (
-        "interrupted" if isinstance(primary, int) else primary or "final inventory failed"
+        "interrupted"
+        if isinstance(primary, int)
+        else primary or "final inventory failed"
     )
     with pytest.raises((RuntimeError, OSError), match=cause):
         observer.run_observation(args)
@@ -1009,17 +1017,25 @@ def test_finalization_preserves_first_failure(
     if primary is not None:
         assert "final inventory failed" in str(result["notes"])
     assert reports == [True] and releases == ["vm"]
-    assert json.loads((args.output / "report.json").read_text())["operationalOutcome"][
-        "cause"
-    ] == result["cause"]
+    assert (
+        json.loads((args.output / "report.json").read_text())["operationalOutcome"][
+            "cause"
+        ]
+        == result["cause"]
+    )
 
 
-def test_renderer_failure_after_success_is_terminal_failure(observer, tmp_path, monkeypatch):
+def test_renderer_failure_after_success_is_terminal_failure(
+    observer, tmp_path, monkeypatch
+):
+    """Renderer failure after success is terminal failure."""
     from types import SimpleNamespace
 
     args, releases = offline_observation(observer, tmp_path, monkeypatch)
     monkeypatch.setattr(
-        observer.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout='{"list":[]}')
+        observer.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(stdout='{"list":[]}'),
     )
     attempts = []
 
@@ -1033,3 +1049,66 @@ def test_renderer_failure_after_success_is_terminal_failure(observer, tmp_path, 
     assert attempts == [True] and releases == ["vm"]
     result = json.loads((args.output / "result.json").read_text())
     assert result["cause"] == "renderer failed" and result["state"] == "failed"
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_active_observation_entrypoint_must_match_frozen_script(
+    observer, tmp_path, monkeypatch, changed
+):
+    """Reject executing different launcher bytes even when saved artifacts verify."""
+    from types import SimpleNamespace
+
+    args, releases = offline_observation(observer, tmp_path, monkeypatch)
+    saved = args.freeze / "source-used.py"
+    saved.write_bytes(Path(observer.__file__).read_bytes())
+    frozen = json.loads((args.freeze / "freeze.json").read_text())
+    frozen["files"]["source-used.py"] = observer.sha(saved)
+    (args.freeze / "freeze.json").write_text(json.dumps(frozen))
+    active = tmp_path / "active-observer.py"
+    active.write_bytes(
+        saved.read_bytes() + (b"\n# different launcher\n" if changed else b"")
+    )
+    monkeypatch.setattr(observer, "__file__", str(active))
+    inventories = []
+
+    def inventory(*a, **k):
+        inventories.append(True)
+        return SimpleNamespace(stdout='{"list":[]}')
+
+    monkeypatch.setattr(observer.subprocess, "run", inventory)
+    if changed:
+        with pytest.raises(ValueError, match="observation entrypoint drift"):
+            observer.run_observation(args)
+        assert not inventories and not releases and not args.output.exists()
+    else:
+        observer.run_observation(args)
+        assert len(inventories) == 2 and releases == ["vm"]
+
+
+@pytest.mark.parametrize(
+    "relative", ["one_shot/supervision.py", "cli/catalogue.py", "config/scenario.py"]
+)
+def test_changed_package_implementation_stops_before_observation_inventory(
+    observer, tmp_path, monkeypatch, relative
+):
+    """The real package fingerprint includes each production fix before acquisition."""
+    from nanolab.tasks.one_shot import artifacts
+
+    package = tmp_path / "package"
+    for name in ("one_shot/supervision.py", "cli/catalogue.py", "config/scenario.py"):
+        path = package / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# original implementation\n")
+    monkeypatch.setattr(artifacts, "files", lambda _: package)
+    args, releases = offline_observation(observer, tmp_path, monkeypatch)
+    (package / relative).write_text("# fixed implementation\n")
+    attempts = []
+
+    def inventory(*a, **k):
+        attempts.append(True)
+        pytest.fail("package drift reached inventory")
+
+    monkeypatch.setattr(observer.subprocess, "run", inventory)
+    with pytest.raises(ValueError, match="host boot or package drift"):
+        observer.run_observation(args)
+    assert not attempts and not releases and not args.output.exists()

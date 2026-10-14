@@ -649,6 +649,7 @@ def test_terminal_outcome_updates_report_before_verified_archive(tmp_path, fails
 def test_service_initial_probe_failure_survives_cleanup_errors(
     tmp_path, monkeypatch, close_fails, release_fails
 ):
+    """Service initial probe failure survives cleanup errors."""
     from nanolab.tasks.one_shot.clock import ClockMonitor
 
     supervisor = CampaignSupervision(tmp_path, cadence=100)
@@ -696,16 +697,19 @@ def test_service_initial_probe_failure_survives_cleanup_errors(
 def test_service_cleanup_preserves_interruption_and_dependencies(
     tmp_path, monkeypatch, signum
 ):
+    """Service cleanup preserves interruption and dependencies."""
     from nanolab.tasks.one_shot.clock import ClockMonitor
 
     supervisor = CampaignSupervision(tmp_path, cadence=100)
     calls = []
     base = Resource(
-        title="VM", acquire=lambda _: calls.append("acquire vm") or "vm",
+        title="VM",
+        acquire=lambda _: calls.append("acquire vm") or "vm",
         release=lambda _, value: calls.append("release " + value),
     )
     unused = Resource(
-        title="Unacquired", acquire=lambda _: pytest.fail("unused"),
+        title="Unacquired",
+        acquire=lambda _: pytest.fail("unused"),
         release=lambda *_: pytest.fail("unowned release"),
     )
     close = ClockMonitor.close
@@ -729,7 +733,8 @@ def test_service_cleanup_preserves_interruption_and_dependencies(
     monkeypatch.setattr(ClockMonitor, "close", failing_close)
     service = supervisor.service_resource(
         Resource(title="Service", acquire=acquire, release=release, requires=(base,)),
-        "service", interrupt,
+        "service",
+        interrupt,
     )
     assert service.requires == (base,)
     workflow = Workflow("probe-interruption")
@@ -745,6 +750,7 @@ def test_service_cleanup_preserves_interruption_and_dependencies(
 
 
 def test_service_normal_release_retains_first_cleanup_error(tmp_path, monkeypatch):
+    """Service normal release retains first cleanup error."""
     from nanolab.tasks.one_shot.clock import ClockMonitor
 
     supervisor = CampaignSupervision(tmp_path, cadence=100)
@@ -764,7 +770,8 @@ def test_service_normal_release_retains_first_cleanup_error(tmp_path, monkeypatc
     monkeypatch.setattr(ClockMonitor, "close", failing_close)
     service = supervisor.service_resource(
         Resource(title="Service", acquire=lambda _: "service", release=release),
-        "service", lambda _: None,
+        "service",
+        lambda _: None,
     )
     workflow = Workflow("normal-release")
     workflow.add(Action(lambda inputs: inputs.resource(service)), requires=(service,))
@@ -780,6 +787,7 @@ def test_service_normal_release_retains_first_cleanup_error(tmp_path, monkeypatc
 def test_final_archive_hash_failure_invalidates_both_receipts(
     tmp_path, monkeypatch, capsys, corrupt
 ):
+    """Final archive hash failure invalidates both receipts."""
     from nanolab.one_shot import supervision
     from nanolab.one_shot.report import render_report
     from tests.one_shot.test_report import manifest
@@ -799,9 +807,14 @@ def test_final_archive_hash_failure_invalidates_both_receipts(
     from pathlib import Path
 
     monkeypatch.setattr(supervision.shutil, "copy2", corrupt_measurement)
-    action = lambda: render_report(manifest(), None, raw / "report.html")
+
+    def action():
+        render_report(manifest(), None, raw / "report.html")
+
     if corrupt:
-        with pytest.raises(ValueError, match="archive hash mismatch: measurement.json"):
+        with pytest.raises(
+            ValueError, match=r"archive hash mismatch: measurement\.json"
+        ):
             supervisor.run(action)
     else:
         supervisor.run(action)
@@ -813,7 +826,8 @@ def test_final_archive_hash_failure_invalidates_both_receipts(
             assert receipt["archiveVerified"] is (not corrupt)
         report = json.loads((directory / "report.json").read_text())
         assert report["operationalOutcome"]["state"] == receipt["state"]
-        assert receipt["cause"] in (directory / "report.html").read_text() if corrupt else True
+        if corrupt:
+            assert receipt["cause"] in (directory / "report.html").read_text()
     assert (raw / "measurement.json").read_text() == '{"value":1}'
     assert (archive / "measurement.json").read_text() == (
         '{"value":2}' if corrupt else '{"value":1}'
@@ -825,11 +839,14 @@ def test_final_archive_hash_failure_invalidates_both_receipts(
     )
 
 
-@pytest.mark.parametrize("primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize(
+    "primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM]
+)
 @pytest.mark.parametrize("boundary", ["preexisting", "partial", "invalidation"])
 def test_archive_failure_preserves_primary_and_owned_destination(
     tmp_path, monkeypatch, capsys, primary, boundary
 ):
+    """Archive failure preserves primary and owned destination."""
     from pathlib import Path
 
     from nanolab.one_shot import supervision
@@ -868,14 +885,16 @@ def test_archive_failure_preserves_primary_and_owned_destination(
     monkeypatch.setattr(supervision.shutil, "copy2", copy_control)
     workflow = Workflow("archive-failure")
     workflow.add(Action(fail))
-    with pytest.raises(Exception):
+    with pytest.raises((RuntimeError, OSError, ValueError)):
         supervisor.run(workflow.run)
     result = json.loads((raw / "result.json").read_text())
     assert result["state"] == "failed" and result["archiveVerified"] is False
     assert supervisor.primary is not None
     assert result["cause"] == str(supervisor.primary)
     if primary is not None:
-        assert ("interrupted" if isinstance(primary, int) else primary) in result["cause"]
+        assert ("interrupted" if isinstance(primary, int) else primary) in result[
+            "cause"
+        ]
         assert "archive:" in str(result["notes"])
     assert result["exitCode"] == (128 + primary if isinstance(primary, int) else 1)
     assert (raw / "measurement.txt").read_text() == "retained"
@@ -898,6 +917,7 @@ def test_archive_failure_preserves_primary_and_owned_destination(
 def test_deferred_signal_final_verification_invalidates_archive(
     tmp_path, monkeypatch, signum, late
 ):
+    """Deferred signal final verification invalidates archive."""
     from pathlib import Path
 
     from nanolab.one_shot import supervision
@@ -941,6 +961,7 @@ def test_deferred_signal_final_verification_invalidates_archive(
 def test_archive_failure_survives_unwritable_failure_receipts(
     tmp_path, monkeypatch, capsys
 ):
+    """Archive failure survives unwritable failure receipts."""
     from pathlib import Path
 
     from nanolab.one_shot import supervision
@@ -961,9 +982,11 @@ def test_archive_failure_survives_unwritable_failure_receipts(
         return result
 
     def reject_receipt(path, text, *args, **kwargs):
-        if failed and path.parent == raw and path.name in {
-            "status.json.tmp", "status.json", "result.json"
-        }:
+        if (
+            failed
+            and path.parent == raw
+            and path.name in {"status.json.tmp", "status.json", "result.json"}
+        ):
             raise OSError("raw failure receipt unavailable")
         return write(path, text, *args, **kwargs)
 
@@ -976,3 +999,8 @@ def test_archive_failure_survives_unwritable_failure_receipts(
     assert "raw failure receipt unavailable" in str(final["notes"])
     assert (raw / "measurement.txt").read_text() == "retained"
     assert (archive / "measurement.txt").read_text() == "corrupted"
+
+    for name in ("status.json", "result.json"):
+        receipt = json.loads((archive / name).read_text())
+        assert receipt["state"] == "failed" and receipt["archiveVerified"] is False
+        assert "raw failure receipt unavailable" in str(receipt["notes"])

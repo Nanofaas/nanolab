@@ -410,7 +410,9 @@ class CampaignSupervision:
                 try:
                     self.record("archive.failed", cause=str(error))
                 except Exception as reporting:
-                    self.primary.add_note("archive failure reporting: " + str(reporting))
+                    self.primary.add_note(
+                        "archive failure reporting: " + str(reporting)
+                    )
                 self._write_result()
                 if archive_owned:
                     # Diagnostic invalidation only: never repair measurements
@@ -441,16 +443,35 @@ class CampaignSupervision:
     def _copy_archive_controls(self, *, invalidate=False):
         assert self.archive is not None
         for name in (
-            "status.json", "result.json", "supervision.jsonl", "report.json", "report.html"
+            "status.json",
+            "result.json",
+            "supervision.jsonl",
+            "report.json",
+            "report.html",
         ):
             try:
-                if (self.output / name).exists():
+                if invalidate and name in {"status.json", "result.json"}:
+                    (self.archive / name).write_text(
+                        json.dumps(self.state, indent=2) + "\n"
+                    )
+                elif (self.output / name).exists():
                     shutil.copy2(self.output / name, self.archive / name)
             except Exception as error:
                 if not invalidate:
                     raise
                 assert self.primary is not None
-                self.primary.add_note("archive invalidation " + name + ": " + str(error))
+                self.primary.add_note(
+                    "archive invalidation " + name + ": " + str(error)
+                )
+
+        if invalidate:
+            from nanolab.one_shot.report import finalize_operational_outcome
+
+            try:
+                finalize_operational_outcome(self.archive, self.state)
+            except (OSError, ValueError) as error:
+                assert self.primary is not None
+                self.primary.add_note("archive invalidation report: " + str(error))
 
     def _require_writers_stopped(self):
         for writer in self.writers:
@@ -503,7 +524,9 @@ class CampaignSupervision:
                     )
                 except OSError as error:
                     assert self.primary is not None
-                    self.primary.add_note("result persistence " + name + ": " + str(error))
+                    self.primary.add_note(
+                        "result persistence " + name + ": " + str(error)
+                    )
             self._terminal_outcome()
 
     def _verify_archive(self):

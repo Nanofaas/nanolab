@@ -35,11 +35,14 @@ def test_cli_routes_one_shot_to_dedicated_builder_with_run_directory(
     assert calls == [{"run_dir": tmp_path / "run", "repo_root": tmp_path}]
 
 
-@pytest.mark.parametrize("reference", ["relative", "absolute", "omitted", "missing", "bad-sha"])
+@pytest.mark.parametrize(
+    "reference", ["relative", "absolute", "omitted", "missing", "bad-sha"]
+)
 def test_relative_prerequisite_paths_resolve_from_scenario_not_operator_directory(
     tmp_path, monkeypatch, reference
 ):
     import hashlib
+
     preset = (
         Path(__file__).parents[2]
         / "src/nanolab/assets/presets/scenarios/one-shot-experiment.yaml"
@@ -77,7 +80,9 @@ def test_relative_prerequisite_paths_resolve_from_scenario_not_operator_director
             assert artifact is None
         elif reference in {"missing", "bad-sha"}:
             assert artifact is not None
-            with pytest.raises(FileNotFoundError if reference == "missing" else ValueError):
+            with pytest.raises(
+                FileNotFoundError if reference == "missing" else ValueError
+            ):
                 artifact.read_verified()
         else:
             assert artifact is not None
@@ -170,12 +175,16 @@ def test_catalogue_classifies_one_shot_as_multipass_not_local_container(tmp_path
 
 
 @pytest.mark.parametrize("explicit_defaults", [False, True])
-def test_public_one_shot_builder_selects_recipe_images(tmp_path, monkeypatch, explicit_defaults):
+def test_public_one_shot_builder_selects_recipe_images(
+    tmp_path, monkeypatch, explicit_defaults
+):
+    """Public one shot builder selects recipe images."""
     import nanolab.plans.one_shot_common as common
     from nanolab.config import EnvironmentConfig, ScenarioConfig
 
     preset = (
-        Path(__file__).parents[2] / "src/nanolab/assets/presets/scenarios"
+        Path(__file__).parents[2]
+        / "src/nanolab/assets/presets/scenarios"
         / "one-shot-calibration.yaml"
     )
     data = yaml.safe_load(preset.read_text())
@@ -213,17 +222,24 @@ def test_public_one_shot_builder_selects_recipe_images(tmp_path, monkeypatch, ex
         assert request.recipe.functions == {
             "one-shot-workload": ("one-shot-workload", "rust")
         }
-        assert all(function.image == "resolved-from-recipe" for function in request.functions)
+        assert all(
+            function.image == "resolved-from-recipe" for function in request.functions
+        )
 
 
 def test_generic_comparison_keeps_supported_image_override():
+    """Generic comparison keeps supported image override."""
     from nanolab.config import ScenarioConfig
     from nanolab.plans.runtime_comparison import _variant_image
 
     config = ScenarioConfig.model_validate(
-        {"workflow": "loadtest", "backend": "container", "functions": ["word-stats-java"],
-         "controlPlaneImage": "registry/control-plane:chosen",
-         "functionImages": {"word-stats-java": "registry/function:chosen"}}
+        {
+            "workflow": "loadtest",
+            "backend": "container",
+            "functions": ["word-stats-java"],
+            "controlPlaneImage": "registry/control-plane:chosen",
+            "functionImages": {"word-stats-java": "registry/function:chosen"},
+        }
     )
     assert _variant_image(config) == "registry/control-plane:chosen"
     assert config.function_images == {"word-stats-java": "registry/function:chosen"}

@@ -18,6 +18,7 @@ if __name__ == "__main__" and len(sys.argv) > 2 and sys.argv[1] == "run":
     sys.path.insert(0, str(Path(sys.argv[2]) / "package"))
 
 import yaml
+
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import OperationalLimits
 from nanolab.one_shot.supervision import (
@@ -258,7 +259,10 @@ def prepare(args):
                 "intervalsWithPeerOffload": sum(
                     row["summary"]["neighborRps"] > 0 for row in selected
                 ),
-                "note": "Predicted coverage is recorded; no load selection or exclusion gate",
+                "note": (
+                    "Predicted coverage is recorded; "
+                    "no load selection or exclusion gate"
+                ),
             },
         )
         for name in (
@@ -403,6 +407,9 @@ def run_observation(args):
     """Rely on Sonata compensation; preserve raw and never retry a failed run."""
     frozen = json.loads((args.freeze / "freeze.json").read_text())
     verify_files(args.freeze, frozen)
+    entrypoint_sha = frozen.get("files", {}).get("source-used.py")
+    if entrypoint_sha is not None and sha(Path(__file__)) != entrypoint_sha:
+        raise ValueError("observation entrypoint drift")
     protocol = json.loads((args.freeze / "operator-protocol.json").read_text())
     validate_operator_protocol(protocol)
     arrival_document = read_frozen_arrival_profile(args.freeze, frozen)
