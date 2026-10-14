@@ -1120,3 +1120,149 @@ def test_signal_during_report_finalization_updates_saved_outcomes(
     if archive is not None:
         assert final["archiveVerified"] is True
         supervisor._verify_archive()
+
+
+@pytest.mark.parametrize("blocked", [None, "report.html", "report.json"])
+@pytest.mark.parametrize(
+    "primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM]
+)
+def test_archive_report_failure_updates_writable_outcomes(
+    tmp_path, monkeypatch, capsys, blocked, primary
+):
+    from pathlib import Path
+
+    from nanolab.one_shot.report import render_report
+    from tests.one_shot.test_report import embedded_summary, manifest
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive"
+    raw.mkdir()
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    write = Path.write_text
+    armed, releases = [], []
+    resource = Resource(
+        title="Owned fake resource",
+        acquire=lambda _: "vm",
+        release=lambda _, value: releases.append(value),
+    )
+
+    def reject_late_write(path, data, *args, **kwargs):
+        if blocked is not None and path == raw / blocked and armed:
+            raise OSError("raw " + blocked + " write unavailable")
+        return write(path, data, *args, **kwargs)
+
+    verify = supervisor._verify_archive
+    verifications = []
+
+    def verify_and_arm():
+        verify()
+        verifications.append(True)
+        if len(verifications) == 1:
+            armed.append(True)
+
+    monkeypatch.setattr(Path, "write_text", reject_late_write)
+    monkeypatch.setattr(supervisor, "_verify_archive", verify_and_arm)
+
+    def action(inputs):
+        assert inputs.resource(resource) == "vm"
+        (raw / "measurement.txt").write_text("retained")
+        render_report(manifest(), None, raw / "report.html")
+        if isinstance(primary, int):
+            os.kill(os.getpid(), primary)
+        elif primary is not None:
+            raise RuntimeError(primary)
+
+    workflow = Workflow("report-write-during-archive-finalization")
+    workflow.add(Action(action), requires=(resource,))
+    if blocked is not None or primary is not None:
+        with pytest.raises((RuntimeError, OSError)):
+            supervisor.run(workflow.run)
+    else:
+        supervisor.run(workflow.run)
+    final = json.loads(capsys.readouterr().out.splitlines()[-1])
+    expected_code = (
+        128 + primary
+        if isinstance(primary, int)
+        else int(blocked is not None or primary is not None)
+    )
+    assert final["exitCode"] == expected_code
+    if primary is not None:
+        assert ("interrupted" if isinstance(primary, int) else primary) in final[
+            "cause"
+        ]
+    assert final["archiveVerified"] is (blocked is None)
+    assert releases == ["vm"]
+    for directory in (raw, archive):
+        for name in ("result.json", "status.json", "report.json", "report.html"):
+            if directory == raw and name == blocked:
+                continue
+            document = (directory / name).read_text()
+            outcome = (
+                embedded_summary(document)["operationalOutcome"]
+                if name.endswith("html")
+                else json.loads(document)
+            )
+            if name == "report.json":
+                outcome = outcome["operationalOutcome"]
+            assert outcome["exitCode"] == expected_code
+            assert outcome["state"] == ("failed" if expected_code else "completed")
+            assert outcome["cause"] == final["cause"]
+            assert outcome["archiveVerified"] is (blocked is None)
+        assert (directory / "measurement.txt").read_text() == "retained"
+    if blocked is not None:
+        assert blocked in str(final["notes"])
+        assert len(verifications) == 1
+    else:
+        verify()
+
+
+@pytest.mark.parametrize("archive_blocked", ["report.json", "report.html"])
+def test_archive_report_invalidation_attempts_other_writable_outputs(
+    tmp_path, monkeypatch, capsys, archive_blocked
+):
+    from pathlib import Path
+
+    from nanolab.one_shot.report import render_report
+    from tests.one_shot.test_report import embedded_summary, manifest
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive"
+    raw.mkdir()
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    write = Path.write_text
+    copy = __import__("shutil").copy2
+    armed = []
+
+    def reject_write(path, data, *a, **kw):
+        if armed and (path == raw / "report.html" or path == archive / archive_blocked):
+            raise OSError(str(path) + " unavailable")
+        return write(path, data, *a, **kw)
+
+    def reject_copy(source, target, **kw):
+        if armed and Path(target) == archive / archive_blocked:
+            raise OSError(str(target) + " unavailable")
+        return copy(source, target, **kw)
+
+    verify = supervisor._verify_archive
+
+    def verify_and_arm():
+        verify()
+        armed.append(True)
+
+    monkeypatch.setattr(Path, "write_text", reject_write)
+    monkeypatch.setattr("shutil.copy2", reject_copy)
+    monkeypatch.setattr(supervisor, "_verify_archive", verify_and_arm)
+    workflow = Workflow("archive-output-unavailable")
+    workflow.add(Action(lambda _: render_report(manifest(), None, raw / "report.html")))
+    with pytest.raises(OSError, match="unavailable"):
+        supervisor.run(workflow.run)
+    final = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert final["archiveVerified"] is False
+    assert archive_blocked in str(final["notes"])
+    other = "report.json" if archive_blocked == "report.html" else "report.html"
+    summary = (
+        json.loads((archive / other).read_text())
+        if other.endswith("json")
+        else embedded_summary((archive / other).read_text())
+    )
+    assert summary["operationalOutcome"]["state"] == "failed"
+    for directory in (raw, archive):
+        assert json.loads((directory / "result.json").read_text())["state"] == "failed"

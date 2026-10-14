@@ -6,6 +6,7 @@ import html
 import json
 import math
 import random
+import re
 import statistics
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -848,19 +849,67 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
 
 
 def finalize_operational_outcome(directory: Path, outcome: dict) -> None:
-    """Update the saved summary after writer shutdown, preserving existing charts."""
+    """Update each valid report independently, preserving scientific data/charts."""
     summary_path, report_path = directory / "report.json", directory / "report.html"
-    if not summary_path.exists() or not report_path.exists():
-        return
-    previous = summary_path.read_text().rstrip("\n")
-    summary = json.loads(previous)
-    summary["operationalOutcome"] = dict(outcome)
-    current = json.dumps(summary, indent=2, allow_nan=False)
-    document = report_path.read_text()
-    old = "<pre>" + html.escape(previous) + "</pre>"
-    if old not in document:
-        raise ValueError("report summary differs from saved evidence")
-    report_path.write_text(
-        document.replace(old, "<pre>" + html.escape(current) + "</pre>", 1)
-    )
-    summary_path.write_text(current + "\n")
+    summary = embedded = document = block = None
+    errors = []
+    try:
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text())
+            if not isinstance(summary, dict):
+                raise ValueError("report JSON summary is not an object")
+    except (OSError, ValueError) as error:
+        summary = None
+        errors.append((summary_path, error))
+    try:
+        if report_path.exists():
+            # Preserve line endings and every byte outside the generated summary.
+            document = report_path.read_bytes().decode("utf-8")
+            blocks = list(re.finditer(r"<pre>(.*?)</pre>", document, re.DOTALL))
+            if len(blocks) != 1:
+                raise ValueError("report HTML summary is missing or ambiguous")
+            block = blocks[0]
+            embedded = json.loads(html.unescape(block.group(1)))
+            if not isinstance(embedded, dict):
+                raise ValueError("report HTML summary is not an object")
+    except (OSError, ValueError) as error:
+        embedded = None
+        errors.append((report_path, error))
+    if summary is not None and embedded is not None:
+        # A partial terminal write can change only operationalOutcome. Scientific
+        # disagreement is never repaired from a different diagnostic output.
+        scientific_json = {
+            k: v for k, v in summary.items() if k != "operationalOutcome"
+        }
+        scientific_html = {
+            k: v for k, v in embedded.items() if k != "operationalOutcome"
+        }
+        if json.dumps(scientific_json, sort_keys=True, allow_nan=False) != json.dumps(
+            scientific_html, sort_keys=True, allow_nan=False
+        ):
+            raise ValueError("report summary differs from saved evidence")
+    if embedded is not None:
+        assert document is not None and block is not None
+        try:
+            embedded["operationalOutcome"] = dict(outcome)
+            current = html.escape(json.dumps(embedded, indent=2, allow_nan=False))
+            report_path.write_text(
+                document[: block.start(1)] + current + document[block.end(1) :],
+                encoding="utf-8",
+                newline="",
+            )
+        except (OSError, ValueError) as error:
+            errors.append((report_path, error))
+    if summary is not None:
+        try:
+            summary["operationalOutcome"] = dict(outcome)
+            summary_path.write_text(
+                json.dumps(summary, indent=2, allow_nan=False) + "\n"
+            )
+        except (OSError, ValueError) as error:
+            errors.append((summary_path, error))
+    if errors:
+        primary = errors[0][1]
+        for path, error in errors:
+            primary.add_note("report update " + str(path) + ": " + str(error))
+        raise primary

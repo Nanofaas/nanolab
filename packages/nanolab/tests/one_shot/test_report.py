@@ -1,6 +1,8 @@
 import json
 from typing import Literal
 
+import pytest
+
 from nanolab.one_shot.models import CampaignManifest
 from nanolab.one_shot.report import render_campaign, render_report
 from nanolab.tasks.one_shot.conservation import RunEvidence
@@ -316,3 +318,170 @@ def test_assignment_report_retains_valid_rows_before_truncated_tail(tmp_path):
         "assignment-observations.jsonl": 1,
     }
     assert (tmp_path / "epochs.jsonl").read_text().endswith('{"epoch":')
+
+
+def embedded_summary(document):
+    import html
+    import re
+
+    summaries = re.findall(r"<pre>(.*?)</pre>", document, re.S)
+    assert len(summaries) == 1
+    return json.loads(html.unescape(summaries[0]))
+
+
+def outside_summary(document):
+    import re
+
+    return re.sub(r"(<pre>).*?(</pre>)", r"\1\2", document, count=1, flags=re.S)
+
+
+@pytest.mark.parametrize(
+    "blocked", [("report.html",), ("report.json",), ("report.html", "report.json")]
+)
+def test_report_outputs_are_updated_independently(tmp_path, monkeypatch, blocked):
+    from pathlib import Path
+
+    from nanolab.one_shot.report import finalize_operational_outcome
+
+    render_report(manifest(), evidence(), tmp_path / "report.html")
+    original = json.loads((tmp_path / "report.json").read_text())
+    document = (tmp_path / "report.html").read_text()
+    outcome = {"state": "failed", "cause": "primary failed", "exitCode": 143}
+    write = Path.write_text
+    faults = {name: OSError(name + " write unavailable") for name in blocked}
+    attempts = []
+
+    def reject_write(path, data, *a, **kw):
+        attempts.append(path.name)
+        if path.name in faults:
+            raise faults[path.name]
+        return write(path, data, *a, **kw)
+
+    monkeypatch.setattr(Path, "write_text", reject_write)
+    with pytest.raises(OSError, match=blocked[0]) as caught:
+        finalize_operational_outcome(tmp_path, outcome)
+    assert caught.value is faults[blocked[0]]
+    assert attempts == ["report.html", "report.json"]
+    if len(blocked) == 2:
+        assert "report.json write unavailable" in str(caught.value.__notes__)
+    for name in ("report.html", "report.json"):
+        if name in blocked:
+            continue
+        updated = (
+            embedded_summary((tmp_path / name).read_text())
+            if name.endswith("html")
+            else json.loads((tmp_path / name).read_text())
+        )
+        assert updated.pop("operationalOutcome") == outcome
+        assert updated == {
+            k: v for k, v in original.items() if k != "operationalOutcome"
+        }
+    assert outside_summary((tmp_path / "report.html").read_text()) == outside_summary(
+        document
+    )
+
+
+@pytest.mark.parametrize("remaining", [None, "report.json", "report.html"])
+def test_finalization_updates_each_existing_report(tmp_path, remaining):
+    from nanolab.one_shot.report import finalize_operational_outcome
+
+    if remaining is not None:
+        render_report(manifest(), None, tmp_path / "report.html")
+        (
+            tmp_path / ("report.html" if remaining == "report.json" else "report.json")
+        ).unlink()
+    outcome = {"state": "failed", "cause": "early failed", "exitCode": 1}
+    finalize_operational_outcome(tmp_path, outcome)
+    if remaining is None:
+        assert not list(tmp_path.iterdir())
+    else:
+        updated = (
+            embedded_summary((tmp_path / remaining).read_text())
+            if remaining.endswith("html")
+            else json.loads((tmp_path / remaining).read_text())
+        )
+        assert updated["operationalOutcome"] == outcome
+
+
+@pytest.mark.parametrize(
+    "change", ["operationalOutcome", "mode", "missing", "ambiguous", "malformed"]
+)
+def test_report_finalization_accepts_only_outcome_divergence(tmp_path, change):
+    import html
+
+    from nanolab.one_shot.report import finalize_operational_outcome
+
+    render_report(manifest(), evidence(), tmp_path / "report.html")
+    document = (tmp_path / "report.html").read_text()
+    summary = json.loads((tmp_path / "report.json").read_text())
+    previous = json.dumps(summary, indent=2, allow_nan=False)
+    old = "<pre>" + html.escape(previous) + "</pre>"
+    assert old in document
+    changed = dict(summary)
+    changed[change] = (
+        {"state": "completed", "exitCode": 0}
+        if change == "operationalOutcome"
+        else "tampered"
+    )
+    replacement = "<pre>" + html.escape(json.dumps(changed, indent=2)) + "</pre>"
+    if change == "missing":
+        replacement = ""
+    elif change == "ambiguous":
+        replacement = old + old
+    elif change == "malformed":
+        replacement = "<pre>{invalid JSON}</pre>"
+    document = (
+        document.replace(old, replacement) + "\r\n<!-- chart bytes preserved -->\r\n"
+    )
+    (tmp_path / "report.html").write_text(document)
+    before = (tmp_path / "report.html").read_bytes()
+    outcome = {"state": "failed", "cause": "operational failure", "exitCode": 1}
+    if change == "operationalOutcome":
+        finalize_operational_outcome(tmp_path, outcome)
+        actual = (tmp_path / "report.html").read_bytes().decode()
+        assert embedded_summary(actual) == json.loads(
+            (tmp_path / "report.json").read_text()
+        )
+        assert outside_summary(actual) == outside_summary(document)
+        assert embedded_summary(actual)["operationalOutcome"] == outcome
+    else:
+        with pytest.raises(ValueError, match=r"summary|Expecting property name"):
+            finalize_operational_outcome(tmp_path, outcome)
+        assert (tmp_path / "report.html").read_bytes() == before
+        if change == "mode":
+            assert json.loads((tmp_path / "report.json").read_text()) == summary
+
+
+@pytest.mark.parametrize("blocked", ["report.json", "report.html"])
+def test_unreadable_report_does_not_block_valid_other_evidence(
+    tmp_path, monkeypatch, blocked
+):
+    from pathlib import Path
+
+    from nanolab.one_shot.report import finalize_operational_outcome
+
+    render_report(manifest(), None, tmp_path / "report.html")
+    read_text, read_bytes = Path.read_text, Path.read_bytes
+
+    def text(path, *a, **kw):
+        if path.name == blocked:
+            raise OSError(blocked + " read unavailable")
+        return read_text(path, *a, **kw)
+
+    def binary(path):
+        if path.name == blocked:
+            raise OSError(blocked + " read unavailable")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_text", text)
+    monkeypatch.setattr(Path, "read_bytes", binary)
+    outcome = {"state": "failed", "cause": "failed", "exitCode": 1}
+    with pytest.raises(OSError, match=blocked):
+        finalize_operational_outcome(tmp_path, outcome)
+    other = "report.html" if blocked == "report.json" else "report.json"
+    updated = (
+        embedded_summary((tmp_path / other).read_text())
+        if other.endswith("html")
+        else json.loads((tmp_path / other).read_text())
+    )
+    assert updated["operationalOutcome"] == outcome

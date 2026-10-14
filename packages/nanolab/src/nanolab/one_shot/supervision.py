@@ -397,6 +397,9 @@ class CampaignSupervision:
                     interruption=str(self.interruption) if self.interruption else None,
                 )
                 self._write_result()
+                if not self.state["archiveVerified"]:
+                    assert self.primary is not None
+                    raise self.primary
                 self._copy_archive_controls()
                 self._verify_archive()
                 if self.primary is None and self.interruption is not None:
@@ -536,9 +539,16 @@ class CampaignSupervision:
         try:
             finalize_operational_outcome(self.output, self.state)
         except (OSError, ValueError) as error:
-            if self.primary is None:
-                self.primary = error
+            self.primary = self.primary or self.interruption or error
             self.primary.add_note("result persistence: " + str(error))
+            self.state["archiveVerified"] = False
+            self._terminal_outcome()
+            # One diagnostic pass promotes the earlier report snapshot to the
+            # failed outcome. Each writable channel is attempted independently.
+            try:
+                finalize_operational_outcome(self.output, self.state)
+            except (OSError, ValueError) as reporting:
+                self.primary.add_note("report finalization: " + str(reporting))
             self._terminal_outcome()
             for name in ("result.json", "status.json"):
                 try:
