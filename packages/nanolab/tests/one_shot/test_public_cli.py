@@ -167,3 +167,63 @@ def test_catalogue_classifies_one_shot_as_multipass_not_local_container(tmp_path
         "workflow: one-shot-experiment\nbackend: container\n"
     )
     assert _workflow_catalog(tmp_path)["one-shot-experiment"][0] == ("multipass",)
+
+
+@pytest.mark.parametrize("explicit_defaults", [False, True])
+def test_public_one_shot_builder_selects_recipe_images(tmp_path, monkeypatch, explicit_defaults):
+    import nanolab.plans.one_shot_common as common
+    from nanolab.config import EnvironmentConfig, ScenarioConfig
+
+    preset = (
+        Path(__file__).parents[2] / "src/nanolab/assets/presets/scenarios"
+        / "one-shot-calibration.yaml"
+    )
+    data = yaml.safe_load(preset.read_text())
+    if explicit_defaults:
+        data.update(controlPlaneImage=None, functionImages={})
+    config = ScenarioConfig.model_validate(data)
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
+    )
+    (tmp_path / "functions/rust/one-shot-workload").mkdir(parents=True)
+    requests = []
+    add = common.add_platform
+    recipe_run = common.recipe_run_resource
+    recipes = []
+
+    def capture_recipe(**kwargs):
+        recipes.append(Path(kwargs["recipe"]).name)
+        return recipe_run(**kwargs)
+
+    def capture(workflow, request, **kwargs):
+        requests.append(request)
+        return add(workflow, request, **kwargs)
+
+    monkeypatch.setattr(
+        "nanolab.cli.product.default_tool_paths",
+        lambda: SimpleNamespace(nanofaas_root=tmp_path),
+    )
+    monkeypatch.setattr(common, "add_platform", capture)
+    monkeypatch.setattr(common, "recipe_run_resource", capture_recipe)
+    compiled = _workflow(config, environment, run_dir=tmp_path / "run").compile()
+    assert compiled.tasks and requests
+    assert recipes == ["one-shot-jvm.yaml"]
+    for request in requests:
+        assert request.recipe is not None
+        assert request.recipe.functions == {
+            "one-shot-workload": ("one-shot-workload", "rust")
+        }
+        assert all(function.image == "resolved-from-recipe" for function in request.functions)
+
+
+def test_generic_comparison_keeps_supported_image_override():
+    from nanolab.config import ScenarioConfig
+    from nanolab.plans.runtime_comparison import _variant_image
+
+    config = ScenarioConfig.model_validate(
+        {"workflow": "loadtest", "backend": "container", "functions": ["word-stats-java"],
+         "controlPlaneImage": "registry/control-plane:chosen",
+         "functionImages": {"word-stats-java": "registry/function:chosen"}}
+    )
+    assert _variant_image(config) == "registry/control-plane:chosen"
+    assert config.function_images == {"word-stats-java": "registry/function:chosen"}

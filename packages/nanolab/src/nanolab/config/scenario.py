@@ -270,6 +270,12 @@ class ScenarioConfig(BaseModel):
                 raise ValueError(
                     "one-shot requires container backend and oneShot settings"
                 )
+            if self.control_plane_image is not None or self.function_images:
+                raise ValueError(
+                    "one-shot does not support controlPlaneImage or functionImages "
+                    "overrides; select images through recipeProfile and the runtime "
+                    "distribution"
+                )
             unexpected = self.model_fields_set - {
                 "workflow",
                 "backend",

@@ -91,3 +91,51 @@ def test_strict_memory_is_explicit_and_disabled_for_legacy_scenarios():
     strict = ScenarioConfig.model_validate(data)
     assert strict.one_shot is not None
     assert strict.one_shot.strict_memory is True
+
+
+def valid_scenario(workflow):
+    data = scenario(workflow)
+    if workflow != "one-shot-calibration":
+        data["oneShot"]["profile"] = {"path": "profile.json", "sha256": "a" * 64}
+    if workflow == "one-shot-experiment":
+        data["oneShot"]["qualification"] = {"path": "timing.json", "sha256": "b" * 64}
+    return data
+
+
+@pytest.mark.parametrize(
+    "workflow", ["one-shot-calibration", "one-shot-qualification", "one-shot-experiment"]
+)
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"controlPlaneImage": "unused.invalid/control-plane:nonexistent"},
+        {"functionImages": {"one-shot-workload-rust": "unused.invalid/function:nonexistent"}},
+        {
+            "controlPlaneImage": "unused.invalid/control-plane:nonexistent",
+            "functionImages": {"one-shot-workload-rust": "unused.invalid/function:nonexistent"},
+        },
+    ],
+)
+def test_one_shot_rejects_unconsumed_image_overrides(workflow, overrides):
+    data = valid_scenario(workflow)
+    data.update(overrides)
+    with pytest.raises(
+        ValidationError,
+        match="one-shot does not support controlPlaneImage or functionImages overrides; "
+        "select images through recipeProfile and the runtime distribution",
+    ):
+        ScenarioConfig.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    "workflow", ["one-shot-calibration", "one-shot-qualification", "one-shot-experiment"]
+)
+@pytest.mark.parametrize(
+    "defaults", [{}, {"controlPlaneImage": None}, {"functionImages": {}},
+                 {"controlPlaneImage": None, "functionImages": {}}]
+)
+def test_one_shot_accepts_serialized_image_defaults(workflow, defaults):
+    data = valid_scenario(workflow)
+    data.update(defaults)
+    config = ScenarioConfig.model_validate(data)
+    assert config.control_plane_image is None and config.function_images == {}
