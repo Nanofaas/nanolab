@@ -368,91 +368,89 @@ class CampaignSupervision:
             self.stop.set()
             if self.thread.ident is not None:
                 self.thread.join()
-        primary = self.fault or primary or self.interruption
-        self.primary = primary
-        self.state.update(
-            state="failed" if primary else "completed",
-            activity="terminal",
-            cause=str(primary) if primary else None,
-            exitCode=getattr(primary, "exit_code", 1) if primary else 0,
-            notes=getattr(primary, "__notes__", []),
-        )
+        self.primary = self.fault or primary or self.interruption
+        self._terminal_outcome()
         self.record("campaign.writers-joined")
         self._write_result()
+        archive_owned = False
         if self.archive is not None:
             try:
                 self.state.update(state="archiving", activity="progress")
                 self.record("archive.started")
                 self._require_writers_stopped()
-                shutil.copytree(self.output, self.archive)
+                # Claim atomically before copy: a partial copy is ours, an
+                # existing destination (even an empty one) is never touched.
+                self.archive.mkdir(parents=True, exist_ok=False)
+                archive_owned = True
+                shutil.copytree(self.output, self.archive, dirs_exist_ok=True)
                 self._verify_archive()
-                primary = primary or self.interruption
-                self.primary = primary
-                self.state.update(
-                    archiveVerified=True,
-                    state="failed" if primary else "completed",
-                    activity="terminal",
-                    cause=str(primary) if primary else None,
-                    exitCode=getattr(primary, "exit_code", 1) if primary else 0,
-                )
+                self.state["archiveVerified"] = True
+                self._terminal_outcome()
                 self.record(
                     "archive.verified",
                     interruption=str(self.interruption) if self.interruption else None,
                 )
                 self._write_result()
-                # Only this thread writes now. Copy final control files and
-                # verify again; no background writer can alter either tree.
-                for name in (
-                    "status.json",
-                    "result.json",
-                    "supervision.jsonl",
-                    "report.json",
-                    "report.html",
-                ):
-                    if (self.output / name).exists():
-                        shutil.copy2(self.output / name, self.archive / name)
+                self._copy_archive_controls()
                 self._verify_archive()
-            except Exception as error:
-                primary = primary or self.interruption
-                if primary is not None:
-                    primary.add_note("archive: " + str(error))
-                else:
-                    primary = error
-                self.state.update(
-                    state="failed",
-                    activity="terminal",
-                    exitCode=getattr(primary, "exit_code", 1),
-                    cause=str(primary),
-                    archiveVerified=False,
-                    notes=getattr(primary, "__notes__", []),
-                )
-                self.record("archive.failed", cause=str(error))
+                if self.primary is None and self.interruption is not None:
+                    self._terminal_outcome()
+                    self.record("signal.deferred", cause=str(self.primary))
+                    self._write_result()
+                    self._copy_archive_controls()
+                    self._verify_archive()
+            except BaseException as error:
+                self.primary = self.primary or self.fault or self.interruption
+                if self.primary is None:
+                    self.primary = error
+                elif self.primary is not error:
+                    self.primary.add_note("archive: " + str(error))
+                self.state["archiveVerified"] = False
+                self._terminal_outcome()
+                try:
+                    self.record("archive.failed", cause=str(error))
+                except Exception as reporting:
+                    self.primary.add_note("archive failure reporting: " + str(reporting))
                 self._write_result()
-        if primary is None and self.interruption is not None:
-            primary = self.interruption
-            self.state.update(
-                state="failed", cause=str(primary), exitCode=primary.exit_code
-            )
-            self.record("signal.deferred", cause=str(primary))
-            self._write_result()
-            if self.archive is not None and self.state["archiveVerified"]:
-                for name in (
-                    "status.json",
-                    "result.json",
-                    "supervision.jsonl",
-                    "report.json",
-                    "report.html",
-                ):
-                    if (self.output / name).exists():
-                        shutil.copy2(self.output / name, self.archive / name)
-                self._verify_archive()
-        primary = self.fault or self.primary or primary or self.interruption
+                if archive_owned:
+                    # Diagnostic invalidation only: never repair measurements
+                    # or verify this failed archive again.
+                    self._copy_archive_controls(invalidate=True)
+                    self._write_result()
+        self._terminal_outcome()
         try:
             print(json.dumps(self.state), flush=True)
         except OSError as error:
-            primary = primary or error
-        if primary is not None:
-            raise primary
+            if self.primary is None:
+                self.primary = error
+            else:
+                self.primary.add_note("final stdout: " + str(error))
+        if self.primary is not None:
+            raise self.primary
+
+    def _terminal_outcome(self):
+        self.primary = self.primary or self.fault or self.interruption
+        self.state.update(
+            state="failed" if self.primary else "completed",
+            activity="terminal",
+            cause=str(self.primary) if self.primary else None,
+            exitCode=getattr(self.primary, "exit_code", 1) if self.primary else 0,
+            notes=getattr(self.primary, "__notes__", []),
+        )
+
+    def _copy_archive_controls(self, *, invalidate=False):
+        assert self.archive is not None
+        for name in (
+            "status.json", "result.json", "supervision.jsonl", "report.json", "report.html"
+        ):
+            try:
+                if (self.output / name).exists():
+                    shutil.copy2(self.output / name, self.archive / name)
+            except Exception as error:
+                if not invalidate:
+                    raise
+                assert self.primary is not None
+                self.primary.add_note("archive invalidation " + name + ": " + str(error))
 
     def _require_writers_stopped(self):
         for writer in self.writers:
@@ -470,26 +468,43 @@ class CampaignSupervision:
                 raise RuntimeError("archive unsafe: owned process still running")
 
     def _write_result(self):
-        self.primary = self.fault or self.primary or self.interruption
-        if self.primary is not None:
-            self.state.update(
-                state="failed",
-                cause=str(self.primary),
-                exitCode=getattr(self.primary, "exit_code", 1),
-                notes=getattr(self.primary, "__notes__", []),
-            )
-        try:
-            from nanolab.one_shot.report import finalize_operational_outcome
+        self._terminal_outcome()
+        from nanolab.one_shot.report import finalize_operational_outcome
 
+        errors = []
+        # Each diagnostic channel is independent; storage can reject any of
+        # them. Always retain the first cause and report limits on stdout.
+        try:
             (self.output / "result.json").write_text(
                 json.dumps(self.state, indent=2) + "\n"
             )
+        except (OSError, ValueError) as error:
+            errors.append(error)
+        try:
             finalize_operational_outcome(self.output, self.state)
         except (OSError, ValueError) as error:
+            errors.append(error)
+        try:
+            self._write_status()
+        except (OSError, ValueError) as error:
+            errors.append(error)
+        for error in errors:
             if self.primary is None:
-                self.primary = self.fault = error
-                self.state.update(state="failed", cause=str(error), exitCode=1)
+                self.primary = error
             self.primary.add_note("result persistence: " + str(error))
+        self._terminal_outcome()
+        if errors:
+            # Persist failure and limitations wherever the terminal channel
+            # is still writable. This does not retry campaign/archive work.
+            for name in ("result.json", "status.json"):
+                try:
+                    (self.output / name).write_text(
+                        json.dumps(self.state, indent=2) + "\n"
+                    )
+                except OSError as error:
+                    assert self.primary is not None
+                    self.primary.add_note("result persistence " + name + ": " + str(error))
+            self._terminal_outcome()
 
     def _verify_archive(self):
         assert self.archive is not None

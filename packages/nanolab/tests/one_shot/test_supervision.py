@@ -302,9 +302,9 @@ def test_signal_handlers_remain_installed_during_archive(tmp_path, monkeypatch):
     previous = signal.getsignal(signal.SIGTERM)
     copy = supervision.shutil.copytree
 
-    def inspect_copy(source, target):
+    def inspect_copy(source, target, **kwargs):
         assert signal.getsignal(signal.SIGTERM) != previous
-        return copy(source, target)
+        return copy(source, target, **kwargs)
 
     monkeypatch.setattr(supervision.shutil, "copytree", inspect_copy)
     CampaignSupervision(output, archive=archive, cadence=0.01).run(lambda: None)
@@ -395,9 +395,9 @@ def test_first_archive_signal_defers_cleanup_and_returns_interruption(
     archive = tmp_path / "archive"
     copy = supervision.shutil.copytree
 
-    def interrupted_copy(source, target):
+    def interrupted_copy(source, target, **kwargs):
         os.kill(os.getpid(), signum)
-        return copy(source, target)
+        return copy(source, target, **kwargs)
 
     monkeypatch.setattr(supervision.shutil, "copytree", interrupted_copy)
     with pytest.raises(RuntimeError, match="interrupted"):
@@ -774,3 +774,205 @@ def test_service_normal_release_retains_first_cleanup_error(tmp_path, monkeypatc
     assert "secondary delete failed" in str(first.__notes__)
     assert released == ["service"]
     assert not supervisor.checks
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_final_archive_hash_failure_invalidates_both_receipts(
+    tmp_path, monkeypatch, capsys, corrupt
+):
+    from nanolab.one_shot import supervision
+    from nanolab.one_shot.report import render_report
+    from tests.one_shot.test_report import manifest
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive"
+    raw.mkdir()
+    (raw / "measurement.json").write_text('{"value":1}')
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    copy = supervision.shutil.copy2
+
+    def corrupt_measurement(source, target, **kwargs):
+        value = copy(source, target, **kwargs)
+        if corrupt and Path(source).name == "supervision.jsonl":
+            (archive / "measurement.json").write_text('{"value":2}')
+        return value
+
+    from pathlib import Path
+
+    monkeypatch.setattr(supervision.shutil, "copy2", corrupt_measurement)
+    action = lambda: render_report(manifest(), None, raw / "report.html")
+    if corrupt:
+        with pytest.raises(ValueError, match="archive hash mismatch: measurement.json"):
+            supervisor.run(action)
+    else:
+        supervisor.run(action)
+    for directory in (raw, archive):
+        for name in ("status.json", "result.json"):
+            receipt = json.loads((directory / name).read_text())
+            assert receipt["state"] == ("failed" if corrupt else "completed")
+            assert receipt["exitCode"] == int(corrupt)
+            assert receipt["archiveVerified"] is (not corrupt)
+        report = json.loads((directory / "report.json").read_text())
+        assert report["operationalOutcome"]["state"] == receipt["state"]
+        assert receipt["cause"] in (directory / "report.html").read_text() if corrupt else True
+    assert (raw / "measurement.json").read_text() == '{"value":1}'
+    assert (archive / "measurement.json").read_text() == (
+        '{"value":2}' if corrupt else '{"value":1}'
+    )
+    if not corrupt:
+        supervisor._verify_archive()
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["state"] == (
+        "failed" if corrupt else "completed"
+    )
+
+
+@pytest.mark.parametrize("primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize("boundary", ["preexisting", "partial", "invalidation"])
+def test_archive_failure_preserves_primary_and_owned_destination(
+    tmp_path, monkeypatch, capsys, primary, boundary
+):
+    from pathlib import Path
+
+    from nanolab.one_shot import supervision
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive"
+    raw.mkdir()
+    (raw / "measurement.txt").write_text("retained")
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    copytree, copy2 = supervision.shutil.copytree, supervision.shutil.copy2
+    if boundary == "preexisting":
+        archive.mkdir()
+        (archive / "result.json").write_text("unowned bytes")
+        before = {p.name: p.read_bytes() for p in archive.iterdir()}
+
+    def copy_tree(source, target, **kwargs):
+        value = copytree(source, target, **kwargs)
+        if boundary == "partial":
+            raise OSError("partial archive failed")
+        return value
+
+    def copy_control(source, target, **kwargs):
+        if boundary == "invalidation" and supervisor.state["archiveVerified"] is False:
+            raise OSError("invalidation storage unavailable")
+        value = copy2(source, target, **kwargs)
+        if boundary == "invalidation" and Path(source).name == "supervision.jsonl":
+            (archive / "measurement.txt").write_text("corrupted")
+        return value
+
+    def fail(_):
+        if isinstance(primary, int):
+            os.kill(os.getpid(), primary)
+        elif primary is not None:
+            raise RuntimeError(primary)
+
+    monkeypatch.setattr(supervision.shutil, "copytree", copy_tree)
+    monkeypatch.setattr(supervision.shutil, "copy2", copy_control)
+    workflow = Workflow("archive-failure")
+    workflow.add(Action(fail))
+    with pytest.raises(Exception):
+        supervisor.run(workflow.run)
+    result = json.loads((raw / "result.json").read_text())
+    assert result["state"] == "failed" and result["archiveVerified"] is False
+    assert supervisor.primary is not None
+    assert result["cause"] == str(supervisor.primary)
+    if primary is not None:
+        assert ("interrupted" if isinstance(primary, int) else primary) in result["cause"]
+        assert "archive:" in str(result["notes"])
+    assert result["exitCode"] == (128 + primary if isinstance(primary, int) else 1)
+    assert (raw / "measurement.txt").read_text() == "retained"
+    if boundary == "preexisting":
+        assert {p.name: p.read_bytes() for p in archive.iterdir()} == before
+    elif boundary == "partial":
+        copied = json.loads((archive / "result.json").read_text())
+        assert copied["state"] == "failed" and copied["archiveVerified"] is False
+    else:
+        assert "archive invalidation" in str(result["notes"])
+        assert "invalidation storage unavailable" in str(result["notes"])
+    stdout = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert stdout["state"] == "failed"
+    if boundary == "invalidation":
+        assert "archive invalidation" in str(stdout["notes"])
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize("late", [False, True])
+def test_deferred_signal_final_verification_invalidates_archive(
+    tmp_path, monkeypatch, signum, late
+):
+    from pathlib import Path
+
+    from nanolab.one_shot import supervision
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive"
+    raw.mkdir()
+    (raw / "measurement.txt").write_text("retained")
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    copy = supervision.shutil.copy2
+    verify = supervisor._verify_archive
+    checks = []
+
+    def control_copy(source, target, **kwargs):
+        value = copy(source, target, **kwargs)
+        if Path(source).name == "supervision.jsonl" and not checks:
+            os.kill(os.getpid(), signum)
+            if not late:
+                (archive / "measurement.txt").write_text("corrupted")
+            checks.append(True)
+        return value
+
+    verifications = []
+
+    def verify_then_interrupt():
+        verify()
+        verifications.append(True)
+        if late and len(verifications) == 2:
+            (archive / "measurement.txt").write_text("corrupted")
+
+    monkeypatch.setattr(supervision.shutil, "copy2", control_copy)
+    monkeypatch.setattr(supervisor, "_verify_archive", verify_then_interrupt)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        supervisor.run(lambda: None)
+    for directory in (raw, archive):
+        result = json.loads((directory / "result.json").read_text())
+        assert result["exitCode"] == 128 + signum
+        assert result["archiveVerified"] is False
+        assert "archive hash mismatch" in str(result["notes"])
+
+
+def test_archive_failure_survives_unwritable_failure_receipts(
+    tmp_path, monkeypatch, capsys
+):
+    from pathlib import Path
+
+    from nanolab.one_shot import supervision
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive"
+    raw.mkdir()
+    (raw / "measurement.txt").write_text("retained")
+    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    copy = supervision.shutil.copy2
+    write = Path.write_text
+    failed = []
+
+    def corrupt(source, target, **kwargs):
+        result = copy(source, target, **kwargs)
+        if Path(source).name == "supervision.jsonl":
+            (archive / "measurement.txt").write_text("corrupted")
+            failed.append(True)
+        return result
+
+    def reject_receipt(path, text, *args, **kwargs):
+        if failed and path.parent == raw and path.name in {
+            "status.json.tmp", "status.json", "result.json"
+        }:
+            raise OSError("raw failure receipt unavailable")
+        return write(path, text, *args, **kwargs)
+
+    monkeypatch.setattr(supervision.shutil, "copy2", corrupt)
+    monkeypatch.setattr(Path, "write_text", reject_receipt)
+    with pytest.raises(ValueError, match="archive hash mismatch"):
+        supervisor.run(lambda: None)
+    final = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert final["state"] == "failed" and final["archiveVerified"] is False
+    assert "raw failure receipt unavailable" in str(final["notes"])
+    assert (raw / "measurement.txt").read_text() == "retained"
+    assert (archive / "measurement.txt").read_text() == "corrupted"
