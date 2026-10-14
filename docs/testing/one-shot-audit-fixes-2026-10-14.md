@@ -84,3 +84,95 @@ execution flows and medium risk. The affected flows include scenario loading
 for plan/run/compare and service acquisition/status. Some individual diff
 hunks do not overlap indexed symbols. These results are partial graph evidence,
 not an all-clear; real regressions and source review provide the behavioral checks.
+
+## Follow-up to the independent finalization review
+
+The review of `14f261e` identified two additional P2 finalization defects.
+The preceding sections describe the first audit series at its original revisions;
+they do not claim `14f261e` already handled these follow-up cases correctly.
+The approved follow-up plan is
+`nanofaas/docs/superpowers/plans/2026-10-14-one-shot-finalization-review-fixes.md`.
+Implementation continued natively in the same worktree and branch:
+
+- `56fc7c4`: persist deferred interruptions with or without an archive.
+- `981eb4e`: independently update writable reports and invalidate archive outcomes
+  after partial report persistence failures.
+- `01fab85`: persist changes observed during terminal receipt writes and retain
+  secondary report-channel notes under the existing primary exception.
+
+Baseline supervisor/report checks passed 73 tests. Task 1's new regressions
+observably failed in two no-archive signal cases while ten controls passed;
+the complete supervisor then passed 70 tests. Task 2 had 17 red failures and ten
+controls; supervisor/report then passed 112 tests. The final independent review
+found two Important cases within the same scope: signal adoption before the
+persistence guard and secondary output errors lost while preserving an earlier
+workflow cause. Ten further real-I/O/signal regressions failed before the final
+fix and passed afterward; supervisor/report passed 122 tests. No Critical, Minor,
+deferred or declined-to-judge findings were reported. The single review fix pass
+was verified through regressions and the broader suites below, without a second
+independent review.
+
+### Final follow-up verification
+
+- Combined supervisor, report, launcher, public CLI, observation workflow and
+  scenario configuration: **237 passed, 6 skipped**.
+- Full one-shot plus heterogeneous/scenario configuration: **1,063 passed,
+  6 skipped, 1 deselected, 20 subtests passed**, with the loopback HTTP test
+  subsequently run alone outside the denying sandbox: **1 passed**. All selected
+  tests were exercised; the isolated HTTP test was not changed or counted as a
+  skipped integration.
+- The entire NanoLab package completed on the final code: **4,360 passed,
+  415 skipped, 20 subtests passed**. The extra 409 skips comprise 406 NanoFaaS
+  checkout contracts without `NANOFAAS_ROOT` and three JVM/native-inapplicable
+  cases. An earlier extra package-wide sandbox run stopped progressing at 61%
+  and was interrupted/terminated only in its owned pytest process; the full
+  final run above completed with the existing local-test execution permissions.
+- The six optional skips require two actual runtime/JDK contracts and four
+  preserved observation/tuning/runtime artifact settings. They were not exercised.
+- Reference/SciPy tests reused the preserved source and Python environment listed
+  above. Commands additionally set `PYTHONDONTWRITEBYTECODE=1`,
+  `UV_PROJECT_ENVIRONMENT=/home/michele/Documenti/nanolab/.venv` and
+  `-p no:cacheprovider`, explicitly selecting this worktree's sources. No new
+  environment, dependency or campaign freeze was created.
+- Ruff, format checks and whitespace checks passed for the four changed Python
+  files. The existing real package fingerprint was checked for sensitivity to
+  changes in both `one_shot/supervision.py` and `one_shot/report.py` using temporary
+  copies; installed/historical bytes and drift checks were unchanged.
+
+The original independent reproducer was rerun without editing it. New output is
+saved beside the historical evidence as
+`nanofaas/docs/experiments/one-shot-audit-2026-10-14/branch-review/fixed-01fab85-reproduction.jsonl`.
+Assertions on actual saved result/status/JSON/HTML confirm healthy exit 0,
+SIGINT 130, SIGTERM 143, and report-I/O failure exit 1 in every writable output.
+For report-I/O failure the unavailable raw HTML remains diagnostic evidence;
+raw JSON and all writable archive outcomes are failed with
+`archiveVerified=false`. The original branch/main reproduction files and script
+retain their SHA-256 hashes.
+
+HTML/JSON summaries may be reconciled only when their scientific payload matches
+and their prior `operationalOutcome` differs. Missing, ambiguous or malformed HTML
+summaries and divergent science remain errors; an unavailable/invalid output is
+not reconstructed from the other channel. Each valid existing output is attempted
+independently, preserving chart bytes outside the selected summary. First causes
+and signal codes survive, with all encountered channel limitations retained as
+notes. No workflow/acquisition/measurement or failed verification is retried;
+existing unowned archive destinations remain protected.
+
+GitNexus freshness was checked and each scoped diff analyzed before commit.
+Initial `_run`, `_write_result` and finalizer impacts were LOW; the archive-control
+invalidation impact later reported CRITICAL with 87 process associations and was
+reported explicitly. An incremental index update left `incremental-in-progress`
+and unresolved symbols; these UNKNOWN/empty results were checked against source
+callers and not treated as safety evidence. A forced full rebuild completed and
+its contents matched all 1,483 covered files. The final graph again resolves
+CampaignSupervision and the changed production symbols. Process truncation and
+FTS/BM25 failure remain limitations. Final comparison against `14f261e`
+reported six changed files, 38 symbols, zero resolved affected flows and LOW
+aggregate risk; these counts do not negate the earlier CRITICAL impact warning. The source review and real regression tests,
+not zero graph counts, establish the checked behavior.
+
+No protocol, load, rounds, CPU/RAM, pools, timing limits or experimental criteria
+changed. No VM/container acquisition, campaign, merge, push, runtime integration
+or unrelated filesystem cleanup was performed. Existing fixes and modifications
+were preserved; the worktree/branch remain available. Documentation is committed
+separately; the NanoFaaS plan and new reproduction evidence remain uncommitted.

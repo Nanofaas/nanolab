@@ -859,3 +859,34 @@ Future observations must prepare a new freeze with the fixed package and launche
 The package fingerprint covers the supervisor, catalogue and scenario code;
 execution also verifies the active launcher against the saved `source-used.py`
 hash. Existing freezes, historical results and their drift checks remain intact.
+
+### Follow-up: interruptions and partial report updates
+
+The finalization review of `14f261e` found additional cases beyond the original
+five fixes. An interruption received during terminal receipt or report writes
+now causes a bounded update of the newly observed failed snapshot, whether or
+not an archive is selected. The supervisor detects the change relative to the
+snapshot being persisted, including when the interruption has already become
+primary. Healthy verified archives are not followed by unconditional raw rewrites.
+
+Terminal report updates attempt each existing valid JSON/HTML output independently.
+An unreadable or unwritable output does not prevent updating the other valid
+output. Missing reports remain allowed for early failures. The HTML's unique
+escaped JSON summary is read and compared with the JSON scientific payload;
+only differences in `operationalOutcome` may be reconciled. Different scientific
+fields or missing, ambiguous or malformed HTML summaries remain errors. Chart
+content and all bytes outside the selected summary block are preserved.
+
+When a report write changes the operational outcome, a single diagnostic pass
+updates writable outputs to that failed outcome. A partial report update during
+archive finalization stops the successful completion path and invalidates the
+owned archive with `archiveVerified=false`. Its report is finalized independently
+of raw report writability. Corrupted measurements, existing unowned destinations,
+cleanup ownership and normal hash verification keep their existing behavior.
+
+If an earlier workflow failure or interruption remains primary, its cause/code
+survive and secondary report-channel limitations are retained in the available
+terminal receipts and stdout. A writable report reflects failure even if the
+other output cannot be updated; no consistency is promised for unavailable or
+scientifically invalid outputs. This is diagnostic finalization, with no retry
+of the workflow, acquisition, measurement or failed archive verification.
