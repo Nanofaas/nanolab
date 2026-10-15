@@ -1086,7 +1086,18 @@ def test_active_observation_entrypoint_must_match_frozen_script(
 
 
 @pytest.mark.parametrize(
-    "relative", ["one_shot/supervision.py", "cli/catalogue.py", "config/scenario.py"]
+    "relative",
+    [
+        "one_shot/supervision.py",
+        "one_shot/recording.py",
+        "one_shot/presentation.py",
+        "one_shot/views.py",
+        "tui/workflow.py",
+        "tui/workflow_controller.py",
+        "cli/progress.py",
+        "cli/catalogue.py",
+        "config/scenario.py",
+    ],
 )
 def test_changed_package_implementation_stops_before_observation_inventory(
     observer, tmp_path, monkeypatch, relative
@@ -1095,7 +1106,12 @@ def test_changed_package_implementation_stops_before_observation_inventory(
     from nanolab.tasks.one_shot import artifacts
 
     package = tmp_path / "package"
-    for name in ("one_shot/supervision.py", "cli/catalogue.py", "config/scenario.py"):
+    for name in (
+        "one_shot/supervision.py",
+        "cli/catalogue.py",
+        "config/scenario.py",
+        relative,
+    ):
         path = package / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# original implementation\n")
@@ -1112,3 +1128,148 @@ def test_changed_package_implementation_stops_before_observation_inventory(
     with pytest.raises(ValueError, match="host boot or package drift"):
         observer.run_observation(args)
     assert not attempts and not releases and not args.output.exists()
+
+
+@pytest.mark.parametrize("mode", ["console", "tui", "json", "none"])
+@pytest.mark.parametrize("position", ["before", "between", "after"])
+def test_display_parser_preserves_positionals_archive_and_frozen_bootstrap(
+    observer, tmp_path, mode, position
+):
+    import subprocess
+    import sys
+
+    freeze, output, archive = (
+        tmp_path / "freeze",
+        tmp_path / "run",
+        tmp_path / "archive",
+    )
+    arguments = [str(freeze), str(output)]
+    flags = ["--display", mode, "--archive", str(archive)]
+    at = {"before": 0, "between": 1, "after": 2}[position]
+    arguments[at:at] = flags
+    args = observer.parse_args(["run", *arguments])
+    assert (args.freeze, args.output, args.archive, args.display) == (
+        freeze,
+        output,
+        archive,
+        mode,
+    )
+    package = freeze / "package/nanolab"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        "raise SystemExit('frozen package selected')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, observer.__file__, "run", *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stderr.strip() == "frozen package selected"
+    assert not output.exists()
+
+
+def test_display_parser_defaults_and_rejects_unknown_before_import(observer, tmp_path):
+    import subprocess
+    import sys
+
+    assert observer.parse_args(["run", "freeze", "output"]).display == "console"
+    result = subprocess.run(
+        [
+            sys.executable,
+            observer.__file__,
+            "run",
+            "--display",
+            "bad",
+            str(tmp_path),
+            str(tmp_path / "run"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2 and "invalid choice" in result.stderr
+    assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize("mode", ["console", "tui", "json", "none"])
+@pytest.mark.parametrize("fails", [False, True])
+def test_launcher_routes_stages_and_terminal_failures_once(
+    observer, tmp_path, monkeypatch, capsys, mode, fails
+):
+    from types import SimpleNamespace
+
+    args, releases = offline_observation(
+        observer, tmp_path, monkeypatch, primary="task exploded" if fails else None
+    )
+    args.display = mode
+    monkeypatch.setattr(
+        observer.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(stdout='{"list":[]}'),
+    )
+    if fails:
+        with pytest.raises(RuntimeError, match="task exploded"):
+            observer.run_observation(args)
+    else:
+        observer.run_observation(args)
+    assert releases == ["vm"]
+    progress = [
+        json.loads(s) for s in (args.output / "progress.jsonl").read_text().splitlines()
+    ]
+    assert [r["stage"] for r in progress] == [
+        "provisioning-started",
+        "workflow-failed" if fails else "workflow-complete",
+    ]
+    output = capsys.readouterr()
+    if mode == "none":
+        assert output == ("", "")
+    elif mode == "json":
+        rows = [json.loads(s) for s in output.out.splitlines()]
+        assert (
+            sum(r.get("state") == ("failed" if fails else "completed") for r in rows)
+            == 1
+        )
+        assert sum(r.get("stage") == "provisioning-started" for r in rows) == 1
+    else:
+        assert not any(line.startswith('{"atUtc"') for line in output.out.splitlines())
+    result = json.loads((args.output / "result.json").read_text())
+    assert result["state"] == ("failed" if fails else "completed")
+
+
+@pytest.mark.parametrize("mode", ["console", "tui", "json", "none"])
+def test_launch_boundary_formats_pre_supervisor_failure_by_selected_mode(
+    observer, tmp_path, monkeypatch, capsys, mode
+):
+    monkeypatch.setattr(
+        observer.sys,
+        "argv",
+        [
+            observer.__file__,
+            "run",
+            str(tmp_path / "absent"),
+            str(tmp_path / "raw"),
+            "--display",
+            mode,
+        ],
+    )
+    with pytest.raises(SystemExit) as caught:
+        observer.main()
+    assert caught.value.code == 1
+    output = capsys.readouterr()
+    if mode == "none":
+        assert output == ("", "")
+    elif mode == "json":
+        rows = [json.loads(s) for s in output.out.splitlines()]
+        assert len(rows) == 1 and rows[0]["exitCode"] == 1
+    else:
+        assert "No such file" in output.out
+        assert not output.out.startswith("{")
+
+
+def test_preparation_dependency_inventory_includes_actual_view_code(observer):
+    inventory = observer.dependency_files()
+    for module in ("rich", "tui_toolkit", "sonata_engine"):
+        assert any(f"/{module}/" in name for name in inventory)
+    assert all(observer.sha(Path(name)) == digest for name, digest in inventory.items())

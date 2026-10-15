@@ -430,3 +430,24 @@ def test_tui_background_refresh_fault_wakes_wait_and_does_not_redraw_broken_view
         thread.join()
     assert released == ["vm"]
     assert attempts == [1]
+
+
+def test_progress_helper_records_once_in_active_campaign_and_standalone(
+    tmp_path, capsys
+):
+    from nanolab.tasks.one_shot.observation import event
+
+    view = View()
+    supervisor = CampaignSupervision(tmp_path, presentation=view)
+    supervisor.run(lambda: event(tmp_path, "warmup", epoch=42))
+    event(tmp_path, "standalone", epoch=43)
+    rows = [
+        json.loads(s) for s in (tmp_path / "progress.jsonl").read_text().splitlines()
+    ]
+    assert [(r["stage"], r["epoch"]) for r in rows] == [
+        ("warmup", 42),
+        ("standalone", 43),
+    ]
+    assert sum(row.get("stage") == "warmup" for row in view.rows) == 1
+    assert not any(row.get("stage") == "standalone" for row in view.rows)
+    assert capsys.readouterr() == ("", "")

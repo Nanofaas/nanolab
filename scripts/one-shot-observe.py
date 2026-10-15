@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Run one unqualified ORACLE observation through owned NanoLab infrastructure."""
 
+
+# Frozen-package selection must precede all third-party/application imports.
+# ruff: noqa: E402
 import argparse
 import copy
 import json
@@ -14,8 +17,30 @@ from importlib import metadata
 from importlib.resources import files
 from pathlib import Path
 
-if __name__ == "__main__" and len(sys.argv) > 2 and sys.argv[1] == "run":
-    sys.path.insert(0, str(Path(sys.argv[2]) / "package"))
+
+def parse_args(argv=None):
+    """Parse with the standard library before selecting any frozen package."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    prep = commands.add_parser("prepare")
+    for key in ["tuning", "observations", "distribution", "source", "output"]:
+        prep.add_argument("--" + key, type=Path, required=True)
+    prep.add_argument("--arrival-profile", type=Path)
+    prep.add_argument("--parent-freeze", type=Path)
+    launch = commands.add_parser("run")
+    launch.add_argument("freeze", type=Path)
+    launch.add_argument("output", type=Path)
+    launch.add_argument("--archive", type=Path)
+    launch.add_argument(
+        "--display", choices=("console", "tui", "json", "none"), default="console"
+    )
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    _bootstrap_args = parse_args()
+    if _bootstrap_args.command == "run":
+        sys.path.insert(0, str(_bootstrap_args.freeze / "package"))
 
 import yaml
 
@@ -24,6 +49,7 @@ from nanolab.config.one_shot import OperationalLimits
 from nanolab.one_shot.supervision import (
     CampaignSupervision,
 )
+from nanolab.one_shot.views import select_presentation, show_launch_failure
 from nanolab.one_shot.vm_resources import (
     telemetry_policy,
 )
@@ -163,6 +189,23 @@ def verify_parent_archive(root: Path, expected_fingerprint: str) -> None:
         path.relative_to(root.resolve())
         if sha(path) != expected:
             raise ValueError("parent archive bytes changed: " + name)
+
+
+def dependency_files():
+    """Fingerprint the actual engine and presentation code used by future freezes."""
+    return {
+        str(path): sha(path)
+        for package_name in (
+            "sonata_engine",
+            "sonata_tasks",
+            "multipass_vm_sdk",
+            "subprocess_toolkit",
+            "rich",
+            "tui_toolkit",
+            "typer",
+        )
+        for path in Path(str(files(package_name))).rglob("*.py")
+    }
 
 
 def prepare(args):
@@ -340,6 +383,9 @@ def prepare(args):
             "httpx",
             "pydantic",
             "plotly",
+            "rich",
+            "tui-toolkit",
+            "typer",
         ]
     }
     frozen = {
@@ -351,16 +397,7 @@ def prepare(args):
         "sourceFiles": {
             name: sha(args.source / name) for name in source_file_names(args.source)
         },
-        "dependencyFiles": {
-            str(path): sha(path)
-            for package_name in (
-                "sonata_engine",
-                "sonata_tasks",
-                "multipass_vm_sdk",
-                "subprocess_toolkit",
-            )
-            for path in Path(str(files(package_name))).rglob("*.py")
-        },
+        "dependencyFiles": dependency_files(),
         "python": sys.version,
         "dependencies": deps,
         "hostBootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
@@ -436,7 +473,13 @@ def run_observation(args):
         save(args.output / name, value)
         return value
 
-    supervision = CampaignSupervision(args.output, archive=args.archive)
+    supervision = CampaignSupervision(
+        args.output,
+        archive=args.archive,
+        presentation_factory=lambda fail: select_presentation(
+            getattr(args, "display", "console"), on_failure=fail
+        ),
+    )
 
     def execute():
         primary = None
@@ -501,37 +544,24 @@ def run_observation(args):
         if primary is not None:
             raise primary
 
+    args.supervised = True
     supervision.run(execute)
 
 
-def main():
-    """Keep preparation and execution as separate saved commands."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    prep = commands.add_parser("prepare")
-    for key in ["tuning", "observations", "distribution", "source", "output"]:
-        prep.add_argument("--" + key, type=Path, required=True)
-    prep.add_argument("--arrival-profile", type=Path)
-    prep.add_argument("--parent-freeze", type=Path)
-    launch = commands.add_parser("run")
-    launch.add_argument("freeze", type=Path)
-    launch.add_argument("output", type=Path)
-    launch.add_argument("--archive", type=Path)
-    args = parser.parse_args()
+def main(args=None):
+    """Format pre-supervisor errors once, preserving selected output and exits."""
+    args = args or parse_args()
     if args.command == "prepare":
         prepare(args)
     else:
+        args.supervised = False
         try:
             run_observation(args)
         except BaseException as error:
-            print(
-                json.dumps(
-                    {"cause": str(error), "exitCode": getattr(error, "exit_code", 1)}
-                ),
-                flush=True,
-            )
+            if not args.supervised:
+                show_launch_failure(args.display, error)
             raise SystemExit(getattr(error, "exit_code", 1)) from error
 
 
 if __name__ == "__main__":
-    main()
+    main(_bootstrap_args)

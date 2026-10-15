@@ -24,6 +24,7 @@ from nanolab.one_shot.profiles import CalibrationProfiles
 from nanolab.one_shot.report import render_report
 from nanolab.one_shot.returned_errors import summarize_responses
 from nanolab.one_shot.supervision import (
+    CampaignSupervision,
     check_sampler,
 )
 from nanolab.one_shot.vm_resources import (
@@ -84,11 +85,20 @@ def save(path, value):
 
 
 def event(directory, stage, **values):
-    """Record operator progress both on disk and stdout."""
+    """Persist a stage once and route it through the current campaign if present."""
+    from sonata_engine.workflow.context import active_sink
+
+    from nanolab.one_shot.recording import CampaignRecorder
+
     row = {"atUtc": datetime.now(UTC).isoformat(), "stage": stage, **values}
-    with (directory / "progress.jsonl").open("a") as stream:
-        stream.write(json.dumps(row) + "\n")
-    print(json.dumps(row), flush=True)
+    sink = active_sink()
+    if (
+        isinstance(sink, CampaignSupervision)
+        and sink.output.resolve() == directory.resolve()
+    ):
+        sink.progress(row)
+    else:
+        CampaignRecorder(directory).append_progress(row)
 
 
 def source_file_names(root: Path) -> list[str]:

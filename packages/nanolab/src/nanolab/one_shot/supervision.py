@@ -107,6 +107,12 @@ class CampaignSupervision:
         else:
             self._render(lambda view: view.emit(_event))
 
+    def progress(self, row: dict):
+        """Record an observation stage once, then deliver its detached snapshot."""
+        with self.lock:
+            self.recorder.append_progress(row)
+        self._render(lambda view: view.campaign_event(deepcopy(row)))
+
     def _presentation_failed(self, error):
         with self.lock:
             self.presentation_broken = True
