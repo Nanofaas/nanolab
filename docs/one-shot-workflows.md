@@ -670,7 +670,7 @@ After preparing the freeze, launch everything with one command in the NanoLab Py
 
 The frozen runner provisions the six owned VMs through Sonata, waits for cloud-init, starts services and logging, checks replicas and cgroups, measures observer cost, starts VM/container sampling and k6, runs the warmup and all nine 360-second intervals, writes the report and releases its owned resources. Sonata events cover acquisition, execution and compensation; an internal health thread runs during blocking waits without agent polling. It uses the configured operator CPU assignment applied by the existing CPU-placement resource.
 
-Progress appears automatically as UTC JSON lines on stdout. The run directory contains atomic `status.json`, append-only `supervision.jsonl`, and final `result.json` with state, first cause, exit code, cleanup anomalies and archive verification. Heartbeats distinguish normal waiting from a completed stage; they are a reporting cadence, not a deadline or performance gate. During load they include mode, function scope and epoch from the frozen schedule. Supervisor thread CPU time is recorded alongside precheck VM sampler and collector cost observations.
+Progress uses the ordinary task console by default. Select `--display json` for the established UTC JSON lines, `--display tui` for the existing workflow dashboard, or `--display none` for supervised execution without terminal I/O. The run directory contains atomic `status.json`, append-only `supervision.jsonl`, and final `result.json` with state, first cause, exit code, cleanup anomalies and archive verification. Heartbeats distinguish normal waiting from a completed stage; they are a reporting cadence, not a deadline or performance gate. During load they include mode, function scope and epoch from the frozen schedule. Supervisor thread CPU time is recorded alongside precheck VM sampler and collector cost observations.
 
 An unexpected generator exit before all scheduled requests finish, a nonzero exit, a collector/sampler process failure, or a missing required control-plane/log collector in a valid sampler inventory stops the procedure once. Function request failures and HTTP rejects are counted separately in `responses.json`; function scaling, missing samples and uncertain clocks do not introduce exclusion criteria. Missing VM/container samples remain visible in raw files and coverage reports. SIGINT/SIGTERM trigger owned compensation, with exit130/143; operational failure returns exit1. No repair, retry or automatic relaunch occurs.
 
@@ -836,8 +836,8 @@ owned archive locations wherever they are writable. This diagnostic finalization
 never repairs corrupted measurement files, retries verification, or relaunches
 the workflow. Corrupted archive evidence and intact raw measurements are retained.
 If storage rejects failure receipts or report updates, consistency cannot be
-promised for those files; available raw receipts and final stdout record the
-persistence or archive-invalidation limitation while preserving the first cause.
+promised for those files; available raw receipts and a healthy selected display
+record the persistence or archive-invalidation limitation while preserving the first cause.
 
 Scenario CLI artifact references, including the optional
 `oneShot.observability.vmResourceOverhead`, resolve relative to the scenario file.
@@ -886,7 +886,62 @@ cleanup ownership and normal hash verification keep their existing behavior.
 
 If an earlier workflow failure or interruption remains primary, its cause/code
 survive and secondary report-channel limitations are retained in the available
-terminal receipts and stdout. A writable report reflects failure even if the
-other output cannot be updated; no consistency is promised for unavailable or
+terminal receipts and a healthy selected display. A writable report reflects
+failure even if the other output cannot be updated; no consistency is promised for unavailable or
 scientifically invalid outputs. This is diagnostic finalization, with no retry
 of the workflow, acquisition, measurement or failed archive verification.
+
+## Observation presentation selection
+
+These are invocation examples; choose one display when launching a normally
+prepared observation (do not run them as verification commands):
+
+```bash
+uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py run FREEZE RUN --archive ARCHIVE --display console
+uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py run FREEZE RUN --archive ARCHIVE --display tui
+uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py run FREEZE RUN --archive ARCHIVE --display json
+uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py run FREEZE RUN --archive ARCHIVE --display none
+```
+
+`console` is the default. Scripts consuming the former JSON stdout must select
+`json`. `--display` and `--archive` can precede or follow the positional paths.
+TUI selection is explicit, uses the existing dashboard and log pane, and never
+waits for acknowledgment at campaign exit. Other interactive workflows retain
+acknowledgment on terminal input, including after a workflow error. This adds no
+new TUI menu, attach service or resume mechanism.
+
+`none` constructs no UI and reads/writes no terminal input/output. Health checks,
+recording, signal handling, report finalization and owned cleanup remain active.
+Programmatic `CampaignSupervision` inherits the active Sonata sink when omitted;
+`presentation=None` explicitly disables inheritance. A caller-provided sink is
+borrowed, receives original task events once, and is restored on every exit.
+Its outer lifecycle remains the caller's responsibility. The observation
+launcher owns its selected view through the supervisor's factory.
+
+A selected display failure is operational: acquisition/load stops, raw evidence
+is retained and Sonata releases only acquired resources in dependency order.
+Subsequent rendering to the failed view is disabled. No replacement display is
+opened. Creation, refresh, input listener and disposal failures participate in
+first-cause handling; earlier failures and signal codes 130/143 survive.
+Background recording or rendering failures wake active waits without status
+polling. Request rejects and errors remain measurements.
+
+`RUN/supervision.jsonl` and `RUN/progress.jsonl` retain complete structured rows;
+`RUN/status.json` is replaced atomically and `RUN/result.json` records the terminal
+outcome. Writable JSON/HTML reports and owned archive receipts are finalized to
+that outcome. Storage errors may prevent individual diagnostic channels from
+being updated; no consistency is promised for unwritable files.
+
+The live TUI remains available for cleanup and initial archive progress. Its
+listener is joined and display disposed before the final control-file copy and
+SHA verification. Any close failure is persisted before that verification; late
+outcome changes invalidate owned success receipts through the bounded diagnostic
+path, without recopying measurements or retrying a failed hash check. Consult the
+terminal artifacts for the authoritative result, particularly after the TUI has
+closed. Console/JSON sinks have no background lifecycle and emit the final
+post-verification summary.
+
+Future normal preparations fingerprint the new NanoLab modules, active launcher,
+Rich, TUI toolkit and Typer sources and versions. Existing freezes and historical
+fingerprints are unchanged; code drift still stops before inventory/acquisition.
+See [verification evidence](testing/one-shot-reporting-separation.md).
