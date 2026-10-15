@@ -644,7 +644,13 @@ def test_operational_results_and_event_order_agree_across_views(
 
 
 @pytest.mark.parametrize("mode", ["console", "tui", "json"])
-def test_selected_real_view_output_fault_stops_generator(tmp_path, monkeypatch, mode):
+@pytest.mark.parametrize(
+    "boundary", ["progress", "event", "status-enter", "status-exit"]
+)
+@pytest.mark.parametrize("fault", ["display", signal.SIGINT, signal.SIGTERM])
+def test_selected_real_view_output_fault_stops_generator(
+    tmp_path, monkeypatch, mode, boundary, fault
+):
     from io import StringIO
 
     from rich.console import Console
@@ -653,17 +659,22 @@ def test_selected_real_view_output_fault_stops_generator(tmp_path, monkeypatch, 
     from nanolab.one_shot.views import open_presentation, select_presentation
     from nanolab.tasks.one_shot.observation import event
 
-    active, released, continued, later_tasks = [], [], [], []
+    active, released, continued, later_tasks, attempts = [], [], [], [], []
     original_print, original_refresh = print, Live.refresh
 
+    def fail_output():
+        if active and (fault == "display" or not attempts):
+            attempts.append(fault)
+            if fault == "display":
+                raise BrokenPipeError("selected output unavailable")
+            os.kill(os.getpid(), fault)
+
     def broken_print(*args, **kwargs):
-        if active:
-            raise BrokenPipeError("selected output unavailable")
+        fail_output()
         return original_print(*args, **kwargs)
 
     def broken_refresh(self):
-        if active:
-            raise BrokenPipeError("selected output unavailable")
+        fail_output()
         return original_refresh(self)
 
     monkeypatch.setattr("builtins.print", broken_print)
@@ -686,18 +697,44 @@ def test_selected_real_view_output_fault_stops_generator(tmp_path, monkeypatch, 
     workflow = Workflow("broken-output")
 
     def action(_):
-        active.append(True)
-        event(tmp_path, "generating")
+        (tmp_path / "raw.jsonl").write_text('{"statusCode":429}\n')
+        if boundary == "status-exit":
+            with status("generating"):
+                active.append(True)
+        else:
+            active.append(True)
+            if boundary == "progress":
+                event(tmp_path, "generating")
+            elif boundary == "event":
+                with subtask(task_id="nested", title="Generating"):
+                    continued.append("subtask body")
+            else:
+                with status("generating"):
+                    continued.append("status body")
         continued.append("generator continued after output failed")
 
     workflow.add(Action(action), requires=(resource,))
     workflow.add(Action(lambda _: later_tasks.append("later")))
-    with pytest.raises(BrokenPipeError, match="selected output unavailable"):
-        supervisor.run(workflow.run)
+    expected = (
+        "selected output unavailable"
+        if fault == "display"
+        else f"campaign interrupted by signal {fault}"
+    )
+    outer = View()
+    handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    with bind_workflow_sink(outer):
+        with pytest.raises((BrokenPipeError, RuntimeError), match=expected):
+            supervisor.run(workflow.run)
+        assert active_sink() is outer
+    assert all(signal.getsignal(sig) is handler for sig, handler in handlers.items())
     assert continued == []
     assert later_tasks == []
     assert released == ["generator"]
-    assert json.loads((tmp_path / "result.json").read_text())["exitCode"] == 1
+    assert attempts == [fault]
+    assert (tmp_path / "raw.jsonl").read_text() == '{"statusCode":429}\n'
+    receipt = json.loads((tmp_path / "result.json").read_text())
+    assert receipt["cause"] == expected
+    assert receipt["exitCode"] == (1 if fault == "display" else 128 + fault)
 
 
 @pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
