@@ -55,12 +55,13 @@ def build_one_shot_observation_plan(
     frozen = json.loads((freeze_dir / "freeze.json").read_text())
     protocol = json.loads((freeze_dir / "operator-protocol.json").read_text())
     settings = config.one_shot
-    assert (
-        settings is not None
-        and settings.timing is not None
-        and settings.experiment is not None
-        and settings.operational_limits is not None
-    )
+    if (
+        settings is None
+        or settings.timing is None
+        or settings.experiment is None
+        or settings.operational_limits is None
+    ):
+        raise ValueError("one-shot observation requires complete experiment settings")
     arrival_profile = read_frozen_arrival_profile(
         freeze_dir,
         frozen,

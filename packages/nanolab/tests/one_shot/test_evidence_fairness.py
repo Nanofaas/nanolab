@@ -103,7 +103,7 @@ def test_unrecoverable_prefix_does_not_starve_new_available_proofs(
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
         monkeypatch.setattr(experiment.httpx, "Client", lambda **_: nullcontext(client))
         collector = experiment.LiveEvidenceCollector(run, inputs)
-        collector.stop = Passes()
+        monkeypatch.setattr(collector, "stop", Passes())
         collector.collect_events = lambda: None
         collector.loop()
     collector.require_healthy()

@@ -9,6 +9,8 @@ from sonata_engine import Workflow
 from nanolab.cli.catalogue import _scenario
 from nanolab.cli.product import _workflow
 
+pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
+
 
 @pytest.mark.parametrize("name", ["calibration", "qualification", "experiment"])
 def test_cli_routes_one_shot_to_dedicated_builder_with_run_directory(

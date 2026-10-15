@@ -565,8 +565,9 @@ class CampaignSupervision:
                 persisted_interruption = self.interruption
                 self._write_result()
                 if not self.state["archiveVerified"]:
-                    assert self.primary is not None
-                    raise self.primary
+                    raise self.primary or RuntimeError(
+                        "archive verification invalidated"
+                    )
                 self._copy_archive_controls()
                 self._verify_archive()
                 if self.interruption is not persisted_interruption:
@@ -637,7 +638,8 @@ class CampaignSupervision:
         )
 
     def _copy_archive_controls(self, *, invalidate=False):
-        assert self.archive is not None
+        if self.archive is None:
+            raise RuntimeError("archive destination is required")
         for name in (
             "status.json",
             "result.json",
@@ -655,7 +657,7 @@ class CampaignSupervision:
             except Exception as error:
                 if not invalidate:
                     raise
-                assert self.primary is not None
+                self.primary = self.primary or error
                 self.primary.add_note(
                     "archive invalidation " + name + ": " + str(error)
                 )
@@ -666,7 +668,7 @@ class CampaignSupervision:
             try:
                 finalize_operational_outcome(self.archive, self.state)
             except (OSError, ValueError) as error:
-                assert self.primary is not None
+                self.primary = self.primary or error
                 self.primary.add_note("archive invalidation report: " + str(error))
                 if self.primary is not error:
                     for note in getattr(error, "__notes__", ()):
@@ -703,8 +705,7 @@ class CampaignSupervision:
         except (OSError, ValueError) as error:
             errors.append(error)
         for error in errors:
-            if self.primary is None:
-                self.primary = error
+            self.primary = self.primary or error
             self.primary.add_note("result persistence: " + str(error))
         self._terminal_outcome()
         if errors:
@@ -717,7 +718,7 @@ class CampaignSupervision:
                     else:
                         self.recorder.write_status(self.state)
                 except OSError as error:
-                    assert self.primary is not None
+                    self.primary = self.primary or error
                     self.primary.add_note(
                         "result persistence " + name + ": " + str(error)
                     )
@@ -758,7 +759,8 @@ class CampaignSupervision:
             self._terminal_outcome()
 
     def _verify_archive(self):
-        assert self.archive is not None
+        if self.archive is None:
+            raise RuntimeError("archive destination is required")
         for path in self.output.rglob("*"):
             if path.is_file():
                 with (

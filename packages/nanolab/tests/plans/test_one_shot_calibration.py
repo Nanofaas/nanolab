@@ -5,6 +5,8 @@ import pytest
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.plans.one_shot_calibration import build_one_shot_calibration_plan
 
+pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
+
 
 def scenario():
     return ScenarioConfig.model_validate(

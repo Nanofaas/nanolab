@@ -65,8 +65,10 @@ their sibling recipe/payload files remain ordinary operator-owned inputs.
 ## Tests and supported NanoFaaS source
 
 The CI-tested NanoFaaS source revision is
-`6570aaf0c2287201013bd09406c2d7905c2666c5`. Rust control-plane workloads also
-require the upstream nullable invocation-map fix (`e0c874b9` or newer).
+`79a0b21a804cd3ec9466b4ed9fe6a6cba64855ba`, published on
+`ci/nanolab-one-shot-79a0b21a`. It includes the five Rust one-shot workloads,
+forecasting and peer discovery required by the bundled recipes, as well as the
+nullable invocation-map fix (`e0c874b9`) and terminal execution identity fixes.
 Newer revisions can be used when they
 preserve the CLI, recipe v2 and managed-container inspection contracts.
 Docker validation selects running replicas by NanoFaaS function/replica labels
@@ -98,7 +100,7 @@ The public console command is `nanolab`.
 
 `.github/workflows/ci.yml` runs on every push and pull request against
 `main`. It checks out this repo and the pinned nanoFaaS source at
-`6570aaf0c2287201013bd09406c2d7905c2666c5` into `.nanofaas-source`, points
+`79a0b21a804cd3ec9466b4ed9fe6a6cba64855ba` into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below. The gate
 validates all checked-in recipe profiles. To reproduce profile validation
 and the full container lifecycles locally, use the commands below.

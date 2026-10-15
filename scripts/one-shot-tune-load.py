@@ -440,7 +440,9 @@ def execute(name, command, output):
     started = datetime.now(UTC).isoformat()
     print(started, name, "started", flush=True)
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=300, check=False
+        )
     except subprocess.TimeoutExpired as error:
         write_json(
             output / (name + ".command.json"),
@@ -473,7 +475,6 @@ def execute(name, command, output):
 def tune(args):
     """Save all candidates, select nine windows and validate the shared trace."""
     import yaml
-
     from nanolab.tasks.one_shot.trace import TraceArtifact
 
     args.output.mkdir(parents=True, exist_ok=False)
@@ -487,10 +488,12 @@ def tune(args):
             [
                 str(args.reference_python),
                 "-c",
-                "import sys,json,importlib.metadata as m; "
-                "print(json.dumps({'python':sys.version,'packages':"
-                "{name:m.version(name) for name in ['numpy','pandas','scipy','pyomo',"
-                "'matplotlib','networkx','seaborn','parse','tqdm']}}))",
+                (
+                    "import sys,json,importlib.metadata as m; "
+                    "print(json.dumps({'python':sys.version,'packages':"
+                    "{name:m.version(name) for name in ['numpy','pandas','scipy','pyomo',"
+                    "'matplotlib','networkx','seaborn','parse','tqdm']}}))"
+                ),
             ],
             args.output,
         )
@@ -689,22 +692,34 @@ def report(output, selected, context):
     lines = [
         "# Taratura del carico one-shot — riferimento Python",
         "",
-        "Previsioni con tempi storici a64MiB e quote CPU originali; "
-        "RAM prospettica64/128/256/128/256MiB.",
-        "Otto round fissi con helper originali, bid aggregate, nessuna sostituzione "
-        "o gerarchia. Cloud terminale con7 repliche per funzione, fuori dall'asta.",
-        "I fattori esplorati definiscono il carico, "
-        "non soglie di accettazione delle prestazioni.",
-        "Scelta: primo fattore con inoltri ai vicini in ogni intervallo; "
-        "nei sette intervalli centrali anche richiesta al cloud. "
-        "Almeno due intervalli devono avere uno stesso nodo che inoltra a "
-        "due vicini distinti. Nessun fallback se il carico non soddisfa questi "
-        "requisiti; conteggi verificati in offload-coverage.json.",
-        "La capacità cloud è una stima fluida: richieste al cloud ed eccesso "
-        "stimato non sono completamenti o reject osservati.",
+        (
+            "Previsioni con tempi storici a64MiB e quote CPU originali; "
+            "RAM prospettica64/128/256/128/256MiB."
+        ),
+        (
+            "Otto round fissi con helper originali, bid aggregate, nessuna sostituzione "
+            "o gerarchia. Cloud terminale con7 repliche per funzione, fuori dall'asta."
+        ),
+        (
+            "I fattori esplorati definiscono il carico, "
+            "non soglie di accettazione delle prestazioni."
+        ),
+        (
+            "Scelta: primo fattore con inoltri ai vicini in ogni intervallo; "
+            "nei sette intervalli centrali anche richiesta al cloud. "
+            "Almeno due intervalli devono avere uno stesso nodo che inoltra a "
+            "due vicini distinti. Nessun fallback se il carico non soddisfa questi "
+            "requisiti; conteggi verificati in offload-coverage.json."
+        ),
+        (
+            "La capacità cloud è una stima fluida: richieste al cloud ed eccesso "
+            "stimato non sono completamenti o reject osservati."
+        ),
         "",
-        "| Intervallo | Condizione | Fattore | Arrivi edge/s | Locale/s | "
-        "Vicini/s | Cloud richiesto/s | Eccesso cloud/s |",
+        (
+            "| Intervallo | Condizione | Fattore | Arrivi edge/s | Locale/s | "
+            "Vicini/s | Cloud richiesto/s | Eccesso cloud/s |"
+        ),
         "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     with (output / "rates.csv").open("x") as stream:

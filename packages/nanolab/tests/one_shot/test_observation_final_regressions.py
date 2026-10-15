@@ -13,6 +13,8 @@ from nanolab.config.one_shot import OperationalLimits
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.tasks.one_shot import experiment, qualification
 
+pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
+
 
 def test_collection_stops_before_retry_or_queued_proof_work(tmp_path, monkeypatch):
     from threading import Event

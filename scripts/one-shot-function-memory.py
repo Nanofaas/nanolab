@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 import yaml
-
 from nanolab.config.one_shot import resolve_node_functions
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.one_shot.capacity import comparison_replica_vectors

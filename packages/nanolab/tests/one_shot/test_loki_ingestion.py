@@ -1,6 +1,7 @@
 """Backend health must prove ingestion, not just a running process or /ready."""
 
 import json
+from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,7 +18,7 @@ def fake_backend(
     tmp_path,
     monkeypatch,
     *,
-    push_status=204,
+    push_status: int | Callable[[], int] = 204,
     visible=True,
     supervision=None,
     wal_metric="0",

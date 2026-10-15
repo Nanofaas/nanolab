@@ -889,7 +889,8 @@ def finalize_operational_outcome(directory: Path, outcome: dict) -> None:
         ):
             raise ValueError("report summary differs from saved evidence")
     if embedded is not None:
-        assert document is not None and block is not None
+        if document is None or block is None:
+            raise ValueError("report HTML summary is missing")
         try:
             embedded["operationalOutcome"] = dict(outcome)
             current = html.escape(json.dumps(embedded, indent=2, allow_nan=False))

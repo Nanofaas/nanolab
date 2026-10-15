@@ -10,6 +10,8 @@ from nanolab.config import EnvironmentConfig
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.one_shot.infrastructure import build_one_shot_resources
 
+pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
+
 
 def config() -> OneShotConfig:
     return OneShotConfig.model_validate(

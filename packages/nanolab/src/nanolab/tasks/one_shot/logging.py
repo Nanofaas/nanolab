@@ -189,7 +189,10 @@ def backend_resource(
         timestamp = str(time.time_ns())
         message = "nanolab backend probe " + timestamp
         labels = {"nanolab_backend_probe": project}
-        row = {"atUtc": datetime.now(UTC).isoformat(), "state": "checking"}
+        row: dict[str, str | int | float | None] = {
+            "atUtc": datetime.now(UTC).isoformat(),
+            "state": "checking",
+        }
         timeout = operational_limit(settings, "collection_http_seconds", 10)
         with httpx.Client(trust_env=False) as http:
             metrics = None

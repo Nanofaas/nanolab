@@ -2,6 +2,7 @@
 
 import copy
 import unittest
+from typing import cast
 
 import pytest
 
@@ -105,7 +106,9 @@ class RewindowTest(unittest.TestCase):
                 ),
             ):
                 rewindow_profile(
-                    source_profile(), period_seconds=period, integral=integral
+                    source_profile(),
+                    period_seconds=cast(int, period),
+                    integral=integral,
                 )
         for offsets in ([360], [-1], [0, 0], [1, 0], [float("nan")], [True]):
             source = source_profile()

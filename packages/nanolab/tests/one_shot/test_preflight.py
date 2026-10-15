@@ -6,6 +6,8 @@ import pytest
 
 from nanolab.tasks.one_shot.preflight import NodeEvidence, validate_node
 
+pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
+
 
 def evidence(**changes):
     data = {

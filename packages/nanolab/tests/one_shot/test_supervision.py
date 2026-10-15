@@ -862,6 +862,7 @@ def test_archive_failure_preserves_primary_and_owned_destination(
     (raw / "measurement.txt").write_text("retained")
     supervisor = json_supervision(raw, archive=archive, cadence=100)
     copytree, copy2 = supervision.shutil.copytree, supervision.shutil.copy2
+    before = {}
     if boundary == "preexisting":
         archive.mkdir()
         (archive / "result.json").write_text("unowned bytes")

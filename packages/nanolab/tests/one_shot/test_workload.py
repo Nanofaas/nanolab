@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
+
 VECTORS = json.loads(
     (Path(__file__).parent / "fixtures/multi-workloads.json").read_text()
 )

@@ -41,6 +41,14 @@ class FakeSink:
 
 
 @pytest.fixture
+def simulated_one_shot_host(monkeypatch):
+    """Keep fake VM workflows independent of the runner's CPUs and free RAM."""
+    monkeypatch.setattr(
+        "nanolab.one_shot.infrastructure.host_capacity", lambda: (128, 131072)
+    )
+
+
+@pytest.fixture
 def fake_sink() -> FakeSink:
     return FakeSink()
 

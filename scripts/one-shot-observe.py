@@ -2,7 +2,6 @@
 """Run one unqualified ORACLE observation through owned NanoLab infrastructure."""
 
 # Frozen-package selection must precede all third-party/application imports.
-# ruff: noqa: E402
 import argparse
 import copy
 import json
@@ -42,7 +41,6 @@ if __name__ == "__main__":
         sys.path.insert(0, str(_bootstrap_args.freeze / "package"))
 
 import yaml
-
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import OperationalLimits
 from nanolab.one_shot.supervision import (
@@ -504,7 +502,7 @@ def run_observation(args):
             event(args.output, "provisioning-started", qualified=False)
             workflow.run()
             event(args.output, "workflow-complete", qualified=False)
-        except BaseException as error:
+        except BaseException as error:  # noqa: BLE001 - defer until diagnostics finish
             primary = error
             try:
                 save(
@@ -515,27 +513,27 @@ def run_observation(args):
                         "atUtc": datetime.now(UTC).isoformat(),
                     },
                 )
-            except Exception as reporting:
+            except Exception as reporting:  # noqa: BLE001 - retain the first cause
                 error.add_note("failure receipt: " + str(reporting))
             try:
                 event(args.output, "workflow-failed", error=repr(error))
-            except Exception as reporting:
+            except Exception as reporting:  # noqa: BLE001 - retain the first cause
                 error.add_note("failure event: " + str(reporting))
         finally:
             try:
                 inventory("vms-after.json")
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - complete independent diagnostics
                 if primary is None:
                     primary = error
                 else:
                     primary.add_note("post-run inventory: " + str(error))
                 try:
                     save(args.output / "inventory-failure.json", {"error": repr(error)})
-                except Exception as reporting:
+                except Exception as reporting:  # noqa: BLE001 - retain the first cause
                     primary.add_note("inventory receipt: " + str(reporting))
             try:
                 retain_offline_report(args.output)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - complete independent diagnostics
                 if primary is None:
                     primary = error
                 else:
