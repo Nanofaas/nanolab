@@ -515,8 +515,15 @@ class CampaignSupervision:
             if self.thread.ident is not None:
                 self.thread.join()
         self.primary = (
-            self.fault or primary or self.interruption or self.presentation_error
+            self.fault or self.interruption or primary or self.presentation_error
         )
+        if (
+            primary is not None
+            and self.primary is not None
+            and self.primary is self.interruption
+            and primary is not self.primary
+        ):
+            self.primary.add_note("workflow cleanup: " + str(primary))
         for channel, error in self.deferred_errors:
             if self.primary is None:
                 self.primary = error

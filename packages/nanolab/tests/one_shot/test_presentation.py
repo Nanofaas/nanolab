@@ -1028,3 +1028,68 @@ def test_stop_during_release_finishes_owned_cleanup_before_stopping_later_work(
         assert sent == [fault]
     assert released == ["collector", "vm"]
     assert (tmp_path / "raw.jsonl").read_text() == '{"statusCode":503}\n'
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize("archived", [False, True])
+def test_release_signal_remains_primary_when_cleanup_then_fails(
+    tmp_path, signum, archived
+):
+    from nanolab.one_shot.report import render_report
+    from nanolab.one_shot.supervision import CampaignInterruptedError
+    from nanolab.one_shot.views import ConsoleCampaignPresentation
+    from tests.one_shot.test_report import manifest
+
+    raw, archive = tmp_path / "raw", tmp_path / "archive"
+    raw.mkdir()
+    render_report(manifest(), None, raw / "report.html")
+    (raw / "samples.jsonl").write_text('{"statusCode":503}\n')
+    sent, released, later_tasks = [], [], []
+
+    def write(line):
+        if "stop child" in line and not sent:
+            sent.append(signum)
+            os.kill(os.getpid(), signum)
+
+    supervisor = CampaignSupervision(
+        raw,
+        archive=archive if archived else None,
+        presentation=ConsoleCampaignPresentation(write=write, log_lines=True),
+    )
+    vm = Resource(
+        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
+    )
+
+    def release(_, value):
+        workflow_log("stop child")
+        released.append(value)
+        raise OSError("cleanup command failed after signal")
+
+    child = Resource(
+        title="Child", acquire=lambda _: "child", release=release, requires=(vm,)
+    )
+    flow = Workflow("release-signal-cleanup-failure")
+    flow.add(Action(lambda _: None), requires=(vm, child))
+    flow.add(Action(lambda _: later_tasks.append("later")), requires=(vm,))
+    with pytest.raises(CampaignInterruptedError) as caught:
+        supervisor.run(flow.run)
+    assert released == ["child", "vm"]
+    assert later_tasks == []
+    assert caught.value is supervisor.interruption
+    assert caught.value.exit_code == 128 + signum
+    assert "cleanup command failed after signal" in str(caught.value.__notes__)
+    for directory in [raw, archive] if archived else [raw]:
+        receipt = json.loads((directory / "result.json").read_text())
+        assert receipt["cause"] == f"campaign interrupted by signal {signum}"
+        assert receipt["exitCode"] == 128 + signum
+        assert receipt["archiveVerified"] is archived
+        assert "cleanup command failed after signal" in str(receipt["anomalies"])
+        outcome = json.loads((directory / "report.json").read_text())[
+            "operationalOutcome"
+        ]
+        assert outcome["cause"] == receipt["cause"]
+        assert outcome["exitCode"] == receipt["exitCode"]
+        assert "failed" in (directory / "report.html").read_text()
+        assert (directory / "samples.jsonl").read_text() == '{"statusCode":503}\n'
+    if archived:
+        supervisor._verify_archive()
