@@ -11,15 +11,20 @@ import subprocess
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Event, RLock, Thread
+from threading import Event, RLock, Thread, current_thread, main_thread
 from typing import Any
 
 from sonata_engine import Resource, WorkflowEvent, bind_workflow_sink
+from sonata_engine.workflow.context import active_sink
 
+from nanolab.one_shot.presentation import SinkCampaignPresentation
 from nanolab.one_shot.recording import CampaignRecorder
+
+_INHERIT = object()
 
 
 class CampaignInterruptedError(RuntimeError):
@@ -34,9 +39,21 @@ class CampaignInterruptedError(RuntimeError):
 class CampaignSupervision:
     """Supervise acquired resources without changing Sonata dependency semantics."""
 
-    def __init__(self, output: Path, *, archive: Path | None = None, cadence=5.0):
+    def __init__(
+        self,
+        output: Path,
+        *,
+        archive: Path | None = None,
+        cadence=5.0,
+        presentation=_INHERIT,
+    ):
         """Use cadence for health polling/reporting, never a performance gate."""
         self.output, self.archive, self.cadence = output, archive, cadence
+        self.presentation = presentation
+        self.presentation_lock = RLock()
+        self.presentation_broken = False
+        self.presentation_error = None
+        self.releasing = False
         self.recorder = CampaignRecorder(output)
         self.lock = RLock()
         self.stop = Event()
@@ -65,8 +82,8 @@ class CampaignSupervision:
         self.state["atUtc"] = datetime.now(UTC).isoformat()
         self.recorder.write_status(self.state)
 
-    def record(self, kind: str, **values):
-        """Serialize events, state and stdout from both engine and health thread."""
+    def record(self, kind: str, *, _event=None, **values):
+        """Persist before delivery; never run a view under the health lock."""
         with self.lock:
             row = {"atUtc": datetime.now(UTC).isoformat(), "kind": kind, **values}
             errors = []
@@ -78,22 +95,59 @@ class CampaignSupervision:
                 self._write_status()
             except OSError as error:
                 errors.append(error)
-            try:
-                if kind != "log.line":
-                    print(json.dumps(row, default=str), flush=True)
-            except OSError as error:
-                errors.append(error)
             if errors:
                 self.fault = self.fault or self.primary or errors[0]
-                # Reporting failures must not prevent compensation. The monitor
-                # delivers the first fault independently of the broken channel.
                 if not self.aborting and not self.finishing:
                     raise self.fault
+        if _event is None:
+            self._render(lambda view: view.campaign_event(deepcopy(row)))
+        else:
+            self._render(lambda view: view.emit(_event))
+
+    def _presentation_failed(self, error):
+        with self.lock:
+            self.presentation_broken = True
+            self.presentation_error = self.presentation_error or error
+            primary = self.primary or self.fault or self.interruption
+            if primary is not None and primary is not error:
+                primary.add_note("presentation: " + str(error))
+            # A failed task or signal is already unwinding Sonata. Never throw
+            # from its diagnostic/compensation events and skip a release.
+            if self.aborting or self.finishing:
+                return
+            self.fault = primary or error
+            self.aborting = True
+            self.state.update(state="cleanup", cause=str(self.fault))
+        if self.releasing:
+            return
+        if current_thread() is main_thread():
+            self.fault_dispatched = True
+            raise self.fault
+        # Wake blocking workflow waits immediately, independently of cadence.
+        os.kill(os.getpid(), signal.SIGINT)
+
+    def _render(self, callback):
+        error = None
+        with self.presentation_lock:
+            if self.presentation is None or self.presentation_broken:
+                return None
+            try:
+                return callback(self.presentation)
+            except Exception as caught:
+                self.presentation_broken = True
+                error = caught
+        # Release the view lock before signalling: compensation may render.
+        self._presentation_failed(error)
+        return None
 
     def emit(self, event: WorkflowEvent):
-        """Receive every Sonata acquisition, task, nested step and compensation."""
+        """Record original Sonata identities and forward exactly once."""
         with self.lock:
             key = event.task_run_id or event.task_id or event.title
+            if event.parent_task_id is None:
+                # Sonata Resource.release_title is the lifecycle vocabulary;
+                # display faults during releases are deferred to the next unit.
+                self.releasing = event.title.startswith("Release ")
             if event.kind == "task.started":
                 self.active[key] = event.title
                 self.state.update(activity="progress", phase=event.title)
@@ -108,17 +162,46 @@ class CampaignSupervision:
             row = asdict(event)
             row.pop("kind")
             row["at"] = event.at.isoformat()
-            try:
-                self.record(event.kind, **row)
-            except OSError as error:
-                self.fault = self.fault or error
+        try:
+            self.record(event.kind, _event=event, **row)
+        except OSError as error:
+            if self.presentation_broken and self.fault_dispatched:
+                raise
+            self.fault = self.fault or error
+        if (
+            self.presentation_error is not None
+            and self.fault is not None
+            and not self.fault_dispatched
+            and not self.releasing
+            and event.kind == "task.started"
+            and not self.finishing
+        ):
+            self.fault_dispatched = True
+            raise self.fault
 
     @contextmanager
     def status(self, label: str) -> Generator[None, None, None]:
-        """Support Sonata status blocks without introducing another renderer."""
+        """Compose status blocks without holding either lock over task work."""
         self.record("status.started", title=label)
+        block = self._render(lambda view: view.status(label))
+        if block is not None:
+            self._render(lambda _: block.__enter__())
         try:
             yield
+        except BaseException as error:
+            if block is not None:
+                try:
+                    self._render(
+                        lambda _, exc=error: block.__exit__(
+                            type(exc), exc, exc.__traceback__
+                        )
+                    )
+                except Exception as rendering:
+                    error.add_note("presentation: " + str(rendering))
+            raise
+        else:
+            if block is not None:
+                self._render(lambda _: block.__exit__(None, None, None))
         finally:
             self.record("status.finished", title=label)
 
@@ -294,13 +377,13 @@ class CampaignSupervision:
                                 ),
                             }
                     self.state["activity"] = "waiting"
-                    self.record(
-                        "heartbeat",
-                        activity="waiting",
-                        phase=self.state["phase"],
-                        processes=list(self.checks),
-                        observation=self.state.get("observation"),
-                    )
+                self.record(
+                    "heartbeat",
+                    activity="waiting",
+                    phase=self.state["phase"],
+                    processes=list(self.checks),
+                    observation=self.state.get("observation"),
+                )
             except Exception as error:
                 with self.lock:
                     if self.aborting:
@@ -308,10 +391,10 @@ class CampaignSupervision:
                     self.fault = error
                     self.aborting = True
                     self.state.update(state="cleanup", cause=str(error))
-                    try:
-                        self.record("operational.failure", cause=str(error))
-                    except Exception as reporting_error:
-                        error.add_note("failure reporting: " + str(reporting_error))
+                try:
+                    self.record("operational.failure", cause=str(error))
+                except Exception as reporting_error:
+                    error.add_note("failure reporting: " + str(reporting_error))
                 # Wake a main thread blocked in warmup/provisioning/waits. The
                 # handler raises once; Sonata owns the compensating releases.
                 os.kill(os.getpid(), signal.SIGINT)
@@ -339,6 +422,12 @@ class CampaignSupervision:
 
     def run(self, action: Callable[[], Any]):
         """Run exactly once, compensate, join writers, archive and retain cause."""
+        if self.presentation is _INHERIT:
+            self.presentation = active_sink()
+        if self.presentation is not None and not hasattr(
+            self.presentation, "campaign_event"
+        ):
+            self.presentation = SinkCampaignPresentation(self.presentation)
         previous = {
             sig: signal.signal(sig, self._interrupted)
             for sig in (signal.SIGINT, signal.SIGTERM)
@@ -368,7 +457,9 @@ class CampaignSupervision:
             self.stop.set()
             if self.thread.ident is not None:
                 self.thread.join()
-        self.primary = self.fault or primary or self.interruption
+        self.primary = (
+            self.fault or primary or self.interruption or self.presentation_error
+        )
         self._terminal_outcome()
         self.record("campaign.writers-joined")
         persisted_interruption = self.interruption
@@ -411,7 +502,12 @@ class CampaignSupervision:
                     self._copy_archive_controls()
                     self._verify_archive()
             except BaseException as error:
-                self.primary = self.primary or self.fault or self.interruption
+                self.primary = (
+                    self.primary
+                    or self.fault
+                    or self.interruption
+                    or self.presentation_error
+                )
                 if self.primary is None:
                     self.primary = error
                 elif self.primary is not error:
@@ -431,18 +527,21 @@ class CampaignSupervision:
                     self._copy_archive_controls(invalidate=True)
                     self._write_result()
         self._terminal_outcome()
-        try:
-            print(json.dumps(self.state), flush=True)
-        except OSError as error:
-            if self.primary is None:
-                self.primary = error
-            else:
-                self.primary.add_note("final stdout: " + str(error))
+        self._render(lambda view: view.campaign_event(deepcopy(self.state)))
+        if self.presentation_error is not None:
+            self._terminal_outcome()
+            self._write_result()
+            if archive_owned:
+                self.state["archiveVerified"] = False
+                self._write_result()
+                self._copy_archive_controls(invalidate=True)
         if self.primary is not None:
             raise self.primary
 
     def _terminal_outcome(self):
-        self.primary = self.primary or self.fault or self.interruption
+        self.primary = (
+            self.primary or self.fault or self.interruption or self.presentation_error
+        )
         self.state.update(
             state="failed" if self.primary else "completed",
             activity="terminal",

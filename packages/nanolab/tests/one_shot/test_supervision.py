@@ -11,7 +11,13 @@ from typing import Any, cast
 import pytest
 from sonata_engine import Resource, Task, TaskOutcome, Workflow
 
+from nanolab.one_shot.presentation import JsonCampaignPresentation
 from nanolab.one_shot.supervision import CampaignSupervision
+
+
+def json_supervision(*args, **kwargs):
+    """Keep legacy stdout regressions explicit while programmatic defaults are quiet."""
+    return CampaignSupervision(*args, presentation=JsonCampaignPresentation(), **kwargs)
 
 
 class Action(Task):
@@ -28,7 +34,7 @@ class Action(Task):
 def test_success_dependencies_progress_and_archive(tmp_path, capsys):
     output, archive = tmp_path / "raw", tmp_path / "archive"
     output.mkdir()
-    supervisor = CampaignSupervision(output, archive=archive, cadence=0.01)
+    supervisor = json_supervision(output, archive=archive, cadence=0.01)
     releases = []
     base = Resource(
         title="Owned simulated VM",
@@ -79,7 +85,7 @@ def test_success_dependencies_progress_and_archive(tmp_path, capsys):
 
 
 def test_process_failure_interrupts_wait_and_cleans_owned_resources(tmp_path):
-    supervisor = CampaignSupervision(
+    supervisor = json_supervision(
         tmp_path, archive=tmp_path.parent / "failed-archive", cadence=0.01
     )
     released = []
@@ -119,7 +125,7 @@ def test_process_failure_interrupts_wait_and_cleans_owned_resources(tmp_path):
 
 @pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
 def test_interruption_preserves_raw_and_cleanup(tmp_path, signum):
-    supervisor = CampaignSupervision(tmp_path, cadence=0.01)
+    supervisor = json_supervision(tmp_path, cadence=0.01)
     released = []
     previous = signal.getsignal(signum)
     resource = Resource(
@@ -145,7 +151,7 @@ def test_interruption_preserves_raw_and_cleanup(tmp_path, signum):
 
 
 def test_first_fault_preserved_when_cleanup_fails(tmp_path):
-    supervisor = CampaignSupervision(tmp_path, cadence=0.01)
+    supervisor = json_supervision(tmp_path, cadence=0.01)
 
     def release(_inputs, _value):
         raise RuntimeError("cleanup failed")
@@ -164,7 +170,7 @@ def test_first_fault_preserved_when_cleanup_fails(tmp_path):
 
 
 def test_dependency_is_not_inferred_by_supervision(tmp_path):
-    supervisor = CampaignSupervision(tmp_path, cadence=0.01)
+    supervisor = json_supervision(tmp_path, cadence=0.01)
     base = Resource(title="Sampler", acquire=lambda _: True, release=lambda *_: None)
     child = supervisor.resource(
         Resource(
@@ -215,7 +221,7 @@ def test_archive_failure_retains_raw_and_returns_failure(tmp_path):
     archive.mkdir()
     output = tmp_path / "raw"
     output.mkdir()
-    supervisor = CampaignSupervision(output, archive=archive, cadence=0.01)
+    supervisor = json_supervision(output, archive=archive, cadence=0.01)
     with pytest.raises(FileExistsError):
         supervisor.run(lambda: (output / "partial.txt").write_text("retained"))
     result = json.loads((output / "result.json").read_text())
@@ -260,7 +266,7 @@ def test_background_thread_exit_without_reported_error_is_fault():
 
 
 def test_all_campaign_phases_and_nine_intervals_use_sonata_events(tmp_path):
-    supervisor = CampaignSupervision(tmp_path, cadence=0.01)
+    supervisor = json_supervision(tmp_path, cadence=0.01)
     releases = []
     resource = Resource(
         title="Owned VM",
@@ -307,7 +313,7 @@ def test_signal_handlers_remain_installed_during_archive(tmp_path, monkeypatch):
         return copy(source, target, **kwargs)
 
     monkeypatch.setattr(supervision.shutil, "copytree", inspect_copy)
-    CampaignSupervision(output, archive=archive, cadence=0.01).run(lambda: None)
+    json_supervision(output, archive=archive, cadence=0.01).run(lambda: None)
     assert signal.getsignal(signal.SIGTERM) == previous
 
 
@@ -319,7 +325,7 @@ def test_archive_waits_for_owned_writer_cleanup(tmp_path):
     thread = Thread(target=stop.wait)
     thread.start()
     archive = tmp_path.parent / "unsafe-archive"
-    supervisor = CampaignSupervision(tmp_path, archive=archive, cadence=0.01)
+    supervisor = json_supervision(tmp_path, archive=archive, cadence=0.01)
     resource = supervisor.resource(
         Resource(
             title="Broken collector cleanup",
@@ -350,7 +356,7 @@ def test_late_health_signal_still_archives_and_retains_first_fault(
 
     detected = Event()
     killed = supervision.os.kill
-    supervisor = CampaignSupervision(
+    supervisor = json_supervision(
         tmp_path, archive=tmp_path.parent / "late-archive", cadence=0.01
     )
 
@@ -401,7 +407,7 @@ def test_first_archive_signal_defers_cleanup_and_returns_interruption(
 
     monkeypatch.setattr(supervision.shutil, "copytree", interrupted_copy)
     with pytest.raises(RuntimeError, match="interrupted"):
-        CampaignSupervision(output, archive=archive, cadence=0.01).run(lambda: None)
+        json_supervision(output, archive=archive, cadence=0.01).run(lambda: None)
     result = json.loads((archive / "result.json").read_text())
     assert result["exitCode"] == 128 + signum
     assert result["archiveVerified"] is True
@@ -410,7 +416,7 @@ def test_first_archive_signal_defers_cleanup_and_returns_interruption(
 def test_successful_generator_completion_with_rejects_is_not_fault(tmp_path):
     from types import SimpleNamespace
 
-    supervisor = CampaignSupervision(tmp_path, cadence=0.01)
+    supervisor = json_supervision(tmp_path, cadence=0.01)
     child = cast(Any, SimpleNamespace(poll=lambda: 0))
     # All originals returned; rejected requests are successful generator work.
     CampaignSupervision.check_process(
@@ -450,7 +456,7 @@ def test_heartbeat_uses_exact_frozen_phase_and_includes_scope(
             }
         )
     )
-    supervisor = CampaignSupervision(tmp_path, cadence=0.01)
+    supervisor = json_supervision(tmp_path, cadence=0.01)
     supervisor.run(lambda: time.sleep(0.03))
     rows = [
         json.loads(line)
@@ -468,7 +474,7 @@ def test_heartbeat_uses_exact_frozen_phase_and_includes_scope(
 def test_status_io_failure_interrupts_real_workflow_and_preserves_cleanup(
     tmp_path, monkeypatch
 ):
-    supervisor = CampaignSupervision(tmp_path, cadence=0.01)
+    supervisor = json_supervision(tmp_path, cadence=0.01)
     released = []
     completed = []
     resource = supervisor.resource(
@@ -504,7 +510,7 @@ def test_status_io_failure_interrupts_real_workflow_and_preserves_cleanup(
 
 def test_service_watch_covers_resource_lifetime_before_sampler(tmp_path):
     released = []
-    supervisor = CampaignSupervision(tmp_path, cadence=0.005)
+    supervisor = json_supervision(tmp_path, cadence=0.005)
     calls = []
 
     def probe(_):
@@ -532,7 +538,7 @@ def test_service_watch_covers_resource_lifetime_before_sampler(tmp_path):
 def test_reporting_io_failure_never_prevents_sonata_release(
     tmp_path, monkeypatch, failure_kind
 ):
-    supervisor = CampaignSupervision(tmp_path, cadence=0.005)
+    supervisor = json_supervision(tmp_path, cadence=0.005)
     released = []
     resource = supervisor.resource(
         Resource(
@@ -622,7 +628,7 @@ def test_terminal_outcome_updates_report_before_verified_archive(tmp_path, fails
 
     raw, archive = tmp_path / "raw", tmp_path / "archive"
     raw.mkdir()
-    supervisor = CampaignSupervision(raw, archive=archive)
+    supervisor = json_supervision(raw, archive=archive)
 
     def action():
         render_report(manifest(), None, raw / "report.html")
@@ -652,7 +658,7 @@ def test_service_initial_probe_failure_survives_cleanup_errors(
     """Service initial probe failure survives cleanup errors."""
     from nanolab.tasks.one_shot.clock import ClockMonitor
 
-    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    supervisor = json_supervision(tmp_path, cadence=100)
     released = []
     close = ClockMonitor.close
 
@@ -700,7 +706,7 @@ def test_service_cleanup_preserves_interruption_and_dependencies(
     """Service cleanup preserves interruption and dependencies."""
     from nanolab.tasks.one_shot.clock import ClockMonitor
 
-    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    supervisor = json_supervision(tmp_path, cadence=100)
     calls = []
     base = Resource(
         title="VM",
@@ -753,7 +759,7 @@ def test_service_normal_release_retains_first_cleanup_error(tmp_path, monkeypatc
     """Service normal release retains first cleanup error."""
     from nanolab.tasks.one_shot.clock import ClockMonitor
 
-    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    supervisor = json_supervision(tmp_path, cadence=100)
     released = []
     close = ClockMonitor.close
 
@@ -795,7 +801,7 @@ def test_final_archive_hash_failure_invalidates_both_receipts(
     raw, archive = tmp_path / "raw", tmp_path / "archive"
     raw.mkdir()
     (raw / "measurement.json").write_text('{"value":1}')
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     copy = supervision.shutil.copy2
 
     def corrupt_measurement(source, target, **kwargs):
@@ -854,7 +860,7 @@ def test_archive_failure_preserves_primary_and_owned_destination(
     raw, archive = tmp_path / "raw", tmp_path / "archive"
     raw.mkdir()
     (raw / "measurement.txt").write_text("retained")
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     copytree, copy2 = supervision.shutil.copytree, supervision.shutil.copy2
     if boundary == "preexisting":
         archive.mkdir()
@@ -925,7 +931,7 @@ def test_deferred_signal_final_verification_invalidates_archive(
     raw, archive = tmp_path / "raw", tmp_path / "archive"
     raw.mkdir()
     (raw / "measurement.txt").write_text("retained")
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     copy = supervision.shutil.copy2
     verify = supervisor._verify_archive
     checks = []
@@ -969,7 +975,7 @@ def test_archive_failure_survives_unwritable_failure_receipts(
     raw, archive = tmp_path / "raw", tmp_path / "archive"
     raw.mkdir()
     (raw / "measurement.txt").write_text("retained")
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     copy = supervision.shutil.copy2
     write = Path.write_text
     failed = []
@@ -1012,7 +1018,7 @@ def test_terminal_persistence_failure_updates_writable_reports(tmp_path, blocked
     from nanolab.one_shot.report import render_report
     from tests.one_shot.test_report import manifest
 
-    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    supervisor = json_supervision(tmp_path, cadence=100)
 
     def action():
         render_report(manifest(), None, tmp_path / "report.html")
@@ -1052,7 +1058,7 @@ def test_signal_during_report_finalization_updates_saved_outcomes(
 
     raw, archive = tmp_path / "raw", tmp_path / "archive" if archived else None
     raw.mkdir()
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     releases, delivered = [], []
     resource = Resource(
         title="Simulated owned VM",
@@ -1136,7 +1142,7 @@ def test_archive_report_failure_updates_writable_outcomes(
 
     raw, archive = tmp_path / "raw", tmp_path / "archive"
     raw.mkdir()
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     write = Path.write_text
     armed, releases = [], []
     resource = Resource(
@@ -1226,7 +1232,7 @@ def test_archive_report_invalidation_attempts_other_writable_outputs(
 
     raw, archive = tmp_path / "raw", tmp_path / "archive"
     raw.mkdir()
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     write = Path.write_text
     copy = __import__("shutil").copy2
     armed = []
@@ -1284,7 +1290,7 @@ def test_signal_during_receipt_write_persists_changed_snapshot(
         tmp_path / "archive" if stage == "archive" else None,
     )
     raw.mkdir()
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     write = Path.write_text
     delivered, releases, writing = [], [], []
     persist = supervisor._write_result
@@ -1355,7 +1361,7 @@ def test_primary_failure_retains_both_report_channel_limitations(
 
     raw, archive = tmp_path / "raw", tmp_path / "archive" if archived else None
     raw.mkdir()
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    supervisor = json_supervision(raw, archive=archive, cadence=100)
     write = Path.write_text
     attempts = []
 
