@@ -155,6 +155,18 @@ class CampaignSupervision:
             try:
                 return callback(self.presentation)
             except Exception as caught:
+                # A view callback or signal handler may already have dispatched
+                # this stop. Propagate it once on the main thread, while keeping
+                # worker delivery and release/finalization deferment intact.
+                if caught is self.fault or caught is self.interruption:
+                    if (
+                        self.fault_dispatched
+                        and current_thread() is main_thread()
+                        and not self.releasing
+                        and not self.finishing
+                    ):
+                        raise
+                    return None
                 self.presentation_broken = True
                 error = caught
         # Release the view lock before signalling: compensation may render.
@@ -194,15 +206,16 @@ class CampaignSupervision:
             if self.fault_dispatched:
                 raise
             self.fault = self.fault or error
+        pending = self.fault or self.interruption
         if (
-            self.fault is not None
+            pending is not None
             and not self.fault_dispatched
             and not self.releasing
             and event.kind == "task.started"
             and not self.finishing
         ):
             self.fault_dispatched = True
-            raise self.fault
+            raise pending
 
     @contextmanager
     def status(self, label: str) -> Generator[None, None, None]:
@@ -450,6 +463,9 @@ class CampaignSupervision:
                 # during copy and preserve its code in the terminal snapshot.
                 return
             self.aborting = True
+            if self.releasing:
+                return
+            self.fault_dispatched = True
             raise self.interruption
 
     def run(self, action: Callable[[], Any]):

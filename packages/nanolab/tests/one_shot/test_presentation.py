@@ -137,7 +137,7 @@ def test_display_failure_interrupts_wait_disables_view_and_preserves_cleanup(
 
     view = Broken()
     supervisor = CampaignSupervision(tmp_path, presentation=view, cadence=100)
-    released, workers = [], []
+    released, workers, continued = [], [], []
     resource = Resource(
         title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
     )
@@ -156,7 +156,7 @@ def test_display_failure_interrupts_wait_disables_view_and_preserves_cleanup(
         else:
             fail()
         time.sleep(2)
-        pytest.fail("display failure did not stop load")
+        continued.append("display failure did not stop load")
 
     workflow.add(Action(action), requires=(resource,))
     start = time.monotonic()
@@ -164,6 +164,7 @@ def test_display_failure_interrupts_wait_disables_view_and_preserves_cleanup(
         supervisor.run(workflow.run)
     for worker in workers:
         worker.join()
+    assert continued == []
     assert time.monotonic() - start < 1
     assert released == ["vm"]
     assert json.loads((tmp_path / "result.json").read_text())["state"] == "failed"
@@ -394,7 +395,7 @@ def test_tui_background_refresh_fault_wakes_wait_and_does_not_redraw_broken_view
 
     from nanolab.one_shot.views import open_presentation
 
-    trigger, attempts, released, workers = [], [], [], []
+    trigger, attempts, released, workers, continued = [], [], [], [], []
     refresh = Live.refresh
 
     def fail_refresh(self):
@@ -426,13 +427,14 @@ def test_tui_background_refresh_fault_wakes_wait_and_does_not_redraw_broken_view
         workers.append(thread)
         thread.start()
         time.sleep(2)
-        pytest.fail("renderer did not interrupt wait")
+        continued.append("renderer did not interrupt wait")
 
     workflow.add(Action(action), requires=(resource,))
     with pytest.raises(OSError, match="background refresh failed"):
         supervisor.run(workflow.run)
     for thread in workers:
         thread.join()
+    assert continued == []
     assert released == ["vm"]
     assert attempts == [1]
 
@@ -467,7 +469,7 @@ def test_background_recording_failure_interrupts_active_wait(
     from nanolab.tasks.one_shot.observation import event
 
     supervisor = CampaignSupervision(tmp_path, cadence=100)
-    released, workers, failures = [], [], []
+    released, workers, failures, continued = [], [], [], []
     original = Path.open
     failed = False
 
@@ -500,7 +502,7 @@ def test_background_recording_failure_interrupts_active_wait(
         workers.append(thread)
         thread.start()
         time.sleep(2)
-        pytest.fail("recorder fault did not interrupt wait")
+        continued.append("recorder fault did not interrupt wait")
 
     workflow.add(Action(action), requires=(resource,))
     start = time.monotonic()
@@ -508,6 +510,7 @@ def test_background_recording_failure_interrupts_active_wait(
         supervisor.run(workflow.run)
     for thread in workers:
         thread.join()
+    assert continued == []
     assert time.monotonic() - start < 1
     assert released == ["vm"]
     assert json.loads((tmp_path / "result.json").read_text())["state"] == "failed"
@@ -650,7 +653,7 @@ def test_selected_real_view_output_fault_stops_generator(tmp_path, monkeypatch, 
     from nanolab.one_shot.views import open_presentation, select_presentation
     from nanolab.tasks.one_shot.observation import event
 
-    active, released = [], []
+    active, released, continued, later_tasks = [], [], [], []
     original_print, original_refresh = print, Live.refresh
 
     def broken_print(*args, **kwargs):
@@ -685,11 +688,14 @@ def test_selected_real_view_output_fault_stops_generator(tmp_path, monkeypatch, 
     def action(_):
         active.append(True)
         event(tmp_path, "generating")
-        pytest.fail("generator continued after output failed")
+        continued.append("generator continued after output failed")
 
     workflow.add(Action(action), requires=(resource,))
+    workflow.add(Action(lambda _: later_tasks.append("later")))
     with pytest.raises(BrokenPipeError, match="selected output unavailable"):
         supervisor.run(workflow.run)
+    assert continued == []
+    assert later_tasks == []
     assert released == ["generator"]
     assert json.loads((tmp_path / "result.json").read_text())["exitCode"] == 1
 
@@ -815,3 +821,173 @@ def test_status_final_diagnostic_failure_preserves_body_cause(
         json.loads((tmp_path / "result.json").read_text())["cause"]
         == "original task failure"
     )
+
+
+@pytest.mark.parametrize("fault", ["tui-refresh", signal.SIGINT, signal.SIGTERM])
+def test_rendering_stop_prevents_action_continuation_and_later_tasks(
+    tmp_path, monkeypatch, fault
+):
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.live import Live
+
+    from nanolab.one_shot.views import ConsoleCampaignPresentation, open_presentation
+
+    continued, later_tasks, released, enabled, sent = [], [], [], [], []
+
+    if fault == "tui-refresh":
+        original = Live.refresh
+
+        def broken_refresh(self):
+            if enabled:
+                raise OSError("TUI output failed")
+            return original(self)
+
+        monkeypatch.setattr(Live, "refresh", broken_refresh)
+        supervisor = CampaignSupervision(
+            tmp_path,
+            presentation_factory=lambda fail: open_presentation(
+                "tui", console=Console(file=StringIO()), on_failure=fail
+            ),
+        )
+        expected, code = "TUI output failed", 1
+    else:
+
+        def write(line):
+            if "Run measurement" in line and not sent:
+                sent.append(True)
+                os.kill(os.getpid(), fault)
+
+        supervisor = CampaignSupervision(
+            tmp_path, presentation=ConsoleCampaignPresentation(write=write)
+        )
+        expected, code = f"campaign interrupted by signal {fault}", 128 + fault
+
+    def measurement(_):
+        enabled.append(True)
+        workflow_log("refresh TUI now")
+        continued.append("measurement continued")
+
+    resource = Resource(
+        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
+    )
+    flow = Workflow("rendering-stop")
+    action = Action(measurement)
+    action.title = "Run measurement"
+    flow.add(action, requires=(resource,))
+    flow.add(Action(lambda _: later_tasks.append("later")))
+    with pytest.raises((OSError, RuntimeError), match=expected):
+        supervisor.run(flow.run)
+    assert continued == []
+    assert later_tasks == []
+    assert released == ["vm"]
+    receipt = json.loads((tmp_path / "result.json").read_text())
+    assert receipt["state"] == "failed"
+    assert receipt["cause"] == expected
+    assert receipt["exitCode"] == code
+
+
+@pytest.mark.parametrize("boundary", ["log", "status-enter", "status-exit"])
+@pytest.mark.parametrize(
+    ("prior", "fault"),
+    [
+        (None, None),
+        (None, "display"),
+        (None, signal.SIGINT),
+        (None, signal.SIGTERM),
+        ("process", "display"),
+        (signal.SIGINT, "display"),
+        (signal.SIGTERM, "display"),
+    ],
+)
+def test_stop_during_release_finishes_owned_cleanup_before_stopping_later_work(
+    tmp_path, monkeypatch, boundary, prior, fault
+):
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.live import Live
+
+    from nanolab.one_shot.views import open_presentation
+
+    armed, sent, released, later_tasks, order = [], [], [], [], []
+    original = Live.refresh
+
+    def refresh(self):
+        if armed and fault is not None and not sent:
+            sent.append(fault)
+            if fault == "display":
+                raise OSError("release rendering failed")
+            os.kill(os.getpid(), fault)
+        return original(self)
+
+    monkeypatch.setattr(Live, "refresh", refresh)
+    supervisor = CampaignSupervision(
+        tmp_path,
+        presentation_factory=lambda fail: open_presentation(
+            "tui", console=Console(file=StringIO()), on_failure=fail
+        ),
+    )
+
+    def release(_, value):
+        order.append("release-start")
+        if boundary == "status-enter":
+            armed.append(True)
+        with status("releasing owned collector"):
+            if boundary == "log":
+                armed.append(True)
+            workflow_log("stopping collector")
+            if boundary == "status-exit":
+                armed.append(True)
+        released.append(value)
+        order.append("release-end")
+
+    vm = Resource(
+        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
+    )
+    collector = Resource(
+        title="Collector",
+        acquire=lambda _: "collector",
+        release=release,
+        requires=(vm,),
+    )
+
+    def action(_):
+        (tmp_path / "raw.jsonl").write_text('{"statusCode":503}\n')
+        if prior == "process":
+            raise ValueError("original process failure")
+        if prior is not None:
+            os.kill(os.getpid(), prior)
+
+    def later(_):
+        order.append("later")
+        later_tasks.append("later")
+
+    flow = Workflow("release-stop")
+    flow.add(Action(action), requires=(vm, collector))
+    flow.add(Action(later), requires=(vm,))
+    if fault is None:
+        supervisor.run(flow.run)
+        assert order == ["release-start", "release-end", "later"]
+        assert later_tasks == ["later"]
+    else:
+        cause = prior or fault
+        expected = (
+            "original process failure"
+            if cause == "process"
+            else "release rendering failed"
+            if cause == "display"
+            else f"campaign interrupted by signal {cause}"
+        )
+        with pytest.raises((OSError, RuntimeError, ValueError), match=expected):
+            supervisor.run(flow.run)
+        assert order == ["release-start", "release-end"]
+        assert later_tasks == []
+        receipt = json.loads((tmp_path / "result.json").read_text())
+        assert receipt["state"] == "failed"
+        assert receipt["cause"] == expected
+        assert receipt["exitCode"] == (128 + cause if isinstance(cause, int) else 1)
+        assert sent == [fault]
+    assert released == ["collector", "vm"]
+    assert (tmp_path / "raw.jsonl").read_text() == '{"statusCode":503}\n'
