@@ -296,8 +296,11 @@ class WorkflowKeyListener:
         refresh: Callable[[], None],
         *,
         input_stream: Any = None,
+        on_failure: Callable[[Exception], None] | None = None,
     ) -> None:
         """Bind to ``dashboard``, repainting through ``refresh``; defaults to stdin."""
+        self._on_failure = on_failure
+        self._error: Exception | None = None
         self._dashboard = dashboard
         self._refresh = refresh
         self._input_stream = sys.stdin if input_stream is None else input_stream
@@ -350,12 +353,18 @@ class WorkflowKeyListener:
         def run() -> None:
             if self._fd is None:
                 return
-            while not self._stop.is_set():
-                ready, _, _ = select.select([self._fd], [], [], 0.1)
-                if ready:
-                    char = os.read(self._fd, 1).decode(errors="ignore")
-                    if char:
-                        self.handle_key(char)
+            try:
+                while not self._stop.is_set():
+                    ready, _, _ = select.select([self._fd], [], [], 0.1)
+                    if ready:
+                        char = os.read(self._fd, 1).decode(errors="ignore")
+                        if char:
+                            self.handle_key(char)
+            except Exception as exc:
+                self._error = exc
+                if self._on_failure is not None:
+                    self._on_failure(exc)
+                self._acknowledged.set()
 
         self._thread = Thread(target=run, daemon=True)
         self._thread.start()
@@ -375,6 +384,11 @@ class WorkflowKeyListener:
                 self._termios.TCSADRAIN,
                 self._original_attrs,
             )
+
+        if self._thread is not None and self._thread.is_alive() is True:
+            raise RuntimeError("Workflow key listener did not stop")
+        if self._error is not None:
+            raise self._error
 
 
 __all__ = [

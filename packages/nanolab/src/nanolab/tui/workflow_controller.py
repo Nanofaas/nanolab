@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import traceback
 from collections.abc import Callable
+from contextlib import contextmanager
+from threading import RLock
 from typing import Any
 
 from rich.console import Console
@@ -82,7 +84,7 @@ def _stop_listener(
 ) -> BaseException | None:
     try:
         listener.stop()
-    except (OSError, RuntimeError) as cleanup_error:
+    except Exception as cleanup_error:
         error = _record_error(
             error,
             cleanup_error,
@@ -102,23 +104,21 @@ class TuiWorkflowController:
         """Use ``console`` for the live display and screen clearing."""
         self.console = console
 
-    def run_live_workflow(
+    @contextmanager
+    def live_display(
         self,
         *,
         title: str,
         summary_lines: list[str],
-        planned_steps: list[str] | None,
-        action: Callable[[WorkflowDashboard, TuiWorkflowSink], Any],
-    ) -> Any:
-        """Run ``action`` under a live dashboard and return what it returns.
+        planned_steps: list[str] | None = None,
+        wait_for_acknowledgment: bool = True,
+        on_failure: Callable[[Exception], None] | None = None,
+    ):
+        """Own terminal setup/teardown without owning workflow execution.
 
-        The aggregator, dashboard and sink are created here and the sink is
-        bound for the duration, so command output emitted anywhere in the
-        execution layer reaches the log pane. A failure inside ``action`` is
-        recorded on the dashboard and re-raised after the display closes;
-        start/stop faults in the key listener are attached to that error as
-        notes rather than replacing it. On a terminal the final frame stays up
-        until the user presses a key.
+        Refresh synchronously on events and keypresses: Rich's autonomous refresh
+        thread cannot propagate output errors to a supervising caller. Listener
+        errors use the same callback, and shutdown completes before returning.
         """
         aggregator = WorkflowEventAggregator(planned_steps=planned_steps)
         dashboard = WorkflowDashboard(
@@ -128,52 +128,101 @@ class TuiWorkflowController:
             summary_lines=summary_lines,
             aggregator=aggregator,
         )
-        live: Live | None = None
+        lock = RLock()
+        live = None
+        broken = False
 
-        def refresh() -> None:
-            dashboard.sync_from_snapshot(aggregator.snapshot())
-            if live is not None:
-                live.update(dashboard.render(), refresh=True)
+        def failed(exc):
+            nonlocal broken
+            if broken:
+                return
+            broken = True
+            if on_failure is not None:
+                on_failure(exc)
+
+        def refresh():
+            if broken:
+                return
+            try:
+                with lock:
+                    dashboard.sync_from_snapshot(aggregator.snapshot())
+                    if live is not None:
+                        live.update(dashboard.render(), refresh=True)
+            except Exception as exc:
+                failed(exc)
+                raise
 
         sink = TuiWorkflowSink(aggregator, refresh=refresh)
-        listener = WorkflowKeyListener(dashboard, refresh)
-        result: Any = None
-        error: BaseException | None = None
-
-        self.console.clear()
-        with Live(
+        listener = WorkflowKeyListener(dashboard, refresh, on_failure=failed)
+        display = Live(
             dashboard.render(),
             console=self.console,
             refresh_per_second=8,
             transient=False,
-        ) as active_live:
-            live = active_live
+            auto_refresh=False,
+        )
+        error = None
+        try:
+            self.console.clear()
+            live = display.__enter__()
             refresh()
-            try:
-                listener.start()
-                # Command output routing (SubprocessShell._emit_output) reads the
-                # same contextvar, so one bind covers the whole execution layer.
-                with bind_workflow_sink(sink):
-                    try:
-                        result = action(dashboard, sink)
-                    except Exception as exc:
-                        error = _handle_action_failure(dashboard, sink, aggregator, exc)
+            listener.start()
+            yield dashboard, sink
+            if wait_for_acknowledgment:
                 dashboard.footer_hint = "Press any key to continue"
                 refresh()
                 if listener.input_is_tty:
                     listener.wait_for_acknowledgment()
-            except (OSError, RuntimeError) as exc:
+        except BaseException as exc:
+            error = exc
+        finally:
+            # Join without the refresh lock: the key thread may be in refresh.
+            error = _stop_listener(listener, error)
+            if broken:
+                # Rich.stop still restores redirects, hooks and cursor, but its
+                # final refresh must not invoke a failed renderer again.
+                display.refresh = lambda: None
+            try:
+                display.__exit__(None, None, None)
+            except BaseException as exc:
                 error = _record_error(
-                    error,
-                    exc,
-                    f"Additional live workflow error: {exc}",
+                    error, exc, f"Workflow display cleanup failed: {exc}"
                 )
-            finally:
-                error = _stop_listener(listener, error)
-
         if error is not None:
             raise error
-        return result
+
+    def run_live_workflow(
+        self,
+        *,
+        title: str,
+        summary_lines: list[str],
+        planned_steps: list[str] | None,
+        action: Callable[[WorkflowDashboard, TuiWorkflowSink], Any],
+        wait_for_acknowledgment: bool = True,
+    ) -> Any:
+        """Run the existing interactive workflow with optional acknowledgment."""
+        with (
+            self.live_display(
+                title=title,
+                summary_lines=summary_lines,
+                planned_steps=planned_steps,
+                wait_for_acknowledgment=wait_for_acknowledgment,
+            ) as (dashboard, sink),
+            bind_workflow_sink(sink),
+        ):
+            try:
+                return action(dashboard, sink)
+            except Exception as exc:
+                try:
+                    _handle_action_failure(
+                        dashboard,
+                        sink,
+                        dashboard._aggregator,  # noqa: SLF001 - owned dashboard
+                        exc,
+                    )
+                except Exception as rendering:
+                    exc.add_note("Workflow failure display: " + str(rendering))
+                raise
 
 
 __all__ = ["TuiWorkflowController"]

@@ -53,29 +53,3 @@ def campaign_line(row: dict) -> str:
         if key not in {"kind", "stage", "atUtc"} and value is not None
     )
     return f"[{label}] {details}".rstrip()
-
-
-class JsonCampaignPresentation:
-    """Retain the established machine-readable stdout rows."""
-
-    def emit(self, event: WorkflowEvent) -> None:
-        """Serialize task events; raw command lines keep the console policy."""
-        from dataclasses import asdict
-        from datetime import UTC, datetime
-
-        if event.kind != "log.line":
-            row = asdict(event)
-            row["at"] = event.at.isoformat()
-            self.campaign_event({"atUtc": datetime.now(UTC).isoformat(), **row})
-
-    def status(self, label: str) -> AbstractContextManager[None]:
-        """Status rows arrive through the campaign channel."""
-        from contextlib import nullcontext
-
-        return nullcontext()
-
-    def campaign_event(self, row: dict) -> None:
-        """Write one established JSON row."""
-        import json
-
-        print(json.dumps(row, default=str), flush=True)

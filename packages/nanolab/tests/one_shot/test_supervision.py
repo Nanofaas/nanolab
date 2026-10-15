@@ -11,8 +11,8 @@ from typing import Any, cast
 import pytest
 from sonata_engine import Resource, Task, TaskOutcome, Workflow
 
-from nanolab.one_shot.presentation import JsonCampaignPresentation
 from nanolab.one_shot.supervision import CampaignSupervision
+from nanolab.one_shot.views import JsonCampaignPresentation
 
 
 def json_supervision(*args, **kwargs):

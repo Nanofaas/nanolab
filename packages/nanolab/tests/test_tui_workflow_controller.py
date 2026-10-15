@@ -465,3 +465,24 @@ def test_controller_propagates_programming_error_from_listener_stop() -> None:
             planned_steps=None,
             action=lambda _dashboard, _sink: None,
         )
+
+
+def test_campaign_controller_can_disable_terminal_acknowledgment():
+    listener = MagicMock()
+    listener.input_is_tty = True
+    with (
+        patch("nanolab.tui.workflow_controller.Live", return_value=live_mock()),
+        patch(
+            "nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener
+        ),
+    ):
+        result = TuiWorkflowController(console=MagicMock()).run_live_workflow(
+            title="Campaign",
+            summary_lines=[],
+            planned_steps=None,
+            action=lambda *_: 42,
+            wait_for_acknowledgment=False,
+        )
+    assert result == 42
+    listener.wait_for_acknowledgment.assert_not_called()
+    listener.stop.assert_called_once()

@@ -46,9 +46,12 @@ class CampaignSupervision:
         archive: Path | None = None,
         cadence=5.0,
         presentation=_INHERIT,
+        presentation_factory=None,
     ):
         """Use cadence for health polling/reporting, never a performance gate."""
         self.output, self.archive, self.cadence = output, archive, cadence
+        self.presentation_factory = presentation_factory
+        self.presentation_context = None
         self.presentation = presentation
         self.presentation_lock = RLock()
         self.presentation_broken = False
@@ -442,6 +445,13 @@ class CampaignSupervision:
         primary = None
         self.state["state"] = "running"
         try:
+            if self.presentation_factory is not None:
+                selected = self.presentation_factory(self._presentation_failed)
+                if hasattr(selected, "__enter__"):
+                    self.presentation_context = selected
+                    self.presentation = selected.__enter__()
+                else:
+                    self.presentation = selected
             self.record("campaign.started")
             self.thread.start()
             with bind_workflow_sink(self):
@@ -488,6 +498,10 @@ class CampaignSupervision:
                     "archive.verified",
                     interruption=str(self.interruption) if self.interruption else None,
                 )
+                # Keep the view through archive progress, then stop all terminal
+                # activity before the authoritative control copy/hash check.
+                if self.presentation_context is not None:
+                    self._close_presentation()
                 persisted_interruption = self.interruption
                 self._write_result()
                 if not self.state["archiveVerified"]:
@@ -527,7 +541,7 @@ class CampaignSupervision:
                     self._copy_archive_controls(invalidate=True)
                     self._write_result()
         self._terminal_outcome()
-        self._render(lambda view: view.campaign_event(deepcopy(self.state)))
+        self._close_presentation()
         if self.presentation_error is not None:
             self._terminal_outcome()
             self._write_result()
@@ -537,6 +551,17 @@ class CampaignSupervision:
                 self._copy_archive_controls(invalidate=True)
         if self.primary is not None:
             raise self.primary
+
+    def _close_presentation(self):
+        self._render(lambda view: view.campaign_event(deepcopy(self.state)))
+        context, self.presentation_context = self.presentation_context, None
+        self.presentation = None
+        if context is not None:
+            try:
+                context.__exit__(None, None, None)
+            except Exception as error:
+                self._presentation_failed(error)
+        self._terminal_outcome()
 
     def _terminal_outcome(self):
         self.primary = (
