@@ -16,9 +16,9 @@ from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, RLock, Thread, current_thread, main_thread
-from typing import Any
+from typing import Any, cast
 
-from sonata_engine import Resource, WorkflowEvent, bind_workflow_sink
+from sonata_engine import Resource, WorkflowEvent, WorkflowSink, bind_workflow_sink
 from sonata_engine.workflow.context import active_sink
 
 from nanolab.one_shot.presentation import SinkCampaignPresentation
@@ -86,7 +86,7 @@ class CampaignSupervision:
         self.state["atUtc"] = datetime.now(UTC).isoformat()
         self.recorder.write_status(self.state)
 
-    def record(self, kind: str, *, _event=None, **values):
+    def record(self, kind: str, *, _event=None, _prior=None, **values):
         """Persist before delivery; never run a view under the health lock."""
         with self.lock:
             row = {"atUtc": datetime.now(UTC).isoformat(), "kind": kind, **values}
@@ -100,11 +100,11 @@ class CampaignSupervision:
             except OSError as error:
                 errors.append(error)
         for error in errors:
-            self._operational_failure(error, "recording")
+            self._operational_failure(error, "recording", prior=_prior)
         if _event is None:
-            self._render(lambda view: view.campaign_event(deepcopy(row)))
+            self._render(lambda view: view.campaign_event(deepcopy(row)), prior=_prior)
         else:
-            self._render(lambda view: view.emit(_event))
+            self._render(lambda view: view.emit(_event), prior=_prior)
 
     def progress(self, row: dict):
         """Record an observation stage once, then deliver its detached snapshot."""
@@ -117,14 +117,14 @@ class CampaignSupervision:
 
     def _presentation_failed(self, error, *, prior=None):
         with self.lock:
-            if prior is not None:
-                self.fault = self.fault or self.primary or self.interruption or prior
             self.presentation_broken = True
             self.presentation_error = self.presentation_error or error
-        self._operational_failure(error, "presentation")
+        self._operational_failure(error, "presentation", prior=prior)
 
-    def _operational_failure(self, error, channel):
+    def _operational_failure(self, error, channel, *, prior=None):
         with self.lock:
+            if prior is not None:
+                self.fault = self.fault or self.primary or self.interruption or prior
             primary = self.primary or self.fault or self.interruption
             if primary is not None and primary is not error:
                 primary.add_note(channel + ": " + str(error))
@@ -165,7 +165,12 @@ class CampaignSupervision:
         """Record original Sonata identities and forward exactly once."""
         with self.lock:
             key = event.task_run_id or event.task_id or event.title
-            if event.parent_task_id is None:
+            if event.parent_task_id is None and event.kind in {
+                "task.started",
+                "task.passed",
+                "task.failed",
+                "task.skipped",
+            }:
                 # Sonata Resource.release_title is the lifecycle vocabulary;
                 # display faults during releases are deferred to the next unit.
                 self.releasing = event.title.startswith("Release ")
@@ -206,9 +211,11 @@ class CampaignSupervision:
         block = self._render(lambda view: view.status(label))
         if block is not None:
             self._render(lambda _: block.__enter__())
+        body_error = None
         try:
             yield
         except BaseException as error:
+            body_error = error
             if block is not None:
                 try:
                     self._render(
@@ -224,7 +231,7 @@ class CampaignSupervision:
             if block is not None:
                 self._render(lambda _: block.__exit__(None, None, None))
         finally:
-            self.record("status.finished", title=label)
+            self.record("status.finished", title=label, _prior=body_error)
 
     def watch(self, name: str, check: Callable[[], None], *, writer=None):
         """Register only an acquired resource; checks must be nonblocking."""
@@ -452,7 +459,9 @@ class CampaignSupervision:
         if self.presentation is not None and not hasattr(
             self.presentation, "campaign_event"
         ):
-            self.presentation = SinkCampaignPresentation(self.presentation)
+            self.presentation = SinkCampaignPresentation(
+                cast(WorkflowSink, self.presentation)
+            )
         previous = {
             sig: signal.signal(sig, self._interrupted)
             for sig in (signal.SIGINT, signal.SIGTERM)

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Run one unqualified ORACLE observation through owned NanoLab infrastructure."""
 
-
 # Frozen-package selection must precede all third-party/application imports.
 # ruff: noqa: E402
 import argparse

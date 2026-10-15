@@ -43,8 +43,10 @@ def test_outer_view_receives_real_events_once_and_binding_is_restored(
     tmp_path, ending, explicit
 ):
     view = View()
-    supervisor = CampaignSupervision(
-        tmp_path, **({"presentation": view} if explicit else {})
+    supervisor = (
+        CampaignSupervision(tmp_path, presentation=view)
+        if explicit
+        else CampaignSupervision(tmp_path)
     )
     releases = []
     resource = Resource(
@@ -262,7 +264,10 @@ def test_tui_uses_existing_hierarchy_logs_and_actual_campaign_fields():
 
     stream = StringIO()
     console = Console(file=stream, width=140)
+    from nanolab.one_shot.views import TuiCampaignPresentation
+
     with open_presentation("tui", console=console) as view:
+        assert isinstance(view, TuiCampaignPresentation)
         view.emit(
             build_task_event(kind="task.started", task_id="parent", title="Parent")
         )
@@ -743,4 +748,70 @@ def test_status_disposal_failure_preserves_body_error(tmp_path):
     assert (
         json.loads((tmp_path / "result.json").read_text())["cause"]
         == "original process failure"
+    )
+
+
+def test_release_body_logging_failure_never_interrupts_owned_cleanup(tmp_path):
+    class Broken(View):
+        def emit(self, event):
+            if event.kind == "log.line":
+                raise OSError("release log display failed")
+            super().emit(event)
+
+    released = []
+
+    def release(_, value):
+        workflow_log("Stopping resource")
+        released.append(value)
+
+    resource = Resource(title="VM", acquire=lambda _: "vm", release=release)
+    workflow = Workflow("release-logging")
+    workflow.add(Action(lambda _: None), requires=(resource,))
+    with pytest.raises(OSError, match="release log display failed"):
+        CampaignSupervision(tmp_path, presentation=Broken()).run(workflow.run)
+    assert released == ["vm"]
+    assert json.loads((tmp_path / "result.json").read_text())["state"] == "failed"
+
+
+@pytest.mark.parametrize("channel", ["display", "recording"])
+def test_status_final_diagnostic_failure_preserves_body_cause(
+    tmp_path, monkeypatch, channel
+):
+    from pathlib import Path
+
+    class Broken(View):
+        def campaign_event(self, row):
+            if row.get("kind") == "status.finished" and channel == "display":
+                raise OSError("closing diagnostic failed")
+            super().campaign_event(row)
+
+    original = Path.open
+    body_failed = []
+
+    def fail_write(path, *args, **kwargs):
+        if channel == "recording" and body_failed and path.name == "supervision.jsonl":
+            raise OSError("closing diagnostic failed")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_write)
+    supervisor = CampaignSupervision(tmp_path, presentation=Broken())
+    released = []
+    resource = Resource(
+        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
+    )
+    workflow = Workflow("status-final")
+
+    def action(_):
+        with status("waiting"):
+            body_failed.append(True)
+            raise ValueError("original task failure")
+
+    workflow.add(Action(action), requires=(resource,))
+    with pytest.raises(ValueError, match="original task failure") as caught:
+        supervisor.run(workflow.run)
+    assert released == ["vm"]
+    assert "closing diagnostic failed" in str(caught.value.__notes__)
+    assert (
+        json.loads((tmp_path / "result.json").read_text())["cause"]
+        == "original task failure"
     )
