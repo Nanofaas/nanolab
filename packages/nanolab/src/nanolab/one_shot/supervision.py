@@ -19,6 +19,8 @@ from typing import Any
 
 from sonata_engine import Resource, WorkflowEvent, bind_workflow_sink
 
+from nanolab.one_shot.recording import CampaignRecorder
+
 
 class CampaignInterruptedError(RuntimeError):
     """An operator signal whose exit code is retained through compensation."""
@@ -35,6 +37,7 @@ class CampaignSupervision:
     def __init__(self, output: Path, *, archive: Path | None = None, cadence=5.0):
         """Use cadence for health polling/reporting, never a performance gate."""
         self.output, self.archive, self.cadence = output, archive, cadence
+        self.recorder = CampaignRecorder(output)
         self.lock = RLock()
         self.stop = Event()
         self.thread = Thread(target=self._monitor, name="one-shot-supervision")
@@ -60,9 +63,7 @@ class CampaignSupervision:
 
     def _write_status(self):
         self.state["atUtc"] = datetime.now(UTC).isoformat()
-        temporary = self.output / "status.json.tmp"
-        temporary.write_text(json.dumps(self.state, indent=2) + "\n")
-        temporary.replace(self.output / "status.json")
+        self.recorder.write_status(self.state)
 
     def record(self, kind: str, **values):
         """Serialize events, state and stdout from both engine and health thread."""
@@ -70,8 +71,7 @@ class CampaignSupervision:
             row = {"atUtc": datetime.now(UTC).isoformat(), "kind": kind, **values}
             errors = []
             try:
-                with (self.output / "supervision.jsonl").open("a") as stream:
-                    stream.write(json.dumps(row, default=str) + "\n")
+                self.recorder.append_event(row)
             except OSError as error:
                 errors.append(error)
             try:
@@ -510,9 +510,7 @@ class CampaignSupervision:
         # Each diagnostic channel is independent; storage can reject any of
         # them. Always retain the first cause and report limits on stdout.
         try:
-            (self.output / "result.json").write_text(
-                json.dumps(self.state, indent=2) + "\n"
-            )
+            self.recorder.write_result(self.state)
         except (OSError, ValueError) as error:
             errors.append(error)
         try:
@@ -529,9 +527,10 @@ class CampaignSupervision:
             # is still writable. This does not retry campaign/archive work.
             for name in ("result.json", "status.json"):
                 try:
-                    (self.output / name).write_text(
-                        json.dumps(self.state, indent=2) + "\n"
-                    )
+                    if name == "result.json":
+                        self.recorder.write_result(self.state)
+                    else:
+                        self.recorder.write_status(self.state)
                 except OSError as error:
                     assert self.primary is not None
                     self.primary.add_note(
@@ -563,9 +562,10 @@ class CampaignSupervision:
             self._terminal_outcome()
             for name in ("result.json", "status.json"):
                 try:
-                    (self.output / name).write_text(
-                        json.dumps(self.state, indent=2) + "\n"
-                    )
+                    if name == "result.json":
+                        self.recorder.write_result(self.state)
+                    else:
+                        self.recorder.write_status(self.state)
                 except OSError as reporting:
                     self.primary.add_note(
                         "result persistence " + name + ": " + str(reporting)
