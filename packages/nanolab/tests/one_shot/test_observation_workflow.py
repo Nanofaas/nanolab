@@ -43,8 +43,9 @@ from tests.one_shot.test_preflight import strict_cgroup_sample
     "failure",
     [None, "generator", "signal", "dependency", "precheck", "auction", "interrupt"],
 )
+@pytest.mark.parametrize("display", ["console", "tui", "json", "none"])
 def test_real_nine_epoch_observation_workflow(
-    tmp_path, monkeypatch, failure, profiled, period, epoch_count
+    tmp_path, monkeypatch, failure, profiled, period, epoch_count, display
 ):
     raw, freeze, archive = (tmp_path / name for name in ("raw", "freeze", "archive"))
     raw.mkdir()
@@ -657,7 +658,22 @@ def test_real_nine_epoch_observation_workflow(
             return self.returncode
 
     monkeypatch.setattr(experiment.subprocess, "Popen", Child)
-    supervisor = CampaignSupervision(raw, archive=archive, cadence=100)
+    from io import StringIO
+
+    from rich.console import Console
+
+    from nanolab.one_shot.views import open_presentation, select_presentation
+
+    def presentation(fail):
+        if display == "tui":
+            return open_presentation(
+                "tui", console=Console(file=StringIO()), on_failure=fail
+            )
+        return select_presentation(display, on_failure=fail)
+
+    supervisor = CampaignSupervision(
+        raw, archive=archive, cadence=100, presentation_factory=presentation
+    )
     workflow = builder.build_one_shot_observation_plan(
         ScenarioConfig.model_construct(one_shot=settings),
         EnvironmentConfig.model_validate(

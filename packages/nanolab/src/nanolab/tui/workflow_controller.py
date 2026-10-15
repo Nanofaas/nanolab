@@ -201,28 +201,38 @@ class TuiWorkflowController:
         wait_for_acknowledgment: bool = True,
     ) -> Any:
         """Run the existing interactive workflow with optional acknowledgment."""
-        with (
-            self.live_display(
-                title=title,
-                summary_lines=summary_lines,
-                planned_steps=planned_steps,
-                wait_for_acknowledgment=wait_for_acknowledgment,
-            ) as (dashboard, sink),
-            bind_workflow_sink(sink),
-        ):
-            try:
-                return action(dashboard, sink)
-            except Exception as exc:
+        result = None
+        primary = None
+        try:
+            with (
+                self.live_display(
+                    title=title,
+                    summary_lines=summary_lines,
+                    planned_steps=planned_steps,
+                    wait_for_acknowledgment=wait_for_acknowledgment,
+                ) as (dashboard, sink),
+                bind_workflow_sink(sink),
+            ):
                 try:
-                    _handle_action_failure(
-                        dashboard,
-                        sink,
-                        dashboard._aggregator,  # noqa: SLF001 - owned dashboard
-                        exc,
-                    )
-                except Exception as rendering:
-                    exc.add_note("Workflow failure display: " + str(rendering))
+                    result = action(dashboard, sink)
+                except Exception as exc:
+                    primary = exc
+                    try:
+                        _handle_action_failure(
+                            dashboard,
+                            sink,
+                            dashboard._aggregator,  # noqa: SLF001 - owned dashboard
+                            exc,
+                        )
+                    except Exception as rendering:
+                        exc.add_note("Workflow failure display: " + str(rendering))
+        except BaseException as cleanup:
+            if primary is None:
                 raise
+            primary.add_note("Workflow display cleanup: " + str(cleanup))
+        if primary is not None:
+            raise primary
+        return result
 
 
 __all__ = ["TuiWorkflowController"]

@@ -56,6 +56,7 @@ class CampaignSupervision:
         self.presentation_lock = RLock()
         self.presentation_broken = False
         self.presentation_error = None
+        self.deferred_errors = []
         self.releasing = False
         self.recorder = CampaignRecorder(output)
         self.lock = RLock()
@@ -98,10 +99,8 @@ class CampaignSupervision:
                 self._write_status()
             except OSError as error:
                 errors.append(error)
-            if errors:
-                self.fault = self.fault or self.primary or errors[0]
-                if not self.aborting and not self.finishing:
-                    raise self.fault
+        for error in errors:
+            self._operational_failure(error, "recording")
         if _event is None:
             self._render(lambda view: view.campaign_event(deepcopy(row)))
         else:
@@ -109,20 +108,33 @@ class CampaignSupervision:
 
     def progress(self, row: dict):
         """Record an observation stage once, then deliver its detached snapshot."""
-        with self.lock:
-            self.recorder.append_progress(row)
+        try:
+            with self.lock:
+                self.recorder.append_progress(row)
+        except OSError as error:
+            self._operational_failure(error, "recording")
         self._render(lambda view: view.campaign_event(deepcopy(row)))
 
-    def _presentation_failed(self, error):
+    def _presentation_failed(self, error, *, prior=None):
         with self.lock:
+            if prior is not None:
+                self.fault = self.fault or self.primary or self.interruption or prior
             self.presentation_broken = True
             self.presentation_error = self.presentation_error or error
+        self._operational_failure(error, "presentation")
+
+    def _operational_failure(self, error, channel):
+        with self.lock:
             primary = self.primary or self.fault or self.interruption
             if primary is not None and primary is not error:
-                primary.add_note("presentation: " + str(error))
+                primary.add_note(channel + ": " + str(error))
             # A failed task or signal is already unwinding Sonata. Never throw
             # from its diagnostic/compensation events and skip a release.
             if self.aborting or self.finishing:
+                if self.finishing:
+                    self.primary = primary or error
+                elif primary is None:
+                    self.deferred_errors.append((channel, error))
                 return
             self.fault = primary or error
             self.aborting = True
@@ -135,7 +147,7 @@ class CampaignSupervision:
         # Wake blocking workflow waits immediately, independently of cadence.
         os.kill(os.getpid(), signal.SIGINT)
 
-    def _render(self, callback):
+    def _render(self, callback, *, prior=None):
         error = None
         with self.presentation_lock:
             if self.presentation is None or self.presentation_broken:
@@ -146,7 +158,7 @@ class CampaignSupervision:
                 self.presentation_broken = True
                 error = caught
         # Release the view lock before signalling: compensation may render.
-        self._presentation_failed(error)
+        self._presentation_failed(error, prior=prior)
         return None
 
     def emit(self, event: WorkflowEvent):
@@ -174,12 +186,11 @@ class CampaignSupervision:
         try:
             self.record(event.kind, _event=event, **row)
         except OSError as error:
-            if self.presentation_broken and self.fault_dispatched:
+            if self.fault_dispatched:
                 raise
             self.fault = self.fault or error
         if (
-            self.presentation_error is not None
-            and self.fault is not None
+            self.fault is not None
             and not self.fault_dispatched
             and not self.releasing
             and event.kind == "task.started"
@@ -203,7 +214,8 @@ class CampaignSupervision:
                     self._render(
                         lambda _, exc=error: block.__exit__(
                             type(exc), exc, exc.__traceback__
-                        )
+                        ),
+                        prior=error,
                     )
                 except Exception as rendering:
                     error.add_note("presentation: " + str(rendering))
@@ -411,7 +423,11 @@ class CampaignSupervision:
     def _interrupted(self, signum, _frame):
         with self.lock:
             if self.fault is not None:
-                if not self.finishing and not self.fault_dispatched:
+                if (
+                    not self.finishing
+                    and not self.fault_dispatched
+                    and not self.releasing
+                ):
                     self.fault_dispatched = True
                     raise self.fault
                 return
@@ -476,6 +492,12 @@ class CampaignSupervision:
         self.primary = (
             self.fault or primary or self.interruption or self.presentation_error
         )
+        for channel, error in self.deferred_errors:
+            if self.primary is None:
+                self.primary = error
+            elif self.primary is not error:
+                self.primary.add_note(channel + ": " + str(error))
+        self.deferred_errors.clear()
         self._terminal_outcome()
         self.record("campaign.writers-joined")
         persisted_interruption = self.interruption
@@ -547,8 +569,9 @@ class CampaignSupervision:
                     self._copy_archive_controls(invalidate=True)
                     self._write_result()
         self._terminal_outcome()
+        before_close = deepcopy(self.state)
         self._close_presentation()
-        if self.presentation_error is not None:
+        if self.state != before_close:
             self._terminal_outcome()
             self._write_result()
             if archive_owned:

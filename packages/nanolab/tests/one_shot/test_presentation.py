@@ -451,3 +451,296 @@ def test_progress_helper_records_once_in_active_campaign_and_standalone(
     assert sum(row.get("stage") == "warmup" for row in view.rows) == 1
     assert not any(row.get("stage") == "standalone" for row in view.rows)
     assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("channel", ["stage", "event"])
+def test_background_recording_failure_interrupts_active_wait(
+    tmp_path, monkeypatch, channel
+):
+    from pathlib import Path
+
+    from nanolab.tasks.one_shot.observation import event
+
+    supervisor = CampaignSupervision(tmp_path, cadence=100)
+    released, workers, failures = [], [], []
+    original = Path.open
+    failed = False
+
+    def write_failure(path, *args, **kwargs):
+        nonlocal failed
+        name = "progress.jsonl" if channel == "stage" else "supervision.jsonl"
+        if path.name == name and workers and not failed:
+            failed = True
+            raise OSError("recording unavailable")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", write_failure)
+    resource = Resource(
+        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
+    )
+    workflow = Workflow("recorder-worker")
+
+    def action(_):
+        def worker():
+            time.sleep(0.02)
+            try:
+                if channel == "stage":
+                    event(tmp_path, "observing")
+                else:
+                    workflow_log("worker row")
+            except Exception as error:
+                failures.append(error)
+
+        thread = Thread(target=worker)
+        workers.append(thread)
+        thread.start()
+        time.sleep(2)
+        pytest.fail("recorder fault did not interrupt wait")
+
+    workflow.add(Action(action), requires=(resource,))
+    start = time.monotonic()
+    with pytest.raises(OSError, match="recording unavailable"):
+        supervisor.run(workflow.run)
+    for thread in workers:
+        thread.join()
+    assert time.monotonic() - start < 1
+    assert released == ["vm"]
+    assert json.loads((tmp_path / "result.json").read_text())["state"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "process", "recording", signal.SIGINT, signal.SIGTERM]
+)
+def test_operational_results_and_event_order_agree_across_views(
+    tmp_path, monkeypatch, failure
+):
+    from io import StringIO
+    from pathlib import Path
+
+    from rich.console import Console
+
+    from nanolab.one_shot.report import render_report
+    from nanolab.one_shot.views import open_presentation, select_presentation
+    from nanolab.tasks.one_shot.observation import event
+    from tests.one_shot.test_report import manifest
+
+    results = []
+    for mode in ("console", "tui", "json", "none"):
+        raw, archive = tmp_path / mode / "raw", tmp_path / mode / "archive"
+        raw.mkdir(parents=True)
+        factory = (
+            (
+                lambda fail: open_presentation(
+                    "tui", console=Console(file=StringIO(), width=120), on_failure=fail
+                )
+            )
+            if mode == "tui"
+            else (lambda fail, mode=mode: select_presentation(mode, on_failure=fail))
+        )
+        supervisor = CampaignSupervision(
+            raw, archive=archive, cadence=0.005, presentation_factory=factory
+        )
+        released = []
+        resources = []
+        for name in ("VM", "service", "generator", "collector"):
+            resources.append(
+                supervisor.resource(
+                    Resource(
+                        title=name,
+                        acquire=lambda _, name=name: name,
+                        release=lambda _, v, released=released: released.append(v),
+                        requires=tuple(resources[-1:]),
+                    ),
+                    name,
+                    lambda _: None,
+                )
+            )
+        workflow = Workflow("equivalence")
+        original = Path.open
+        blocked = []
+
+        def write_failure(
+            path, *args, raw=raw, blocked=blocked, original=original, **kwargs
+        ):
+            if (
+                failure == "recording"
+                and path == raw / "progress.jsonl"
+                and not blocked
+            ):
+                blocked.append(1)
+                raise OSError("recording unavailable")
+            return original(path, *args, **kwargs)
+
+        def action(_, raw=raw):
+            (raw / "requests.jsonl").write_text(
+                '{"statusCode":429}\n{"statusCode":503}\n'
+            )
+            render_report(manifest(), None, raw / "report.html")
+            with subtask(task_id="nested", title="Nested stage"), status("waiting"):
+                worker = Thread(target=lambda: workflow_log("sample", stream="stderr"))
+                worker.start()
+                worker.join()
+                event(raw, "measurement", epoch=42)
+                if failure == "process":
+                    raise RuntimeError("generator stopped unexpectedly: exit 7")
+                if isinstance(failure, int):
+                    os.kill(os.getpid(), failure)
+
+        workflow.add(Action(action), requires=tuple(resources))
+        with monkeypatch.context() as context:
+            context.setattr(Path, "open", write_failure)
+            if failure is None:
+                supervisor.run(workflow.run)
+            else:
+                with pytest.raises((RuntimeError, OSError)):
+                    supervisor.run(workflow.run)
+        assert released == ["collector", "generator", "service", "VM"]
+        result = json.loads((raw / "result.json").read_text())
+        assert result["state"] == ("failed" if failure else "completed")
+        assert result["exitCode"] == (
+            128 + failure if isinstance(failure, int) else int(failure is not None)
+        )
+        assert result["archiveVerified"] is True
+        supervisor._verify_archive()
+        for directory in (raw, archive):
+            assert (
+                directory / "requests.jsonl"
+            ).read_text() == '{"statusCode":429}\n{"statusCode":503}\n'
+            assert (
+                json.loads((directory / "report.json").read_text())[
+                    "operationalOutcome"
+                ]["state"]
+                == result["state"]
+            )
+        rows = [
+            json.loads(s) for s in (raw / "supervision.jsonl").read_text().splitlines()
+        ]
+        events = [
+            tuple(
+                row.get(key)
+                for key in (
+                    "kind",
+                    "task_id",
+                    "parent_task_id",
+                    "title",
+                    "detail",
+                    "line",
+                    "stream",
+                )
+            )
+            for row in rows
+            if row["kind"].startswith("task.") or row["kind"] == "log.line"
+        ]
+        results.append((events, result["state"], result["cause"], result["exitCode"]))
+    assert results.count(results[0]) == 4
+
+
+@pytest.mark.parametrize("mode", ["console", "tui", "json"])
+def test_selected_real_view_output_fault_stops_generator(tmp_path, monkeypatch, mode):
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.live import Live
+
+    from nanolab.one_shot.views import open_presentation, select_presentation
+    from nanolab.tasks.one_shot.observation import event
+
+    active, released = [], []
+    original_print, original_refresh = print, Live.refresh
+
+    def broken_print(*args, **kwargs):
+        if active:
+            raise BrokenPipeError("selected output unavailable")
+        return original_print(*args, **kwargs)
+
+    def broken_refresh(self):
+        if active:
+            raise BrokenPipeError("selected output unavailable")
+        return original_refresh(self)
+
+    monkeypatch.setattr("builtins.print", broken_print)
+    monkeypatch.setattr(Live, "refresh", broken_refresh)
+    factory = (
+        (
+            lambda fail: open_presentation(
+                "tui", console=Console(file=StringIO()), on_failure=fail
+            )
+        )
+        if mode == "tui"
+        else (lambda fail: select_presentation(mode, on_failure=fail))
+    )
+    supervisor = CampaignSupervision(tmp_path, presentation_factory=factory)
+    resource = Resource(
+        title="generator",
+        acquire=lambda _: "generator",
+        release=lambda _, v: released.append(v),
+    )
+    workflow = Workflow("broken-output")
+
+    def action(_):
+        active.append(True)
+        event(tmp_path, "generating")
+        pytest.fail("generator continued after output failed")
+
+    workflow.add(Action(action), requires=(resource,))
+    with pytest.raises(BrokenPipeError, match="selected output unavailable"):
+        supervisor.run(workflow.run)
+    assert released == ["generator"]
+    assert json.loads((tmp_path / "result.json").read_text())["exitCode"] == 1
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+def test_signal_during_tui_disposal_without_archive_is_persisted(
+    tmp_path, monkeypatch, signum
+):
+    from io import StringIO
+
+    from rich.console import Console
+
+    from nanolab.one_shot.views import open_presentation
+    from nanolab.tui.workflow import WorkflowKeyListener
+
+    stop = WorkflowKeyListener.stop
+
+    def interrupt_close(self):
+        stop(self)
+        os.kill(os.getpid(), signum)
+
+    monkeypatch.setattr(WorkflowKeyListener, "stop", interrupt_close)
+    supervisor = CampaignSupervision(
+        tmp_path,
+        presentation_factory=lambda fail: open_presentation(
+            "tui", console=Console(file=StringIO()), on_failure=fail
+        ),
+    )
+    with pytest.raises(RuntimeError, match="interrupted"):
+        supervisor.run(lambda: None)
+    assert (
+        json.loads((tmp_path / "result.json").read_text())["exitCode"] == 128 + signum
+    )
+
+
+def test_status_disposal_failure_preserves_body_error(tmp_path):
+    class BrokenStatus(View):
+        @contextmanager
+        def status(self, label):
+            try:
+                yield
+            finally:
+                raise OSError("status renderer failed")
+
+    supervisor = CampaignSupervision(tmp_path, presentation=BrokenStatus())
+    workflow = Workflow("status-failure")
+
+    def action(_):
+        with status("waiting"):
+            raise ValueError("original process failure")
+
+    workflow.add(Action(action))
+    with pytest.raises(ValueError, match="original process failure") as caught:
+        supervisor.run(workflow.run)
+    assert "status renderer failed" in str(caught.value.__notes__)
+    assert (
+        json.loads((tmp_path / "result.json").read_text())["cause"]
+        == "original process failure"
+    )

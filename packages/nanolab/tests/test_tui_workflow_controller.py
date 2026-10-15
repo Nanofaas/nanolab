@@ -486,3 +486,35 @@ def test_campaign_controller_can_disable_terminal_acknowledgment():
     assert result == 42
     listener.wait_for_acknowledgment.assert_not_called()
     listener.stop.assert_called_once()
+
+
+def test_key_listener_worker_failure_is_reported_and_joined(monkeypatch):
+    from threading import Event
+
+    notified = Event()
+    failures = []
+    input_stream = MagicMock()
+    input_stream.isatty.return_value = True
+    input_stream.fileno.return_value = 7
+    termios, tty = MagicMock(), MagicMock()
+    termios.tcgetattr.return_value = ["original"]
+
+    def fail_read(*args):
+        raise OSError("terminal input disappeared")
+
+    def on_failure(error):
+        failures.append(error)
+        notified.set()
+
+    monkeypatch.setattr("nanolab.tui.workflow.select.select", fail_read)
+    with patch.dict(sys.modules, {"termios": termios, "tty": tty}):
+        listener = WorkflowKeyListener(
+            MagicMock(), lambda: None, input_stream=input_stream, on_failure=on_failure
+        )
+        listener.start()
+        assert notified.wait(1)
+        with pytest.raises(OSError, match="terminal input disappeared"):
+            listener.stop()
+    assert len(failures) == 1
+    assert listener._thread is not None and not listener._thread.is_alive()
+    termios.tcsetattr.assert_called_once()
