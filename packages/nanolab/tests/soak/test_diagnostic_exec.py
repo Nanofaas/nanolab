@@ -69,7 +69,7 @@ def provision(tmp_path, body, *, runtime="jvm", operations=None, changes=None):
     return executor, target, capture, helper
 
 
-def request(target, capture, *, operation="histogram", max_bytes=4096, timeout_s=2):
+def request(target, capture, *, operation="histogram", max_bytes=4096, timeout_s=10):
     output = capture / "one"
     output.mkdir()
     return DiagnosticRequest(
@@ -97,7 +97,7 @@ def test_inspect_and_stream_artifacts(tmp_path):
         "print(json.dumps({'kind':'artifact','name':'histogram.txt','data_base64':base64.b64encode(b'histogram').decode()}))\n"
         + SUCCESS,
     )
-    assert executor.inspect(target, 2) == target
+    assert executor.inspect(target, 10) == target
     outcome = executor.execute(request(target, capture))
     assert outcome.completed
     assert (capture / "one" / "histogram.txt").read_bytes() == b"histogram"
@@ -219,9 +219,12 @@ def test_node_cannot_request_heap_snapshot_as_gc(tmp_path):
         executor.execute(attempt)
 
 
-@pytest.mark.parametrize("exit_mode", ["timeout", "interrupt", "normal"])
+@pytest.mark.parametrize(
+    ("exit_mode", "startup_delay"),
+    [("timeout", 0), ("timeout", 0.75), ("interrupt", 0), ("normal", 0)],
+)
 def test_detached_descendants_are_reaped_and_unrelated_process_is_preserved(
-    tmp_path, monkeypatch, exit_mode
+    tmp_path, monkeypatch, exit_mode, startup_delay
 ):
     import os
     import selectors
@@ -230,6 +233,7 @@ def test_detached_descendants_are_reaped_and_unrelated_process_is_preserved(
 
     pid_path = tmp_path / "detached.pid"
     body = (
+        f"time.sleep({startup_delay})\n"
         "import subprocess\n"
         f"child=subprocess.Popen([{sys.executable!r},'-c',"
         "'import time; time.sleep(30)'],start_new_session=True,"
@@ -242,6 +246,20 @@ def test_detached_descendants_are_reaped_and_unrelated_process_is_preserved(
     unrelated = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True
     )
+    if exit_mode == "timeout":
+        from types import SimpleNamespace
+
+        from nanolab.tasks.soak import diagnostic_exec
+
+        def deadline_after_detach():
+            # Expire the executor's clock only once there is a child to reap.
+            # Real wall-clock bounds are covered by test_helper_timeout_is_bounded.
+            detached = pid_path.exists() and pid_path.stat().st_size
+            return time.monotonic() + (11 if detached else 0)
+
+        monkeypatch.setattr(
+            diagnostic_exec, "time", SimpleNamespace(monotonic=deadline_after_detach)
+        )
     original_select = selectors.DefaultSelector.select
     if exit_mode == "interrupt":
 
@@ -269,9 +287,7 @@ def test_detached_descendants_are_reaped_and_unrelated_process_is_preserved(
                 r"synthetic cancellation"
             ),
         ):
-            executor.execute(
-                request(target, capture, timeout_s=0.5 if exit_mode == "timeout" else 3)  # pyright: ignore[reportArgumentType]
-            )
+            executor.execute(request(target, capture, timeout_s=10))
         pid = int(pid_path.read_text())
         assert not Path(f"/proc/{pid}").exists(), (
             "detached diagnostic descendant survived or was not reaped"

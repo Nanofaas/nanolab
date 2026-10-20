@@ -24,6 +24,8 @@ _CURATED_COUNTS = {
     Path("runtimes/watchdog/Cargo.lock"): 1,
     Path("sdks/python/pyproject.toml"): 1,
     Path("sdks/python/uv.lock"): 1,
+    Path("functions/python/mlimage/uv.lock"): 1,
+    Path("functions/python/qr-code/uv.lock"): 1,
     Path("functions/python/roman-numeral/uv.lock"): 1,
     Path("tools/fn-init/src/fn_init/main.py"): 1,
     Path(
@@ -39,11 +41,15 @@ _CURATED_COUNTS = {
 _LOCKFILE_COMMANDS = (
     (("cargo", "check"), Path("runtimes/watchdog")),
     (("uv", "lock"), Path("sdks/python")),
+    (("uv", "lock"), Path("functions/python/mlimage")),
+    (("uv", "lock"), Path("functions/python/qr-code")),
     (("uv", "lock"), Path("functions/python/roman-numeral")),
 )
 _LOCKFILE_PACKAGES = {
     Path("runtimes/watchdog/Cargo.lock"): "nanofaas-watchdog",
     Path("sdks/python/uv.lock"): "nanofaas-sdk",
+    Path("functions/python/mlimage/uv.lock"): "nanofaas-sdk",
+    Path("functions/python/qr-code/uv.lock"): "nanofaas-sdk",
     Path("functions/python/roman-numeral/uv.lock"): "nanofaas-sdk",
 }
 _LOCKFILES = frozenset(_LOCKFILE_PACKAGES)

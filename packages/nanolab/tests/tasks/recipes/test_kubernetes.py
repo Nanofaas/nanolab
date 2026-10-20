@@ -203,8 +203,11 @@ def test_pod_selection_follows_deployment_ownership() -> None:
     assert [pod["metadata"]["name"] for pod in selected] == ["owned"]
 
 
-@pytest.mark.parametrize("fault", [None, "foreign", "load", "release"])
-def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(tmp_path, fault):
+@pytest.mark.parametrize("manifest_id", [False, True])
+@pytest.mark.parametrize("fault", [None, "foreign", "load", "release", "wrong-config"])
+def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
+    tmp_path, fault, manifest_id
+):
     from pathlib import Path
 
     from sonata_engine import Resource
@@ -213,7 +216,13 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(tmp_path,
     from nanolab.tasks.recipes.workflow import RecipeComponent, RecipeDistribution
 
     reference = "127.0.0.1:5000/nanofaas/control-plane:unique-cli"
-    image = RecipeImage(reference, "sha256:" + "a" * 64, "built", None)
+    import hashlib
+
+    config = b'{"architecture":"amd64","os":"linux"}'
+    config_id = "sha256:" + hashlib.sha256(config).hexdigest()
+    image = RecipeImage(
+        reference, "sha256:" + "a" * 64 if manifest_id else config_id, "built", None
+    )
     value = RecipeDistribution(
         Path("report.json"),
         "recipe-sha",
@@ -251,9 +260,30 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(tmp_path,
             code = 0
             if task.argv[:3] == ("docker", "image", "inspect"):
                 body = [{"Id": image.id}]
+            elif task.argv[:3] == ("docker", "image", "save"):
+                import io
+                import tarfile
+
+                assert task.argv[-1] == image.id
+                with tarfile.open(task.argv[4], "w") as archive:
+                    for name, content in (
+                        ("manifest.json", b'[{"Config":"config.json"}]'),
+                        ("config.json", config),
+                    ):
+                        entry = tarfile.TarInfo(name)
+                        entry.size = len(content)
+                        archive.addfile(entry, io.BytesIO(content))
+                body = {}
             elif "ssh" in task.argv:
                 body = {
-                    "images": [{"id": image.id, "repoTags": [reference]}]
+                    "images": [
+                        {
+                            "id": "sha256:wrong"
+                            if fault == "wrong-config"
+                            else config_id,
+                            "repoTags": [reference],
+                        }
+                    ]
                     if self.loaded
                     else []
                 }
@@ -288,7 +318,11 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(tmp_path,
     inputs = TaskInputs._for_resources(
         {target: target_value, distribution: value}, {target, distribution}
     )
-    if fault in ("foreign", "load"):
+    if fault == "wrong-config":
+        with pytest.raises(ValueError, match="Runtime image config differs"):
+            resource.acquire(inputs)
+        assert executor.loaded is False
+    elif fault in ("foreign", "load"):
         with pytest.raises(RuntimeError):
             resource.acquire(inputs)
         if fault == "foreign":

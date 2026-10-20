@@ -498,3 +498,72 @@ def test_source_resource_preflight_failure_preserves_remote_contents(
     assert not calls
     assert (remote / "source" / "previous").read_bytes() == b"previous application"
     assert (remote / "source.tar").read_bytes() == b"previous archive"
+
+
+@pytest.mark.parametrize("role", ["stack", "loadgen", "arm-builder"])
+def test_release_bootstrap_refreshes_cached_azure_login_groups(
+    tmp_path, monkeypatch, role
+):
+    import io
+
+    from azure_vm._backend import FakeBackend
+    from azure_vm.vm import AzureVM
+    from sonata_tasks.vm.azure import AzureVmProvider
+
+    from nanolab.application.vm_provider import vm_request_for_role
+    from nanolab.tasks.vm.models import VmInfo
+
+    group_added = False
+
+    class SshOutput(io.BytesIO):
+        def __init__(self, data: bytes, code: int):
+            super().__init__(data)
+            self.channel = SimpleNamespace(recv_exit_status=lambda: code)
+
+    class SshSession:
+        def __init__(self):
+            self.has_docker_group = group_added
+
+        def get_transport(self):
+            return SimpleNamespace(
+                is_active=lambda: True, is_authenticated=lambda: True
+            )
+
+        def exec_command(self, command):
+            assert "docker info" in command
+            code = 0 if self.has_docker_group else 1
+            stdout = SshOutput(b"docker-ready" if code == 0 else b"", code)
+            return None, stdout, io.BytesIO(b"permission denied" if code else b"")
+
+        def close(self):
+            pass
+
+    vm = AzureVM("release", tmp_path, FakeBackend())
+    monkeypatch.setattr(vm, "_connect_ssh", SshSession)
+    provider = AzureVmProvider(tmp_path)
+    monkeypatch.setattr(provider, "_vm", lambda _request: vm)
+    request = vm_request_for_role(_environment(), role)
+    assert request.name is not None
+    info = VmInfo(
+        name=request.name,
+        host="20.0.0.10",
+        user=request.user,
+        home=f"/home/{request.user}",
+    )
+    monkeypatch.setattr(
+        release_resources,
+        "retarget_cloud_operations",
+        lambda _provider, _context, operations: operations,
+    )
+
+    def provision(*_args, **_kwargs):
+        nonlocal group_added
+        # An authenticated transport already exists when Ansible updates groups.
+        assert provider.exec_argv(request, ("docker", "info")).return_code == 1
+        group_added = True
+
+    monkeypatch.setattr(release_resources, "run_bootstrap_operations", provision)
+    release_resources._bootstrap_role(provider, tmp_path, role, request, info)
+    result = provider.exec_argv(request, ("docker", "info"))
+    assert result.return_code == 0, result.stderr
+    assert result.stdout == "docker-ready"

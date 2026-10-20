@@ -29,6 +29,8 @@ CURATED_FILES = (
     Path("runtimes/watchdog/Cargo.lock"),
     Path("sdks/python/pyproject.toml"),
     Path("sdks/python/uv.lock"),
+    Path("functions/python/mlimage/uv.lock"),
+    Path("functions/python/qr-code/uv.lock"),
     Path("functions/python/roman-numeral/uv.lock"),
     Path("tools/fn-init/src/fn_init/main.py"),
     Path(
@@ -48,6 +50,16 @@ LOCKFILE_COMMANDS = (
         Path("runtimes/watchdog/Cargo.lock"),
     ),
     (("uv", "lock"), Path("sdks/python"), Path("sdks/python/uv.lock")),
+    (
+        ("uv", "lock"),
+        Path("functions/python/mlimage"),
+        Path("functions/python/mlimage/uv.lock"),
+    ),
+    (
+        ("uv", "lock"),
+        Path("functions/python/qr-code"),
+        Path("functions/python/qr-code/uv.lock"),
+    ),
     (
         ("uv", "lock"),
         Path("functions/python/roman-numeral"),

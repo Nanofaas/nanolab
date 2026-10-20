@@ -18,7 +18,7 @@ from nanolab.workspace.paths import discover_tool_root
 
 DEPLOYMENT_PAYLOAD = '{"spec":{"template":{"spec":{"containers":[{"resources":{}}]}}}}'
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
-HANDLER_ENVELOPE_FUNCTIONS = (
+ALL_HANDLER_ENVELOPE_FUNCTIONS = (
     "json-transform-exec",
     "json-transform-go",
     "json-transform-java",
@@ -58,6 +58,9 @@ HANDLER_ENVELOPE_FUNCTIONS = (
     "handler-envelope-javascript",
     "handler-envelope-python",
     "binary-envelope-java",
+)
+HANDLER_ENVELOPE_FUNCTIONS = tuple(
+    key for key in ALL_HANDLER_ENVELOPE_FUNCTIONS if not key.startswith("one-shot-")
 )
 EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS = {"figlet-exec", "figlet-java", "mlimage-python"}
 
@@ -319,9 +322,12 @@ def test_handler_envelope_validation_requires_every_contract_function() -> None:
 
 
 @pytest.mark.nanofaas
-def test_handler_envelope_container_scenario_runs_every_deterministic_function() -> (
-    None
-):
+@pytest.mark.parametrize(
+    "include_one_shot", [False, pytest.param(True, marks=pytest.mark.one_shot)]
+)
+def test_handler_envelope_container_scenario_runs_every_deterministic_function(
+    include_one_shot: bool,
+) -> None:
     config = ScenarioConfig.model_validate(
         yaml.safe_load(
             (
@@ -329,13 +335,19 @@ def test_handler_envelope_container_scenario_runs_every_deterministic_function()
             ).read_text()
         )
     )
+    assert config.functions == list(ALL_HANDLER_ENVELOPE_FUNCTIONS)
+    expected_functions = (
+        ALL_HANDLER_ENVELOPE_FUNCTIONS
+        if include_one_shot
+        else HANDLER_ENVELOPE_FUNCTIONS
+    )
+    config = config.model_copy(update={"functions": list(expected_functions)})
     plan = build_validate_plan(
         config,
         RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
     )
 
     assert config.backend == "container"
-    assert config.functions == list(HANDLER_ENVELOPE_FUNCTIONS)
     titles = [task.task.title for task in plan.compile().tasks]
     assert titles.count("Invoke handler-envelope") == 1
     qr_invocation = next(
@@ -346,12 +358,16 @@ def test_handler_envelope_container_scenario_runs_every_deterministic_function()
     assert qr_invocation[-2] == (
         '{"input":{"text":"https://example.org/invite/abc","size":256}}'
     )
-    for key in HANDLER_ENVELOPE_FUNCTIONS:
+    for key in expected_functions:
         assert titles.count(f"Invoke {resolve_function(config, key).name}") == 1
 
 
+@pytest.mark.parametrize(
+    "include_one_shot", [False, pytest.param(True, marks=pytest.mark.one_shot)]
+)
 def test_handler_envelope_container_excludes_only_nondeterministic_catalog_functions(
     nanofaas_root: Path,
+    include_one_shot: bool,
 ) -> None:
     config = ScenarioConfig.model_validate(
         yaml.safe_load(
@@ -367,8 +383,15 @@ def test_handler_envelope_container_excludes_only_nondeterministic_catalog_funct
         if function.example_dir is not None
     }
 
+    selected_keys = set(config.functions)
+    if not include_one_shot:
+        example_keys = {key for key in example_keys if not key.startswith("one-shot-")}
+        selected_keys = {
+            key for key in selected_keys if not key.startswith("one-shot-")
+        }
+
     assert example_keys >= EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
-    assert set(config.functions) == example_keys - EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
+    assert selected_keys == example_keys - EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
 
 
 @pytest.mark.nanofaas

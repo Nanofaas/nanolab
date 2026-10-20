@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import tarfile
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -110,6 +113,37 @@ def _json_command(
     if not isinstance(data, dict):
         raise ValueError(f"{title} returned no JSON object")
     return data
+
+
+def _local_image_config(
+    expected: RecipeImage,
+    actual: RuntimeImageIdentity,
+    executor: CommandTaskExecutor,
+    inputs: TaskInputs,
+) -> RecipeImage:
+    """Resolve Docker manifest IDs to config IDs using the immutable local image."""
+    if expected.digest is not None or expected.id == actual.config_digest:
+        return expected
+    with tempfile.TemporaryDirectory(prefix="nanolab-image-") as directory:
+        path = Path(directory) / "image.tar"
+        _command(
+            executor,
+            inputs,
+            f"Resolve built image config {expected.reference}",
+            ("docker", "image", "save", "--output", str(path), expected.id),
+        )
+        with tarfile.open(path) as archive:
+            manifest_file = archive.extractfile("manifest.json")
+            if manifest_file is None:
+                raise ValueError("Local image archive has no manifest")
+            manifests = json.load(manifest_file)
+            if not isinstance(manifests, list) or len(manifests) != 1:
+                raise ValueError("Local image archive must contain one image")
+            config_file = archive.extractfile(manifests[0]["Config"])
+            if config_file is None:
+                raise ValueError("Local image archive has no config")
+            digest = "sha256:" + hashlib.sha256(config_file.read()).hexdigest()
+    return replace(expected, id=digest)
 
 
 def minikube_target_resource(
@@ -242,8 +276,10 @@ def minikube_images_resource(
                                 f"Loaded image missing or ambiguous on {node}: "
                                 f"{reference}"
                             )
+                        actual = RuntimeImageIdentity(rows[0].get("id", ""), ())
                         verify_runtime_image(
-                            expected, RuntimeImageIdentity(rows[0].get("id", ""), ())
+                            _local_image_config(expected, actual, executor, inputs),
+                            actual,
                         )
         except Exception:
             release(inputs, ())
@@ -524,9 +560,12 @@ class RecipeKubernetesImageCheckTask(Task[None]):
                         "index": index,
                         "manifest": descriptor,
                     }
+                actual = RuntimeImageIdentity(row.get("id", ""), digests)
                 verify_runtime_image(
-                    expected,
-                    RuntimeImageIdentity(row.get("id", ""), digests),
+                    _local_image_config(expected, actual, self.executor, inputs)
+                    if self.target is not None
+                    else expected,
+                    actual,
                     registry_config_digest=registry_config,
                 )
                 for container in containers:

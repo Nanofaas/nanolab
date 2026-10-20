@@ -14,6 +14,7 @@ from sonata_tasks.archive import remove_source_archive
 from sonata_tasks.compensation import best_effort
 from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.vm.azure import AzureVmProvider
 
 from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
@@ -267,6 +268,9 @@ def _bootstrap_role(
         raw = plan_vm_provision_base(context, install_uv=True)
     operations = retarget_cloud_operations(provider, context, remote_operations(raw))
     run_bootstrap_operations(provider, operations, role=role)
+    if isinstance(provider, AzureVmProvider):
+        # Reauthenticate after Ansible updates supplementary groups (notably Docker).
+        provider._vm(request).close()  # noqa: SLF001 - provider has no public session reset
 
 
 def build_release_resources(
