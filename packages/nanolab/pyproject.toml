@@ -7,7 +7,7 @@ description = "Control-plane orchestration product for build, test, and reportin
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "azure-vm-sdk==0.6.3",
+    "azure-vm-sdk==0.7.0",
     "httpx>=0.27",
     "multipass-vm-sdk==0.6.0",
     "pandas>=2.2",
@@ -19,8 +19,8 @@ dependencies = [
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
-    "sonata-engine==0.6.15",
-    "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.15",
+    "sonata-engine==0.6.16",
+    "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.6.16",
     "tui-toolkit>=0.6.0,<0.7",
     "jsonschema>=4.23",
 ]
