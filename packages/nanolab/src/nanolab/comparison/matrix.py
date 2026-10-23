@@ -17,10 +17,22 @@ comparison and a coincidence.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanolab.images.control_plane_variants import ControlPlaneVariant
+from nanolab.images.control_plane_variants import (
+    EXPERIMENT_01_VARIANTS,
+    ControlPlaneVariant,
+)
+
+# Experiment 01 does not repeat one order. With A-G the rows of its table, the
+# three repetitions run these orders: every build occupies three different
+# positions and follows different predecessors. That reduces the confounding of
+# a build with its slot and with what ran before it; it is not a complete
+# counterbalance, and is never described as one. Further repetitions cycle.
+EXPERIMENT_01_ORDER_POLICY = "experiment-01-three-orders-v1"
+EXPERIMENT_01_ORDERS: tuple[str, ...] = ("ABCDEFG", "DGBFAEC", "FCEAGDB")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +69,31 @@ def build_matrix(
     )
 
 
+def build_experiment_01_matrix(
+    variants: tuple[ControlPlaneVariant, ...], repetitions: int
+) -> tuple[ComparisonCell, ...]:
+    """Every cell of experiment 01, each repetition in its declared order.
+
+    A subset (a diagnosis) keeps the declared orders filtered to the selected
+    builds; it is still a subset and is recorded as one.
+    """
+    if repetitions < 1:
+        raise ValueError("a comparison needs at least one repetition")
+    letters = {
+        variant.key: chr(ord("A") + index)
+        for index, variant in enumerate(EXPERIMENT_01_VARIANTS)
+    }
+    if not variants or any(variant.key not in letters for variant in variants):
+        raise ValueError("experiment-01 matrix takes only experiment-01 builds")
+    by_letter = {letters[variant.key]: variant for variant in variants}
+    return tuple(
+        ComparisonCell(variant=by_letter[letter], repetition=repetition)
+        for repetition in range(1, repetitions + 1)
+        for letter in EXPERIMENT_01_ORDERS[(repetition - 1) % len(EXPERIMENT_01_ORDERS)]
+        if letter in by_letter
+    )
+
+
 def completed(cell: ComparisonCell, root: Path) -> bool:
     """Whether this cell already produced the summary the report reads.
 
@@ -77,7 +114,13 @@ def completed(cell: ComparisonCell, root: Path) -> bool:
 
 
 def pending(
-    cells: tuple[ComparisonCell, ...], root: Path
+    cells: tuple[ComparisonCell, ...],
+    root: Path,
+    done: Callable[[ComparisonCell, Path], bool] = completed,
 ) -> tuple[ComparisonCell, ...]:
-    """Return the cells that have not completed yet, in matrix order."""
-    return tuple(cell for cell in cells if not completed(cell, root))
+    """Return the cells that have not completed yet, in matrix order.
+
+    `done` is the completion rule: the historical artefact check by default,
+    the definitive-outcome receipt for experiment 01.
+    """
+    return tuple(cell for cell in cells if not done(cell, root))

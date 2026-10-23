@@ -21,10 +21,8 @@ from nanolab.comparison.prepare import (
     verify_comparison_source,
 )
 from nanolab.comparison.profiles import (
-    COMPARISON_FUNCTIONS,
-    COMPARISON_RECIPE_MODULES,
     COMPARISON_SCHEDULER_STRATEGY,
-    declared_options,
+    contract_for,
 )
 from nanolab.tasks.recipes.workflow import (
     RecipeDistribution,
@@ -206,8 +204,9 @@ def verify_comparison_publication(
 ) -> dict[str, object]:
     """Return a receipt only after source, report and image evidence agree."""
     captured = cast(dict[str, Any], inputs)
+    contract = contract_for(captured)
     run = stage.runs[variant]
-    options = declared_options(run.recipe)
+    options = contract.options(variant, run.recipe)
     profile = captured["profiles"][variant]
     if (
         hashlib.sha256(run.recipe.read_bytes()).hexdigest() != profile["sha256"]
@@ -220,8 +219,10 @@ def verify_comparison_publication(
     )
     require_validation_distribution(
         distribution,
-        functions=tuple(COMPARISON_FUNCTIONS.values()) if variant == "jvm" else (),
-        required_modules=COMPARISON_RECIPE_MODULES,
+        functions=tuple(contract.functions.values())
+        if variant == contract.shared
+        else (),
+        required_modules=contract.modules(variant),
         exact_modules=True,
     )
     evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -298,6 +299,7 @@ def require_recorded_publications(
 ) -> None:
     """Require local receipts and published images without rebuilding anything."""
     inputs = cast(dict[str, Any], manifest.identity)
+    contract = contract_for(inputs)
     for variant, raw_receipt in manifest.publications.items():
         receipt = cast(dict[str, Any], raw_receipt)
         expected_profile = inputs["profiles"].get(variant)
@@ -326,12 +328,14 @@ def require_recorded_publications(
             raise ValueError("Comparison recorded report source differs")
         if distribution.control_plane().native != expected_profile["options"]["native"]:
             raise ValueError("Comparison recorded native options differ")
-        if declared_options(profile) != receipt["declaredOptions"]:
+        if contract.options(variant, profile) != receipt["declaredOptions"]:
             raise ValueError("Comparison recorded profile options differ")
         require_validation_distribution(
             distribution,
-            functions=tuple(COMPARISON_FUNCTIONS.values()) if variant == "jvm" else (),
-            required_modules=COMPARISON_RECIPE_MODULES,
+            functions=tuple(contract.functions.values())
+            if variant == contract.shared
+            else (),
+            required_modules=contract.modules(variant),
             exact_modules=True,
         )
         for component in distribution.components:
@@ -388,6 +392,17 @@ def verify_comparison_scheduler(
     *, endpoint: Any, executor: Any, inputs: Any, run_dir: Path
 ) -> None:
     """Retain a direct management scrape before validating the active scheduler."""
+    require_comparison_scheduler(
+        record_comparison_management(
+            endpoint=endpoint, executor=executor, inputs=inputs, run_dir=run_dir
+        )
+    )
+
+
+def record_comparison_management(
+    *, endpoint: Any, executor: Any, inputs: Any, run_dir: Path
+) -> str:
+    """Retain and return a direct scrape of the control plane's management port."""
     from urllib.parse import urlsplit, urlunsplit
 
     from sonata_tasks.http import endpoint_argv
@@ -417,7 +432,7 @@ def verify_comparison_scheduler(
     (run_dir / "scheduler-metrics.txt").write_text(result.stdout)
     if result.return_code != 0 or result.status != "passed":
         raise RuntimeError(f"Comparison scheduler scrape failed: {result.stderr}")
-    require_comparison_scheduler(result.stdout)
+    return result.stdout
 
 
 def verify_comparison_cell_registry(

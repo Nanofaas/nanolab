@@ -158,11 +158,16 @@ def stage_comparison(
     tag: str,
     provider: VmCommandProvider,
     request: VmRequest,
+    shared: str = "jvm",
 ) -> ComparisonStage:
-    """Capture and upload one source checkout shared by every comparison profile."""
-    if not profiles or next(iter(profiles)) != "jvm":
-        raise ValueError("Comparison staging requires the shared JVM profile first")
-    captured = prepare_recipe_run(source, profiles["jvm"], root / "inputs", tag)
+    """Capture and upload one source checkout shared by every comparison profile.
+
+    `shared` is the profile that publishes the functions every cell reuses; it
+    is staged and published first.
+    """
+    if not profiles or next(iter(profiles)) != shared:
+        raise ValueError("Comparison staging requires the shared profile first")
+    captured = prepare_recipe_run(source, profiles[shared], root / "inputs", tag)
     remote_root = remote_recipe_root(request, tag)
     runs = {}
     profile_root = root / "profiles"
@@ -241,7 +246,6 @@ def prepare_comparison(
         verify_comparison_publication,
     )
     from nanolab.comparison.manifest import write_comparison_manifest
-    from nanolab.comparison.profiles import declared_options
     from nanolab.tasks.recipes.workflow import (
         RecipeDistribution,
         read_distribution,
@@ -302,7 +306,7 @@ def prepare_comparison(
             )
             report = local.output_dir / "distribution.json"
             report.unlink(missing_ok=True)
-            native = declared_options(local.recipe)["mode"] == "native"
+            native = identity["profiles"][key]["options"]["mode"] == "native"
             properties = identity["nativeProperties"]
             command = recipe_command(
                 "publishRecipe",

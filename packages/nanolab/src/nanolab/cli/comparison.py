@@ -19,6 +19,7 @@ import subprocess
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -34,6 +35,17 @@ from nanolab.application.vm_provider import (
 from nanolab.cli.catalogue import environment_input, scenario_input
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.comparison.evidence import require_recorded_publications
+from nanolab.comparison.experiment_01 import (
+    DIAGNOSTICS,
+    LOAD_STARTED,
+    attempt_dir,
+    classify_failure,
+    experiment_01_identity,
+    experiment_completed,
+    next_attempt,
+    write_cell_result,
+    write_experiment_01_report,
+)
 from nanolab.comparison.manifest import (
     ComparisonManifest,
     capture_comparison_inputs,
@@ -44,6 +56,7 @@ from nanolab.comparison.manifest import (
 )
 from nanolab.comparison.matrix import (
     ComparisonCell,
+    build_experiment_01_matrix,
     build_matrix,
     pending,
 )
@@ -55,18 +68,34 @@ from nanolab.comparison.prepare import (
 )
 from nanolab.comparison.profiles import (
     COMPARISON_FUNCTIONS,
+    EXPERIMENT_01_CONTRACT,
+    EXPERIMENT_01_FUNCTIONS,
     PreparedComparison,
     comparison_profiles,
+    experiment_01_profiles,
 )
-from nanolab.comparison.target import read_comparison_target, require_comparison_target
+from nanolab.comparison.target import (
+    read_comparison_target,
+    read_host_facts,
+    require_comparison_target,
+)
 from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.experiment_01 import experiment_01_payload
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
+from nanolab.images.control_plane_variants import (
+    EXPERIMENT_01_VARIANTS_BY_KEY,
+    VARIANTS_BY_KEY,
+    resolve_variants,
+)
+from nanolab.plans.runtime_comparison import EXPERIMENT_01_SCRIPT_NAME
+from nanolab.tasks.deployment import DEFAULT_NAMESPACE
 from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
 from nanolab.tasks.recipes.remote import remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest
+from nanolab.workspace.paths import bundled_assets_root
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
+EXPERIMENT_01_DEFAULT_VARIANTS = tuple(EXPERIMENT_01_VARIANTS_BY_KEY)
 
 
 HEARTBEAT_SECONDS = 60.0
@@ -122,6 +151,7 @@ def _run_prepare(
             tag=str(manifest.identity["tag"]),
             provider=provider,
             request=request,
+            shared=next(iter(profiles)),
         )
         return prepare_comparison(
             stage=stage,
@@ -157,53 +187,176 @@ def _run_cell(
     before_attempt: Callable[[], None] | None = None,
 ) -> None:
     """Run one cell, retrying once if the attempt dies rather than fails."""
-    from nanolab.cli.product import _execute_workflow, _prepare_run
-
-    cell_dir = cell.run_dir(root)
     for attempt in range(1, CELL_ATTEMPTS + 1):
         if before_attempt is not None:
             before_attempt()
-        lifetime = ExitStack()
         try:
-            sink, *_rest = _prepare_run(
-                lifetime,
-                release=False,
+            _run_attempt(
+                cell,
+                run_dir=cell.run_dir(root),
                 scenario=scenario,
+                scenario_config=scenario_config,
                 environment=environment,
-                release_config=None,
-                run_dir=cell_dir,
-                resume=False,
                 environment_config=environment_config,
-                paths=paths,  # type: ignore[arg-type]
-                effective_run_dir=cell_dir,
-            )
-            _execute_workflow(
-                sink=sink,
-                scenario_config=cell_scenario(scenario_config, cell),
-                environment_config=environment_config,
-                paths=paths,  # type: ignore[arg-type]
-                keep=True,
-                control_plane_url=None,
-                prometheus_url=None,
-                effective_run_dir=cell_dir,
-                only=None,
-                start=None,
-                until=None,
-                scenario=scenario,
-                release_request=None,
-                release_provider=None,
-                release_journal=None,
-                resume=False,
-                prepared_comparison=prepared,
-                provision=False,
+                paths=paths,
+                prepared=prepared,
             )
             return
         except Exception as error:
             if attempt == CELL_ATTEMPTS:
                 raise
             typer.echo(f"  {cell.label} failed ({error}); retrying once")
-        finally:
-            lifetime.close()
+
+
+def _run_attempt(
+    cell: ComparisonCell,
+    *,
+    run_dir: Path,
+    scenario: Path,
+    scenario_config: ScenarioConfig,
+    environment: Path,
+    environment_config: EnvironmentConfig,
+    paths: object,
+    prepared: PreparedComparison,
+) -> None:
+    """Execute one cell's workflow into `run_dir`, building nothing."""
+    from nanolab.cli.product import _execute_workflow, _prepare_run
+
+    cell_dir = run_dir
+    lifetime = ExitStack()
+    try:
+        sink, *_rest = _prepare_run(
+            lifetime,
+            release=False,
+            scenario=scenario,
+            environment=environment,
+            release_config=None,
+            run_dir=cell_dir,
+            resume=False,
+            environment_config=environment_config,
+            paths=paths,  # type: ignore[arg-type]
+            effective_run_dir=cell_dir,
+        )
+        _execute_workflow(
+            sink=sink,
+            scenario_config=cell_scenario(scenario_config, cell),
+            environment_config=environment_config,
+            paths=paths,  # type: ignore[arg-type]
+            keep=True,
+            control_plane_url=None,
+            prometheus_url=None,
+            effective_run_dir=cell_dir,
+            only=None,
+            start=None,
+            until=None,
+            scenario=scenario,
+            release_request=None,
+            release_provider=None,
+            release_journal=None,
+            resume=False,
+            prepared_comparison=prepared,
+            provision=False,
+        )
+    finally:
+        lifetime.close()
+
+
+def _pods(provider: VmCommandProvider, request: VmRequest) -> str:
+    return comparison_remote_command(
+        provider,
+        request,
+        (
+            "sudo",
+            "k3s",
+            "kubectl",
+            "get",
+            "pods",
+            "-n",
+            DEFAULT_NAMESPACE,
+            "-o",
+            "json",
+        ),
+    )
+
+
+def _run_experiment_cell(
+    cell: ComparisonCell,
+    *,
+    root: Path,
+    identity: Mapping[str, object],
+    provider: VmCommandProvider,
+    request: VmRequest,
+    before_attempt: Callable[[], None],
+    run_attempt: Callable[[Path], None],
+) -> str:
+    """Run one experiment 01 cell to a definitive outcome, or stop the matrix.
+
+    Every attempt has its own directory. OOM and failed startup are results:
+    they are committed with their diagnostics and never retried. One retry is
+    allowed only for a transport failure before load, with the control plane
+    verified running and ready. Anything else stops with its partial evidence;
+    the next resume starts a new attempt on a clean deployment.
+    """
+    transport_retried = False
+    while True:
+        cell_dir = cell.run_dir(root)
+        attempt = next_attempt(cell_dir)
+        run_dir = attempt_dir(cell_dir, attempt)
+        run_dir.mkdir(parents=True)
+        started = datetime.now(UTC)
+        before_attempt()
+        try:
+            run_attempt(run_dir)
+        except Exception as error:
+            diagnostics = run_dir / DIAGNOSTICS
+            diagnostics.mkdir(exist_ok=True)
+            (diagnostics / "error.txt").write_text(f"{type(error).__name__}: {error}\n")
+            try:
+                listing = _pods(provider, request)
+            except Exception as probe:  # the probe failing is itself evidence
+                (diagnostics / "pods-error.txt").write_text(f"{probe}\n")
+                raise error from None
+            (diagnostics / "pods.json").write_text(listing)
+            failure = classify_failure(
+                json.loads(listing), load_started=(run_dir / LOAD_STARTED).is_file()
+            )
+            if failure in ("oom", "startup_failed"):
+                write_cell_result(
+                    cell,
+                    root,
+                    identity=identity,
+                    attempt=attempt,
+                    outcome=failure,
+                    reason=str(error),
+                    started_at=started,
+                )
+                typer.echo(f"  {cell.label}: {failure} (attempt {attempt})")
+                return failure
+            if failure == "transport" and not transport_retried:
+                transport_retried = True
+                typer.echo(f"  {cell.label} transport failure before load; retrying")
+                continue
+            raise
+        # A run that finished can still have lost its control plane to the OOM
+        # killer and restarted it mid-load: that is an OOM, measured or not.
+        listing = _pods(provider, request)
+        (run_dir / DIAGNOSTICS).mkdir(exist_ok=True)
+        (run_dir / DIAGNOSTICS / "pods-after-load.json").write_text(listing)
+        outcome = (
+            "oom"
+            if classify_failure(json.loads(listing), load_started=True) == "oom"
+            else "measured"
+        )
+        write_cell_result(
+            cell,
+            root,
+            identity=identity,
+            attempt=attempt,
+            outcome=outcome,
+            reason="completed" if outcome == "measured" else "OOMKilled during load",
+            started_at=started,
+        )
+        return outcome
 
 
 def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfig:
@@ -272,24 +425,37 @@ def register(app: typer.Typer) -> None:
 
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        experiment = scenario_config.load_profile == "experiment-01"
         if (
             scenario_config.workflow != "loadtest"
             or scenario_config.backend != "k8s"
-            or scenario_config.load_profile not in ("comparison", "mixed")
+            or scenario_config.load_profile
+            not in ("comparison", "mixed", "experiment-01")
         ):
             raise typer.BadParameter(
-                "compare requires a Kubernetes comparison or mixed loadtest"
+                "compare requires a Kubernetes comparison, mixed or "
+                "experiment-01 loadtest"
             )
         if environment_config.provider == "local":
             raise typer.BadParameter("compare requires a VM environment")
+        if experiment and (
+            environment_config.provider != "azure"
+            or set(environment_config.roles) != {"stack", "loadgen"}
+        ):
+            raise typer.BadParameter(
+                "experiment-01 runs on Azure with exactly the stack and loadgen roles"
+            )
+        expected_functions = (
+            EXPERIMENT_01_FUNCTIONS if experiment else COMPARISON_FUNCTIONS
+        )
         if (
-            set(scenario_config.functions) != set(COMPARISON_FUNCTIONS)
+            set(scenario_config.functions) != set(expected_functions)
             or scenario_config.control_plane_image
             or scenario_config.function_images
             or scenario_config.recipe_profile
         ):
             raise typer.BadParameter(
-                "compare requires the Java/JavaScript function pair "
+                "compare requires the profile's own functions "
                 "without prebuilt image overrides"
             )
         if repetitions < 1 or (
@@ -299,10 +465,29 @@ def register(app: typer.Typer) -> None:
                 "repetitions and native parallelism must be positive"
             )
         selected = tuple(part.strip() for part in variants.split(",") if part.strip())
+        if experiment and selected == DEFAULT_VARIANTS:
+            selected = EXPERIMENT_01_DEFAULT_VARIANTS
         paths = default_tool_paths()
+        protocol = scenario_config.experiment_01
         try:
-            profiles = comparison_profiles(paths.tool_root, selected)
-            cells = build_matrix(resolve_variants(selected), repetitions)
+            if protocol is not None:
+                profiles = experiment_01_profiles(paths.tool_root, selected)
+                cells = build_experiment_01_matrix(
+                    resolve_variants(selected), repetitions
+                )
+                experiment_identity: dict[str, object] | None = experiment_01_identity(
+                    protocol,
+                    cells,
+                    payload=experiment_01_payload(
+                        protocol, paths.tool_root / "scenarios" / "payloads"
+                    ),
+                    script=bundled_assets_root() / "k6" / EXPERIMENT_01_SCRIPT_NAME,
+                    selected=selected,
+                )
+            else:
+                profiles = comparison_profiles(paths.tool_root, selected)
+                cells = build_matrix(resolve_variants(selected), repetitions)
+                experiment_identity = None
             root = (run_dir or paths.runs_dir / "comparison").resolve()
             manifest = read_comparison_manifest(root)
             new_run = manifest is None
@@ -331,6 +516,12 @@ def register(app: typer.Typer) -> None:
                     tag=tag,
                     build_memory=native_build_memory,
                     parallelism=native_parallelism,
+                    experiment=experiment_identity,
+                    **(
+                        {"profile_options": EXPERIMENT_01_CONTRACT.options}
+                        if experiment
+                        else {}
+                    ),
                 )
 
             inputs = capture()
@@ -357,8 +548,15 @@ def register(app: typer.Typer) -> None:
             if new_run
             else nullcontext()
         )
-        with provisioning:
+
+        def read_target() -> dict[str, object]:
             target = read_comparison_target(provider, requests)
+            if experiment:
+                target["facts"] = read_host_facts(provider, requests)
+            return target
+
+        with provisioning:
+            target = read_target()
             if new_run:
                 manifest.target = target
                 (root / "prepare").mkdir(parents=True, exist_ok=True)
@@ -381,7 +579,14 @@ def register(app: typer.Typer) -> None:
                 provider=provider,
                 request=request,
             )
-            todo = cells if fresh else pending(cells, root)
+            done = experiment_completed(manifest.identity) if experiment else None
+            todo = (
+                cells
+                if fresh
+                else pending(cells, root, done)
+                if done is not None
+                else pending(cells, root)
+            )
             if len(todo) < len(cells):
                 typer.echo(
                     f"resuming: {len(cells) - len(todo)} of {len(cells)} cells "
@@ -390,9 +595,7 @@ def register(app: typer.Typer) -> None:
 
             def before_attempt() -> None:
                 require_matching_inputs(manifest, capture())
-                require_comparison_target(
-                    target, read_comparison_target(provider, requests)
-                )
+                require_comparison_target(target, read_target())
                 names = [
                     resolve_function(
                         scenario_config,
@@ -407,6 +610,30 @@ def register(app: typer.Typer) -> None:
 
             for index, cell in enumerate(todo, start=1):
                 typer.echo(f"[{index}/{len(todo)}] {cell.label}")
+                if experiment:
+
+                    def run_attempt(run_dir: Path, cell: ComparisonCell = cell) -> None:
+                        _run_attempt(
+                            cell,
+                            run_dir=run_dir,
+                            scenario=scenario,
+                            scenario_config=scenario_config,
+                            environment=environment,
+                            environment_config=environment_config,
+                            paths=paths,
+                            prepared=prepared,
+                        )
+
+                    _ = _run_experiment_cell(
+                        cell,
+                        root=root,
+                        identity=manifest.identity,
+                        provider=provider,
+                        request=request,
+                        before_attempt=before_attempt,
+                        run_attempt=run_attempt,
+                    )
+                    continue
                 _run_cell(
                     cell,
                     scenario=scenario,
@@ -426,8 +653,11 @@ def register(app: typer.Typer) -> None:
             _ = comparison_remote_command(
                 provider, request, ("rm", "-rf", "--", str(owned))
             )
-        report = WriteComparisonReport(
-            task_id="", title="Control-plane build comparison", root=root
-        ).run()
+        if protocol is not None:
+            report = write_experiment_01_report(root, cells, protocol)
+        else:
+            report = WriteComparisonReport(
+                task_id="", title="Control-plane build comparison", root=root
+            ).run()
         typer.echo(f"matrix complete: {root}")
         typer.echo(f"report: {report}")

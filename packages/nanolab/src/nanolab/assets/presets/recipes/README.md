@@ -165,6 +165,18 @@ Oracle GraalVM and records effective JFR monitoring. These profiles have passed
 `validateRecipe`; native publication and the complete native matrix remain to be
 verified. See [runtime comparison usage and evidence](../../../../../README.md#recipe-runtime-comparison).
 
+## Experiment 01 profiles
+
+`experiment-01-*.yaml` provides seven control planes for one `qr-code-rust`:
+core + k8s-deployment-provider with full-tiering JVM and native -O3, and core +
+k8s-deployment-provider + async-queue with JVM `-Xint`, C1, full tiering and
+native -O2/-O3. Every JVM uses Serial GC and `-Xmx64m`; every profile includes
+`build-metadata`, which nanoFaaS requires for the explicit -O2 and which lets
+each cell check the running build. Only `experiment-01-core-k8s-jvm-jit.yaml`
+declares the Rust QR function. The native profiles fix the 64 MiB heap at build
+time with `build.native.maxHeap`, which needs a nanoFaaS revision that has the
+field. See [Experiment 01](../../../../../../../docs/experiment-01.md).
+
 ## Bash container validation
 
 `validate-container-bash.yaml` publishes the JVM control plane and the existing

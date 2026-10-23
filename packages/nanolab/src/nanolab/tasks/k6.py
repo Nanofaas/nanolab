@@ -73,6 +73,7 @@ class K6Task(SharedK6Task):
                 "vus": config.vus,
                 "duration": config.duration,
                 "payload_path": config.payload_path,
+                "process_env": config.process_env,
                 "target": (
                     config.target_url
                     if isinstance(config.target_url, str)
@@ -84,7 +85,9 @@ class K6Task(SharedK6Task):
             resolve,
             executor=executor,
             role=role,
-            options=CommandOptions(cwd=cwd, remote_dir=remote_dir),
+            options=CommandOptions(
+                cwd=cwd, remote_dir=remote_dir, env=config.process_env
+            ),
             title=title,
             semantic_key=f"nanolab-k6:v2:{key}",
             require_pass=require_pass,

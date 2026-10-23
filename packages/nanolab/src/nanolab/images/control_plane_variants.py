@@ -19,6 +19,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal
+
+# What a build executes as, kept apart from the key that names the build. The
+# historical tuning only ever distinguished C1 from C2, and calling every JVM
+# that does not stop at level 1 "c2" would describe -Xint as a C2 build.
+RuntimeClass = Literal["interpreted", "c1", "tiered", "native-o2", "native-o3"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +37,10 @@ class ControlPlaneVariant:
     # reader does not have to reconstruct the intent from the flags.
     rationale: str
     build_env: Mapping[str, str]
+    # Set only where the variant declares it rather than deriving it from the
+    # historical tuning: the experiment 01 builds, whose recipe is the build.
+    runtime: RuntimeClass | None = None
+    modules: tuple[str, ...] = ()
 
     def image(self, registry: str) -> str:
         """Return the control-plane image reference this variant is tagged as.
@@ -58,7 +68,13 @@ def jvm_optimization(variant: ControlPlaneVariant) -> str:
     Derived from the effective JVM_TUNING — the variant's own, or the
     Dockerfile default when it sets none — so callers never have to reason
     about which flag a silent variant inherits.
+
+    A variant that declares its runtime is built from its recipe, not from
+    JVM_TUNING, and only `runtime_class` describes it: its empty build_env would
+    otherwise read as the Dockerfile's C1 default.
     """
+    if variant.runtime is not None:
+        raise ValueError(f"{variant.key} declares its runtime; use runtime_class")
     tuning = variant.build_env.get("JVM_TUNING", DEFAULT_JVM_TUNING)
     return "c1" if "TieredStopAtLevel=1" in tuning else "c2"
 
@@ -182,18 +198,111 @@ VARIANTS_BY_KEY: Mapping[str, ControlPlaneVariant] = MappingProxyType(
 )
 
 
+def runtime_class(variant: ControlPlaneVariant) -> RuntimeClass:
+    """Return what the build executes as: its declared class, or derived.
+
+    Historical variants carry no declaration, so theirs is read from the same
+    tuning `jvm_optimization` reads, plus the native optimisation level.
+    """
+    if variant.runtime is not None:
+        return variant.runtime
+    if "NATIVE_OPTIMIZATION" in variant.build_env:
+        level = variant.build_env["NATIVE_OPTIMIZATION"]
+        if level == "3":
+            return "native-o3"
+        if level == "2":
+            return "native-o2"
+        raise ValueError(f"{variant.key} has no runtime class for -O{level}")
+    return "c1" if jvm_optimization(variant) == "c1" else "tiered"
+
+
+# Experiment 01: the control plane's own footprint in front of one function.
+# Seven builds, not a cartesian product: five runtimes on the composition with
+# the async queue, and the two ends of that range (full JIT, native -O3) on the
+# baseline composition. Core is implicit in every recipe. The keys are the
+# recipe basenames, so `--variants` names exactly the file that is built.
+_BASE = ("k8s-deployment-provider", "build-metadata")
+_QUEUE = ("k8s-deployment-provider", "async-queue", "build-metadata")
+EXPERIMENT_01_VARIANTS: tuple[ControlPlaneVariant, ...] = (
+    ControlPlaneVariant(
+        key="experiment-01-core-k8s-jvm-jit",
+        label="Core + k8s, JVM full tiering",
+        rationale="Baseline composition at the JVM's deployed JIT configuration.",
+        build_env=_env(),
+        runtime="tiered",
+        modules=_BASE,
+    ),
+    ControlPlaneVariant(
+        key="experiment-01-core-k8s-native-o3",
+        label="Core + k8s, native -O3",
+        rationale="Baseline composition at the native default optimisation.",
+        build_env=_env(),
+        runtime="native-o3",
+        modules=_BASE,
+    ),
+    ControlPlaneVariant(
+        key="experiment-01-core-k8s-queue-jvm-int",
+        label="Core + k8s + queue, JVM interpreter",
+        rationale="The JVM with no JIT at all: the floor of compiled-code memory.",
+        build_env=_env(),
+        runtime="interpreted",
+        modules=_QUEUE,
+    ),
+    ControlPlaneVariant(
+        key="experiment-01-core-k8s-queue-jvm-c1",
+        label="Core + k8s + queue, JVM C1 only",
+        rationale="Client compiler only, as the historical jvm baseline runs.",
+        build_env=_env(),
+        runtime="c1",
+        modules=_QUEUE,
+    ),
+    ControlPlaneVariant(
+        key="experiment-01-core-k8s-queue-jvm-jit",
+        label="Core + k8s + queue, JVM full tiering",
+        rationale="Tiered C1 to C2, the JVM default.",
+        build_env=_env(),
+        runtime="tiered",
+        modules=_QUEUE,
+    ),
+    ControlPlaneVariant(
+        key="experiment-01-core-k8s-queue-native-o2",
+        label="Core + k8s + queue, native -O2",
+        rationale="Native image one optimisation level below the default.",
+        build_env=_env(),
+        runtime="native-o2",
+        modules=_QUEUE,
+    ),
+    ControlPlaneVariant(
+        key="experiment-01-core-k8s-queue-native-o3",
+        label="Core + k8s + queue, native -O3",
+        rationale="Native image at the default optimisation level.",
+        build_env=_env(),
+        runtime="native-o3",
+        modules=_QUEUE,
+    ),
+)
+
+EXPERIMENT_01_VARIANTS_BY_KEY: Mapping[str, ControlPlaneVariant] = MappingProxyType(
+    {variant.key: variant for variant in EXPERIMENT_01_VARIANTS}
+)
+# Every build a cell can name. The historical default matrix stays VARIANTS.
+_ALL_VARIANTS_BY_KEY: Mapping[str, ControlPlaneVariant] = MappingProxyType(
+    {**VARIANTS_BY_KEY, **EXPERIMENT_01_VARIANTS_BY_KEY}
+)
+
+
 def resolve_variants(keys: tuple[str, ...]) -> tuple[ControlPlaneVariant, ...]:
     """Look up each variant key, keeping the order the caller asked for.
 
     Raises ValueError listing the unknown keys and the available ones when a
     key is not in the matrix.
     """
-    unknown = [key for key in keys if key not in VARIANTS_BY_KEY]
+    unknown = [key for key in keys if key not in _ALL_VARIANTS_BY_KEY]
     if unknown:
         raise ValueError(
             "unknown control-plane variants: "
             + ", ".join(unknown)
             + ". Available: "
-            + ", ".join(VARIANTS_BY_KEY)
+            + ", ".join(_ALL_VARIANTS_BY_KEY)
         )
-    return tuple(VARIANTS_BY_KEY[key] for key in keys)
+    return tuple(_ALL_VARIANTS_BY_KEY[key] for key in keys)

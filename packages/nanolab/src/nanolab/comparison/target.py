@@ -126,3 +126,36 @@ def require_comparison_target(
     _validate_target(actual)
     if expected != actual:
         raise ValueError("Comparison target identity differs; use a new run directory")
+
+
+HOST_FACTS_PROBE = (
+    "sh",
+    "-c",
+    "uname -m; uname -r; nproc; "
+    "awk '/^MemTotal:/ {print $2}' /proc/meminfo; "
+    '. /etc/os-release && echo "$PRETTY_NAME"',
+)
+
+
+def read_host_facts(
+    provider: VmCommandProvider, requests: Mapping[str, VmRequest]
+) -> dict[str, dict[str, object]]:
+    """Read what each host is, beyond which host it is.
+
+    Architecture, kernel, CPUs, memory and OS, per role. The SKU is already in
+    the role's request; these are what that SKU actually delivered, and a
+    resume onto a host whose facts differ is refused like any other change.
+    """
+    facts: dict[str, dict[str, object]] = {}
+    for role, request in requests.items():
+        lines = _probe(provider, request, HOST_FACTS_PROBE).splitlines()
+        if len(lines) != 5 or not lines[2].isdigit() or not lines[3].isdigit():
+            raise ValueError(f"Invalid host facts for {role}")
+        facts[role] = {
+            "architecture": lines[0],
+            "kernel": lines[1],
+            "cpus": int(lines[2]),
+            "memoryKiB": int(lines[3]),
+            "os": lines[4],
+        }
+    return facts

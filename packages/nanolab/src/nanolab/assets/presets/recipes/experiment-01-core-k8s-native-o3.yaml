@@ -1,0 +1,17 @@
+schemaVersion: 2
+name: experiment-01-core-k8s-native-o3
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: experiment-01
+controlPlane:
+  modules:
+  - k8s-deployment-provider
+  - build-metadata
+  build:
+    mode: native
+    builder: host
+    native:
+      gc: serial
+      maxHeap: 64m
+  container:
+    image: control-plane-e01-native-o3

@@ -75,6 +75,20 @@ def payload_corpus_path(
     return corpus
 
 
+def declared_function_resources(
+    config: ScenarioConfig, function: str
+) -> dict[str, dict[str, float]]:
+    """Return exactly the requests and limits the scenario declared, no defaults."""
+    declared = config.resources.get(function)
+    if declared is None:
+        raise ValueError(f"no resources declared for {function}")
+    return {
+        section: quantity.model_dump(by_alias=True, exclude_none=True)
+        for section in ("requests", "limits")
+        if (quantity := getattr(declared, section)) is not None
+    }
+
+
 def _concurrency_function_resources(
     config: ScenarioConfig, function: str
 ) -> dict[str, dict[str, float]]:

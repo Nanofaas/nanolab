@@ -356,6 +356,11 @@ def _resolve_functions(
             )
             for function in functions
         )
+    if scaling_config is None and resources_for is not None:
+        functions = tuple(
+            replace(function, resources=resources_for(function.name))
+            for function in functions
+        )
     if function_concurrency is not None or function_queue_size is not None:
         functions = tuple(
             replace(
@@ -726,6 +731,7 @@ def _build_run_k6(
     env_overrides: Mapping[str, str] | None = None,
     remote: bool,
     payload_path: Path | None = None,
+    events_path: Path | None = None,
 ) -> K6Task:
     return K6Task(
         executor=executor,
@@ -750,6 +756,13 @@ def _build_run_k6(
                 **dict(env_overrides or {}),
             },
             payload_path=payload_path,
+            # console.log lines go to this file as k6 writes them, so events
+            # emitted before a request survive a generator that is killed.
+            process_env=(
+                {"K6_CONSOLE_OUTPUT": str(events_path)}
+                if events_path is not None
+                else {}
+            ),
         ),
         # Solo per un ruolo di carico remoto. L'executor locale rifiuta qualunque
         # remote_dir, e un load-test `container` DEVE girare su un environment locale
@@ -906,6 +919,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     concurrency_report: WriteConcurrencyReport | None = None,
     drain_minutes: int | None = None,
     management_url: str | None = None,
+    events_path: Path | None = None,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     # First, because it has to sample while the stack is still up and before the
@@ -935,6 +949,18 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                 )
             )
         )
+        if events_path is not None:
+            after.append(
+                FetchResultsTask(
+                    fetch=FetchVmResults(
+                        task_id="",
+                        title="Fetch k6 events",
+                        fetcher=cast(RemoteFileFetcher, fetcher),
+                        remote_source=str(events_path),
+                        local_dest=run_dir,
+                    )
+                )
+            )
     if concurrency_watchers is not None:
         after.append(
             ReportCoTenancyTask(watchers=concurrency_watchers, series_dir=run_dir)
@@ -1097,9 +1123,20 @@ def _build_concurrency_report(
 
 
 def _prepare_run_directory_argv(
-    summary_path: Path, remote_run_dir: Path | None
+    summary_path: Path, remote_run_dir: Path | None, events_path: Path | None = None
 ) -> tuple[str, ...]:
-    prepare_argv = ("mkdir", "-p", str(summary_path.parent))
+    prepare_argv: tuple[str, ...] = ("mkdir", "-p", str(summary_path.parent))
+    if events_path is not None and remote_run_dir is None:
+        # The shared output directory outlives a run; k6 appends to an existing
+        # console file, and the previous cell's events must not join this ledger.
+        prepare_argv = (
+            "sh",
+            "-c",
+            'set -eu; mkdir -p -- "$1"; rm -f -- "$2"',
+            "prepare-loadtest-run",
+            str(summary_path.parent),
+            str(events_path),
+        )
     if remote_run_dir is not None:
         prepare_argv = (
             "sh",
@@ -1278,6 +1315,10 @@ def build_loadtest_plan(
     function_queue_size: int | None = None,
     before_load: Callable[[Platform], Resource[None]] | None = None,
     helm_values_overrides: Mapping[str, str] | None = None,
+    k6_events: bool = False,
+    # Requests and limits per function name, for a caller that declares them
+    # outside concurrency control; applied exactly as returned.
+    function_resources: Callable[[str], dict[str, dict[str, float]]] | None = None,
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1314,7 +1355,7 @@ def build_loadtest_plan(
         resources_for=(
             (lambda name: _concurrency_function_resources(config, name))
             if config.concurrency_control
-            else None
+            else function_resources
         ),
         function_concurrency=function_concurrency,
         function_queue_size=function_queue_size,
@@ -1341,6 +1382,7 @@ def build_loadtest_plan(
         run_dir=run_dir,
         script_name=script_name,
     )
+    events_path = summary_path.parent / "k6-events.jsonl" if k6_events else None
     additional_modules = _additional_modules(
         config.autoscaling, hpa, config.concurrency_control
     )
@@ -1408,6 +1450,7 @@ def build_loadtest_plan(
         env_overrides=k6_env_overrides,
         remote=environment.provider != "local",
         payload_path=payload_corpus_path(config, root, target.name),
+        events_path=events_path,
     )
     watcher, replica_probe = _build_replica_watcher(
         config=config,
@@ -1457,6 +1500,7 @@ def build_loadtest_plan(
         hpa_metrics=hpa,
         snapshot_lead_seconds=snapshot_lead_seconds,
         heap_metrics_required=heap_metrics_required,
+        events_path=events_path if remote else None,
     )
     if request.recipe is not None:
         binding = request.recipe
@@ -1475,7 +1519,9 @@ def build_loadtest_plan(
             )
             for function in request.functions
         ] + after
-    prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
+    prepare_argv = _prepare_run_directory_argv(
+        summary_path, remote_run_dir, events_path
+    )
     preflight = _build_preflight(
         executor=executor,
         load_role=load_role,

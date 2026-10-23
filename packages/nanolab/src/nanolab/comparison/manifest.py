@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,18 +39,27 @@ class _Identity(BaseModel):
     roles: dict[str, dict[str, object]]
     functions: dict[str, dict[str, object]]
     scheduler: dict[str, object]
+    # Absent from every historical manifest, which keeps the historical rules.
+    experiment: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def complete_identity(self) -> _Identity:
         for source in (self.nanofaas, self.nanolab):
             if not source.get("revision") or not _sha(source.get("patchSha256")):
                 raise ValueError("incomplete Git identity")
-        if self.scheduler != {
-            "engine": "unified",
-            "strategy": COMPARISON_SCHEDULER_STRATEGY,
-            "runtimeSwitching": False,
-        }:
+        expected_scheduler = (
+            EXPERIMENT_01_SCHEDULER
+            if self.experiment is not None
+            else {
+                "engine": "unified",
+                "strategy": COMPARISON_SCHEDULER_STRATEGY,
+                "runtimeSwitching": False,
+            }
+        )
+        if self.scheduler != expected_scheduler:
             raise ValueError("missing or conflicting scheduler identity")
+        if self.experiment is not None:
+            _complete_experiment(self.experiment, self.variants, self.repetitions)
         if (
             not self.variants
             or len(set(self.variants)) != len(self.variants)
@@ -62,7 +71,8 @@ class _Identity(BaseModel):
                 "sha256"
             ) != _hash(config["values"]):
                 raise ValueError("incomplete configuration identity")
-        for key in dict.fromkeys(("jvm", *self.variants)):
+        shared = () if self.experiment is not None else ("jvm",)
+        for key in dict.fromkeys((*shared, *self.variants)):
             profile = self.profiles.get(key, {})
             if not _sha(profile.get("sha256")) or not isinstance(
                 profile.get("options"), dict
@@ -90,6 +100,53 @@ class _Identity(BaseModel):
         if not self.roles or not self.functions or not self.tag:
             raise ValueError("incomplete resolved inputs")
         return self
+
+
+# Experiment 01 pins no strategy: the baseline has no queue to schedule, and
+# the queue composition keeps the engine's own derivation from its modules. The
+# strategy that actually ran is observed per cell, not asserted here.
+EXPERIMENT_01_SCHEDULER: dict[str, object] = {
+    "engine": "unified",
+    "strategy": None,
+    "runtimeSwitching": False,
+}
+_EXPERIMENT_FIELDS = {
+    "profile",
+    "orderPolicy",
+    "order",
+    "protocol",
+    "protocolSha256",
+    "payload",
+    "script",
+    "builds",
+    "subset",
+}
+
+
+def _complete_experiment(
+    experiment: Mapping[str, object], variants: list[str], repetitions: int
+) -> None:
+    if set(experiment) != _EXPERIMENT_FIELDS:
+        raise ValueError("incomplete experiment identity")
+    if experiment["profile"] != "experiment-01" or experiment["protocolSha256"] != (
+        _hash(experiment["protocol"])
+    ):
+        raise ValueError("incomplete experiment protocol identity")
+    payload = experiment["payload"]
+    script = experiment["script"]
+    builds = experiment["builds"]
+    order = experiment["order"]
+    if (
+        not isinstance(payload, dict)
+        or not _sha(payload.get("sha256"))
+        or not isinstance(script, dict)
+        or not _sha(script.get("sha256"))
+        or not isinstance(builds, dict)
+        or set(builds) != set(variants)
+        or not isinstance(order, list)
+        or len(order) != len(variants) * repetitions
+    ):
+        raise ValueError("incomplete experiment artifact identity")
 
 
 def _sha(value: object) -> bool:
@@ -136,6 +193,10 @@ def capture_comparison_inputs(
     tag: str,
     build_memory: str | None,
     parallelism: int | None,
+    experiment: Mapping[str, object] | None = None,
+    profile_options: Callable[[str, Path], dict[str, object]] = (
+        lambda _key, path: declared_options(path)
+    ),
 ) -> dict[str, object]:
     """Capture tracked Git state and complete effective experiment settings."""
     scenario_values = scenario.model_dump(mode="json")
@@ -154,7 +215,7 @@ def capture_comparison_inputs(
             key: {
                 "path": str(path),
                 "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "options": declared_options(path),
+                "options": profile_options(key, path),
             }
             for key, path in profiles.items()
         },
@@ -176,12 +237,16 @@ def capture_comparison_inputs(
             )
             for key in scenario.functions
         },
-        "scheduler": {
+        "scheduler": dict(EXPERIMENT_01_SCHEDULER)
+        if experiment is not None
+        else {
             "engine": "unified",
             "strategy": COMPARISON_SCHEDULER_STRATEGY,
             "runtimeSwitching": False,
         },
     }
+    if experiment is not None:
+        inputs["experiment"] = dict(experiment)
     # Normalize tuples in resolved functions to JSON's array representation.
     normalized = json.loads(json.dumps(inputs))
     _Identity.model_validate(normalized)

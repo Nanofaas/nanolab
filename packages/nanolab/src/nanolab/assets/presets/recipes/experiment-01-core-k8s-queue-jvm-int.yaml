@@ -1,0 +1,19 @@
+schemaVersion: 2
+name: experiment-01-core-k8s-queue-jvm-int
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: experiment-01
+controlPlane:
+  modules:
+  - k8s-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+  container:
+    image: control-plane-e01-queue-jvm-int
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -Xmx64m
+    - -Xint

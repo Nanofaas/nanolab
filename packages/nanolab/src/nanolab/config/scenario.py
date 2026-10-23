@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from nanolab.config.contract import ContractConfig
+from nanolab.config.experiment_01 import EXPERIMENT_01_FUNCTION, Experiment01Protocol
 from nanolab.config.heap_analysis import HeapAnalysisConfig
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.config.soak import SoakConfig
@@ -120,7 +121,11 @@ ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # driving two functions at once. A flat rate is the one regime where the builds are
 # hardest to distinguish — a JIT reaches its peak and stays there, and a native image
 # starts at its own — so the differences live in the transitions.
-LoadProfile = Literal["cycle", "saturation", "burst", "openloop", "comparison", "mixed"]
+# `experiment-01` measures what the control plane costs in front of ONE function,
+# on a calendar of constant-rate plateaux declared in its `experiment01` block.
+LoadProfile = Literal[
+    "cycle", "saturation", "burst", "openloop", "comparison", "mixed", "experiment-01"
+]
 # Which control-plane build to run. `native` uses a GraalVM image compiled
 # beforehand by `scripts/native-java-image.sh control-plane`, so the run does not
 # rebuild it — measured at rest, the JVM build held 212 MiB against the native
@@ -254,6 +259,9 @@ class ScenarioConfig(BaseModel):
     release: ReleaseConfig | None = None
     soak: SoakConfig | None = None
     heap_analysis: HeapAnalysisConfig | None = Field(default=None, alias="heapAnalysis")
+    experiment_01: Experiment01Protocol | None = Field(
+        default=None, alias="experiment01"
+    )
 
     @model_validator(mode="after")
     def validate_workflow(
@@ -529,7 +537,52 @@ class ScenarioConfig(BaseModel):
             raise ValueError("asyncShare and idemShare belong to loadProfile: mixed")
         if (self.async_share or 0.0) + (self.idem_share or 0.0) > 1.0:
             raise ValueError("asyncShare + idemShare cannot exceed 1.0")
-        if self.load_profile in ("comparison", "mixed"):
+        if (self.load_profile == "experiment-01") != (self.experiment_01 is not None):
+            raise ValueError(
+                "the experiment01 block belongs to loadProfile: experiment-01, "
+                "which requires it"
+            )
+        if self.load_profile == "experiment-01":
+            if (
+                self.workflow != "loadtest"
+                or self.backend != "k8s"
+                or self.functions != [EXPERIMENT_01_FUNCTION]
+            ):
+                raise ValueError(
+                    "experiment-01 is a Kubernetes loadtest of qr-code-rust alone"
+                )
+            if (
+                self.concurrency_control
+                or self.autoscaling
+                or self.payload_profile is not None
+                or self.load_vus is not None
+                or self.load_scale != 1.0
+                or self.drain_minutes is not None
+                or self.soak_minutes is not None
+            ):
+                raise ValueError(
+                    "experiment-01 takes its load from the experiment01 block; "
+                    "governors, autoscaling and legacy load options do not apply"
+                )
+            for name in (CONTROL_PLANE_RESOURCES, EXPERIMENT_01_FUNCTION):
+                spec = self.resources.get(name)
+                if (
+                    spec is None
+                    or spec.requests is None
+                    or spec.limits is None
+                    or None
+                    in (
+                        spec.requests.cpu,
+                        spec.requests.memory_mib,
+                        spec.limits.cpu,
+                        spec.limits.memory_mib,
+                    )
+                ):
+                    raise ValueError(
+                        "experiment-01 declares explicit CPU and memory requests "
+                        f"and limits for {name}"
+                    )
+        elif self.load_profile in ("comparison", "mixed"):
             # The script drives a named pair, and holds the functions fixed so the
             # control-plane build is the only thing that varies between runs.
             if len(self.functions) != 2:
@@ -539,7 +592,10 @@ class ScenarioConfig(BaseModel):
                     "the comparison profile compares control-plane builds; a governor "
                     "or an autoscaler would move the limits underneath that comparison"
                 )
-        elif self.control_plane_variant is not None:
+        if (
+            self.load_profile not in ("comparison", "mixed", "experiment-01")
+            and self.control_plane_variant is not None
+        ):
             raise ValueError(
                 "controlPlaneVariant selects one of the builds the comparison profile "
                 "compares; no other profile builds them"

@@ -270,6 +270,14 @@ is required for G1. Profile validation and fake native tests do not establish
 successful native publication. Other load-test backends remain outside this
 comparison migration.
 
+### Experiment 01
+
+`loadProfile: experiment-01` runs `compare` against a single `qr-code-rust` with
+seven `recipes/experiment-01-*.yaml` builds, three declared interleaved orders,
+per-attempt directories and definitive outcome receipts (`measured`, `oom`,
+`startup_failed`). Native builds fix their heap at build time
+(`build.native.maxHeap`), which needs a nanoFaaS revision with that field. See [Experiment 01](../../docs/experiment-01.md).
+
 ## Bash recipe validation
 
 Run `deployment-lifecycle-container-bash.yaml` for the same local Docker

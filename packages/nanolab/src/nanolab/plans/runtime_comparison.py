@@ -20,26 +20,36 @@ since `platform.py` skips its own build entirely when an image is supplied.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.application.functions import resolve_function
+from nanolab.application.loadtest_policy import declared_function_resources
 from nanolab.comparison.evidence import (
+    record_comparison_management,
     verify_comparison_cell_registry,
     verify_comparison_scheduler,
 )
+from nanolab.comparison.experiment_01 import mark_load_started
 from nanolab.comparison.profiles import (
     COMPARISON_FUNCTIONS,
     COMPARISON_RECIPE_MODULES,
     COMPARISON_SCHEDULER_STRATEGY,
+    EXPERIMENT_01_FUNCTIONS,
     PreparedComparison,
 )
 from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.experiment_01 import experiment_01_payload
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.control_plane_variants import resolve_variants
+from nanolab.images.control_plane_variants import (
+    EXPERIMENT_01_VARIANTS,
+    resolve_variants,
+)
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
@@ -55,14 +65,17 @@ SCRIPT_NAME = "runtime-comparison.js"
 # is that the load carries both doors and a small share of idempotency keys, which
 # is the traffic the platform actually receives and has never been measured under.
 MIXED_SCRIPT_NAME = "mixed-workload.js"
+EXPERIMENT_01_SCRIPT_NAME = "experiment-01.js"
 
 
 def script_for(config: ScenarioConfig) -> str:
     """Return the k6 script that drives this profile's load.
 
-    The `mixed` profile reuses the comparison wiring with a different
-    generator, so it is the one profile that does not run `SCRIPT_NAME`.
+    The `mixed` profile and experiment 01 reuse the comparison wiring with a
+    different generator; every other comparison runs `SCRIPT_NAME`.
     """
+    if config.load_profile == "experiment-01":
+        return EXPERIMENT_01_SCRIPT_NAME
     return MIXED_SCRIPT_NAME if config.load_profile == "mixed" else SCRIPT_NAME
 
 
@@ -88,7 +101,36 @@ NO_STAGES: tuple[tuple[str, int], ...] = ()
 
 def is_runtime_comparison(config: ScenarioConfig) -> bool:
     """Return whether the scenario's load profile is one this module plans."""
-    return config.load_profile in ("comparison", "mixed")
+    return config.load_profile in ("comparison", "mixed", "experiment-01")
+
+
+def experiment_01_k6_environment(
+    config: ScenarioConfig, payload: bytes
+) -> Mapping[str, str]:
+    """Return the one serialized protocol and the exact body experiment 01 sends.
+
+    Only the function is named beside them: experiment 01 has no neighbour,
+    and nothing here reaches for a second function.
+    """
+    protocol = config.experiment_01
+    if protocol is None:
+        raise ValueError("experiment-01 requires its experiment01 block")
+    return {
+        "NANOFAAS_FUNCTION": config.functions[0],
+        "E01_PAYLOAD": payload.decode("utf-8"),
+        "E01_PROTOCOL": json.dumps(
+            {
+                "phases": protocol.phases(),
+                "httpTimeoutSeconds": protocol.http_timeout_seconds,
+                "gracefulStopSeconds": protocol.graceful_stop_seconds,
+                "preAllocatedVUs": protocol.pre_allocated_vus,
+                "maxVUs": protocol.max_vus,
+                "size": json.loads(payload)["size"],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    }
 
 
 def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
@@ -177,6 +219,20 @@ def build_runtime_comparison_plan(
     if not is_runtime_comparison(config):
         raise ValueError(
             "runtime-comparison plan requires loadProfile: comparison or mixed"
+        )
+    if config.load_profile == "experiment-01":
+        return _experiment_01_plan(
+            config,
+            environment,
+            bindings,
+            control_plane_url=control_plane_url,
+            prometheus_client=prometheus_client,
+            run_dir=run_dir,
+            remote_run_dir=remote_run_dir,
+            fetcher=fetcher,
+            repo_root=repo_root,
+            tool_root=tool_root,
+            prepared=prepared,
         )
     if prepared is not None:
         if (
@@ -365,3 +421,170 @@ def _prepared_checks(
         )
 
     return before_load
+
+
+def _experiment_01_plan(
+    config: ScenarioConfig,
+    environment: EnvironmentConfig,
+    bindings: RoleBindings,
+    *,
+    control_plane_url: str,
+    prometheus_client: PrometheusClient,
+    run_dir: Path,
+    remote_run_dir: Path | None,
+    fetcher: RemoteFileFetcher | None,
+    repo_root: Path | None,
+    tool_root: Path | None,
+    prepared: PreparedComparison | None,
+) -> Workflow:
+    """Compile one experiment 01 cell from its prepared distribution.
+
+    Only the prepared path exists: a cell must measure the build and the one
+    function digest the prepare phase published, never something it built.
+    """
+    protocol = config.experiment_01
+    if (
+        protocol is None
+        or prepared is None
+        or tool_root is None
+        or config.control_plane_variant is None
+        or config.control_plane_variant not in prepared.distributions
+    ):
+        raise ValueError(
+            "experiment-01 runs only through compare, from a prepared distribution"
+        )
+    variant = resolve_variants((config.control_plane_variant,))[0]
+    selected = prepared.distributions[variant.key]
+    shared = prepared.distributions[EXPERIMENT_01_VARIANTS[0].key]
+    key = config.functions[0]
+    function_image = shared.function(*EXPERIMENT_01_FUNCTIONS[key]).image.reference
+    payload = experiment_01_payload(protocol, tool_root / "scenarios" / "payloads")
+
+    def before_load(platform: Platform) -> Resource[None]:
+        executor = RoleBoundCommandTaskExecutor(bindings)
+        resources = {
+            name: Resource(
+                title=f"Prepared experiment-01 distribution ({name})",
+                acquire=lambda _inputs, value=value: value,
+                release=lambda _inputs, _value: None,
+            )
+            for name, value in (("selected", selected), ("shared", shared))
+        }
+
+        def acquire(inputs: TaskInputs) -> None:
+            verify_comparison_cell_registry(
+                distributions=(selected, shared)
+                if selected is not shared
+                else (selected,),
+                executor=executor,
+                inputs=inputs,
+                run_dir=run_dir,
+            )
+            function = resolve_function(
+                config, key, source_root=repo_root, tool_root=tool_root
+            )
+            name, sdk = EXPERIMENT_01_FUNCTIONS[key]
+            for resource, deployment, component, evidence in (
+                (
+                    resources["selected"],
+                    "nanofaas-control-plane",
+                    ("control-plane", "control-plane", "java"),
+                    run_dir / "images/control-plane",
+                ),
+                (
+                    resources["shared"],
+                    f"fn-{function.name}",
+                    ("function", name, sdk),
+                    run_dir / "images" / sdk,
+                ),
+            ):
+                _ = RecipeKubernetesImageCheckTask(
+                    resource,
+                    namespace=DEFAULT_NAMESPACE,
+                    deployment=deployment,
+                    component=component,
+                    executor=executor,
+                    role="stack",
+                    run_dir=evidence,
+                ).run(inputs)
+            # The running process reports its modules and native optimisation
+            # level; a build other than the recipe's stops the cell here.
+            _ = RecipeMetadataCheckTask(
+                resources["selected"],
+                executor=executor,
+                run_dir=run_dir,
+                endpoint=platform.endpoint,
+                role="stack",
+            ).run(inputs)
+            # Observed rather than required: the baseline has no queue and so
+            # no scheduler strategy to assert. What the process exposes, and
+            # its pod spec, are kept as the evidence of what actually ran.
+            record_comparison_management(
+                endpoint=platform.endpoint,
+                executor=executor,
+                inputs=inputs,
+                run_dir=run_dir,
+            )
+            pods = executor.run(
+                CommandTaskSpec(
+                    task_id="",
+                    summary="Record experiment-01 pods before load",
+                    argv=(
+                        "kubectl",
+                        "get",
+                        "pods",
+                        "-n",
+                        DEFAULT_NAMESPACE,
+                        "-o",
+                        "json",
+                    ),
+                    role="stack",
+                )
+            )
+            (run_dir / "pods-before-load.json").write_text(pods.stdout)
+            if pods.return_code != 0:
+                raise RuntimeError("experiment-01 pod listing failed before load")
+            mark_load_started(run_dir)
+
+        return Resource(
+            title="Verify experiment-01 cell before load",
+            acquire=acquire,
+            release=lambda _inputs, _value: None,
+            requires=(
+                *platform.resources,
+                *platform.functions,
+                *resources.values(),
+            ),
+        )
+
+    return build_loadtest_plan(
+        config,
+        environment,
+        bindings,
+        control_plane_url=control_plane_url,
+        prometheus_client=prometheus_client,
+        run_dir=run_dir,
+        remote_run_dir=remote_run_dir,
+        remote_repo_root=Path(prepared.remote_source),
+        fetcher=fetcher,
+        repo_root=repo_root,
+        tool_root=tool_root,
+        stages=NO_STAGES,
+        prebuilt_control_plane_image=selected.control_plane().image.reference,
+        prebuilt_function_images={key: function_image},
+        script_name=EXPERIMENT_01_SCRIPT_NAME,
+        k6_env_overrides=experiment_01_k6_environment(config, payload),
+        container_metrics=True,
+        observed_modules=variant.modules,
+        before_load=before_load,
+        snapshot_lead_seconds=0.0,
+        heap_metrics_required=False,
+        function_concurrency=protocol.fixed_concurrency,
+        # The queue capacity belongs to the composition that has a queue; the
+        # baseline keeps the core's own admission, recorded as it is.
+        function_queue_size=protocol.queue_capacity
+        if "async-queue" in variant.modules
+        else None,
+        k6_events=True,
+        function_resources=lambda name: declared_function_resources(config, name),
+    )

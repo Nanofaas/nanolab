@@ -464,3 +464,134 @@ def test_prepared_cells_use_distribution_images_and_fixed_scheduler(
     assert captured["stages"] == ()
     assert captured["snapshot_lead_seconds"] == 0.0
     assert captured["heap_metrics_required"] is False
+
+
+@pytest.mark.parametrize(
+    ("variant", "queue"),
+    [
+        ("experiment-01-core-k8s-jvm-jit", None),
+        ("experiment-01-core-k8s-queue-jvm-c1", 200),
+    ],
+)
+def test_experiment_01_cell_uses_the_shared_function_digest_and_its_protocol(
+    monkeypatch, tmp_path, variant, queue
+):
+    import json
+    from pathlib import PurePosixPath
+
+    import yaml
+
+    from nanolab.comparison.profiles import PreparedComparison
+    from nanolab.tasks.recipes.workflow import (
+        RecipeComponent,
+        RecipeDistribution,
+        RecipeImage,
+    )
+    from nanolab.workspace.paths import discover_tool_root
+
+    def component(kind, name, sdk, image):
+        return RecipeComponent(
+            kind,
+            name,
+            sdk,
+            "jvm" if kind == "control-plane" else "container",
+            RecipeImage(
+                f"127.0.0.1:5000/nanofaas/{image}:recipe-unique",
+                "sha256:" + "a" * 64,
+                "published",
+                "sha256:" + "b" * 64,
+            ),
+            None,
+            None,
+        )
+
+    shared = RecipeDistribution(
+        tmp_path / "shared.json",
+        "hash",
+        "recipe-unique",
+        None,
+        ("k8s-deployment-provider",),
+        (
+            component("control-plane", "control-plane", "java", "cp-jit"),
+            component("function", "qr-code", "rust", "rust-qr-code"),
+        ),
+    )
+    selected = RecipeDistribution(
+        tmp_path / "selected.json",
+        "hash",
+        "recipe-unique",
+        None,
+        ("k8s-deployment-provider", "async-queue"),
+        (component("control-plane", "control-plane", "java", "cp-c1"),),
+    )
+    prepared = PreparedComparison(
+        PurePosixPath("/captured/source"),
+        {"experiment-01-core-k8s-jvm-jit": shared, variant: selected}
+        if variant != "experiment-01-core-k8s-jvm-jit"
+        else {variant: shared},
+    )
+    root = discover_tool_root()
+    config = ScenarioConfig.model_validate(
+        {
+            **yaml.safe_load(
+                (root / "scenarios" / "experiment-01-pilot.yaml").read_text()
+            ),
+            "controlPlaneVariant": variant,
+        }
+    )
+    captured = {}
+    monkeypatch.setattr(
+        comparison_mod,
+        "build_loadtest_plan",
+        lambda *args, **kwargs: captured.update(kwargs) or object(),
+    )
+    build_runtime_comparison_plan(
+        config,
+        environment=None,  # type: ignore[arg-type]
+        bindings=None,  # type: ignore[arg-type]
+        control_plane_url="http://cp:8080",
+        prometheus_client=None,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        tool_root=root,
+        prepared=prepared,
+    )
+    expected_cp = "cp-jit" if queue is None else "cp-c1"
+    assert (
+        captured["prebuilt_control_plane_image"].split("/")[-1].startswith(expected_cp)
+    )
+    assert captured["prebuilt_function_images"] == {
+        "qr-code-rust": "127.0.0.1:5000/nanofaas/rust-qr-code:recipe-unique"
+    }
+    assert captured["script_name"] == "experiment-01.js"
+    assert captured["k6_events"] is True
+    assert captured.get("helm_values_overrides") is None
+    assert captured["function_concurrency"] == 2
+    assert captured["function_queue_size"] == queue
+    assert captured["function_resources"]("qr-code-rust") == {
+        "requests": {"cpu": 1.0, "memoryMiB": 256},
+        "limits": {"cpu": 1.0, "memoryMiB": 256},
+    }
+    protocol = json.loads(captured["k6_env_overrides"]["E01_PROTOCOL"])
+    assert protocol["maxVUs"] == 6000
+    assert "NANOFAAS_NEIGHBOUR" not in captured["k6_env_overrides"]
+
+
+def test_experiment_01_cannot_run_outside_a_prepared_compare(tmp_path):
+    import yaml
+
+    from nanolab.workspace.paths import discover_tool_root
+
+    root = discover_tool_root()
+    config = ScenarioConfig.model_validate(
+        yaml.safe_load((root / "scenarios" / "experiment-01-pilot.yaml").read_text())
+    )
+    with pytest.raises(ValueError, match="only through compare"):
+        build_runtime_comparison_plan(
+            config,
+            environment=None,  # type: ignore[arg-type]
+            bindings=None,  # type: ignore[arg-type]
+            control_plane_url="http://cp:8080",
+            prometheus_client=None,  # type: ignore[arg-type]
+            run_dir=tmp_path,
+            tool_root=root,
+        )

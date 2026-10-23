@@ -24,11 +24,15 @@ class K6Config:
     vus: int | None = None
     duration: str | None = None
     payload_path: Path | None = None
+    # The k6 PROCESS environment, unlike `env`, which becomes the script's
+    # `__ENV`. k6 reads its own options from here, e.g. K6_CONSOLE_OUTPUT.
+    process_env: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Normalise `stages` to a tuple and copy `env` for a frozen instance."""
+        """Normalise `stages` to a tuple and copy the environments."""
         object.__setattr__(self, "stages", tuple(self.stages))
         object.__setattr__(self, "env", dict(self.env))
+        object.__setattr__(self, "process_env", dict(self.process_env))
 
 
 @dataclass(frozen=True)
