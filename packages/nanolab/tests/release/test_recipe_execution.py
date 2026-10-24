@@ -514,6 +514,28 @@ def test_inventory_allows_guarded_included_build_cache(staged):
 
 
 @pytest.mark.nanofaas
+@pytest.mark.parametrize(
+    "plugin",
+    ["it.unimib.datai.nanofaas.control-plane-modules", "io.github.nanofaas.build"],
+)
+def test_inventory_allows_control_plane_module_build_outputs(staged, plugin):
+    source, inventory = staged
+    (source / "settings.gradle").write_text(f"plugins {{\n    id '{plugin}'\n}}\n")
+    module = source / "platform/modules/async-queue"
+    module.mkdir(parents=True)
+    (module / "module.properties").write_text("id=async-queue\n")
+    execution.capture_release_inventory(source, inventory)
+    (module / "build/libs").mkdir(parents=True)
+    (module / "build/libs/async-queue.jar").write_text("jar")
+    execution.verify_release_source(
+        inventory_file=inventory,
+        provider=LocalProvider(source.parent),
+        request=object(),
+        source_dir=ROOT + "/source",
+    )
+
+
+@pytest.mark.nanofaas
 def test_final_inspection_rejects_earlier_tag_replaced_by_later_group(staged, tmp_path):
     with pytest.raises(ValueError, match="image"):
         _run(staged, tmp_path, replace_after_default=True)

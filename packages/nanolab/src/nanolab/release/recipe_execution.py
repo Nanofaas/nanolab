@@ -70,7 +70,13 @@ for name in ("settings.gradle", "settings.gradle.kts"):
         for project, directory in re.findall(mapping, text):
             projects.discard(project.strip(":").replace(":", "/"))
             projects.add(directory)
-        if "it.unimib.datai.nanofaas.control-plane-modules" in text:
+        # The settings plugin that includes platform/modules: built in-repo until
+        # Nanofaas/nanofaas#258, published as io.github.nanofaas.build since.
+        plugins = (
+            "it.unimib.datai.nanofaas.control-plane-modules",
+            "io.github.nanofaas.build",
+        )
+        if any(plugin in text for plugin in plugins):
             for path in entries:
                 parts = Path(path).parts
                 if len(parts) == 4 and parts[:2] == ("platform", "modules"):
