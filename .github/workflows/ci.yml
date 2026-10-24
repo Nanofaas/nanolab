@@ -27,7 +27,10 @@ jobs:
   # contracts differ only by a name, and a matrix says that once.
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The nanolab leg takes 17-19 minutes on a typical runner, 7-9 of them in
+    # tests/one_shot/test_observation_workflow.py; one about a fifth slower
+    # overran 20 and was cancelled in the middle of the contracts.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
