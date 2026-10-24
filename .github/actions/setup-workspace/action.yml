@@ -33,11 +33,12 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: miciav/nanofaas
-        # Published on ci/nanolab-one-shot-79a0b21a. Includes forecasting,
-        # p2p-discovery, all one-shot Rust workloads,
-        # and the terminal execution identity / remote diagnostic fixes.
+        # main at the merge of Nanofaas/nanofaas#257, which brought in the
+        # one-shot work. Includes forecasting, p2p-discovery, all one-shot Rust
+        # workloads, the terminal execution identity / remote diagnostic
+        # fixes, and the native maxHeap recipe field (#256).
         # Keep the immutable pin aligned with the bundled recipe contracts.
-        ref: 79a0b21a804cd3ec9466b4ed9fe6a6cba64855ba
+        ref: e8c08d444e19e478e80ec1f782fee7b8c0704a97
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 

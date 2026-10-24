@@ -51,9 +51,9 @@ report carries the value, and `compare` requires it to match the recipe before
 the load. The running heap is observable in `scheduler-metrics.txt`
 (`jvm_memory_max_bytes{area="heap"}`) but is not checked.
 
-The field is in nanoFaaS `main` since Nanofaas/nanofaas#256. The CI pin
-(`79a0b21a`) predates it, so there the schema rejects it and the native builds
-fail to prepare; the operator's checkout must include #256.
+The field is in nanoFaaS `main` since Nanofaas/nanofaas#256, and in the CI pin.
+An older checkout's schema rejects it, so the native builds fail to prepare
+there; the operator's checkout must include #256.
 
 ## Protocol
 
