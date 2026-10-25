@@ -52,14 +52,18 @@ jobs:
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: |
           if [ "${{ matrix.package }}" = nanolab ]; then
-            NANOFAAS_ROOT= uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -m 'not nanofaas' --cov-fail-under=0
+            NANOFAAS_ROOT= uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -m 'not nanofaas' --cov-config=packages/nanolab/pyproject.toml --cov-fail-under=0
           else
             uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
           fi
 
+      # Both nanolab runs pass --cov-config: `-c` selects pytest's settings only,
+      # and without it nanolab's [tool.coverage] (branch coverage, fail_under) is
+      # never read. The pure run disables the threshold; this one enforces it on
+      # the combined number.
       - name: Run NanoFaaS contracts and combined coverage report
         if: ${{ !cancelled() && steps.sync.outcome == 'success' && matrix.package == 'nanolab' && steps.sync.outputs.nanofaas == 'true' }}
-        run: uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -m nanofaas --cov-append
+        run: uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -m nanofaas --cov-config=packages/nanolab/pyproject.toml --cov-append
 
       - name: Type-check ${{ matrix.package }}
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}

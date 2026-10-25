@@ -119,7 +119,7 @@ export NANOFAAS_ROOT=/path/to/nanofaas   # e.g. your working mcFaas checkout
 uv lock --check
 uv sync --locked --all-packages --all-groups
 
-uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
+uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests --cov-config=packages/nanolab/pyproject.toml
 uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
 
 uv run --locked --all-packages --all-groups ruff check packages
