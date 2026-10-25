@@ -65,10 +65,12 @@ their sibling recipe/payload files remain ordinary operator-owned inputs.
 ## Tests and supported NanoFaaS source
 
 The CI-tested NanoFaaS source revision is
-`550d8f7a3379e5441fe90afb8ade3cf345aadbac`, `main` at the merge of
-Nanofaas/nanofaas#258, which builds the recipes with the published Gradle plugin
-`io.github.nanofaas.build` 0.1.2, resolved from the Gradle Plugin Portal. It
-includes the one-shot work of Nanofaas/nanofaas#257: the five Rust one-shot
+`3327c4aa723d743a07d6b5bcd4110d4c917bef84`, `main` at the merge of
+Nanofaas/nanofaas#259, which adds the Holt and ARI forecasters used by
+`one-shot-observe.py prepare --forecast holt|ari`. It builds the recipes with the
+published Gradle plugin `io.github.nanofaas.build` 0.1.2 (Nanofaas/nanofaas#258),
+resolved from the Gradle Plugin Portal, and includes the one-shot work of
+Nanofaas/nanofaas#257: the five Rust one-shot
 workloads, forecasting and peer discovery required by the bundled recipes, the
 nullable invocation-map fix (`e0c874b9`), terminal execution identity fixes and
 the native `maxHeap` recipe field (Nanofaas/nanofaas#256).

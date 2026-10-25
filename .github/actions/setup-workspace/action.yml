@@ -33,14 +33,15 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: miciav/nanofaas
-        # main at the merge of Nanofaas/nanofaas#258, which builds the recipes
-        # with the published Gradle plugin io.github.nanofaas.build 0.1.2,
-        # resolved from the Gradle Plugin Portal. Includes the one-shot work of
-        # #257: forecasting, p2p-discovery, all one-shot Rust workloads, the
+        # main at the merge of Nanofaas/nanofaas#259, which adds the Holt and
+        # ARI forecasters behind the runtime-config `forecasting` namespace.
+        # Builds the recipes with the published Gradle plugin
+        # io.github.nanofaas.build 0.1.2 (#258) and includes the one-shot work
+        # of #257: forecasting, p2p-discovery, all one-shot Rust workloads, the
         # terminal execution identity / remote diagnostic fixes, and the native
         # maxHeap recipe field (#256).
         # Keep the immutable pin aligned with the bundled recipe contracts.
-        ref: 550d8f7a3379e5441fe90afb8ade3cf345aadbac
+        ref: 3327c4aa723d743a07d6b5bcd4110d4c917bef84
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
