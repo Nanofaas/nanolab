@@ -157,9 +157,11 @@ def test_traversal_is_rejected(tmp_path):
 def test_helper_timeout_is_bounded(tmp_path):
     executor, target, capture, _ = provision(tmp_path, "time.sleep(30)")
     started = time.monotonic()
+    # The budget also pays for the inspection before launch: at 0.2 s that often
+    # used it all, and the operation deadline fired before the helper ever ran.
     with pytest.raises(TimeoutError, match="diagnostic helper deadline exceeded"):
-        executor.execute(request(target, capture, timeout_s=0.2))  # pyright: ignore[reportArgumentType]
-    assert time.monotonic() - started < 2
+        executor.execute(request(target, capture, timeout_s=1))  # pyright: ignore[reportArgumentType]
+    assert time.monotonic() - started < 3
 
 
 def test_changed_executable_is_rejected_before_execution(tmp_path):
