@@ -111,18 +111,23 @@ def forecast_error_rows(
                     "errorVsOracle": None,
                 }
                 if function:
-                    predicted = function["forecastRate"]
-                    error = predicted - actual
-                    row.update(
-                        predictedRate=predicted,
-                        solverRate=solver_rate(predicted, plan["flowQuantum"]),
-                        error=error,
-                        absoluteError=abs(error),
-                        relativeError=error / actual if actual else None,
-                        errorVsOracle=predicted - oracle,
-                    )
+                    with_prediction(row, function["forecastRate"], plan["flowQuantum"])
                 rows.append(row)
     return rows
+
+
+def with_prediction(row: dict, predicted: float, quantum: float) -> dict:
+    """Fill a row's prediction and its errors against the actual and oracle rates."""
+    actual, error = row["actualRate"], predicted - row["actualRate"]
+    row.update(
+        predictedRate=predicted,
+        solverRate=solver_rate(predicted, quantum),
+        error=error,
+        absoluteError=abs(error),
+        relativeError=error / actual if actual else None,
+        errorVsOracle=predicted - row["oracleRate"],
+    )
+    return row
 
 
 def _statistics(rows: list[dict], period: float) -> dict:

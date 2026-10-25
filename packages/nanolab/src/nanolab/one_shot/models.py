@@ -140,9 +140,9 @@ class CampaignManifest(BaseModel):
     period_seconds: float = Field(gt=0)
     lead_seconds: float = Field(gt=0)
     flow_quantum: float = Field(gt=0)
-    modes: list[Literal["baseline", "oracle", "ewma"]]
+    modes: list[Literal["baseline", "oracle", "ewma", "holt", "ari"]]
     run_id: str = ""
-    mode: Literal["baseline", "oracle", "ewma"] = "baseline"
+    mode: Literal["baseline", "oracle", "ewma", "holt", "ari"] = "baseline"
     repetition: int = Field(default=0, ge=0)
     anchor: str = ""
     parameters: dict[str, JsonValue] = Field(default_factory=dict)

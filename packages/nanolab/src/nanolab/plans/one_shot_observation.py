@@ -33,6 +33,7 @@ from nanolab.tasks.one_shot.observation import (
     ObservationReport,
     ObserverPrecheck,
     WarmInstances,
+    forecast_properties,
     observation_forecast,
     observation_purpose,
     oracle_lifetime_seconds,
@@ -90,10 +91,10 @@ def build_one_shot_observation_plan(
         forecast_max_age_seconds=forecast["maxAgeSeconds"],
         **(
             {
-                "forecast_alpha": forecast["alpha"],
                 "forecast_window_seconds": forecast["windowSeconds"],
+                "forecast_properties": forecast_properties(forecast),
             }
-            if mode == "ewma"
+            if mode != "oracle"
             else {}
         ),
     )

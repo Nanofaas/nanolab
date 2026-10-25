@@ -74,35 +74,79 @@ def oracle_lifetime_seconds(trace, *, warmup_seconds, limits=None):
     )
 
 
+FORECASTERS = ("ewma", "holt", "ari")
+HOLT_WEIGHTS = ("level", "trend", "damping")
+
+
+def _whole(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _unit(value) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and 0 < value <= 1
+    )
+
+
 def observation_forecast(protocol: dict) -> dict:
-    """Return the frozen forecast source: ORACLE unless the freeze selected EWMA."""
+    """Return the frozen forecast source: ORACLE unless the freeze selected another."""
     forecast = protocol.get("forecast")
     if forecast is None:
         return {"provider": "oracle", "maxAgeSeconds": protocol["oracleMaxAgeSeconds"]}
-    alpha, window, age = (
-        forecast.get(key) for key in ("alpha", "windowSeconds", "maxAgeSeconds")
-    )
-    if (
-        forecast.get("provider") != "ewma"
-        or isinstance(alpha, bool)
-        or not isinstance(alpha, (int, float))
-        or not 0 < alpha <= 1
-        or any(isinstance(v, bool) or not isinstance(v, int) for v in (window, age))
-        or not 0 < window < age
+    provider = forecast.get("provider")
+    window, age = forecast.get("windowSeconds"), forecast.get("maxAgeSeconds")
+    if provider not in FORECASTERS or not (
+        _whole(window) and _whole(age) and 0 < window < age
     ):
         raise ValueError(
-            "EWMA forecast needs alpha in (0, 1], a whole-second window "
+            "a forecast needs ewma, holt or ari, a whole-second window "
             "and a longer max age"
+        )
+    # NanoFaaS keeps 4 to 100000 complete windows for Holt and ARI.
+    history = forecast.get("historyWindows")
+    order = forecast.get("order")
+    holt = forecast.get("holt") or {}
+    if provider == "ewma" and not _unit(forecast.get("alpha")):
+        raise ValueError("an EWMA forecast needs alpha in (0, 1]")
+    if provider != "ewma" and not (_whole(history) and 4 <= history <= 100_000):
+        raise ValueError(f"a {provider} forecast needs a history of 4-100000 windows")
+    if provider == "holt" and not all(_unit(holt.get(k)) for k in HOLT_WEIGHTS):
+        raise ValueError("a holt forecast needs level, trend and damping in (0, 1]")
+    if provider == "ari" and not (
+        _whole(order) and 1 <= order <= 64 and 2 * order + 2 <= history
+    ):
+        raise ValueError(
+            "an ari forecast needs an order in [1, 64] within (history - 2) / 2"
         )
     return forecast
 
 
+def forecast_properties(forecast: dict) -> dict[str, str]:
+    """NanoFaaS forecasting properties beyond provider, window and max age."""
+    provider = forecast["provider"]
+    if provider == "ewma":
+        return {"alpha": repr(forecast["alpha"])}
+    if provider == "holt":
+        return {
+            "history": str(forecast["historyWindows"]),
+            **{f"holt.{k}": repr(forecast["holt"][k]) for k in HOLT_WEIGHTS},
+        }
+    if provider == "ari":
+        return {
+            "history": str(forecast["historyWindows"]),
+            "ari.order": str(forecast["order"]),
+        }
+    return {}
+
+
 def observation_purpose(mode: str) -> str:
-    """Keep the ORACLE observation's historical name; name the EWMA one apart."""
+    """Keep the ORACLE observation's historical name; name the others apart."""
     return (
         "first-functional-oracle-observation"
         if mode == "oracle"
-        else "ewma-forecast-observation"
+        else f"{mode}-forecast-observation"
     )
 
 
@@ -594,8 +638,9 @@ class ConfigureOracle(Task):
     def __init__(self, run):
         """Bind the frozen observation context."""
         self.run_context = run
-        if getattr(run, "mode", "oracle") == "ewma":
-            self.title = "Configure observed EWMA forecasts"
+        mode = getattr(run, "mode", "oracle")
+        if mode != "oracle":
+            self.title = f"Configure observed {mode.upper()} forecasts"
 
     def run(self, inputs):
         """Execute this observation stage on the owned resources."""
@@ -638,12 +683,12 @@ class ConfigureOracle(Task):
                     revision=client.status().revision,
                     output=run.run_dir / "api.jsonl",
                 )
-                if run.mode == "ewma":
+                if run.mode != "oracle":
                     # Each node forecasts from the arrivals it observes; the
                     # trace stays in the run only to measure the forecast error.
                     event(
                         run.run_dir,
-                        "ewma-configured",
+                        f"{run.mode}-configured",
                         node=node,
                         forecast=run.forecast,
                     )

@@ -360,7 +360,9 @@ def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypat
 @pytest.mark.parametrize("baseline", [False, True])
 @pytest.mark.parametrize("scientific", [False, True])
 @pytest.mark.parametrize("forecast_max_age_seconds", [None, 4110])
-@pytest.mark.parametrize("ewma", [None, (60, 0.5)])
+@pytest.mark.parametrize(
+    "forecaster", [None, (10, {"history": "360", "ari.order": "6"})]
+)
 def test_control_plane_namespace_and_compensated_cleanup(
     tmp_path,
     monkeypatch,
@@ -369,7 +371,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
     baseline,
     scientific,
     forecast_max_age_seconds,
-    ewma,
+    forecaster,
 ):
     from types import SimpleNamespace
 
@@ -450,8 +452,11 @@ def test_control_plane_namespace_and_compensated_cleanup(
         scientific=scientific,
         forecast_max_age_seconds=forecast_max_age_seconds,
         **(
-            {"forecast_window_seconds": ewma[0], "forecast_alpha": ewma[1]}
-            if ewma
+            {
+                "forecast_window_seconds": forecaster[0],
+                "forecast_properties": forecaster[1],
+            }
+            if forecaster
             else {}
         ),
         baseline_depth=2 if baseline else None,
@@ -494,15 +499,20 @@ def test_control_plane_namespace_and_compensated_cleanup(
             argument
             for argument in launch
             if argument.startswith(
-                ("--nanofaas.forecasting.window=", "--nanofaas.forecasting.alpha=")
+                (
+                    "--nanofaas.forecasting.window=",
+                    "--nanofaas.forecasting.history=",
+                    "--nanofaas.forecasting.ari.",
+                )
             )
         ]
         assert forecasting == (
             [
-                "--nanofaas.forecasting.window=60s",
-                "--nanofaas.forecasting.alpha=0.5",
+                "--nanofaas.forecasting.window=10s",
+                "--nanofaas.forecasting.history=360",
+                "--nanofaas.forecasting.ari.order=6",
             ]
-            if ewma
+            if forecaster
             else ["--nanofaas.forecasting.window=1s"]
         )
         if baseline and not terminal_queueing:

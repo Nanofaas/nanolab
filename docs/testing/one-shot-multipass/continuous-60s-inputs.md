@@ -41,10 +41,13 @@ separate; `runtimeReady` deliberately remains false.
 The prepared campaign bundle and readable routing/memory CSVs live in the
 private `Nanofaas/dfaas-documents` repository, under
 `experiments/one-shot-continuous-60s-2026-10-14/`.
-The updated manual logical observation mode accepts 60-second decisions with
-the existing auction 60 s, preparation 10 s and lead 90 s settings. Qualified
-and automatic modes retain their timing checks. Actual activation/expiry
-deadlines remain in force; recorded maxima are not a promise that each epoch
+The 14 October run kept auction 60 s, preparation 10 s and lead 90 s, which the
+unpublished runtime it was built from (`c335eb9d`) accepted with 60-second
+decisions. NanoFaaS main refuses them: the lead must be shorter than the period,
+and auction plus preparation must fit in both. New minute freezes use auction
+10 s, preparation 10 s and lead 30 s; in that run negotiation took at most
+1.4 s and activation at most 4.8 s. Actual activation/expiry deadlines remain in
+force; recorded maxima are not a promise that each epoch
 will finish. The generator continues independently during negotiation.
 
 Tests reuse the existing environments; no package installation is needed:
@@ -77,8 +80,10 @@ uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py p
 
 Preparation checks the parent's archived inventory independently of its retired
 external checkout/environment. The new freeze binds the current runtime, package,
-dependencies, oracle and calendar. It records `timingPolicy=observe` and keeps
-all prior resource and timeout values. No load or VM is started by preparation.
+dependencies, oracle and calendar. Apart from the auction, preparation and lead
+above, it keeps all prior resource and timeout values. Preparation and the run
+check these three against NanoFaaS's configuration rules. No load or VM is
+started by preparation.
 
 One command then owns provisioning, collection, load, supervision, reporting,
 archiving and cleanup:
@@ -99,10 +104,11 @@ Request rejects/errors remain separate measured results. Existing plan expiry
 and routing/transition behavior is preserved; an expired plan is not extended
 just to make an epoch look successful.
 
-## The same minute run with the EWMA load forecast
+## The same minute run with a NanoFaaS load forecast
 
-The one-minute observation can replace the ORACLE with NanoFaaS's own load
-forecast. Prepare it like the ORACLE run, adding `--forecast ewma`:
+The one-minute observation can replace the ORACLE with one of NanoFaaS's own
+load forecasts. Prepare it like the ORACLE run, adding `--forecast ewma`,
+`--forecast holt` or `--forecast ari`:
 
 ```bash
 uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py prepare \
@@ -112,24 +118,33 @@ uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py p
   --observations /path/to/original-continuous-freeze/observations.json \
   --distribution /path/to/new-runtime-distribution/distribution.json \
   --source /path/to/new-runtime-source \
-  --forecast ewma \
-  --output /path/to/new-ewma-freeze
+  --forecast holt \
+  --output /path/to/new-holt-freeze
 ```
 
-Each edge node then forecasts every function's external arrivals as an
-exponentially weighted moving average of complete UTC-aligned windows:
-`--forecast-alpha` (default 0.5) weights the latest window and
-`--forecast-window-seconds` (default 60, the decision period) sets its length.
-The freeze records them in `operator-protocol.json` under `forecast`, with a
-maximum age of two windows: NanoFaaS dates an EWMA forecast at the start of its
+Each edge node then forecasts every function's external arrivals from complete
+UTC-aligned windows of `--forecast-window-seconds`: by default 60 for EWMA, 10
+for Holt and ARI. EWMA is an exponentially weighted moving average whose
+`--forecast-alpha` (default 0.5) weights the latest window. Holt follows a damped
+trend (`--holt-level`, `--holt-trend`, `--holt-damping`; defaults 0.4, 0.4, 0.95)
+and ARI an autoregression of the window-to-window changes (`--ari-order`,
+default 6), both over the latest 360 windows. Unlike EWMA, they forecast each
+window up to the interval and answer the mean over it; NanoFaaS's
+`docs/forecasting.md` defines them. The runtime needs Nanofaas/nanofaas#259.
+The freeze records the settings in `operator-protocol.json` under `forecast`,
+with a maximum age of two windows: NanoFaaS dates a forecast at the start of its
 current window. Each auction freezes its forecasts when it starts, the lead
-(90 s) before its interval, so the latest window it averages ended at least that
-long before the interval it predicts. The trace is not uploaded to any node; it
-stays in the run only to measure the error. Calendar, resources, timeouts, auction and lead are those
-of the ORACLE run, and the manifest mode is `ewma`. Freezes prepared without the
-option keep the ORACLE and their historical protocol unchanged.
+(30 s) before its interval. With 60 s windows the latest complete one then ended
+30 to 90 s before the interval it predicts, depending on where the anchor falls
+in the UTC minute; the interval just before is never complete. With the
+14 October timing, each auction starting just after the previous activation, it
+would have ended 70.75 s before. 10 s windows end 30 to 40 s before. The trace
+is not uploaded to any node; it stays in the run only to measure the error.
+Calendar, resources, timeouts, auction and lead are those of an ORACLE minute
+freeze, and the manifest mode is the forecaster's name. Freezes prepared without
+the option keep the ORACLE and their historical protocol unchanged.
 
-Every observation run, ORACLE or EWMA, ends with `forecast-errors.csv` and
+Every observation run, whatever its forecast, ends with `forecast-errors.csv` and
 `forecast-errors.json`, also after a failure that left `epochs.jsonl`. The CSV
 has one row per interval, edge node and function: 54 x 5 x 5 = 1,350 rows. The
 cloud runs no auction and has no forecast.
@@ -164,8 +179,38 @@ On the archived ORACLE minute run of 14 October 2026 this finds a plan for all
 1,350 cells. `errorVsOracle` is zero throughout, and the error stays within two
 requests per minute (±0.033 requests/s), with a mean absolute error of 0.0106.
 That is the 0.05 requests/s rounding of the oracle against the integer arrivals
-of each minute, so it is the baseline for the EWMA errors. Two cells of the 1,350 differ by one request between
+of each minute, so it is the baseline for the forecasters' errors. Two cells of the 1,350 differ by one request between
 emitted and scheduled counts.
+
+### Replaying the forecasters offline
+
+The arrivals of a finished run can be replayed, without VMs, through Python copies
+of NanoFaaS's EWMA, Holt and ARI as merged in Nanofaas/nanofaas#259. Each interval
+is queried its lead before it starts, the run's own unless `--lead-seconds` is
+given, and the results go to a new directory:
+
+```bash
+uv run --frozen --all-packages --all-groups python scripts/one-shot-forecast-replay.py \
+  /path/to/run-or-archive --output /path/to/new-forecast-replay --lead-seconds 30 \
+  --forecaster ewma:window=60,alpha=0.5 --forecaster holt:window=10 \
+  --forecaster ari:window=10,order=6
+```
+
+`--forecaster provider:key=value,...` repeats; the keys are `window` (default 10),
+`alpha`, `level`, `trend`, `damping`, `order` and `history`, with NanoFaaS's
+defaults. Without it the replay uses EWMA with 60 s windows and alpha 0.5, EWMA
+with 10 s windows and alpha 0.7, Holt and ARI. `forecast-replay.csv` has the
+`forecast-errors.csv` columns preceded by `model`; `forecastSource` is `replay`,
+or `no-window` before the first complete window. `forecast-replay.json` holds one
+summary per model. The replay counts the generator's emitted requests, assumes each
+function registered 60 s before the first arrival, and queries at the nominal lead
+rather than at each auction's actual start. The copies agree with the Java classes
+to within 1e-12, which a test pins.
+
+On the archived ORACLE minute run with a 30 s lead, the mean absolute error is
+37.3 requests per minute for EWMA with 60 s windows, 15.7 for EWMA with 10 s
+windows and alpha 0.7, 7.5 for Holt and 8.6 for ARI, against a mean of 62
+requests per minute per cell.
 
 ## Physical evidence collection after the minute-run diagnosis
 

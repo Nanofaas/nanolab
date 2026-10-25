@@ -59,9 +59,43 @@ def test_real_nine_epoch_observation_workflow(
     )
 
 
-@pytest.mark.parametrize("failure", [None, "auction"])
-def test_ewma_minute_observation_forecasts_from_arrivals(
-    tmp_path, monkeypatch, failure
+EWMA = {"provider": "ewma", "alpha": 0.5, "windowSeconds": 60, "maxAgeSeconds": 120}
+HOLT = {
+    "provider": "holt",
+    "windowSeconds": 10,
+    "maxAgeSeconds": 20,
+    "historyWindows": 360,
+    "holt": {"level": 0.4, "trend": 0.4, "damping": 0.95},
+}
+ARI = {
+    "provider": "ari",
+    "windowSeconds": 10,
+    "maxAgeSeconds": 20,
+    "historyWindows": 360,
+    "order": 6,
+}
+
+
+@pytest.mark.parametrize(
+    ("forecast", "failure", "properties"),
+    [
+        (EWMA, None, {"alpha": "0.5"}),
+        (EWMA, "auction", {"alpha": "0.5"}),
+        (
+            HOLT,
+            None,
+            {
+                "history": "360",
+                "holt.level": "0.4",
+                "holt.trend": "0.4",
+                "holt.damping": "0.95",
+            },
+        ),
+        (ARI, None, {"history": "360", "ari.order": "6"}),
+    ],
+)
+def test_minute_observation_forecasts_from_arrivals(
+    tmp_path, monkeypatch, forecast, failure, properties
 ):
     platforms = run_observation_workflow(
         tmp_path,
@@ -71,19 +105,20 @@ def test_ewma_minute_observation_forecasts_from_arrivals(
         period=60,
         epoch_count=54,
         display="none",
-        forecast="ewma",
+        forecast=forecast,
     )
-    assert platforms["forecast_provider"] == "EWMA"
-    assert platforms["forecast_alpha"] == 0.5
-    assert platforms["forecast_window_seconds"] == 60
-    assert platforms["forecast_max_age_seconds"] == 120
+    provider = forecast["provider"]
+    assert platforms["forecast_provider"] == provider.upper()
+    assert platforms["forecast_properties"] == properties
+    assert platforms["forecast_window_seconds"] == forecast["windowSeconds"]
+    assert platforms["forecast_max_age_seconds"] == forecast["maxAgeSeconds"]
     raw = tmp_path / "raw"
     manifest = json.loads((raw / "manifest.json").read_text())
-    assert (manifest["mode"], manifest["modes"]) == ("ewma", ["ewma"])
+    assert (manifest["mode"], manifest["modes"]) == (provider, [provider])
     observed = json.loads((raw / "observation.json").read_text())
-    assert observed["purpose"] == "ewma-forecast-observation"
+    assert observed["purpose"] == f"{provider}-forecast-observation"
     progress = (raw / "progress.jsonl").read_text()
-    assert progress.count('"ewma-configured"') == 5
+    assert progress.count(f'"{provider}-configured"') == 5
     assert '"oracle-configured"' not in progress
 
 
@@ -96,7 +131,7 @@ def run_observation_workflow(
     period,
     epoch_count,
     display,
-    forecast="oracle",
+    forecast=None,
 ):
     raw, freeze, archive = (tmp_path / name for name in ("raw", "freeze", "archive"))
     raw.mkdir()
@@ -254,18 +289,7 @@ def run_observation_workflow(
             "maxOperationalFraction": 1,
             "oracleMaxAgeSeconds": 4230,
             "protocol": settings.timing.protocol.model_dump(by_alias=True),
-            **(
-                {
-                    "forecast": {
-                        "provider": "ewma",
-                        "alpha": 0.5,
-                        "windowSeconds": 60,
-                        "maxAgeSeconds": 120,
-                    }
-                }
-                if forecast == "ewma"
-                else {}
-            ),
+            **({"forecast": forecast} if forecast else {}),
         },
     )
     save(
@@ -835,7 +859,7 @@ def run_observation_workflow(
             for node, path, data in calls
             if path.endswith("/forecasting/trace")
         ]
-        assert len(uploads) == (0 if forecast == "ewma" else 5)
+        assert len(uploads) == (0 if forecast else 5)
         errors = list(csv.DictReader((raw / "forecast-errors.csv").open()))
         assert len(errors) == epoch_count * 25
         planned = [row for row in errors if row["forecastSource"] == "plan"]

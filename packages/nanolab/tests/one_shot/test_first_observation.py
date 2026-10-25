@@ -175,20 +175,23 @@ def test_native_timing_budget_is_validated_without_performance_gates(observer):
         observer.validate_operator_protocol(protocol)
 
 
-def test_ewma_forecast_is_frozen_only_when_selected(observer, tmp_path):
+def test_forecasts_are_frozen_only_when_selected(observer, tmp_path):
     from types import SimpleNamespace
 
     required = [
         f"--{key}={tmp_path}"
         for key in ("tuning", "observations", "distribution", "source", "output")
     ]
-    assert observer.forecast_protocol(observer.parse_args(["prepare", *required])) == {}
+
+    def frozen(*options):
+        return observer.forecast_protocol(
+            observer.parse_args(["prepare", *required, *options])
+        )
+
+    assert frozen() == {}
     # Callers that build their own arguments predate the option: ORACLE.
     assert observer.forecast_protocol(SimpleNamespace()) == {}
-    frozen = observer.forecast_protocol(
-        observer.parse_args(["prepare", *required, "--forecast", "ewma"])
-    )
-    assert frozen == {
+    assert frozen("--forecast", "ewma") == {
         "forecast": {
             "provider": "ewma",
             "alpha": 0.5,
@@ -196,34 +199,49 @@ def test_ewma_forecast_is_frozen_only_when_selected(observer, tmp_path):
             "maxAgeSeconds": 120,
         }
     }
-    chosen = observer.parse_args(
-        [
-            "prepare",
-            *required,
-            "--forecast=ewma",
-            "--forecast-alpha=0.3",
-            "--forecast-window-seconds=30",
-        ]
-    )
-    assert observer.forecast_protocol(chosen)["forecast"] == {
+    assert frozen(
+        "--forecast=ewma", "--forecast-alpha=0.3", "--forecast-window-seconds=30"
+    )["forecast"] == {
         "provider": "ewma",
         "alpha": 0.3,
         "windowSeconds": 30,
         "maxAgeSeconds": 60,
     }
-    with pytest.raises(ValueError, match="require --forecast ewma"):
-        observer.forecast_protocol(
-            observer.parse_args(["prepare", *required, "--forecast-alpha=0.3"])
-        )
-    for wrong in (
-        "--forecast-alpha=1.5",
-        "--forecast-alpha=0",
-        "--forecast-window-seconds=0",
+    assert frozen("--forecast=holt")["forecast"] == {
+        "provider": "holt",
+        "windowSeconds": 10,
+        "maxAgeSeconds": 20,
+        "historyWindows": 360,
+        "holt": {"level": 0.4, "trend": 0.4, "damping": 0.95},
+    }
+    assert frozen("--forecast=holt", "--holt-trend=0.2", "--holt-damping=1")[
+        "forecast"
+    ]["holt"] == {"level": 0.4, "trend": 0.2, "damping": 1}
+    assert frozen("--forecast=ari", "--ari-order=12")["forecast"] == {
+        "provider": "ari",
+        "windowSeconds": 10,
+        "maxAgeSeconds": 20,
+        "historyWindows": 360,
+        "order": 12,
+    }
+    for mismatched in (
+        ["--forecast-alpha=0.3"],
+        ["--forecast-window-seconds=10"],
+        ["--forecast=holt", "--forecast-alpha=0.3"],
+        ["--forecast=ari", "--holt-level=0.3"],
     ):
-        with pytest.raises(ValueError, match="EWMA forecast needs"):
-            observer.forecast_protocol(
-                observer.parse_args(["prepare", *required, "--forecast=ewma", wrong])
-            )
+        with pytest.raises(ValueError, match="must match the --forecast provider"):
+            frozen(*mismatched)
+    for wrong in (
+        ["--forecast=ewma", "--forecast-alpha=1.5"],
+        ["--forecast=ewma", "--forecast-alpha=0"],
+        ["--forecast=ewma", "--forecast-window-seconds=0"],
+        ["--forecast=holt", "--holt-level=0"],
+        ["--forecast=ari", "--ari-order=0"],
+        ["--forecast=ari", "--ari-order=180"],
+    ):
+        with pytest.raises(ValueError, match="forecast needs"):
+            frozen(*wrong)
 
 
 @pytest.mark.parametrize(
@@ -233,6 +251,28 @@ def test_ewma_forecast_is_frozen_only_when_selected(observer, tmp_path):
         {"provider": "ewma", "alpha": True, "windowSeconds": 60, "maxAgeSeconds": 120},
         {"provider": "ewma", "alpha": 0.5, "windowSeconds": 1.5, "maxAgeSeconds": 120},
         {"provider": "ewma", "alpha": 0.5, "windowSeconds": 60, "maxAgeSeconds": 60},
+        {"provider": "holt", "windowSeconds": 10, "maxAgeSeconds": 20, "holt": {}},
+        {
+            "provider": "holt",
+            "windowSeconds": 10,
+            "maxAgeSeconds": 20,
+            "historyWindows": 360,
+            "holt": {"level": 0.4, "trend": 0.4},
+        },
+        {
+            "provider": "ari",
+            "windowSeconds": 10,
+            "maxAgeSeconds": 20,
+            "historyWindows": 3,
+            "order": 1,
+        },
+        {
+            "provider": "ari",
+            "windowSeconds": 10,
+            "maxAgeSeconds": 20,
+            "historyWindows": 360,
+            "order": 6.0,
+        },
     ],
 )
 def test_frozen_forecast_block_is_checked_before_use(observer, forecast):
@@ -244,7 +284,7 @@ def test_frozen_forecast_block_is_checked_before_use(observer, forecast):
         "protocol": {"auctionSeconds": 4, "preparationSeconds": 1},
         "forecast": forecast,
     }
-    with pytest.raises(ValueError, match="EWMA forecast needs"):
+    with pytest.raises(ValueError, match="forecast needs"):
         observer.validate_operator_protocol(protocol)
 
 
@@ -887,19 +927,36 @@ def test_invalid_arrival_profile_stops_prepare_before_output(observer, tmp_path)
     assert not (tmp_path / "output").exists()
 
 
-def test_minute_observation_records_timing_instead_of_rejecting_maxima(observer):
+@pytest.mark.parametrize(
+    ("lead", "auction", "preparation"),
+    [
+        # 14 October: NanoFaaS main refuses a lead longer than the period and a
+        # budget beyond it, whatever policy a freeze records.
+        (90, 60, 10),
+        (60, 10, 10),
+        (30, 25, 10),
+        (10, 5, 10),
+    ],
+)
+def test_minute_timing_follows_the_native_configuration_checks(
+    observer, lead, auction, preparation
+):
     protocol = {
         "maxOperationalFraction": 1,
         "maxAuctionFraction": 1,
         "periodSeconds": 60,
-        "leadSeconds": 90,
-        "protocol": {"auctionSeconds": 60, "preparationSeconds": 10},
+        "leadSeconds": 30,
+        "protocol": {"auctionSeconds": 10, "preparationSeconds": 10},
     }
+    observer.validate_operator_protocol(protocol)
+    protocol["leadSeconds"] = lead
+    protocol["protocol"] = {
+        "auctionSeconds": auction,
+        "preparationSeconds": preparation,
+    }
+    protocol["timingPolicy"] = "observe"
     with pytest.raises(ValueError, match="operational budget"):
         observer.validate_operator_protocol(protocol)
-    protocol["timingPolicy"] = "observe"
-    observer.validate_operator_protocol(protocol)
-    assert protocol["protocol"] == {"auctionSeconds": 60, "preparationSeconds": 10}
 
 
 def test_derived_scenario_changes_grid_but_keeps_resources_and_timeouts(
@@ -922,8 +979,13 @@ def test_derived_scenario_changes_grid_but_keeps_resources_and_timeouts(
     assert scenario["oneShot"]["functions"] == source["oneShot"]["functions"]
     assert len(scenario["oneShot"]["experiment"]["windows"]) == 54
     assert scenario["oneShot"]["timing"]["periodCandidatesSeconds"] == [60]
-    assert scenario["oneShot"]["timing"]["protocol"]["auctionSeconds"] == 60
-    assert scenario["oneShot"]["timing"]["protocol"]["preparationSeconds"] == 10
+    protocol = scenario["oneShot"]["timing"]["protocol"]
+    assert (protocol["auctionSeconds"], protocol["preparationSeconds"]) == (10, 10)
+    assert (protocol["peerSeconds"], protocol["solverSeconds"]) == (5, 5)
+    assert scenario["oneShot"]["operationalLimits"]["leadSeconds"] == 30
+    six_minute = observer.bind_scenario(source, distribution)
+    assert six_minute["oneShot"]["timing"]["protocol"]["auctionSeconds"] == 60
+    assert six_minute["oneShot"]["operationalLimits"]["leadSeconds"] == 90
 
 
 def test_parent_archive_integrity_does_not_require_retired_environments(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one unqualified ORACLE or EWMA observation on owned NanoLab infrastructure."""
+"""Run one unqualified ORACLE, EWMA, Holt or ARI observation on owned NanoLab VMs."""
 
 # Frozen-package selection must precede all third-party/application imports.
 import argparse
@@ -27,14 +27,20 @@ def parse_args(argv=None):
     prep.add_argument("--parent-freeze", type=Path)
     prep.add_argument(
         "--forecast",
-        choices=("oracle", "ewma"),
+        choices=("oracle", "ewma", "holt", "ari"),
         default="oracle",
-        help="ORACLE uploads the trace; EWMA forecasts from each node's arrivals",
+        help="ORACLE uploads the trace; the others forecast each node's arrivals",
+    )
+    prep.add_argument(
+        "--forecast-window-seconds",
+        type=int,
+        help="not ORACLE; default 60 for EWMA, 10 for Holt and ARI",
     )
     prep.add_argument("--forecast-alpha", type=float, help="EWMA only; default 0.5")
-    prep.add_argument(
-        "--forecast-window-seconds", type=int, help="EWMA only; default 60"
-    )
+    prep.add_argument("--holt-level", type=float, help="Holt only; default 0.4")
+    prep.add_argument("--holt-trend", type=float, help="Holt only; default 0.4")
+    prep.add_argument("--holt-damping", type=float, help="Holt only; default 0.95")
+    prep.add_argument("--ari-order", type=int, help="ARI only; default 6")
     launch = commands.add_parser("run")
     launch.add_argument("freeze", type=Path)
     launch.add_argument("output", type=Path)
@@ -107,39 +113,70 @@ def validate_operator_protocol(protocol):
         raise ValueError(
             "maxAuctionFraction must match the shared configuration epsilon"
         )
-    budget = (
-        protocol["protocol"]["auctionSeconds"]
-        + protocol["protocol"]["preparationSeconds"]
-    )
+    period, lead = protocol["periodSeconds"], protocol["leadSeconds"]
+    preparation = protocol["protocol"]["preparationSeconds"]
+    budget = protocol["protocol"]["auctionSeconds"] + preparation
+    # The checks NanoFaaS makes when the nodes are configured, before any VM.
     if (
-        protocol.get("timingPolicy") != "observe"
-        and budget > protocol["periodSeconds"] * protocol["maxOperationalFraction"]
-    ) or budget > protocol["leadSeconds"]:
+        budget > min(lead, period * protocol["maxOperationalFraction"])
+        or not preparation < lead < period
+    ):
         raise ValueError(
-            "native operational budget must fit the period fraction and lead time"
+            "native operational budget must fit the period fraction and lead time, "
+            "and the lead must be shorter than the period"
         )
     if "forecast" in protocol:
         observation_forecast(protocol)
 
 
+# Option, frozen key and default of each forecaster's own parameters.
+FORECAST_OPTIONS = {
+    "ewma": {"forecast_alpha": ("alpha", 0.5)},
+    "holt": {
+        "holt_level": ("level", 0.4),
+        "holt_trend": ("trend", 0.4),
+        "holt_damping": ("damping", 0.95),
+    },
+    "ari": {"ari_order": ("order", 6)},
+}
+FORECAST_WINDOW_SECONDS = {"ewma": 60, "holt": 10, "ari": 10}
+# NanoFaaS's default number of complete windows kept for Holt and ARI.
+FORECAST_HISTORY_WINDOWS = 360
+
+
 def forecast_protocol(args):
-    """Freeze the EWMA settings; ORACLE keeps its historical protocol unchanged."""
-    alpha = getattr(args, "forecast_alpha", None)
-    window = getattr(args, "forecast_window_seconds", None)
-    if getattr(args, "forecast", "oracle") == "oracle":
-        if alpha is not None or window is not None:
-            raise ValueError("EWMA options require --forecast ewma")
-        return {}
-    window = 60 if window is None else window
-    protocol = {
-        "forecast": {
-            "provider": "ewma",
-            "alpha": 0.5 if alpha is None else alpha,
-            "windowSeconds": window,
-            # NanoFaaS dates an EWMA forecast at its current window's start.
-            "maxAgeSeconds": 2 * window,
-        }
+    """Freeze the forecaster's settings; ORACLE keeps its historical protocol."""
+    provider = getattr(args, "forecast", "oracle")
+    given = {
+        name
+        for options in FORECAST_OPTIONS.values()
+        for name in options
+        if getattr(args, name, None) is not None
     }
+    window = getattr(args, "forecast_window_seconds", None)
+    if given - set(FORECAST_OPTIONS.get(provider, {})) or (
+        provider == "oracle" and window is not None
+    ):
+        raise ValueError("forecast options must match the --forecast provider")
+    if provider == "oracle":
+        return {}
+    window = FORECAST_WINDOW_SECONDS[provider] if window is None else window
+    values = {
+        key: default if getattr(args, name, None) is None else getattr(args, name)
+        for name, (key, default) in FORECAST_OPTIONS[provider].items()
+    }
+    forecast = {
+        "provider": provider,
+        "windowSeconds": window,
+        # NanoFaaS dates a forecast at its current window's start.
+        "maxAgeSeconds": 2 * window,
+    }
+    if provider == "ewma":
+        forecast["alpha"] = values["alpha"]
+    else:
+        forecast["historyWindows"] = FORECAST_HISTORY_WINDOWS
+        forecast |= {"holt": values} if provider == "holt" else values
+    protocol = {"forecast": forecast}
     observation_forecast(protocol)
     return protocol
 
@@ -170,6 +207,11 @@ def bind_scenario(source, distribution, *, trace=None):
         ]
         settings["timing"]["periodCandidatesSeconds"] = [trace.period_seconds]
         settings["timing"]["maxTraceResolutionSeconds"] = trace.period_seconds
+        # One-minute decisions: NanoFaaS wants the lead shorter than the period
+        # and auction plus preparation within both. On 14 October negotiation
+        # took at most 1.4 s and activation 4.8 s.
+        settings["timing"]["protocol"].update(auctionSeconds=10, preparationSeconds=10)
+        settings["operationalLimits"]["leadSeconds"] = 30
     settings["experiment"] = {
         "windows": [{**row, "epochs": 1} for row in settings["timing"]["matrix"]],
         "repetitions": 1,
@@ -403,8 +445,6 @@ def prepare(args):
         ),
         **forecast,
     }
-    if derived:
-        protocol["timingPolicy"] = "observe"
     validate_operator_protocol(protocol)
     save(args.output / "operator-protocol.json", protocol)
     deps = {

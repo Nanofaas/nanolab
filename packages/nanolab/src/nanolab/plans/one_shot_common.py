@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from importlib.resources import files
 from pathlib import Path
@@ -162,7 +163,7 @@ def _control_plane(
     strict_memory: bool = False,
     forecast_max_age_seconds: int | None = None,
     forecast_window_seconds: int = 1,
-    forecast_alpha: float | None = None,
+    forecast_properties: Mapping[str, str] | None = None,
     settings=None,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
@@ -311,9 +312,8 @@ def _control_plane(
             f"--nanofaas.forecasting.provider={forecast_provider}",
             f"--nanofaas.forecasting.window={forecast_window_seconds}s",
             *(
-                [f"--nanofaas.forecasting.alpha={forecast_alpha!r}"]
-                if forecast_alpha is not None
-                else []
+                f"--nanofaas.forecasting.{key}={value}"
+                for key, value in (forecast_properties or {}).items()
             ),
             *(
                 [f"--nanofaas.forecasting.max-age={forecast_max_age_seconds}s"]
@@ -402,7 +402,7 @@ def add_one_shot_platforms(
     observer_bootstrap: bool = False,
     forecast_max_age_seconds: int | None = None,
     forecast_window_seconds: int = 1,
-    forecast_alpha: float | None = None,
+    forecast_properties: Mapping[str, str] | None = None,
     supervision=None,
 ) -> OneShotTopology:
     """Compose existing staged recipes, bootstrap and function resources per VM."""
@@ -610,7 +610,7 @@ def add_one_shot_platforms(
             forecast_provider=forecast_provider,
             forecast_max_age_seconds=forecast_max_age_seconds,
             forecast_window_seconds=forecast_window_seconds,
-            forecast_alpha=forecast_alpha,
+            forecast_properties=forecast_properties,
             settings=settings,
             terminal_queueing=terminal_queueing,
             baseline_depth=max(
