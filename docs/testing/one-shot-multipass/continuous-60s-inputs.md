@@ -99,6 +99,74 @@ Request rejects/errors remain separate measured results. Existing plan expiry
 and routing/transition behavior is preserved; an expired plan is not extended
 just to make an epoch look successful.
 
+## The same minute run with the EWMA load forecast
+
+The one-minute observation can replace the ORACLE with NanoFaaS's own load
+forecast. Prepare it like the ORACLE run, adding `--forecast ewma`:
+
+```bash
+uv run --frozen --all-packages --all-groups python scripts/one-shot-observe.py prepare \
+  --tuning /path/to/one-minute-preparation \
+  --arrival-profile /path/to/one-minute-preparation/arrival-profile.json \
+  --parent-freeze /path/to/original-continuous-freeze \
+  --observations /path/to/original-continuous-freeze/observations.json \
+  --distribution /path/to/new-runtime-distribution/distribution.json \
+  --source /path/to/new-runtime-source \
+  --forecast ewma \
+  --output /path/to/new-ewma-freeze
+```
+
+Each edge node then forecasts every function's external arrivals as an
+exponentially weighted moving average of complete UTC-aligned windows:
+`--forecast-alpha` (default 0.5) weights the latest window and
+`--forecast-window-seconds` (default 60, the decision period) sets its length.
+The freeze records them in `operator-protocol.json` under `forecast`, with a
+maximum age of two windows: NanoFaaS dates an EWMA forecast at the start of its
+current window. Each auction freezes its forecasts when it starts, the lead
+(90 s) before its interval, so the latest window it averages ended at least that
+long before the interval it predicts. The trace is not uploaded to any node; it
+stays in the run only to measure the error. Calendar, resources, timeouts, auction and lead are those
+of the ORACLE run, and the manifest mode is `ewma`. Freezes prepared without the
+option keep the ORACLE and their historical protocol unchanged.
+
+Every observation run, ORACLE or EWMA, ends with `forecast-errors.csv` and
+`forecast-errors.json`, also after a failure that left `epochs.jsonl`. The CSV
+has one row per interval, edge node and function: 54 x 5 x 5 = 1,350 rows. The
+cloud runs no auction and has no forecast.
+
+| Column | Meaning |
+| --- | --- |
+| `predictedRate` | `forecastRate` of the node's activated plan: the rate its auction used, in requests/s |
+| `solverRate` | that rate floored to the flow quantum, as the solver received it |
+| `actualRequests`, `actualRate` | requests the generator emitted from the node for the function in the interval, and that count per second |
+| `scheduledRequests` | the calendar's requests for the interval, to separate generator lateness |
+| `oracleRate` | the frozen trace rate the ORACLE run used |
+| `error` | `predictedRate - actualRate`: positive overestimates, negative underestimates |
+| `absoluteError`, `relativeError` | its magnitude, and the error over `actualRate` (empty when no request arrived) |
+| `errorVsOracle` | `predictedRate - oracleRate` |
+| `forecastSource` | `plan`, or `no-plan`/`no-epoch` when no activated plan recorded the forecast |
+
+NanoFaaS reports the forecast only inside an activated plan, so a node whose
+epoch produced none has an empty prediction; its arrivals are still counted.
+The JSON summarises the errors overall, per node, function, node/function pair
+and interval: mean signed error, mean absolute error, root mean square error,
+and count, mean and largest of the overestimates and of the underestimates.
+
+The same files can be computed from a finished run or archive, without VMs, into
+a new directory:
+
+```bash
+uv run --frozen --all-packages --all-groups python scripts/one-shot-forecast-errors.py \
+  /path/to/run-or-archive --output /path/to/new-forecast-errors
+```
+
+On the archived ORACLE minute run of 14 October 2026 this finds a plan for all
+1,350 cells. `errorVsOracle` is zero throughout, and the error stays within two
+requests per minute (±0.033 requests/s), with a mean absolute error of 0.0106.
+That is the 0.05 requests/s rounding of the oracle against the integer arrivals
+of each minute, so it is the baseline for the EWMA errors. Two cells of the 1,350 differ by one request between
+emitted and scheduled counts.
+
 ## Physical evidence collection after the minute-run diagnosis
 
 The live collector preserves its pending-original order across collection slices.

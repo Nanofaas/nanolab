@@ -175,6 +175,79 @@ def test_native_timing_budget_is_validated_without_performance_gates(observer):
         observer.validate_operator_protocol(protocol)
 
 
+def test_ewma_forecast_is_frozen_only_when_selected(observer, tmp_path):
+    from types import SimpleNamespace
+
+    required = [
+        f"--{key}={tmp_path}"
+        for key in ("tuning", "observations", "distribution", "source", "output")
+    ]
+    assert observer.forecast_protocol(observer.parse_args(["prepare", *required])) == {}
+    # Callers that build their own arguments predate the option: ORACLE.
+    assert observer.forecast_protocol(SimpleNamespace()) == {}
+    frozen = observer.forecast_protocol(
+        observer.parse_args(["prepare", *required, "--forecast", "ewma"])
+    )
+    assert frozen == {
+        "forecast": {
+            "provider": "ewma",
+            "alpha": 0.5,
+            "windowSeconds": 60,
+            "maxAgeSeconds": 120,
+        }
+    }
+    chosen = observer.parse_args(
+        [
+            "prepare",
+            *required,
+            "--forecast=ewma",
+            "--forecast-alpha=0.3",
+            "--forecast-window-seconds=30",
+        ]
+    )
+    assert observer.forecast_protocol(chosen)["forecast"] == {
+        "provider": "ewma",
+        "alpha": 0.3,
+        "windowSeconds": 30,
+        "maxAgeSeconds": 60,
+    }
+    with pytest.raises(ValueError, match="require --forecast ewma"):
+        observer.forecast_protocol(
+            observer.parse_args(["prepare", *required, "--forecast-alpha=0.3"])
+        )
+    for wrong in (
+        "--forecast-alpha=1.5",
+        "--forecast-alpha=0",
+        "--forecast-window-seconds=0",
+    ):
+        with pytest.raises(ValueError, match="EWMA forecast needs"):
+            observer.forecast_protocol(
+                observer.parse_args(["prepare", *required, "--forecast=ewma", wrong])
+            )
+
+
+@pytest.mark.parametrize(
+    "forecast",
+    [
+        {"provider": "arima", "alpha": 0.5, "windowSeconds": 60, "maxAgeSeconds": 120},
+        {"provider": "ewma", "alpha": True, "windowSeconds": 60, "maxAgeSeconds": 120},
+        {"provider": "ewma", "alpha": 0.5, "windowSeconds": 1.5, "maxAgeSeconds": 120},
+        {"provider": "ewma", "alpha": 0.5, "windowSeconds": 60, "maxAgeSeconds": 60},
+    ],
+)
+def test_frozen_forecast_block_is_checked_before_use(observer, forecast):
+    protocol = {
+        "maxOperationalFraction": 0.2,
+        "maxAuctionFraction": 0.2,
+        "periodSeconds": 360,
+        "leadSeconds": 8,
+        "protocol": {"auctionSeconds": 4, "preparationSeconds": 1},
+        "forecast": forecast,
+    }
+    with pytest.raises(ValueError, match="EWMA forecast needs"):
+        observer.validate_operator_protocol(protocol)
+
+
 def test_observer_fraction_boundary_matches_actual_native_records(observer, tmp_path):
     import os
     import shutil

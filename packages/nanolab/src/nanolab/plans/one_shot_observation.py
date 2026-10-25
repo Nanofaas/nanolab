@@ -33,6 +33,8 @@ from nanolab.tasks.one_shot.observation import (
     ObservationReport,
     ObserverPrecheck,
     WarmInstances,
+    observation_forecast,
+    observation_purpose,
     oracle_lifetime_seconds,
 )
 from nanolab.tasks.one_shot.preflight import (
@@ -72,18 +74,28 @@ def build_one_shot_observation_plan(
             run_dir / "arrival-profile.json",
             (freeze_dir / "arrival-profile.json").read_bytes(),
         )
-    workflow = Workflow("first-functional-oracle-observation")
+    forecast = observation_forecast(protocol)
+    mode = forecast["provider"]
+    workflow = Workflow(observation_purpose(mode))
     topology = add_one_shot_platforms(
         workflow,
         config,
         environment,
         run_dir=run_dir,
         repo_root=Path(frozen["source"]),
-        forecast_provider="ORACLE",
+        forecast_provider=mode.upper(),
         terminal_queueing=True,
         observer_bootstrap=True,
         supervision=supervision,
-        forecast_max_age_seconds=protocol["oracleMaxAgeSeconds"],
+        forecast_max_age_seconds=forecast["maxAgeSeconds"],
+        **(
+            {
+                "forecast_alpha": forecast["alpha"],
+                "forecast_window_seconds": forecast["windowSeconds"],
+            }
+            if mode == "ewma"
+            else {}
+        ),
     )
     clock = clock_health_resource(
         endpoints=topology.endpoints,
@@ -101,7 +113,8 @@ def build_one_shot_observation_plan(
         trace=trace,
         clock=clock,
         run_dir=run_dir,
-        mode="oracle",
+        mode=mode,
+        forecast=forecast,
         repetition=0,
         frozen=frozen,
         frozen_dir=freeze_dir,

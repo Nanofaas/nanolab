@@ -360,6 +360,7 @@ def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypat
 @pytest.mark.parametrize("baseline", [False, True])
 @pytest.mark.parametrize("scientific", [False, True])
 @pytest.mark.parametrize("forecast_max_age_seconds", [None, 4110])
+@pytest.mark.parametrize("ewma", [None, (60, 0.5)])
 def test_control_plane_namespace_and_compensated_cleanup(
     tmp_path,
     monkeypatch,
@@ -368,6 +369,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
     baseline,
     scientific,
     forecast_max_age_seconds,
+    ewma,
 ):
     from types import SimpleNamespace
 
@@ -447,6 +449,11 @@ def test_control_plane_namespace_and_compensated_cleanup(
         terminal_queueing=terminal_queueing,
         scientific=scientific,
         forecast_max_age_seconds=forecast_max_age_seconds,
+        **(
+            {"forecast_window_seconds": ewma[0], "forecast_alpha": ewma[1]}
+            if ewma
+            else {}
+        ),
         baseline_depth=2 if baseline else None,
     )
 
@@ -482,6 +489,21 @@ def test_control_plane_namespace_and_compensated_cleanup(
         ]
         assert ages == (
             ["--nanofaas.forecasting.max-age=4110s"] if forecast_max_age_seconds else []
+        )
+        forecasting = [
+            argument
+            for argument in launch
+            if argument.startswith(
+                ("--nanofaas.forecasting.window=", "--nanofaas.forecasting.alpha=")
+            )
+        ]
+        assert forecasting == (
+            [
+                "--nanofaas.forecasting.window=60s",
+                "--nanofaas.forecasting.alpha=0.5",
+            ]
+            if ewma
+            else ["--nanofaas.forecasting.window=1s"]
         )
         if baseline and not terminal_queueing:
             assert "--nanofaas.offload.target-url=http://10.0.0.1:8080" in launch

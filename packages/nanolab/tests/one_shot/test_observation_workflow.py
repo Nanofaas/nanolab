@@ -1,5 +1,6 @@
 """Run the package Sonata DAG and actual observation tasks against simulated I/O."""
 
+import csv
 import hashlib
 import json
 import os
@@ -46,6 +47,56 @@ from tests.one_shot.test_preflight import strict_cgroup_sample
 @pytest.mark.parametrize("display", ["console", "tui", "json", "none"])
 def test_real_nine_epoch_observation_workflow(
     tmp_path, monkeypatch, failure, profiled, period, epoch_count, display
+):
+    run_observation_workflow(
+        tmp_path,
+        monkeypatch,
+        failure=failure,
+        profiled=profiled,
+        period=period,
+        epoch_count=epoch_count,
+        display=display,
+    )
+
+
+@pytest.mark.parametrize("failure", [None, "auction"])
+def test_ewma_minute_observation_forecasts_from_arrivals(
+    tmp_path, monkeypatch, failure
+):
+    platforms = run_observation_workflow(
+        tmp_path,
+        monkeypatch,
+        failure=failure,
+        profiled=True,
+        period=60,
+        epoch_count=54,
+        display="none",
+        forecast="ewma",
+    )
+    assert platforms["forecast_provider"] == "EWMA"
+    assert platforms["forecast_alpha"] == 0.5
+    assert platforms["forecast_window_seconds"] == 60
+    assert platforms["forecast_max_age_seconds"] == 120
+    raw = tmp_path / "raw"
+    manifest = json.loads((raw / "manifest.json").read_text())
+    assert (manifest["mode"], manifest["modes"]) == ("ewma", ["ewma"])
+    observed = json.loads((raw / "observation.json").read_text())
+    assert observed["purpose"] == "ewma-forecast-observation"
+    progress = (raw / "progress.jsonl").read_text()
+    assert progress.count('"ewma-configured"') == 5
+    assert '"oracle-configured"' not in progress
+
+
+def run_observation_workflow(
+    tmp_path,
+    monkeypatch,
+    *,
+    failure,
+    profiled,
+    period,
+    epoch_count,
+    display,
+    forecast="oracle",
 ):
     raw, freeze, archive = (tmp_path / name for name in ("raw", "freeze", "archive"))
     raw.mkdir()
@@ -203,6 +254,18 @@ def test_real_nine_epoch_observation_workflow(
             "maxOperationalFraction": 1,
             "oracleMaxAgeSeconds": 4230,
             "protocol": settings.timing.protocol.model_dump(by_alias=True),
+            **(
+                {
+                    "forecast": {
+                        "provider": "ewma",
+                        "alpha": 0.5,
+                        "windowSeconds": 60,
+                        "maxAgeSeconds": 120,
+                    }
+                }
+                if forecast == "ewma"
+                else {}
+            ),
         },
     )
     save(
@@ -331,7 +394,12 @@ def test_real_nine_epoch_observation_workflow(
         node_function_settings=dict.fromkeys(node_ids, settings.functions),
         requires=(*vms.values(), *endpoints.values(), *probes.values(), distribution),
     )
-    monkeypatch.setattr(builder, "add_one_shot_platforms", lambda *a, **k: topology)
+    platforms = {}
+    monkeypatch.setattr(
+        builder,
+        "add_one_shot_platforms",
+        lambda *a, **k: platforms.update(k) or topology,
+    )
     monitor = SimpleNamespace(refresh=lambda: None, require_healthy=lambda: None)
     monkeypatch.setattr(
         builder,
@@ -767,7 +835,16 @@ def test_real_nine_epoch_observation_workflow(
             for node, path, data in calls
             if path.endswith("/forecasting/trace")
         ]
-        assert len(uploads) == 5
+        assert len(uploads) == (0 if forecast == "ewma" else 5)
+        errors = list(csv.DictReader((raw / "forecast-errors.csv").open()))
+        assert len(errors) == epoch_count * 25
+        planned = [row for row in errors if row["forecastSource"] == "plan"]
+        assert len(errors) - len(planned) == (5 if failure == "auction" else 0)
+        # The simulated generator emits only one warmup request.
+        assert all(
+            float(row["error"]) == float(row["predictedRate"]) == 1 / period
+            for row in planned
+        )
         for node, data in uploads:
             assert data["entries"] == oracle_entries(
                 trace,
@@ -803,3 +880,4 @@ def test_real_nine_epoch_observation_workflow(
     for path in raw.rglob("*"):
         if path.is_file():
             assert path.read_bytes() == (archive / path.relative_to(raw)).read_bytes()
+    return platforms

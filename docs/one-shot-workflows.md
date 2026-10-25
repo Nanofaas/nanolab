@@ -812,6 +812,11 @@ dependency, resource quota or performance/clock exclusion criterion is added.
 Historical freezes require no editing and cannot enable the feature by changing
 an external profile after preparation.
 
+`prepare --forecast ewma` replaces the ORACLE with NanoFaaS's EWMA load forecast,
+and every observation reports the forecast error per interval, edge node and
+function in `forecast-errors.csv`; see
+[the one-minute observation](testing/one-shot-multipass/continuous-60s-inputs.md#the-same-minute-run-with-the-ewma-load-forecast).
+
 ## Operational failures, finalization and configuration
 
 The first operational failure is the structured cause in terminal receipts.

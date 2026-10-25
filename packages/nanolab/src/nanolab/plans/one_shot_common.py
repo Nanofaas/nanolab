@@ -161,6 +161,8 @@ def _control_plane(
     scientific: bool = False,
     strict_memory: bool = False,
     forecast_max_age_seconds: int | None = None,
+    forecast_window_seconds: int = 1,
+    forecast_alpha: float | None = None,
     settings=None,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
@@ -307,7 +309,12 @@ def _control_plane(
             f"--nanofaas.forecasting.enabled={boolean}",
             f"--nanofaas.forecasting.node-id={node.config.id}",
             f"--nanofaas.forecasting.provider={forecast_provider}",
-            "--nanofaas.forecasting.window=1s",
+            f"--nanofaas.forecasting.window={forecast_window_seconds}s",
+            *(
+                [f"--nanofaas.forecasting.alpha={forecast_alpha!r}"]
+                if forecast_alpha is not None
+                else []
+            ),
             *(
                 [f"--nanofaas.forecasting.max-age={forecast_max_age_seconds}s"]
                 if forecast_max_age_seconds is not None
@@ -394,6 +401,8 @@ def add_one_shot_platforms(
     baseline: bool = False,
     observer_bootstrap: bool = False,
     forecast_max_age_seconds: int | None = None,
+    forecast_window_seconds: int = 1,
+    forecast_alpha: float | None = None,
     supervision=None,
 ) -> OneShotTopology:
     """Compose existing staged recipes, bootstrap and function resources per VM."""
@@ -600,6 +609,8 @@ def add_one_shot_platforms(
             run_dir=run_dir,
             forecast_provider=forecast_provider,
             forecast_max_age_seconds=forecast_max_age_seconds,
+            forecast_window_seconds=forecast_window_seconds,
+            forecast_alpha=forecast_alpha,
             settings=settings,
             terminal_queueing=terminal_queueing,
             baseline_depth=max(

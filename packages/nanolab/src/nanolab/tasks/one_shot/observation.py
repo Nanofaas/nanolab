@@ -47,6 +47,7 @@ from nanolab.tasks.one_shot.experiment import (
     generator_rows,
     logical_schedule,
 )
+from nanolab.tasks.one_shot.forecast_errors import record_forecast_errors
 from nanolab.tasks.one_shot.preflight import (
     collect_container_cgroup,
     runtime_endpoint,
@@ -70,6 +71,38 @@ def oracle_lifetime_seconds(trace, *, warmup_seconds, limits=None):
         + limits.schedule_setup_seconds
         + len(trace.windows) * trace.period_seconds
         + limits.generator_drain_seconds
+    )
+
+
+def observation_forecast(protocol: dict) -> dict:
+    """Return the frozen forecast source: ORACLE unless the freeze selected EWMA."""
+    forecast = protocol.get("forecast")
+    if forecast is None:
+        return {"provider": "oracle", "maxAgeSeconds": protocol["oracleMaxAgeSeconds"]}
+    alpha, window, age = (
+        forecast.get(key) for key in ("alpha", "windowSeconds", "maxAgeSeconds")
+    )
+    if (
+        forecast.get("provider") != "ewma"
+        or isinstance(alpha, bool)
+        or not isinstance(alpha, (int, float))
+        or not 0 < alpha <= 1
+        or any(isinstance(v, bool) or not isinstance(v, int) for v in (window, age))
+        or not 0 < window < age
+    ):
+        raise ValueError(
+            "EWMA forecast needs alpha in (0, 1], a whole-second window "
+            "and a longer max age"
+        )
+    return forecast
+
+
+def observation_purpose(mode: str) -> str:
+    """Keep the ORACLE observation's historical name; name the EWMA one apart."""
+    return (
+        "first-functional-oracle-observation"
+        if mode == "oracle"
+        else "ewma-forecast-observation"
     )
 
 
@@ -496,8 +529,8 @@ class ObservationFreeze(Task):
             period_seconds=run.trace.period_seconds,
             lead_seconds=protocol["leadSeconds"],
             flow_quantum=run.trace.flow_quantum,
-            modes=["oracle"],
-            mode="oracle",
+            modes=[run.mode],
+            mode=run.mode,
             run_id="observation:" + run.trace.sha256[:12],
             anchor=anchor.isoformat(),
             parameters=parameters,
@@ -561,6 +594,8 @@ class ConfigureOracle(Task):
     def __init__(self, run):
         """Bind the frozen observation context."""
         self.run_context = run
+        if getattr(run, "mode", "oracle") == "ewma":
+            self.title = "Configure observed EWMA forecasts"
 
     def run(self, inputs):
         """Execute this observation stage on the owned resources."""
@@ -603,6 +638,16 @@ class ConfigureOracle(Task):
                     revision=client.status().revision,
                     output=run.run_dir / "api.jsonl",
                 )
+                if run.mode == "ewma":
+                    # Each node forecasts from the arrivals it observes; the
+                    # trace stays in the run only to measure the forecast error.
+                    event(
+                        run.run_dir,
+                        "ewma-configured",
+                        node=node,
+                        forecast=run.forecast,
+                    )
+                    continue
                 receipt = client.load_trace(
                     {
                         "schemaVersion": 1,
@@ -648,13 +693,14 @@ class ObservationReport(Task):
         responses = summarize_responses(
             json.loads((run.run_dir / "schedule.json").read_text()),
             generator_rows(run.run_dir / "generator.jsonl"),
-            mode="oracle",
+            mode=run.mode,
         )
         save(run.run_dir / "responses.json", responses)
+        record_forecast_errors(run.run_dir)
         save(
             run.run_dir / "observation.json",
             {
-                "purpose": "first-functional-oracle-observation",
+                "purpose": observation_purpose(run.mode),
                 "qualified": False,
                 "legacyComparisonValid": evidence.valid,
                 "legacyDiagnostics": evidence.violations,
@@ -689,5 +735,10 @@ def retain_offline_report(directory):
             mode=manifest.mode,
         )
         save(directory / "responses.json", responses)
+    if (
+        all((directory / name).exists() for name in ("schedule.json", "epochs.jsonl"))
+        and not (directory / "forecast-errors.csv").exists()
+    ):
+        record_forecast_errors(directory)
     if not (directory / "report.html").exists():
         render_report(manifest, None, directory / "report.html")

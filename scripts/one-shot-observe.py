@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one unqualified ORACLE observation through owned NanoLab infrastructure."""
+"""Run one unqualified ORACLE or EWMA observation on owned NanoLab infrastructure."""
 
 # Frozen-package selection must precede all third-party/application imports.
 import argparse
@@ -25,6 +25,16 @@ def parse_args(argv=None):
         prep.add_argument("--" + key, type=Path, required=True)
     prep.add_argument("--arrival-profile", type=Path)
     prep.add_argument("--parent-freeze", type=Path)
+    prep.add_argument(
+        "--forecast",
+        choices=("oracle", "ewma"),
+        default="oracle",
+        help="ORACLE uploads the trace; EWMA forecasts from each node's arrivals",
+    )
+    prep.add_argument("--forecast-alpha", type=float, help="EWMA only; default 0.5")
+    prep.add_argument(
+        "--forecast-window-seconds", type=int, help="EWMA only; default 60"
+    )
     launch = commands.add_parser("run")
     launch.add_argument("freeze", type=Path)
     launch.add_argument("output", type=Path)
@@ -64,6 +74,8 @@ from nanolab.tasks.one_shot.experiment import (
 )
 from nanolab.tasks.one_shot.observation import (
     event,
+    observation_forecast,
+    observation_purpose,
     oracle_lifetime_seconds,
     retain_offline_report,
     save,
@@ -106,6 +118,30 @@ def validate_operator_protocol(protocol):
         raise ValueError(
             "native operational budget must fit the period fraction and lead time"
         )
+    if "forecast" in protocol:
+        observation_forecast(protocol)
+
+
+def forecast_protocol(args):
+    """Freeze the EWMA settings; ORACLE keeps its historical protocol unchanged."""
+    alpha = getattr(args, "forecast_alpha", None)
+    window = getattr(args, "forecast_window_seconds", None)
+    if getattr(args, "forecast", "oracle") == "oracle":
+        if alpha is not None or window is not None:
+            raise ValueError("EWMA options require --forecast ewma")
+        return {}
+    window = 60 if window is None else window
+    protocol = {
+        "forecast": {
+            "provider": "ewma",
+            "alpha": 0.5 if alpha is None else alpha,
+            "windowSeconds": window,
+            # NanoFaaS dates an EWMA forecast at its current window's start.
+            "maxAgeSeconds": 2 * window,
+        }
+    }
+    observation_forecast(protocol)
+    return protocol
 
 
 def bind_scenario(source, distribution, *, trace=None):
@@ -207,6 +243,7 @@ def dependency_files():
 
 def prepare(args):
     """Capture the package, script and inputs without starting any VM."""
+    forecast = forecast_protocol(args)
     arrival_input = getattr(args, "arrival_profile", None)
     arrival_document = None
     if arrival_input is not None:
@@ -364,6 +401,7 @@ def prepare(args):
         "oracleLifetimeBasis": (
             "warmup + schedule setup + all epochs + existing generator drain"
         ),
+        **forecast,
     }
     if derived:
         protocol["timingPolicy"] = "observe"
@@ -386,7 +424,7 @@ def prepare(args):
         ]
     }
     frozen = {
-        "purpose": "first-functional-oracle-observation",
+        "purpose": observation_purpose(observation_forecast(protocol)["provider"]),
         "qualified": False,
         "source": str(args.source.resolve()),
         "sourceRevision": revision,
