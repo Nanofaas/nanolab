@@ -57,6 +57,7 @@ from nanolab.comparison.experiment_02 import (
     Experiment02Cell,
     build_experiment_02_matrix,
     experiment_02_identity,
+    write_experiment_02_report,
 )
 from nanolab.comparison.manifest import (
     ComparisonManifest,
@@ -716,7 +717,9 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
         _ = comparison_remote_command(
             provider, request, ("rm", "-rf", "--", str(owned))
         )
+    report = write_experiment_02_report(root, cells, protocol)
     typer.echo(f"matrix complete: {root}")
+    typer.echo(f"report: {report}")
 
 
 def register(app: typer.Typer) -> None:

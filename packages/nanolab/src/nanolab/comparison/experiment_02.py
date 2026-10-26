@@ -19,14 +19,41 @@ Prometheus snapshot.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import json
 import random
+import statistics
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from nanolab.comparison.experiment_01 import EVENTS, SUMMARY, identity_sha256
+from nanolab.comparison.experiment_01 import (
+    CELL_RESULT,
+    EVENTS,
+    SUMMARY,
+    attempt_dir,
+    build_ledger,
+    identity_sha256,
+    read_events,
+    summarize_phases,
+)
 from nanolab.config.experiment_02 import Budget, Experiment02Protocol
+from nanolab.tasks.experiment_02.budget import ENGINE_CGROUPS
+from nanolab.tasks.experiment_02.samples import (
+    CPU_WINDOW_SECONDS,
+    DEPLOYMENT_CPU,
+    DEPLOYMENT_MEMORY,
+    SAMPLE_INTERVAL_SECONDS,
+    as_snapshot,
+    container_count,
+    cpu_cores,
+    cpu_seconds,
+    memory_byte_seconds,
+    read_cgroup_samples,
+    working_set,
+)
 
 Platform = Literal["nanofaas", "direct"]
 
@@ -171,3 +198,217 @@ def experiment_02_identity(
         "budgets": [budget.label for budget in protocol.budgets],
         "subset": set(selected) != set(CONFIGURATIONS_BY_KEY),
     }
+
+
+# ---------------------------------------------------------------- summaries
+
+
+def _mean_inside(
+    points: Sequence[tuple[float, float]], start: float, end: float
+) -> float | None:
+    inside = [value for at, value in points if start <= at < end]
+    return statistics.fmean(inside) if inside else None
+
+
+def _phase_costs(
+    samples: Sequence[Mapping[str, Any]],
+    row: Mapping[str, Any],
+    *,
+    start: float | None,
+    end: float | None,
+    load: bool,
+) -> dict[str, object]:
+    """Return a phase's engine share, live instances and cost per useful response.
+
+    The cost covers the phase's own window. A cohort's late responses may land
+    in the next phase, by at most `gracefulStopSeconds`; that overlap is the
+    known limit of reading a step's cost from its window.
+    """
+    if start is None or end is None:
+        names = [
+            "engineWorkingSetMeanBytes",
+            "engineCpuMeanCores",
+            "containersMean",
+            "containersMax",
+        ]
+        if load:
+            names += [
+                "cpuSeconds",
+                "memoryByteSeconds",
+                "cpuSecondsPerUseful",
+                "memoryByteSecondsPerUseful",
+            ]
+        unknown: dict[str, object] = {}
+        for name in names:
+            unknown[name] = None
+        return unknown
+    counts = [count for at, count in container_count(samples) if start <= at < end]
+    costs: dict[str, object] = {
+        "engineWorkingSetMeanBytes": _mean_inside(
+            working_set(samples, ENGINE_CGROUPS), start, end
+        ),
+        # A rate whose window reaches into the previous phase is left out.
+        "engineCpuMeanCores": _mean_inside(
+            cpu_cores(samples, ENGINE_CGROUPS), start + CPU_WINDOW_SECONDS, end
+        ),
+        "containersMean": statistics.fmean(counts) if counts else None,
+        "containersMax": max(counts) if counts else None,
+    }
+    if load:
+        useful = int(row["withinThreshold"])
+        cpu = cpu_seconds(samples, start, end)
+        memory = memory_byte_seconds(samples, start, end)
+        costs |= {
+            "cpuSeconds": cpu,
+            "memoryByteSeconds": memory,
+            # Undefined, not zero, when nothing useful came back.
+            "cpuSecondsPerUseful": cpu / useful if useful and cpu is not None else None,
+            "memoryByteSecondsPerUseful": (
+                memory / useful if useful and memory is not None else None
+            ),
+        }
+    return costs
+
+
+def summarize_experiment_02_cell(
+    cell: Experiment02Cell, root: Path, protocol: Experiment02Protocol
+) -> dict[str, object]:
+    """Summarise one cell from the attempt its receipt selects.
+
+    Experiment 01's per-phase rows and verdicts, read from the deployment's
+    cgroup, plus what experiment 02 adds: the engine's share, the live
+    instances, and CPU time and memory occupancy per useful response.
+    """
+    cell_dir = cell.run_dir(root)
+    receipt = json.loads((cell_dir / CELL_RESULT).read_text(encoding="utf-8"))
+    selected = attempt_dir(cell_dir, int(receipt["attempt"]))
+    readiness = selected / "readiness.json"
+    result: dict[str, object] = {
+        "cell": receipt["cell"],
+        "configuration": cell.key,
+        "budget": cell.budget.label,
+        "repetition": cell.repetition,
+        "attempt": receipt["attempt"],
+        "outcome": receipt["outcome"],
+        "reason": receipt["reason"],
+        "notProduced": receipt["notProduced"],
+        "readiness": json.loads(readiness.read_text()) if readiness.is_file() else None,
+        "sampleIntervalSeconds": SAMPLE_INTERVAL_SECONDS,
+        "cpuRateWindowSeconds": CPU_WINDOW_SECONDS,
+    }
+    if receipt["outcome"] != "measured":
+        result["phases"] = []
+        return result
+    events, malformed = read_events(selected / EVENTS)
+    ledger = build_ledger(events)
+    samples = read_cgroup_samples(selected / SAMPLES)
+    rows = summarize_phases(
+        protocol,
+        ledger,
+        summary=json.loads((selected / SUMMARY).read_text(encoding="utf-8")),
+        snapshot=as_snapshot(samples.samples),
+        malformed_events=malformed,
+        memory_series=DEPLOYMENT_MEMORY,
+        cpu_series=DEPLOYMENT_CPU,
+    )
+    origin = ledger["origin"]
+    for row, phase in zip(rows, protocol.phases(), strict=True):
+        start = None if origin is None else origin / 1000 + phase["startSeconds"]
+        end = None if start is None else start + phase["durationSeconds"]
+        row.update(
+            _phase_costs(
+                samples.samples, row, start=start, end=end, load=phase["rate"] > 0
+            )
+        )
+    result["malformedEvents"] = malformed
+    result["malformedSamples"] = samples.malformed
+    result["anomalies"] = ledger["anomalies"]
+    result["phases"] = rows
+    return result
+
+
+_CSV_FIELDS: tuple[str, ...] = (
+    "configuration",
+    "budget",
+    "repetition",
+    "attempt",
+    "outcome",
+    "phase",
+    "offeredRate",
+    "sent",
+    "completed",
+    "withinThresholdFraction",
+    "pending",
+    "timeouts",
+    "errors",
+    "rejected",
+    "p50Ms",
+    "p95Ms",
+    "p99Ms",
+    "load",
+    "sustainability",
+    "workingSetMeanBytes",
+    "workingSetDeltaFromIdle",
+    "cpuMeanCores",
+    "cpuDeltaFromIdle",
+    "engineWorkingSetMeanBytes",
+    "engineCpuMeanCores",
+    "containersMean",
+    "containersMax",
+    "cpuSeconds",
+    "memoryByteSeconds",
+    "cpuSecondsPerUseful",
+    "memoryByteSecondsPerUseful",
+    "firstCorrectSeconds",
+)
+
+
+def write_experiment_02_report(
+    root: Path, cells: Iterable[Experiment02Cell], protocol: Experiment02Protocol
+) -> Path:
+    """Write every cell's summary as JSON and one CSV row per cell and phase.
+
+    Cells without a receipt are listed as incomplete, never as zero.
+    """
+    summaries: list[dict[str, Any]] = []
+    for cell in cells:
+        if (cell.run_dir(root) / CELL_RESULT).is_file():
+            summaries.append(summarize_experiment_02_cell(cell, root, protocol))
+        else:
+            summaries.append(
+                {
+                    "cell": cell.label,
+                    "configuration": cell.key,
+                    "budget": cell.budget.label,
+                    "repetition": cell.repetition,
+                    "outcome": "incomplete",
+                    "phases": [],
+                }
+            )
+    (root / "experiment-02-summary.json").write_text(
+        json.dumps(summaries, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    path = root / "experiment-02-summary.csv"
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=_CSV_FIELDS)
+        writer.writeheader()
+        for summary in summaries:
+            readiness = summary.get("readiness") or {}
+            phases: list[dict[str, Any]] = summary["phases"] or [{}]
+            for phase in phases:
+                row = {key: phase.get(key) for key in _CSV_FIELDS}
+                row.update(
+                    configuration=summary["configuration"],
+                    budget=summary["budget"],
+                    repetition=summary["repetition"],
+                    attempt=summary.get("attempt"),
+                    outcome=summary["outcome"],
+                    load=(phase.get("load") or {}).get("verdict"),
+                    workingSetMeanBytes=(phase.get("workingSetBytes") or {}).get(
+                        "mean"
+                    ),
+                    cpuMeanCores=(phase.get("cpuCores") or {}).get("mean"),
+                    firstCorrectSeconds=readiness.get("firstCorrectSeconds"),
+                )
+                writer.writerow(row)
+    return path

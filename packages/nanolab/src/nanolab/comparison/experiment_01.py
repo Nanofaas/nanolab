@@ -393,14 +393,20 @@ def summarize_phases(
     summary: Mapping[str, Any] | None,
     snapshot: Mapping[str, Any] | None,
     malformed_events: int = 0,
+    memory_series: str = "container_memory_bytes@control-plane",
+    cpu_series: str = "container_cpu_cores_max@control-plane",
 ) -> list[dict[str, Any]]:
-    """Reduce one measured attempt to a row per phase, with its verdicts."""
+    """Reduce one measured attempt to a row per phase, with its verdicts.
+
+    The resource series default to experiment 01's control plane; experiment 02
+    names its deployment's instead.
+    """
     criteria = protocol.criteria
     generator = protocol.generator
     origin = ledger.get("origin")
     requests = ledger["requests"]
-    memory = _series_points(snapshot, "container_memory_bytes@control-plane")
-    cpu = _series_points(snapshot, "container_cpu_cores_max@control-plane")
+    memory = _series_points(snapshot, memory_series)
+    cpu = _series_points(snapshot, cpu_series)
     idle_reference: dict[str, Any] = {}
     rows: list[dict[str, Any]] = []
     for phase in protocol.phases():
