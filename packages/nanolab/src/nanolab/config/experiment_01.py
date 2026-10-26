@@ -200,3 +200,24 @@ def experiment_01_payload(protocol: Experiment01Protocol, payload_dir: Path) -> 
     ):
         raise ValueError("experiment01 payload is not a qr-code text/size request")
     return raw
+
+
+def k6_protocol(protocol: Experiment01Protocol, *, size: int) -> str:
+    """Return the protocol as `assets/k6/experiment-01.js` reads it, `E01_PROTOCOL`.
+
+    Experiments 01 and 02 run that one script, so they share this one
+    serialization: a step means the same calendar in both. `size` is the PNG
+    width the payload asks for, which the response check needs.
+    """
+    return json.dumps(
+        {
+            "phases": protocol.phases(),
+            "httpTimeoutSeconds": protocol.http_timeout_seconds,
+            "gracefulStopSeconds": protocol.graceful_stop_seconds,
+            "preAllocatedVUs": protocol.pre_allocated_vus,
+            "maxVUs": protocol.max_vus,
+            "size": size,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )

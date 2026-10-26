@@ -45,6 +45,9 @@ _JSON = {"Content-Type": "application/json"}
 _API = f"http://127.0.0.1:{ENTRY_PORT}"
 _READY = f"http://127.0.0.1:{MANAGEMENT_PORT}/actuator/health/readiness"
 _CALLBACK = f"http://{CONTROL_PLANE}:8080/v1/internal/executions"
+# The runtime admits one active execution per id (sdks/rust/src/occupancy.rs):
+# with no platform to number the requests, the generator sends each its own.
+EXECUTION_ID_HEADER = "X-Execution-Id"
 
 
 class Platform(Protocol):
@@ -400,7 +403,12 @@ class DirectReference:
 
     def target(self, host: str) -> K6Target:
         """Read the runtime's answer: the PNG as a base64 JSON string."""
-        return K6Target(f"http://{host}:{ENTRY_PORT}/invoke", _JSON, "json-base64")
+        return K6Target(
+            f"http://{host}:{ENTRY_PORT}/invoke",
+            _JSON,
+            "json-base64",
+            id_header=EXECUTION_ID_HEADER,
+        )
 
     def body(self, payload: bytes) -> bytes:
         """Wrap the payload as the runtime's invocation `input`."""

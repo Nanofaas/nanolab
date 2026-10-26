@@ -45,7 +45,7 @@ from nanolab.comparison.profiles import (
     PreparedComparison,
 )
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.experiment_01 import experiment_01_payload
+from nanolab.config.experiment_01 import experiment_01_payload, k6_protocol
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS,
@@ -119,18 +119,7 @@ def experiment_01_k6_environment(
     return {
         "NANOFAAS_FUNCTION": config.functions[0],
         "E01_PAYLOAD": payload.decode("utf-8"),
-        "E01_PROTOCOL": json.dumps(
-            {
-                "phases": protocol.phases(),
-                "httpTimeoutSeconds": protocol.http_timeout_seconds,
-                "gracefulStopSeconds": protocol.graceful_stop_seconds,
-                "preAllocatedVUs": protocol.pre_allocated_vus,
-                "maxVUs": protocol.max_vus,
-                "size": json.loads(payload)["size"],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
+        "E01_PROTOCOL": k6_protocol(protocol, size=json.loads(payload)["size"]),
     }
 
 

@@ -23,7 +23,7 @@ from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 from .fakes import RecordingProvider, Result, vm
 
 SCENARIOS = discover_tool_root() / "scenarios"
-SCRIPT = bundled_assets_root() / "k6" / "experiment-02.js"
+SCRIPT = bundled_assets_root() / "k6" / "experiment-01.js"
 REMOTE = PurePosixPath("/home/azureuser/e02/cell/attempts/1")
 SAMPLES_REMOTE = str(REMOTE / "cgroup-samples.jsonl")
 BUDGET = Budget(cpus=2, memoryMiB=2048)

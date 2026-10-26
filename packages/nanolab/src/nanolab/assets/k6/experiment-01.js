@@ -1,10 +1,14 @@
 import http from 'k6/http';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
+import crypto from 'k6/crypto';
 import { sleep } from 'k6';
 
-// Experiment 01: the control plane's cost in front of one function, on a
-// calendar of constant-rate plateaux.
+// Experiments 01 and 02: one calendar of constant-rate plateaux, one ledger.
+//
+// Experiment 01 measures the control plane's cost in front of one function;
+// experiment 02 sends the same calendar to any platform. Both run this script,
+// so a step means the same load in both.
 //
 // Idle, warmup, then steps with sharp changes, then a bounded drain. Each load
 // phase is its own `constant-arrival-rate` scenario with an explicit
@@ -21,14 +25,27 @@ import { sleep } from 'k6';
 // the report keeps it in its cohort's denominator.
 //
 // Everything comes in through the environment, from one serialized protocol:
-//   E01_PROTOCOL  {"phases": [...], "httpTimeoutSeconds", "gracefulStopSeconds",
-//                  "preAllocatedVUs", "maxVUs", "size"}
-//   E01_PAYLOAD   the exact JSON body, sent byte for byte on every request.
-const BASE_URL = __ENV.NANOFAAS_URL || 'http://localhost:30080';
-const FUNCTION = __ENV.NANOFAAS_FUNCTION || 'qr-code-rust';
+//   E01_PROTOCOL       {"phases": [...], "httpTimeoutSeconds", "gracefulStopSeconds",
+//                       "preAllocatedVUs", "maxVUs", "size"}
+//   E01_PAYLOAD        the exact body, sent byte for byte on every request.
+//   EXPERIMENT_TARGET  experiment 02 only: {"url", "headers", "extractor",
+//                       "field", "idHeader", "pngSha256"}.
+// Without a target, requests go to nanoFaaS's invocation API at NANOFAAS_URL
+// for NANOFAAS_FUNCTION and the answer is its envelope: experiment 01.
 const PROTOCOL = JSON.parse(__ENV.E01_PROTOCOL);
 const PAYLOAD = __ENV.E01_PAYLOAD;
-const URL = `${BASE_URL}/v1/functions/${FUNCTION}:invoke`;
+const TARGET = __ENV.EXPERIMENT_TARGET
+    ? JSON.parse(__ENV.EXPERIMENT_TARGET)
+    : {
+        url: `${__ENV.NANOFAAS_URL || 'http://localhost:30080'}/v1/functions/`
+            + `${__ENV.NANOFAAS_FUNCTION || 'qr-code-rust'}:invoke`,
+        headers: { 'Content-Type': 'application/json' },
+        extractor: 'nanofaas-envelope',
+        field: null,
+        idHeader: null,
+        pngSha256: null,
+    };
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
 function loadScenario(phase) {
     return {
@@ -88,36 +105,71 @@ export function setup() {
     emit({ t: 'origin', ts: Date.now() });
 }
 
-// Light per-request check: the nanoFaaS envelope, success, media type and
-// encoding, the PNG signature and its IHDR dimensions. It does not decode the
-// QR symbol; full QR decoding remains outside this measurement.
+// The check is the same for every target: a PNG signature and a square IHDR
+// at least as large as the requested size and, once experiment 02's protocol
+// is frozen, the sha256 of the whole PNG. It does not decode the QR symbol;
+// full QR decoding remains outside this measurement. An HTTP 200 whose output
+// is wrong is an incorrect response, never a success.
+function validPng(bytes) {
+    if (bytes.length < 24 || PNG_SIGNATURE.some((value, index) => bytes[index] !== value)) {
+        return false;
+    }
+    const width = ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>> 0;
+    const height = ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>> 0;
+    if (width !== height || width < PROTOCOL.size) {
+        return false;
+    }
+    return !TARGET.pngSha256 || crypto.sha256(bytes.buffer, 'hex') === TARGET.pngSha256;
+}
+
+// Only the first 32 characters are decoded unless the hash is checked: the
+// header is all the shape check needs, and decoding every PNG in full would
+// spend the generator's CPU on bytes nobody reads.
+function base64Png(text) {
+    if (typeof text !== 'string' || !text.startsWith('iVBORw0KGgo')) {
+        return false;
+    }
+    const encoded = TARGET.pngSha256 ? text : text.slice(0, 32);
+    return validPng(new Uint8Array(encoding.b64decode(encoded, 'std')));
+}
+
+function mediaType(headers) {
+    return Object.keys(headers || {})
+        .filter((key) => key.toLowerCase() === 'content-type')
+        .map((key) => String(headers[key]).split(';')[0].trim().toLowerCase())[0];
+}
+
+// `nanofaas-envelope` is the control plane's invocation envelope; `json-base64`
+// a base64 PNG at `field` of a JSON object, or the whole JSON body when `field`
+// is null; `raw-png` the PNG as the response body.
 export function correct(response) {
     if (response.status !== 200) {
         return false;
     }
     try {
+        if (TARGET.extractor === 'raw-png') {
+            return mediaType(response.headers) === 'image/png'
+                && validPng(new Uint8Array(response.body));
+        }
         const body = response.json();
+        if (TARGET.extractor === 'json-base64' && !TARGET.field) {
+            return base64Png(body);
+        }
         if (body === null || typeof body !== 'object' || Array.isArray(body)) {
             return false;
         }
-        const headers = body.headers || {};
-        const type = Object.keys(headers)
-            .filter((key) => key.toLowerCase() === 'content-type')
-            .map((key) => String(headers[key]).split(';')[0].trim().toLowerCase())[0];
-        if (
-            body.status !== 'success'
-            || body.statusCode !== 200
-            || body.encoding !== 'base64'
-            || type !== 'image/png'
-            || typeof body.output !== 'string'
-            || !body.output.startsWith('iVBORw0KGgo')
-        ) {
-            return false;
+        if (TARGET.extractor === 'nanofaas-envelope') {
+            return body.status === 'success'
+                && body.statusCode === 200
+                && body.encoding === 'base64'
+                && mediaType(body.headers) === 'image/png'
+                && base64Png(body.output);
         }
-        const head = new Uint8Array(encoding.b64decode(body.output.slice(0, 32), 'std'));
-        const width = ((head[16] << 24) | (head[17] << 16) | (head[18] << 8) | head[19]) >>> 0;
-        const height = ((head[20] << 24) | (head[21] << 16) | (head[22] << 8) | head[23]) >>> 0;
-        return width === height && width >= PROTOCOL.size;
+        if (TARGET.extractor === 'json-base64') {
+            return (body.error === undefined || body.error === null)
+                && base64Png(body[TARGET.field]);
+        }
+        return false;
     } catch (error) {
         return false;
     }
@@ -126,12 +178,18 @@ export function correct(response) {
 export function invoke() {
     const phase = exec.scenario.name;
     const id = `${phase}-${exec.scenario.iterationInTest}`;
+    // A target that admits one active execution per id gets each request's
+    // own ledger id: a shared id would turn every overlap into a rejection.
+    const headers = TARGET.idHeader
+        ? Object.assign({}, TARGET.headers, { [TARGET.idHeader]: id })
+        : TARGET.headers;
     const sent = Date.now();
     emit({ t: 'send', id, phase, ts: sent });
-    const response = http.post(URL, PAYLOAD, {
-        headers: { 'Content-Type': 'application/json' },
+    const response = http.post(TARGET.url, PAYLOAD, {
+        headers,
         timeout: `${PROTOCOL.httpTimeoutSeconds}s`,
         tags: { phase },
+        responseType: TARGET.extractor === 'raw-png' ? 'binary' : 'text',
     });
     const ts = Date.now();
     // 1050 is k6's request-timeout error code: the client gave up, which says

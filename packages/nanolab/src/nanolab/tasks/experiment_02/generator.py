@@ -1,9 +1,10 @@
 """The load generator of experiment 02: experiment 01's calendar, any platform's door.
 
-The script is `assets/k6/experiment-02.js`. What it sends, when, and how a
-request joins its cohort are experiment 01's; what changes per platform is
-only where the request goes, with which headers, and where the PNG is in the
-answer. That is the target, serialized beside the protocol.
+The script is experiment 01's own, `assets/k6/experiment-01.js`. What it sends,
+when, and how a request joins its cohort are therefore experiment 01's; what
+changes per platform is only where the request goes, with which headers, and
+where the PNG is in the answer. That is the target, serialized beside
+experiment 01's protocol in `EXPERIMENT_TARGET`.
 
 The generator runs on the loadgen VM. Its event ledger is fetched whatever k6
 does, including when it fails: a cell's requests are its evidence, and a
@@ -25,6 +26,7 @@ from sonata_tasks.k6 import k6_argv
 from sonata_tasks.k6_models import K6Config
 
 from nanolab.comparison.experiment_01 import EVENTS, SUMMARY
+from nanolab.config.experiment_01 import k6_protocol
 from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.tasks.experiment_02.vm import Vm
 
@@ -44,6 +46,9 @@ class K6Target:
     headers: Mapping[str, str]
     extractor: Extractor
     field: str | None = None
+    # A header the script fills with each request's own ledger id, for targets
+    # that admit one active execution per id.
+    id_header: str | None = None
 
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -100,27 +105,20 @@ def generator_environment(
     the same request wrapped if the target needs it. The PNG size is read from
     the payload, since a wrapped body hides it.
     """
-    protocol_values = {
-        "phases": protocol.phases(),
-        "httpTimeoutSeconds": protocol.http_timeout_seconds,
-        "gracefulStopSeconds": protocol.graceful_stop_seconds,
-        "preAllocatedVUs": protocol.pre_allocated_vus,
-        "maxVUs": protocol.max_vus,
-    }
     target_values = {
         "url": target.url,
         "headers": dict(target.headers),
         "extractor": target.extractor,
         "field": target.field,
+        "idHeader": target.id_header,
         "pngSha256": protocol.png_sha256,
-        "size": json.loads(payload)["size"],
     }
     return {
-        "E02_PAYLOAD": body.decode("utf-8"),
-        "E02_PROTOCOL": json.dumps(
-            protocol_values, sort_keys=True, separators=(",", ":")
+        "E01_PROTOCOL": k6_protocol(protocol, size=json.loads(payload)["size"]),
+        "E01_PAYLOAD": body.decode("utf-8"),
+        "EXPERIMENT_TARGET": json.dumps(
+            target_values, sort_keys=True, separators=(",", ":")
         ),
-        "E02_TARGET": json.dumps(target_values, sort_keys=True, separators=(",", ":")),
     }
 
 

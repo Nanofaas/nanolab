@@ -18,7 +18,7 @@ from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 from .fakes import RecordingProvider, Result, vm
 
 SCENARIOS = discover_tool_root() / "scenarios"
-SCRIPT = bundled_assets_root() / "k6" / "experiment-02.js"
+SCRIPT = bundled_assets_root() / "k6" / "experiment-01.js"
 REMOTE = PurePosixPath("/home/azureuser/e02/attempt-1")
 
 
@@ -37,20 +37,32 @@ def test_generator_environment_serializes_protocol_target_and_body():
         url="http://10.0.0.4:9000/invoke",
         headers={"Content-Type": "application/json"},
         extractor="json-base64",
+        id_header="X-Execution-Id",
     )
     env = generator_environment(
         protocol, payload=payload, body=b'{"input":{}}', target=target
     )
-    assert env["E02_PAYLOAD"] == '{"input":{}}'
-    assert json.loads(env["E02_TARGET"]) == {
+    # Experiment 01's two keys, in experiment 01's format, plus the target.
+    assert set(env) == {"E01_PROTOCOL", "E01_PAYLOAD", "EXPERIMENT_TARGET"}
+    assert env["E01_PAYLOAD"] == '{"input":{}}'
+    assert json.loads(env["EXPERIMENT_TARGET"]) == {
         "url": "http://10.0.0.4:9000/invoke",
         "headers": {"Content-Type": "application/json"},
         "extractor": "json-base64",
         "field": None,
+        "idHeader": "X-Execution-Id",
         "pngSha256": None,
-        "size": 1024,
     }
-    sent = json.loads(env["E02_PROTOCOL"])
+    sent = json.loads(env["E01_PROTOCOL"])
+    assert set(sent) == {
+        "phases",
+        "httpTimeoutSeconds",
+        "gracefulStopSeconds",
+        "preAllocatedVUs",
+        "maxVUs",
+        "size",
+    }
+    assert sent["size"] == 1024
     assert [phase["name"] for phase in sent["phases"]] == [
         "idle",
         "warmup",
@@ -78,7 +90,7 @@ def test_run_generator_fetches_events_even_when_k6_fails(tmp_path: Path):
     code = run_generator(
         vm(provider, "loadgen"),
         script=SCRIPT,
-        env={"E02_PAYLOAD": "{}"},
+        env={"E01_PAYLOAD": "{}"},
         remote_dir=REMOTE,
         local_dir=tmp_path,
     )
@@ -87,8 +99,8 @@ def test_run_generator_fetches_events_even_when_k6_fails(tmp_path: Path):
     assert not (tmp_path / "k6-summary.json").exists()
     assert (tmp_path / "k6-stderr.txt").read_text() == "thresholds crossed"
     k6_run = next(argv for argv in provider.commands() if argv[:2] == ("k6", "run"))
-    assert k6_run[-1] == str(REMOTE / "experiment-02.js")
-    assert k6_run[-3:-1] == ("-e", "E02_PAYLOAD={}")
+    assert k6_run[-1] == str(REMOTE / "experiment-01.js")
+    assert k6_run[-3:-1] == ("-e", "E01_PAYLOAD={}")
 
 
 def test_run_generator_refuses_a_script_that_arrived_changed(tmp_path: Path):

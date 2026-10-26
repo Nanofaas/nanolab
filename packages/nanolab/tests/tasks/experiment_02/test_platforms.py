@@ -143,6 +143,8 @@ def test_direct_reference_wraps_the_payload_as_runtime_input():
     target = direct.target("10.0.0.4")
     assert target.url == "http://10.0.0.4:30080/invoke"
     assert (target.extractor, target.field) == ("json-base64", None)
+    # One id per request: the runtime refuses a second active execution of an id.
+    assert target.id_header == "X-Execution-Id"
     provider, _started = _deployed(direct)
     [function] = _docker_runs(provider)
     assert "30080:8080" in function

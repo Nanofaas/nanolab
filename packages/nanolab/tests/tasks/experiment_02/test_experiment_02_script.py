@@ -13,8 +13,9 @@ from sonata_tasks.shell import SubprocessShell
 
 from nanolab.workspace.paths import bundled_assets_root
 
-SCRIPT = bundled_assets_root() / "k6" / "experiment-02.js"
-HARNESS = Path(__file__).with_name("experiment_02_k6_harness.mjs")
+# Experiment 02 runs experiment 01's script, with a target.
+SCRIPT = bundled_assets_root() / "k6" / "experiment-01.js"
+HARNESS = Path(__file__).parents[2] / "comparison" / "experiment_01_k6_harness.mjs"
 
 
 def _png(size: int) -> bytes:
@@ -42,14 +43,19 @@ ENVELOPE = {
 }
 
 
-def _target(extractor: str, field: str | None = None, sha: str | None = None):
+def _target(
+    extractor: str,
+    field: str | None = None,
+    sha: str | None = None,
+    id_header: str | None = None,
+):
     return {
         "url": URL,
         "headers": HEADERS,
         "extractor": extractor,
         "field": field,
+        "idHeader": id_header,
         "pngSha256": sha,
-        "size": 128,
     }
 
 
@@ -57,13 +63,21 @@ def _run(sample: dict) -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Requires Node to execute the shipped k6 script")
+    environment = {
+        "E01_PROTOCOL": json.dumps(
+            {"phases": [], "httpTimeoutSeconds": 30, "size": 128}
+        ),
+        "E01_PAYLOAD": '{"text":"A","size":128}',
+        "EXPERIMENT_TARGET": json.dumps(sample["target"]),
+    }
+    harness = {key: value for key, value in sample.items() if key != "target"}
     result = SubprocessShell().run(
         [
             node,
             "--experimental-vm-modules",
             str(HARNESS),
             str(SCRIPT),
-            json.dumps(sample),
+            json.dumps({"env": environment, **harness}),
         ]
     )
     assert result.return_code == 0, result.stderr
@@ -142,8 +156,25 @@ def test_the_request_goes_to_the_target_with_its_headers():
     assert raw == {
         "url": URL,
         "payload": '{"text":"A","size":128}',
-        "headers": HEADERS,
-        "responseType": "binary",
+        "params": {
+            "headers": HEADERS,
+            "timeout": "30s",
+            "tags": {"phase": "warmup"},
+            "responseType": "binary",
+        },
     }
     text = _run({"target": _target("json-base64"), "body": B64})["request"]
-    assert text["responseType"] == "text"
+    assert text["params"]["responseType"] == "text"
+
+
+def test_each_request_carries_its_own_execution_id():
+    # The function's runtime admits one active execution per id: a shared id
+    # turns every overlap into a 429.
+    observed = _run(
+        {"target": _target("json-base64", id_header="X-Execution-Id"), "body": B64}
+    )
+    assert observed["request"]["params"]["headers"] == {
+        **HEADERS,
+        "X-Execution-Id": "warmup-0",
+    }
+    assert observed["events"][0]["id"] == "warmup-0"

@@ -123,7 +123,8 @@ from nanolab.workspace.paths import bundled_assets_root
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
 EXPERIMENT_01_DEFAULT_VARIANTS = tuple(EXPERIMENT_01_VARIANTS_BY_KEY)
 EXPERIMENT_02_DEFAULT_CONFIGURATIONS = tuple(CONFIGURATIONS_BY_KEY)
-EXPERIMENT_02_SCRIPT_NAME = "experiment-02.js"
+# Experiment 02 runs experiment 01's calendar, so it runs experiment 01's script.
+EXPERIMENT_02_SCRIPT_NAME = "experiment-01.js"
 _EXPERIMENT_02_REASONS: dict[str, str] = {
     "measured": "completed",
     "oom": "OOM kill in the measured slice",
