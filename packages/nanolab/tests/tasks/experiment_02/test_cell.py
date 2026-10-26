@@ -20,7 +20,7 @@ from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.vm import Vm
 from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
-from .fakes import RecordingProvider, Result, request
+from .fakes import RecordingProvider, Result, vm
 
 SCENARIOS = discover_tool_root() / "scenarios"
 SCRIPT = bundled_assets_root() / "k6" / "experiment-02.js"
@@ -134,8 +134,8 @@ def _loadgen(code: int = 0, summary: bool = True) -> RecordingProvider:
 def _run(stack, loadgen, platform, tmp_path):
     return run_cell(
         CELL,
-        stack=Vm(stack, request("stack")),
-        loadgen=Vm(loadgen, request("loadgen")),
+        stack=vm(stack, "stack"),
+        loadgen=vm(loadgen, "loadgen"),
         platform=platform,
         protocol=_protocol(),
         payload=b'{"size":1024,"text":"A"}',

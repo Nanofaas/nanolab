@@ -10,6 +10,7 @@ from nanolab.comparison.experiment_01 import (
     DIAGNOSTICS,
     EVENTS,
     SUMMARY,
+    Outcome,
     mark_load_started,
 )
 from nanolab.comparison.experiment_02 import (
@@ -25,28 +26,28 @@ CELL = Experiment02Cell(
 )
 
 
-def _measured(run_dir: Path) -> str:
+def _measured(run_dir: Path) -> Outcome:
     (run_dir / "metrics").mkdir(parents=True, exist_ok=True)
     for name in (SUMMARY, EVENTS, SAMPLES):
         (run_dir / name).write_text("{}\n")
     return "measured"
 
 
-def _startup_failed(run_dir: Path) -> str:
+def _startup_failed(run_dir: Path) -> Outcome:
     (run_dir / DIAGNOSTICS).mkdir(parents=True, exist_ok=True)
     (run_dir / DIAGNOSTICS / "error.txt").write_text("no correct response\n")
     return "startup_failed"
 
 
-def _transport(run_dir: Path) -> str:
+def _transport(run_dir: Path) -> Outcome:
     raise RuntimeError("channel closed")
 
 
-def _refused(run_dir: Path) -> str:
+def _refused(run_dir: Path) -> Outcome:
     raise ValueError("the measured slice enforces cpu1-mem2048")
 
 
-def _after_load(run_dir: Path) -> str:
+def _after_load(run_dir: Path) -> Outcome:
     mark_load_started(run_dir)
     raise RuntimeError("k6 exited 107 without a summary")
 
@@ -57,7 +58,7 @@ def _run(tmp_path: Path, behaviours):
     calls: list[Path] = []
     checks: list[str] = []
 
-    def run_attempt(run_dir: Path) -> str:
+    def run_attempt(run_dir: Path) -> Outcome:
         behaviour = behaviours[len(calls)]
         calls.append(run_dir)
         return behaviour(run_dir)

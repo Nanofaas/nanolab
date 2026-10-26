@@ -278,6 +278,15 @@ per-attempt directories and definitive outcome receipts (`measured`, `oom`,
 `startup_failed`). Native builds fix their heap at build time
 (`build.native.maxHeap`), which needs a nanoFaaS revision with that field. See [Experiment 01](../../docs/experiment-01.md).
 
+### Experiment 02
+
+`loadProfile: experiment-02` runs `compare` against complete deployments on
+Docker, without k3s: nanoFaaS P0 and P1 (`recipes/experiment-02-*.yaml`, JVM and
+native) and the function alone, each confined to a cgroup whose CPU quota and
+memory limit are one budget of the protocol's grid. It reuses experiment 01's
+calendar, ledger, receipts and verdicts, and adds CPU time and memory occupancy
+per useful response. See [Experiment 02](../../docs/experiment-02.md).
+
 ## Bash recipe validation
 
 Run `deployment-lifecycle-container-bash.yaml` for the same local Docker

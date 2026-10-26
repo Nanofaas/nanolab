@@ -206,7 +206,7 @@ def _points(series: Series) -> list[dict[str, object]]:
     ]
 
 
-def as_snapshot(samples: Samples) -> dict[str, object]:
+def as_snapshot(samples: Samples) -> dict[str, Any]:
     """Return the series in the shape of a Prometheus snapshot.
 
     `summarize_phases` reads that shape; giving it the same shape lets

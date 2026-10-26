@@ -6,7 +6,11 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
+from sonata_tasks.vm.ports import VmCommandProvider
+
+from nanolab.tasks.experiment_02.vm import Vm
 from nanolab.tasks.vm.models import VmRequest
 
 
@@ -79,3 +83,8 @@ class RecordingProvider:
 def request(name: str = "stack") -> VmRequest:
     """Return a minimal VM request for the fake provider."""
     return VmRequest(lifecycle="multipass", name=name)
+
+
+def vm(provider: RecordingProvider, name: str = "stack") -> Vm:
+    """Return a `Vm` on the fake provider, typed as the real port."""
+    return Vm(cast(VmCommandProvider, provider), request(name))

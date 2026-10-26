@@ -17,9 +17,8 @@ from nanolab.tasks.experiment_02.platforms import (
     NanofaasPlatform,
     leftover_containers,
 )
-from nanolab.tasks.experiment_02.vm import Vm
 
-from .fakes import RecordingProvider, Result, request
+from .fakes import RecordingProvider, Result, vm
 
 PAYLOAD = b'{"size":128,"text":"A"}\n'
 
@@ -82,7 +81,7 @@ def _deployed(platform) -> tuple[RecordingProvider, float]:
         return None
 
     provider = RecordingProvider(handler=handler)
-    return provider, platform.deploy(Vm(provider, request()))
+    return provider, platform.deploy(vm(provider))
 
 
 def test_p1_runs_the_docker_provider_and_registers_a_deployment_function():
@@ -160,7 +159,7 @@ def _probe(platform, output: str, first: bytes | None, tmp_path: Path):
 
     provider = RecordingProvider(handler=handler)
     return platform.readiness(
-        Vm(provider, request()),
+        vm(provider),
         started=100.0,
         timeout_seconds=300,
         payload=PAYLOAD,
@@ -194,7 +193,7 @@ def test_readiness_script_is_valid_shell(platform, tmp_path):
         return None
 
     platform.readiness(
-        Vm(RecordingProvider(handler=handler), request()),
+        vm(RecordingProvider(handler=handler)),
         started=100.0,
         timeout_seconds=1,
         payload=PAYLOAD,
@@ -223,9 +222,9 @@ def test_teardown_removes_every_container_but_the_registry():
         return None
 
     provider = RecordingProvider(handler=handler)
-    vm = Vm(provider, request())
-    assert leftover_containers(vm) == ["e02-control-plane", "qr-code-1"]
-    _p1().teardown(vm)
+    stack = vm(provider)
+    assert leftover_containers(stack) == ["e02-control-plane", "qr-code-1"]
+    _p1().teardown(stack)
     assert ("docker", "rm", "-f", "e02-control-plane", "qr-code-1") in (
         provider.commands()
     )
@@ -243,6 +242,6 @@ def test_record_refuses_a_control_plane_with_unexpected_modules(tmp_path):
         return RecordingProvider(handler=handler)
 
     with pytest.raises(ValueError, match="modules"):
-        _p1().record(Vm(metadata(["build-metadata"]), request()), tmp_path)
-    _p1().record(Vm(metadata(sorted(EXPERIMENT_02_MODULES["P1"])), request()), tmp_path)
+        _p1().record(vm(metadata(["build-metadata"])), tmp_path)
+    _p1().record(vm(metadata(sorted(EXPERIMENT_02_MODULES["P1"]))), tmp_path)
     assert json.loads((tmp_path / "build-metadata.json").read_text())["modules"]

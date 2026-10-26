@@ -13,10 +13,9 @@ from nanolab.tasks.experiment_02.generator import (
     generator_environment,
     run_generator,
 )
-from nanolab.tasks.experiment_02.vm import Vm
 from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
-from .fakes import RecordingProvider, Result, request
+from .fakes import RecordingProvider, Result, vm
 
 SCENARIOS = discover_tool_root() / "scenarios"
 SCRIPT = bundled_assets_root() / "k6" / "experiment-02.js"
@@ -77,7 +76,7 @@ def test_run_generator_fetches_events_even_when_k6_fails(tmp_path: Path):
 
     provider = RecordingProvider(handler=k6)
     code = run_generator(
-        Vm(provider, request("loadgen")),
+        vm(provider, "loadgen"),
         script=SCRIPT,
         env={"E02_PAYLOAD": "{}"},
         remote_dir=REMOTE,
@@ -102,7 +101,7 @@ def test_run_generator_refuses_a_script_that_arrived_changed(tmp_path: Path):
     provider.transfer_to = corrupt  # type: ignore[method-assign]
     with pytest.raises(ValueError, match="differs"):
         run_generator(
-            Vm(provider, request("loadgen")),
+            vm(provider, "loadgen"),
             script=SCRIPT,
             env={},
             remote_dir=REMOTE,
