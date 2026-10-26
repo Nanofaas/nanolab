@@ -177,6 +177,18 @@ declares the Rust QR function. The native profiles fix the 64 MiB heap at build
 time with `build.native.maxHeap`, which needs a nanoFaaS revision that has the
 field. See [Experiment 01](../../../../../../../docs/experiment-01.md).
 
+## Experiment 02 profiles
+
+`experiment-02-*.yaml` provides the nanoFaaS compositions experiment 02 compares
+with other platforms on Docker: P0, the core with `build-metadata` and no queue
+or provider, in front of an external endpoint; and P1, the core with
+`container-deployment-provider`, `async-queue` and `build-metadata`. Each comes as
+a full-tiering JVM build and a native -O3 build, with Serial GC and the same
+64 MiB heap as experiment 01. Only `experiment-02-p1-jvm.yaml` declares the Rust
+QR function; every configuration, including the function run without a
+platform, uses the image it publishes. See
+[Experiment 02](../../../../../../../docs/experiment-02.md).
+
 ## Bash container validation
 
 `validate-container-bash.yaml` publishes the JVM control plane and the existing

@@ -1,0 +1,16 @@
+schemaVersion: 2
+name: experiment-02-p0-jvm
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: experiment-02
+controlPlane:
+  modules:
+  - build-metadata
+  build:
+    mode: jvm
+  container:
+    image: control-plane-e02-p0-jvm
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -Xmx64m

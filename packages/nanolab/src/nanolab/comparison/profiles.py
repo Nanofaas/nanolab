@@ -4,9 +4,15 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any, Literal
 
 import yaml
 
+from nanolab.comparison.experiment_02 import (
+    CONFIGURATIONS_BY_KEY,
+    EXPERIMENT_02_PUBLISHER,
+    Configuration,
+)
 from nanolab.config.experiment_01 import CONTROL_PLANE_MAX_HEAP_MIB
 from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS_BY_KEY,
@@ -27,6 +33,13 @@ COMPARISON_SCHEDULER_STRATEGY = "per-function"
 # Experiment 01 drives one function, built once and published by the first
 # recipe; every later recipe reuses that function's digest.
 EXPERIMENT_01_FUNCTIONS = {"qr-code-rust": ("qr-code", "rust")}
+# Experiment 02 drives the same function; its P1 JVM recipe publishes it.
+EXPERIMENT_02_FUNCTIONS = {"qr-code-rust": ("qr-code", "rust")}
+EXPERIMENT_02_MODULES: dict[Literal["P0", "P1"], tuple[str, ...]] = {
+    # The core and nothing a deployment needs: an external endpoint, no queue.
+    "P0": ("build-metadata",),
+    "P1": ("container-deployment-provider", "async-queue", "build-metadata"),
+}
 _HEAP = f"-Xmx{CONTROL_PLANE_MAX_HEAP_MIB}m"
 # A native image takes its heap limit at build time (-R:MaxHeapSize).
 _NATIVE_HEAP = f"{CONTROL_PLANE_MAX_HEAP_MIB}m"
@@ -95,18 +108,43 @@ def experiment_01_options(
     """
     recipe = yaml.safe_load(profile.read_text())
     cp = recipe["controlPlane"]
-    if sorted(cp["modules"]) != sorted(variant.modules) or len(cp["modules"]) != len(
-        variant.modules
-    ):
-        raise ValueError(f"{variant.key} requires modules {list(variant.modules)}")
-    build = cp["build"]
-    if "variant" in build or cp.get("config"):
-        raise ValueError(
-            "experiment-01 recipes carry no variant label or extra configuration"
-        )
+    _require_modules(cp, variant.modules, variant.key)
     runtime = variant.runtime
     if runtime is None:
         raise ValueError(f"{variant.key} declares no runtime class")
+    _require_build(cp, runtime, variant.key)
+    functions = [
+        (function["name"], function["sdk"]) for function in recipe.get("functions", [])
+    ]
+    expected = list(EXPERIMENT_01_FUNCTIONS.values()) if shares else []
+    if functions != expected or recipe.get("services"):
+        raise ValueError(
+            "only the first experiment-01 recipe declares the shared function"
+        )
+    return {
+        **declared_options(profile, modules=frozenset(variant.modules)),
+        "runtime": runtime,
+    }
+
+
+def _require_modules(cp: Mapping[str, Any], modules: tuple[str, ...], key: str) -> None:
+    """Require exactly `modules`, no more, no fewer and no repeats."""
+    selected = cp["modules"]
+    if sorted(selected) != sorted(modules) or len(selected) != len(modules):
+        raise ValueError(f"{key} requires modules {list(modules)}")
+
+
+def _require_build(cp: Mapping[str, Any], runtime: str, key: str) -> None:
+    """Require the serial collector, the 64 MiB heap and the runtime's tier.
+
+    Shared by experiments 01 and 02, which hold every runtime to the same heap
+    and collector so that only the composition differs between their builds.
+    """
+    build = cp["build"]
+    if "variant" in build or cp.get("config"):
+        raise ValueError(
+            "experiment recipes carry no variant label or extra configuration"
+        )
     if runtime.startswith("native-"):
         native = build.get("native", {})
         if (
@@ -118,25 +156,70 @@ def experiment_01_options(
             or "jvm" in cp
         ):
             raise ValueError(
-                f"{variant.key} must be a serial native -O build, "
-                f"maxHeap {_NATIVE_HEAP}"
+                f"{key} must be a serial native -O build, maxHeap {_NATIVE_HEAP}"
             )
     elif build["mode"] != "jvm" or cp.get("jvm", {}).get("args") != [
         "-XX:+UseSerialGC",
         _HEAP,
         *_JVM_TIER_ARGS[runtime],
     ]:
-        raise ValueError(f"{variant.key} must run serial GC, {_HEAP} and its tier")
+        raise ValueError(f"{key} must run serial GC, {_HEAP} and its tier")
+
+
+# Experiment 02 compares complete platforms, so each nanoFaaS composition runs
+# at its best tier: full JIT on the JVM, -O3 in native mode.
+_EXPERIMENT_02_RUNTIME = {"jvm": "tiered", "native": "native-o3"}
+
+
+def experiment_02_profiles(tool_root: Path, keys: tuple[str, ...]) -> dict[str, Path]:
+    """Resolve the recipes the selected experiment-02 configurations need.
+
+    The function publisher comes first even when it is not selected: every
+    configuration, the function alone included, runs the image it publishes.
+    Configurations without a recipe contribute nothing.
+    """
+    if not keys or len(set(keys)) != len(keys):
+        raise ValueError("experiment-02 configurations must be nonempty and unique")
+    unknown = set(keys) - CONFIGURATIONS_BY_KEY.keys()
+    if unknown:
+        raise ValueError(
+            "unknown experiment-02 configurations: " + ", ".join(sorted(unknown))
+        )
+    ordered = dict.fromkeys((EXPERIMENT_02_PUBLISHER, *keys))
+    profiles: dict[str, Path] = {}
+    for key in ordered:
+        configuration = CONFIGURATIONS_BY_KEY[key]
+        if configuration.recipe is None:
+            continue
+        profiles[key] = tool_root / "recipes" / f"{configuration.recipe}.yaml"
+        _ = experiment_02_options(
+            profiles[key], configuration, shares=key == EXPERIMENT_02_PUBLISHER
+        )
+    return profiles
+
+
+def experiment_02_options(
+    profile: Path, configuration: Configuration, *, shares: bool
+) -> dict[str, object]:
+    """Read a recipe and require exactly the build the configuration declares."""
+    if configuration.profile is None or configuration.runtime is None:
+        raise ValueError(f"{configuration.key} is not built from a recipe")
+    recipe = yaml.safe_load(profile.read_text())
+    cp = recipe["controlPlane"]
+    modules = EXPERIMENT_02_MODULES[configuration.profile]
+    _require_modules(cp, modules, configuration.key)
+    runtime = _EXPERIMENT_02_RUNTIME[configuration.runtime]
+    _require_build(cp, runtime, configuration.key)
     functions = [
         (function["name"], function["sdk"]) for function in recipe.get("functions", [])
     ]
-    expected = list(EXPERIMENT_01_FUNCTIONS.values()) if shares else []
+    expected = list(EXPERIMENT_02_FUNCTIONS.values()) if shares else []
     if functions != expected or recipe.get("services"):
         raise ValueError(
-            "only the first experiment-01 recipe declares the shared function"
+            f"only {EXPERIMENT_02_PUBLISHER} publishes the shared function"
         )
     return {
-        **declared_options(profile, modules=frozenset(variant.modules)),
+        **declared_options(profile, modules=frozenset(modules)),
         "runtime": runtime,
     }
 
@@ -212,37 +295,51 @@ class ProfileContract:
     """What prepare and evidence require of a run's recipes.
 
     Chosen from the manifest identity: a historical manifest keeps the
-    historical contract, and experiment 01 is recognised by its own block.
+    historical contract, and each experiment is recognised by its own block.
     """
 
+    kind: Literal["historical", "experiment-01", "experiment-02"]
     shared: str
     functions: Mapping[str, tuple[str, str]]
 
     def modules(self, key: str) -> frozenset[str]:
         """Return the exact module set the profile `key` must be built with."""
-        if self.shared == "jvm":
+        if self.kind == "historical":
             return COMPARISON_RECIPE_MODULES
+        if self.kind == "experiment-02":
+            profile = CONFIGURATIONS_BY_KEY[key].profile
+            if profile is None:
+                raise ValueError(f"{key} is not built from a recipe")
+            return frozenset(EXPERIMENT_02_MODULES[profile])
         return frozenset(EXPERIMENT_01_VARIANTS_BY_KEY[key].modules)
 
     def options(self, key: str, profile: Path) -> dict[str, object]:
         """Return the declared options recorded for the profile `key`."""
-        if self.shared == "jvm":
+        if self.kind == "historical":
             return declared_options(profile)
+        if self.kind == "experiment-02":
+            return experiment_02_options(
+                profile, CONFIGURATIONS_BY_KEY[key], shares=key == self.shared
+            )
         return experiment_01_options(
             profile, EXPERIMENT_01_VARIANTS_BY_KEY[key], shares=key == self.shared
         )
 
 
-HISTORICAL_CONTRACT = ProfileContract("jvm", COMPARISON_FUNCTIONS)
+HISTORICAL_CONTRACT = ProfileContract("historical", "jvm", COMPARISON_FUNCTIONS)
 EXPERIMENT_01_CONTRACT = ProfileContract(
-    next(iter(EXPERIMENT_01_VARIANTS_BY_KEY)), EXPERIMENT_01_FUNCTIONS
+    "experiment-01", next(iter(EXPERIMENT_01_VARIANTS_BY_KEY)), EXPERIMENT_01_FUNCTIONS
+)
+EXPERIMENT_02_CONTRACT = ProfileContract(
+    "experiment-02", EXPERIMENT_02_PUBLISHER, EXPERIMENT_02_FUNCTIONS
 )
 
 
 def contract_for(identity: Mapping[str, object]) -> ProfileContract:
     """Return the recipe contract a manifest identity was captured under."""
-    return (
-        EXPERIMENT_01_CONTRACT
-        if identity.get("experiment") is not None
-        else HISTORICAL_CONTRACT
-    )
+    experiment = identity.get("experiment")
+    if experiment is None:
+        return HISTORICAL_CONTRACT
+    if isinstance(experiment, Mapping) and experiment.get("profile") == "experiment-02":
+        return EXPERIMENT_02_CONTRACT
+    return EXPERIMENT_01_CONTRACT

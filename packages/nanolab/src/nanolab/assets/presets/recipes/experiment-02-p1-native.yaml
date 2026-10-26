@@ -1,0 +1,18 @@
+schemaVersion: 2
+name: experiment-02-p1-native
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: experiment-02
+controlPlane:
+  modules:
+  - container-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: native
+    builder: host
+    native:
+      gc: serial
+      maxHeap: 64m
+  container:
+    image: control-plane-e02-p1-native

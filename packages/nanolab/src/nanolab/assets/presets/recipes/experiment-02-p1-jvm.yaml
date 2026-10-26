@@ -1,0 +1,23 @@
+schemaVersion: 2
+name: experiment-02-p1-jvm
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: experiment-02
+controlPlane:
+  modules:
+  - container-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+  container:
+    image: control-plane-e02-p1-jvm
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -Xmx64m
+functions:
+- name: qr-code
+  sdk: rust
+  container:
+    image: rust-qr-code
