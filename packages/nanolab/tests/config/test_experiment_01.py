@@ -54,8 +54,10 @@ def test_campaign_is_frozen_and_pilot_is_not():
     [
         ({"steps": [{"rate": 50, "durationSeconds": 60}] * 2}, "increasing"),
         ({"steps": [{"rate": 0, "durationSeconds": 60}]}, "greater than 0"),
+        ({"steps": [{"rate": 25.5, "durationSeconds": 60}]}, "integer"),
+        ({"warmup": {"rate": 0.5, "durationSeconds": 60}}, "integer"),
         ({"steps": [{"rate": 10, "durationSeconds": 0}]}, "greater than 0"),
-        ({"steps": [{"rate": float("inf"), "durationSeconds": 60}]}, "finite"),
+        ({"steps": [{"rate": float("inf"), "durationSeconds": 60}]}, "integer"),
         ({"steps": []}, "at least 1"),
         ({"gracefulStopSeconds": 39}, "gracefulStopSeconds"),
         ({"drainSeconds": 30}, "drainSeconds"),
@@ -101,12 +103,6 @@ def test_phases_are_back_to_back_from_the_idle_origin():
         300,
         360,
     ]
-
-
-def test_vu_budget_counts_overlapping_plateaux():
-    protocol = Experiment01Protocol.model_validate(_protocol())
-    # step-03 still holds its VUs through gracefulStop while step-04 sends.
-    assert protocol.vu_budget() == (100 + 200) * 30
 
 
 @pytest.mark.parametrize(

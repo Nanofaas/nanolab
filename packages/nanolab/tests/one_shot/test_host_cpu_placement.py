@@ -245,7 +245,9 @@ def test_partial_operator_pin_failure_restores_original_masks(tmp_path, monkeypa
     assert masks == {101: {0, 1}, 102: {2, 3}}
 
 
-def test_failed_vm_placement_releases_owned_vm_and_operator(tmp_path, monkeypatch):
+def test_failed_vm_placement_releases_owned_vm_and_operator(
+    tmp_path, monkeypatch, simulated_one_shot_host
+):
     from types import SimpleNamespace
 
     from sonata_engine import Task, TaskOutcome, Workflow

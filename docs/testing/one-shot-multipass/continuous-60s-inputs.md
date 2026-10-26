@@ -201,8 +201,10 @@ uv run --frozen --all-packages --all-groups python scripts/one-shot-forecast-rep
 defaults. Without it the replay uses EWMA with 60 s windows and alpha 0.5, EWMA
 with 10 s windows and alpha 0.7, Holt and ARI. `forecast-replay.csv` has the
 `forecast-errors.csv` columns preceded by `model`; `forecastSource` is `replay`,
-or `no-window` before the first complete window. `forecast-replay.json` holds one
-summary per model. The replay counts the generator's emitted requests, assumes each
+or `no-window` before the first complete window or when no arrivals were recorded.
+Repeated forecaster labels are rejected before any result files are written;
+Holt's history range is independent of ARI's order. `forecast-replay.json` holds
+one summary per model. The replay counts the generator's emitted requests, assumes each
 function registered 60 s before the first arrival, and queries at the nominal lead
 rather than at each auction's actual start. The copies agree with the Java classes
 to within 1e-12, which a test pins.

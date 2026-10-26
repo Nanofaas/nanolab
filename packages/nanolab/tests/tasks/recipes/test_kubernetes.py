@@ -203,10 +203,13 @@ def test_pod_selection_follows_deployment_ownership() -> None:
     assert [pod["metadata"]["name"] for pod in selected] == ["owned"]
 
 
+@pytest.mark.parametrize("nodes", [("node",), ("node", "second")])
 @pytest.mark.parametrize("manifest_id", [False, True])
-@pytest.mark.parametrize("fault", [None, "foreign", "load", "release", "wrong-config"])
+@pytest.mark.parametrize(
+    "fault", [None, "foreign", "load", "release", "wrong-config", "wrong-second-node"]
+)
 def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
-    tmp_path, fault, manifest_id
+    tmp_path, fault, manifest_id, nodes
 ):
     from pathlib import Path
 
@@ -235,7 +238,7 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
             ),
         ),
     )
-    target_value = MinikubeTarget("owned", "owned", ("node",))
+    target_value = MinikubeTarget("owned", "owned", nodes)
     target = Resource(
         title="target",
         acquire=lambda _inputs: target_value,
@@ -280,6 +283,7 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
                         {
                             "id": "sha256:wrong"
                             if fault == "wrong-config"
+                            or (fault == "wrong-second-node" and "second" in task.argv)
                             else config_id,
                             "repoTags": [reference],
                         }
@@ -318,7 +322,7 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
     inputs = TaskInputs._for_resources(
         {target: target_value, distribution: value}, {target, distribution}
     )
-    if fault == "wrong-config":
+    if fault == "wrong-config" or (fault == "wrong-second-node" and "second" in nodes):
         with pytest.raises(ValueError, match="Runtime image config differs"):
             resource.acquire(inputs)
         assert executor.loaded is False
@@ -331,6 +335,12 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
             assert any("rm" in argv for argv in executor.calls)
     else:
         assert resource.acquire(inputs) == (reference,)
+        # Each node is checked against the actual config bytes, while exporting
+        # the same immutable image is expensive and only needed once.
+        exports = [
+            argv for argv in executor.calls if argv[:3] == ("docker", "image", "save")
+        ]
+        assert len(exports) == (1 if manifest_id else 0)
         if fault == "release":
             with pytest.raises(RuntimeError, match="image command failed"):
                 resource.release(inputs, (reference,))

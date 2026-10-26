@@ -88,9 +88,7 @@ def test_scheduler_strategy_mismatch_retains_response(tmp_path, code):
 
 
 @pytest.mark.parametrize("failure", ["scheduler", "pod", "metadata", "registry", None])
-def test_prepared_cell_verifies_all_identities_before_k6(
-    tmp_path, nanofaas_root, failure
-):
+def test_prepared_cell_verifies_all_identities_before_k6(tmp_path, failure):
     import json
 
     from sonata_engine import Resource, Workflow
@@ -143,6 +141,11 @@ def test_prepared_cell_verifies_all_identities_before_k6(
         ("k8s-deployment-provider", "async-queue", "build-metadata"),
         components,
     )
+    source_root = tmp_path / "source"
+    for runtime in ("java", "javascript"):
+        function = source_root / "functions" / runtime / "word-stats"
+        function.mkdir(parents=True)
+        (function / "function.yaml").write_text(f"name: word-stats-{runtime}\n")
     scenario = ScenarioConfig(
         workflow="loadtest",
         backend="k8s",
@@ -304,7 +307,7 @@ def test_prepared_cell_verifies_all_identities_before_k6(
         distribution,
         RoleBindings({"stack": executor}),
         tmp_path,
-        nanofaas_root,
+        source_root,
         None,
     )(platform)
     workflow = Workflow(workflow_id="cell")

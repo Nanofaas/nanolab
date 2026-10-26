@@ -6,11 +6,17 @@ import pytest
 from sonata_engine import Steps
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.shell import SubprocessShell
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.loadtest import _recipe_container_platform, build_loadtest_plan
+from nanolab.plans.loadtest import (
+    _prepare_run_directory_argv,
+    _recipe_container_platform,
+    _resolve_script_and_summary,
+    build_loadtest_plan,
+)
 from nanolab.tasks.loadtest.models import TimeWindow
 from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
@@ -85,6 +91,106 @@ CONTAINER_SCENARIO = ScenarioConfig(
     functions=["word-stats-java"],
     autoscaling=True,
 )
+
+
+@pytest.mark.parametrize("explicit_directory", [False, True])
+def test_event_ledgers_survive_preparation_of_the_next_attempt(
+    tmp_path, explicit_directory
+):
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "external", "roles": {"stack": {"host": "stack.example"}}}
+    )
+    home = Path(environment.target("stack").remote_home)
+    remote_run_dir = (
+        home / "nanofaas-release/v1.2.3/benchmarks/run-1"
+        if explicit_directory
+        else None
+    )
+    summaries = []
+    for attempt in ("1", "2"):
+        _, summary = _resolve_script_and_summary(
+            SCENARIO,
+            environment,
+            remote=True,
+            dedicated=False,
+            remote_run_dir=remote_run_dir,
+            run_dir=tmp_path / "attempts" / attempt,
+            preserve_attempt=True,
+        )
+        # Run the remote command on a local stand-in for the VM filesystem.
+        summaries.append(tmp_path / "remote" / summary.relative_to(home))
+    first, second = summaries
+    first.parent.mkdir(parents=True)
+    previous = first.with_name("k6-events.jsonl")
+    previous.write_text('{"t":"send","id":"unrecovered"}\n')
+    result = SubprocessShell().run(
+        list(
+            _prepare_run_directory_argv(
+                second, remote_run_dir, second.with_name("k6-events.jsonl")
+            )
+        )
+    )
+
+    assert result.return_code == 0, result.stderr
+    assert previous.read_text() == '{"t":"send","id":"unrecovered"}\n'
+    assert second.parent.is_dir()
+
+
+@pytest.mark.parametrize("generator_fails", [True, False])
+def test_remote_plan_recovers_events_before_a_run_or_summary_error(
+    tmp_path, generator_fails
+):
+    source = tmp_path / "source"
+    function = source / "functions/java/word-stats"
+    function.mkdir(parents=True)
+    (function / "function.yaml").write_text("name: word-stats-java\n")
+    remote_files: dict[str, str] = {}
+    ledger = '{"t":"send","id":"in-flight"}\n'
+
+    class Executor(RecordingExecutor):
+        def run(self, task, *, dry_run=False):
+            if task.argv[:2] == ("k6", "run"):
+                self.seen.append(task)
+                remote_files[task.options.env["K6_CONSOLE_OUTPUT"]] = ledger
+                return TaskResult(
+                    task_id=task.task_id,
+                    status="failed" if generator_fails else "passed",
+                    return_code=137 if generator_fails else 0,
+                    stderr="k6 killed" if generator_fails else "",
+                )
+            return super().run(task, dry_run=dry_run)
+
+    class Fetcher:
+        def fetch_from(self, remote, local):
+            if remote not in remote_files:
+                raise FileNotFoundError("summary unavailable")
+            (local / Path(remote).name).write_text(remote_files[remote])
+
+    executor = Executor()
+    attempt = tmp_path / "attempts/1"
+    workflow = build_loadtest_plan(
+        SCENARIO,
+        EnvironmentConfig.model_validate(
+            {"provider": "external", "roles": {"stack": {"host": "stack.example"}}}
+        ),
+        RoleBindings({"host": executor, "stack": executor}),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=attempt,
+        repo_root=source,
+        prebuilt_control_plane_image="registry/control-plane:test",
+        prebuilt_function_images={"word-stats-java": "registry/function:test"},
+        fetcher=Fetcher(),
+        k6_events=True,
+    )
+
+    with pytest.raises(
+        RuntimeError if generator_fails else FileNotFoundError,
+        match="k6 killed" if generator_fails else "summary unavailable",
+    ):
+        workflow.run()
+
+    assert (attempt / "k6-events.jsonl").read_text() == ledger
 
 
 def test_recipe_container_platform_rejects_missing_profile(tmp_path: Path) -> None:

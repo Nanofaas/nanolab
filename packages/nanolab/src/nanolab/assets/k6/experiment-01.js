@@ -90,35 +90,37 @@ export function setup() {
 
 // Light per-request check: the nanoFaaS envelope, success, media type and
 // encoding, the PNG signature and its IHDR dimensions. It does not decode the
-// QR symbol; the preflight does that once, outside the measurement.
+// QR symbol; full QR decoding remains outside this measurement.
 export function correct(response) {
     if (response.status !== 200) {
         return false;
     }
-    let body;
     try {
-        body = response.json();
+        const body = response.json();
+        if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+            return false;
+        }
+        const headers = body.headers || {};
+        const type = Object.keys(headers)
+            .filter((key) => key.toLowerCase() === 'content-type')
+            .map((key) => String(headers[key]).split(';')[0].trim().toLowerCase())[0];
+        if (
+            body.status !== 'success'
+            || body.statusCode !== 200
+            || body.encoding !== 'base64'
+            || type !== 'image/png'
+            || typeof body.output !== 'string'
+            || !body.output.startsWith('iVBORw0KGgo')
+        ) {
+            return false;
+        }
+        const head = new Uint8Array(encoding.b64decode(body.output.slice(0, 32), 'std'));
+        const width = ((head[16] << 24) | (head[17] << 16) | (head[18] << 8) | head[19]) >>> 0;
+        const height = ((head[20] << 24) | (head[21] << 16) | (head[22] << 8) | head[23]) >>> 0;
+        return width === height && width >= PROTOCOL.size;
     } catch (error) {
         return false;
     }
-    const headers = body.headers || {};
-    const type = Object.keys(headers)
-        .filter((key) => key.toLowerCase() === 'content-type')
-        .map((key) => String(headers[key]).split(';')[0].trim().toLowerCase())[0];
-    if (
-        body.status !== 'success'
-        || body.statusCode !== 200
-        || body.encoding !== 'base64'
-        || type !== 'image/png'
-        || typeof body.output !== 'string'
-        || !body.output.startsWith('iVBORw0KGgo')
-    ) {
-        return false;
-    }
-    const head = new Uint8Array(encoding.b64decode(body.output.slice(0, 32), 'std'));
-    const width = ((head[16] << 24) | (head[17] << 16) | (head[18] << 8) | head[19]) >>> 0;
-    const height = ((head[20] << 24) | (head[21] << 16) | (head[22] << 8) | head[23]) >>> 0;
-    return width === height && width >= PROTOCOL.size;
 }
 
 export function invoke() {

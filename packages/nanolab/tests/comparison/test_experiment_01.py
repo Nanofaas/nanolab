@@ -582,8 +582,9 @@ def test_ledger_flags_duplicates_and_orphans():
     assert kinds == {"duplicate": 1, "second": 1, "terminal": 1}
 
 
-def test_truncated_and_logfmt_events_are_read_honestly(tmp_path):
-    event = {"t": "send", "id": "warmup-1", "phase": "warmup", "ts": 1.0}
+@pytest.mark.parametrize("request_id", ["warmup-1", 'warmup-"quoted\\path\nline'])
+def test_truncated_and_logfmt_events_are_read_honestly(tmp_path, request_id):
+    event = {"t": "send", "id": request_id, "phase": "warmup", "ts": 1.0}
     logfmt = (
         'time="x" level=info msg=' + json.dumps(json.dumps(event)) + " source=console"
     )
@@ -914,6 +915,65 @@ def test_error_after_load_started_stops_with_partial_evidence(tmp_path):
     cell_dir = _cell().run_dir(tmp_path)
     assert not (cell_dir / CELL_RESULT).exists()
     assert (attempt_dir(cell_dir, 1) / "diagnostics/error.txt").is_file()
+
+
+def test_failed_attempt_records_remote_evidence_recovery_notes(tmp_path):
+    from nanolab.comparison.experiment_01 import mark_load_started
+
+    def fail_with_recovery_note(run_dir):
+        mark_load_started(run_dir)
+        error = RuntimeError("k6 died")
+        error.add_note("Could not fetch k6 events from /tmp/attempt-1: SSH failed")
+        raise error
+
+    with pytest.raises(RuntimeError, match="k6 died"):
+        _run(tmp_path, [fail_with_recovery_note], [RUNNING])
+    diagnostic = attempt_dir(_cell().run_dir(tmp_path), 1) / "diagnostics/error.txt"
+    assert diagnostic.read_text() == (
+        "RuntimeError: k6 died\n"
+        "Could not fetch k6 events from /tmp/attempt-1: SSH failed\n"
+    )
+
+
+def test_failed_fresh_attempt_stays_pending_and_preserves_previous_receipt(tmp_path):
+    _run(tmp_path, [_measure], [RUNNING])
+    cell = _cell()
+    cell_dir = cell.run_dir(tmp_path)
+    previous = (cell_dir / CELL_RESULT).read_bytes()
+    with pytest.raises(RuntimeError, match="k6 died"):
+        _run(tmp_path, [_fail_after_load], [RUNNING])
+    assert pending((cell,), tmp_path, experiment_completed(IDENTITY)) == (cell,)
+    assert (attempt_dir(cell_dir, 1) / CELL_RESULT).read_bytes() == previous
+    assert (attempt_dir(cell_dir, 1) / "k6-summary.json").read_text() == "{}"
+    assert (attempt_dir(cell_dir, 2) / "diagnostics/error.txt").is_file()
+    _run(tmp_path, [_measure], [RUNNING])
+    receipt = read_cell_result(cell, tmp_path, IDENTITY)
+    assert receipt is not None
+    assert receipt["attempt"] == 3
+    assert (attempt_dir(cell_dir, 1) / CELL_RESULT).read_bytes() == previous
+
+
+def test_fresh_attempt_is_pending_even_if_preparation_fails(tmp_path):
+    from nanolab.cli.comparison import _run_experiment_cell
+
+    _run(tmp_path, [_measure], [RUNNING])
+    cell = _cell()
+
+    def unavailable() -> None:
+        raise RuntimeError("target unavailable")
+
+    with pytest.raises(RuntimeError, match="target unavailable"):
+        _run_experiment_cell(
+            cell,
+            root=tmp_path,
+            identity=IDENTITY,
+            provider=_Provider([]),  # type: ignore[arg-type]
+            request=None,  # type: ignore[arg-type]
+            before_attempt=unavailable,
+            run_attempt=_measure,
+        )
+    assert pending((cell,), tmp_path, experiment_completed(IDENTITY)) == (cell,)
+    assert (attempt_dir(cell.run_dir(tmp_path), 1) / CELL_RESULT).is_file()
 
 
 def test_oom_during_a_completed_load_is_an_oom(tmp_path):

@@ -60,7 +60,8 @@ there; the operator's checkout must include #256.
 The scenario's `experiment01` block (`config/experiment_01.py`) holds every
 parameter; none is a matrix axis. The calendar is idle, warmup, plateaux at
 constant arrival rate with sharp changes, then a bounded drain. The validator
-rejects non-increasing rates, non-finite or non-positive values,
+requires positive integer arrival rates (including warmup), and rejects
+non-increasing rates, non-finite or non-positive values,
 `gracefulStopSeconds < httpTimeoutSeconds + completionMarginSeconds`,
 `drainSeconds < gracefulStopSeconds`, fractions outside `[0, 1)`, and a
 generator window longer than a plateau. `status: frozen` requires the generator
@@ -93,7 +94,9 @@ scenario. It writes events through `K6_CONSOLE_OUTPUT` to `k6-events.jsonl`: a
 `send` immediately before `http.post` (with the phase captured then) and one
 terminal `done`, `timeout` or `error`. `done.ok` is the light check: nanoFaaS
 envelope, success, `image/png`, base64, PNG signature and IHDR at least the
-requested size. It does not decode the QR symbol.
+requested size. Malformed JSON/envelopes and decoding errors still produce a
+`done` event with `ok: false`, so completed incorrect responses are never counted
+as pending. It does not decode the QR symbol.
 
 Per-scenario `dropped_iterations` and `http_reqs` reach the summary through
 always-passing thresholds. A missing per-phase dropped metric is reported as
@@ -117,6 +120,20 @@ failure before the load, with the control plane running and ready, is retried
 once in a new attempt. An error after `load-started.json`, or one that cannot be
 classified, stops the matrix with its partial evidence; the next resume starts
 a new attempt. Previous attempts are never overwritten.
+
+The remote load generator also uses a distinct directory for each attempt,
+under `~/nanofaas-loadtest/recipe-<run-path-hash>/`. The event ledger is fetched
+when k6 exits, including failure or cancellation, before the summary is fetched.
+If that transfer fails, the next attempt leaves the remote files intact and the
+error records their location for recovery. Remote attempt files remain available
+until explicitly removed by the operator.
+
+With `--fresh`, starting a replacement moves the selected receipt into its old
+`attempts/<k>/cell-result.json`, preserving that receipt and its evidence. The
+cell stays incomplete until the new attempt commits a definitive outcome; an
+interrupted replacement is resumed even when an older attempt succeeded.
+Diagnostics also retain evidence-recovery error notes and remote paths when
+fetching the generator ledger fails.
 
 ## Verdicts
 

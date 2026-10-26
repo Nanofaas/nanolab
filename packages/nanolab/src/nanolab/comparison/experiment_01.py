@@ -103,6 +103,14 @@ def next_attempt(cell_dir: Path) -> int:
     return max(numbers, default=0) + 1
 
 
+def archive_cell_result(cell_dir: Path) -> None:
+    """Leave a replacement pending while retaining the previous receipt."""
+    path = cell_dir / CELL_RESULT
+    if path.is_file():
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        path.replace(attempt_dir(cell_dir, int(receipt["attempt"])) / CELL_RESULT)
+
+
 def mark_load_started(run_dir: Path) -> None:
     """Record that every pre-load check passed and the generator is next.
 
@@ -264,7 +272,7 @@ def read_events(path: Path) -> tuple[list[dict[str, Any]], int]:
         if not text.startswith("{") and 'msg="' in text:
             start = text.index('msg="') + 4
             try:
-                text = json.loads(text[start : _logfmt_end(text, start) + 1])
+                text, _end = json.JSONDecoder().raw_decode(text[start:])
             except ValueError:
                 malformed += 1
                 continue
@@ -278,18 +286,6 @@ def read_events(path: Path) -> tuple[list[dict[str, Any]], int]:
         else:
             malformed += 1
     return events, malformed
-
-
-def _logfmt_end(text: str, start: int) -> int:
-    index = start + 1
-    while index < len(text):
-        if text[index] == "\\":
-            index += 2
-            continue
-        if text[index] == '"':
-            return index
-        index += 1
-    raise ValueError("unterminated logfmt string")
 
 
 def build_ledger(events: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
