@@ -15,6 +15,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from nanolab.config.contract import ContractConfig
 from nanolab.config.experiment_01 import EXPERIMENT_01_FUNCTION, Experiment01Protocol
+from nanolab.config.experiment_02 import EXPERIMENT_02_FUNCTION, Experiment02Protocol
 from nanolab.config.heap_analysis import HeapAnalysisConfig
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.config.soak import SoakConfig
@@ -123,8 +124,17 @@ ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # starts at its own — so the differences live in the transitions.
 # `experiment-01` measures what the control plane costs in front of ONE function,
 # on a calendar of constant-rate plateaux declared in its `experiment01` block.
+# `experiment-02` sends the same calendar to complete platforms on Docker, each
+# under the CPU/memory budgets declared in its `experiment02` block.
 LoadProfile = Literal[
-    "cycle", "saturation", "burst", "openloop", "comparison", "mixed", "experiment-01"
+    "cycle",
+    "saturation",
+    "burst",
+    "openloop",
+    "comparison",
+    "mixed",
+    "experiment-01",
+    "experiment-02",
 ]
 # Which control-plane build to run. `native` uses a GraalVM image compiled
 # beforehand by `scripts/native-java-image.sh control-plane`, so the run does not
@@ -261,6 +271,9 @@ class ScenarioConfig(BaseModel):
     heap_analysis: HeapAnalysisConfig | None = Field(default=None, alias="heapAnalysis")
     experiment_01: Experiment01Protocol | None = Field(
         default=None, alias="experiment01"
+    )
+    experiment_02: Experiment02Protocol | None = Field(
+        default=None, alias="experiment02"
     )
 
     @model_validator(mode="after")
@@ -537,6 +550,34 @@ class ScenarioConfig(BaseModel):
             raise ValueError("asyncShare and idemShare belong to loadProfile: mixed")
         if (self.async_share or 0.0) + (self.idem_share or 0.0) > 1.0:
             raise ValueError("asyncShare + idemShare cannot exceed 1.0")
+        if (self.load_profile == "experiment-02") != (self.experiment_02 is not None):
+            raise ValueError(
+                "the experiment02 block belongs to loadProfile: experiment-02, "
+                "which requires it"
+            )
+        if self.load_profile == "experiment-02":
+            if (
+                self.workflow != "loadtest"
+                or self.backend != "container"
+                or self.functions != [EXPERIMENT_02_FUNCTION]
+                or self.experiment_01 is not None
+            ):
+                raise ValueError(
+                    "experiment-02 is a container loadtest of qr-code-rust alone"
+                )
+            if (
+                self.concurrency_control
+                or self.autoscaling
+                or self.payload_profile is not None
+                or self.load_vus is not None
+                or self.load_scale != 1.0
+                or self.drain_minutes is not None
+                or self.soak_minutes is not None
+            ):
+                raise ValueError(
+                    "experiment-02 takes its load from the experiment02 block; "
+                    "governors, autoscaling and legacy load options do not apply"
+                )
         if (self.load_profile == "experiment-01") != (self.experiment_01 is not None):
             raise ValueError(
                 "the experiment01 block belongs to loadProfile: experiment-01, "

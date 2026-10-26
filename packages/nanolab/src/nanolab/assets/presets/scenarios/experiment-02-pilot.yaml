@@ -1,0 +1,49 @@
+# Esperimento 02, pilot: piattaforme complete su Docker, ciascuna sotto un budget di
+# CPU e memoria che vale per l'intero deployment.
+#
+# Eseguito da `compare` con le chiavi di configurazione experiment-02 e una
+# ripetizione. Calendario, payload e criteri sono quelli del pilot dell'esperimento 1,
+# cosi' un gradino significa la stessa cosa nei due esperimenti. I valori sono
+# provvisori: il pilot sceglie le soglie di fedelta' del generatore, l'hash del PNG,
+# la griglia dei budget e il numero di ripetizioni, da congelare prima della campagna.
+#
+# Il budget copre servizi della piattaforma, motore Docker e funzioni insieme, non un
+# singolo container: per questo non ci sono `resources` per componente.
+workflow: loadtest
+backend: container
+loadProfile: experiment-02
+functions:
+  - qr-code-rust
+experiment02:
+  status: pilot
+  # Testo ASCII deterministico ("A" x 1024) e size 1024, byte JSON canonici.
+  payloadFile: experiment-01-qr-1024.json
+  payloadSha256: 75939ab38335f301b61cc12d7aada34d95fee21cbc44757a42383366a7104aa7
+  idleSeconds: 60
+  warmup:
+    rate: 20
+    durationSeconds: 60
+  steps:
+    - {rate: 25, durationSeconds: 60}
+    - {rate: 50, durationSeconds: 60}
+    - {rate: 100, durationSeconds: 60}
+    - {rate: 200, durationSeconds: 60}
+  httpTimeoutSeconds: 30
+  completionMarginSeconds: 10
+  gracefulStopSeconds: 40
+  drainSeconds: 60
+  fixedConcurrency: 2
+  queueCapacity: 200
+  preAllocatedVUs: 100
+  maxVUs: 6000
+  criteria:
+    latencyThresholdMs: 1000
+    minWithinThresholdFraction: 0.99
+    maxPendingFraction: 0.01
+  budgets:
+    - {cpus: 2, memoryMiB: 2048}
+  referenceBudget: {cpus: 2, memoryMiB: 2048}
+  readinessTimeoutSeconds: 300
+  # Si legge da una risposta corretta nel pilot; obbligatorio quando si congela.
+  pngSha256: null
+  orderSeed: 20261026
