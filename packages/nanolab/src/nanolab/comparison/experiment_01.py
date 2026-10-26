@@ -37,7 +37,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from nanolab.comparison.matrix import EXPERIMENT_01_ORDER_POLICY, ComparisonCell
+from nanolab.comparison.matrix import (
+    EXPERIMENT_01_ORDER_POLICY,
+    ComparisonCell,
+    MatrixCell,
+)
 from nanolab.config.experiment_01 import Experiment01Protocol
 from nanolab.images.control_plane_variants import EXPERIMENT_01_VARIANTS_BY_KEY
 
@@ -168,7 +172,7 @@ def classify_failure(pods: Mapping[str, Any], *, load_started: bool) -> Failure 
 
 
 def write_cell_result(
-    cell: ComparisonCell,
+    cell: MatrixCell,
     root: Path,
     *,
     identity: Mapping[str, object],
@@ -176,16 +180,18 @@ def write_cell_result(
     outcome: Outcome,
     reason: str,
     started_at: datetime,
+    required: tuple[str, ...] = (SUMMARY, EVENTS, SNAPSHOT),
 ) -> dict[str, object]:
     """Commit a definitive outcome for a cell, atomically, with its evidence.
 
-    `measured` requires the summary, the event ledger and the snapshot. A
-    failure requires diagnostics and names which artefacts it could not
-    produce; none is invented to fill the gap.
+    `measured` requires every artefact in `required`: by default the summary,
+    the event ledger and the snapshot. A failure requires diagnostics and names
+    which of those artefacts it could not produce; none is invented to fill the
+    gap.
     """
     selected = attempt_dir(cell.run_dir(root), attempt)
-    required = (SUMMARY, EVENTS, SNAPSHOT) if outcome == "measured" else ()
-    missing = [name for name in required if not (selected / name).is_file()]
+    needed = required if outcome == "measured" else ()
+    missing = [name for name in needed if not (selected / name).is_file()]
     if missing:
         raise ValueError(f"measured outcome lacks evidence: {', '.join(missing)}")
     diagnostics = selected / DIAGNOSTICS
@@ -201,7 +207,7 @@ def write_cell_result(
     receipt: dict[str, object] = {
         "schemaVersion": 1,
         "cell": cell.label,
-        "variant": cell.variant.key,
+        "variant": cell.key,
         "repetition": cell.repetition,
         "identitySha256": identity_sha256(identity),
         "attempt": attempt,
@@ -210,18 +216,14 @@ def write_cell_result(
         "startedAt": started_at.isoformat(),
         "recordedAt": datetime.now(UTC).isoformat(),
         "evidence": evidence,
-        "notProduced": [
-            name
-            for name in (SUMMARY, EVENTS, SNAPSHOT)
-            if not (selected / name).is_file()
-        ],
+        "notProduced": [name for name in required if not (selected / name).is_file()],
     }
     _atomic_json(cell.run_dir(root) / CELL_RESULT, receipt)
     return receipt
 
 
 def read_cell_result(
-    cell: ComparisonCell, root: Path, identity: Mapping[str, object]
+    cell: MatrixCell, root: Path, identity: Mapping[str, object]
 ) -> dict[str, Any] | None:
     """Return a cell's receipt if it is definitive and its evidence intact."""
     path = cell.run_dir(root) / CELL_RESULT
@@ -247,7 +249,7 @@ def experiment_completed(
 ) -> Any:
     """Return the completion rule `matrix.pending` applies to experiment 01."""
 
-    def done(cell: ComparisonCell, root: Path) -> bool:
+    def done(cell: MatrixCell, root: Path) -> bool:
         return read_cell_result(cell, root, identity) is not None
 
     return done

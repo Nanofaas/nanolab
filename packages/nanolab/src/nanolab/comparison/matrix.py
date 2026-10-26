@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS,
@@ -35,12 +36,40 @@ EXPERIMENT_01_ORDER_POLICY = "experiment-01-three-orders-v1"
 EXPERIMENT_01_ORDERS: tuple[str, ...] = ("ABCDEFG", "DGBFAEC", "FCEAGDB")
 
 
+class MatrixCell(Protocol):
+    """What resume, receipts and the manifest need from any matrix's cell."""
+
+    @property
+    def key(self) -> str:
+        """Return the configuration this cell measures."""
+        ...
+
+    @property
+    def label(self) -> str:
+        """Return the name this cell takes in the manifest."""
+        ...
+
+    @property
+    def repetition(self) -> int:
+        """Return which repetition of its configuration this cell is."""
+        ...
+
+    def run_dir(self, root: Path) -> Path:
+        """Return the directory this cell's run writes its artefacts to."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class ComparisonCell:
     """One (variant, repetition) pair: a single load-test run."""
 
     variant: ControlPlaneVariant
     repetition: int
+
+    @property
+    def key(self) -> str:
+        """Return the build this cell measures."""
+        return self.variant.key
 
     def run_dir(self, root: Path) -> Path:
         """Return the directory this cell's run writes its artefacts to."""
@@ -94,7 +123,7 @@ def build_experiment_01_matrix(
     )
 
 
-def completed(cell: ComparisonCell, root: Path) -> bool:
+def completed(cell: MatrixCell, root: Path) -> bool:
     """Whether this cell already produced the summary the report reads.
 
     A matrix runs for well over an hour, and every interruption so far has cost a
@@ -113,11 +142,11 @@ def completed(cell: ComparisonCell, root: Path) -> bool:
     ).is_file()
 
 
-def pending(
-    cells: tuple[ComparisonCell, ...],
+def pending[C: MatrixCell](
+    cells: tuple[C, ...],
     root: Path,
-    done: Callable[[ComparisonCell, Path], bool] = completed,
-) -> tuple[ComparisonCell, ...]:
+    done: Callable[[C, Path], bool] = completed,
+) -> tuple[C, ...]:
     """Return the cells that have not completed yet, in matrix order.
 
     `done` is the completion rule: the historical artefact check by default,

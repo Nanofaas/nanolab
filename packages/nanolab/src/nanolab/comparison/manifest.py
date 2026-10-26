@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nanolab.application.functions import ResolvedFunction, resolve_function
 from nanolab.application.vm_provider import vm_request_for_role
-from nanolab.comparison.matrix import ComparisonCell
+from nanolab.comparison.experiment_02 import EXPERIMENT_02_PUBLISHER
+from nanolab.comparison.matrix import ComparisonCell, MatrixCell
 from nanolab.comparison.profiles import COMPARISON_SCHEDULER_STRATEGY, declared_options
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -71,8 +72,7 @@ class _Identity(BaseModel):
                 "sha256"
             ) != _hash(config["values"]):
                 raise ValueError("incomplete configuration identity")
-        shared = () if self.experiment is not None else ("jvm",)
-        for key in dict.fromkeys((*shared, *self.variants)):
+        for key in _profiled_keys(self.experiment, self.variants):
             profile = self.profiles.get(key, {})
             if not _sha(profile.get("sha256")) or not isinstance(
                 profile.get("options"), dict
@@ -123,9 +123,77 @@ _EXPERIMENT_FIELDS = {
 }
 
 
+_EXPERIMENT_02_FIELDS = {
+    "profile",
+    "orderPolicy",
+    "seed",
+    "order",
+    "protocol",
+    "protocolSha256",
+    "payload",
+    "script",
+    "configurations",
+    "budgets",
+    "subset",
+}
+
+
+def _profiled_keys(
+    experiment: Mapping[str, object] | None, variants: list[str]
+) -> tuple[str, ...]:
+    """Return the keys whose recipe must be in the identity's profiles.
+
+    Experiment 02 has configurations without a recipe, such as the function
+    alone; every configuration that has one is profiled, and so is the recipe
+    that publishes the shared function, selected or not.
+    """
+    if experiment is None:
+        return tuple(dict.fromkeys(("jvm", *variants)))
+    if experiment.get("profile") != "experiment-02":
+        return tuple(variants)
+    configurations = experiment["configurations"]
+    assert isinstance(configurations, dict)  # nosec B101 - validated before
+    recipes = [
+        key
+        for key, configuration in configurations.items()
+        if isinstance(configuration, dict) and configuration.get("recipe")
+    ]
+    return tuple(dict.fromkeys((EXPERIMENT_02_PUBLISHER, *recipes)))
+
+
+def _complete_experiment_02(
+    experiment: Mapping[str, object], variants: list[str], repetitions: int
+) -> None:
+    if set(experiment) != _EXPERIMENT_02_FIELDS:
+        raise ValueError("incomplete experiment identity")
+    if experiment["protocolSha256"] != _hash(experiment["protocol"]):
+        raise ValueError("incomplete experiment protocol identity")
+    payload = experiment["payload"]
+    script = experiment["script"]
+    configurations = experiment["configurations"]
+    budgets = experiment["budgets"]
+    order = experiment["order"]
+    if (
+        not isinstance(payload, dict)
+        or not _sha(payload.get("sha256"))
+        or not isinstance(script, dict)
+        or not _sha(script.get("sha256"))
+        or not isinstance(configurations, dict)
+        or set(configurations) != set(variants)
+        or not isinstance(budgets, list)
+        or not budgets
+        or not isinstance(order, list)
+        or len(order) != len(variants) * len(budgets) * repetitions
+    ):
+        raise ValueError("incomplete experiment artifact identity")
+
+
 def _complete_experiment(
     experiment: Mapping[str, object], variants: list[str], repetitions: int
 ) -> None:
+    if experiment.get("profile") == "experiment-02":
+        _complete_experiment_02(experiment, variants, repetitions)
+        return
     if set(experiment) != _EXPERIMENT_FIELDS:
         raise ValueError("incomplete experiment identity")
     if experiment["profile"] != "experiment-01" or experiment["protocolSha256"] != (
@@ -346,12 +414,25 @@ def require_matching_inputs(
 
 
 def new_comparison_manifest(
-    inputs: Mapping[str, object], cells: tuple[ComparisonCell, ...]
+    inputs: Mapping[str, object],
+    cells: tuple[MatrixCell, ...],
+    *,
+    variants: list[dict[str, object]] | None = None,
 ) -> ComparisonManifest:
-    """Create initial evidence while retaining the report's existing fields."""
+    """Create initial evidence while retaining the report's existing fields.
+
+    The historical matrix derives each variant's record from its build; a
+    matrix whose cells are not builds, like experiment 02's, passes `variants`.
+    """
     identity = _Identity.model_validate(dict(inputs))
-    variants = list(
-        {
+    records: list[dict[str, object]]
+    if variants is not None:
+        records = variants
+    else:
+        builds = [cell for cell in cells if isinstance(cell, ComparisonCell)]
+        if len(builds) != len(cells):
+            raise ValueError("cells that are not builds need explicit variants")
+        by_key: dict[str, dict[str, object]] = {
             cell.variant.key: {
                 "key": cell.variant.key,
                 "label": cell.variant.label,
@@ -362,16 +443,16 @@ def new_comparison_manifest(
                     f":{identity.tag}"
                 ),
             }
-            for cell in cells
-        }.values()
-    )
+            for cell in builds
+        }
+        records = list(by_key.values())
     return ComparisonManifest(
         identity=dict(inputs),
         started_at=datetime.now(UTC).isoformat(),
         functions=list(identity.functions),
         repetitions=max(cell.repetition for cell in cells),
         order=[cell.label for cell in cells],
-        variants=variants,
+        variants=records,
         regime=identity.scenario,
     )
 
