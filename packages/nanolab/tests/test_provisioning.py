@@ -3,10 +3,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from nanolab.cli.provisioning import provision_environment
 from nanolab.config import EnvironmentConfig, ScenarioConfig
-from nanolab.workspace.paths import bundled_assets_root
+from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
 
 @dataclass
@@ -631,3 +632,38 @@ def test_workflow_failure_still_destroys_managed_vm(tmp_path: Path) -> None:
         raise RuntimeError("workflow failed")
 
     assert orchestrator.events[-1] == ("teardown", "stack")
+
+
+def test_experiment_02_stack_has_docker_and_registry_but_no_k3s(
+    tmp_path: Path,
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    scenario = ScenarioConfig.model_validate(
+        yaml.safe_load(
+            (
+                discover_tool_root() / "scenarios" / "experiment-02-pilot.yaml"
+            ).read_text()
+        )
+    )
+
+    with provision_environment(
+        scenario,
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {
+                    "stack": {"name": "stack"},
+                    "loadgen": {"name": "loadgen"},
+                },
+            }
+        ),
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+
+    playbooks = _playbooks(orchestrator)
+    assert "provision-k3s.yml" not in playbooks
+    assert "configure-k3s-registry.yml" not in playbooks
+    assert playbooks[:2] == ["provision-base.yml", "ensure-registry.yml"]
+    assert playbooks[-1] == "install-k6.yml"

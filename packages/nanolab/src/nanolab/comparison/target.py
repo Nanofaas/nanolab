@@ -38,9 +38,16 @@ def _identifier(value: object, *, machine: bool = False) -> str:
 
 
 def read_comparison_target(
-    provider: VmCommandProvider, requests: Mapping[str, VmRequest]
+    provider: VmCommandProvider,
+    requests: Mapping[str, VmRequest],
+    *,
+    kubernetes: bool = True,
 ) -> dict[str, object]:
-    """Probe stable machine and Kubernetes identities without provisioning."""
+    """Probe stable machine identities, and the cluster's or the Docker engine's.
+
+    A stack without Kubernetes, like experiment 02's, is identified by its
+    Docker engine instead: a reinstalled engine is a different target.
+    """
     if "stack" not in requests:
         raise ValueError("Missing stack target identity")
     machines = {}
@@ -57,6 +64,11 @@ def read_comparison_target(
             ),
         }
     request = requests["stack"]
+    if not kubernetes:
+        engine = _probe(provider, request, ("docker", "info", "--format", "{{.ID}}"))
+        if not engine or any(character.isspace() for character in engine):
+            raise ValueError("Missing or malformed Docker engine identity")
+        return {"machines": machines, "engine": {"dockerId": engine}}
     try:
         namespace = json.loads(
             _probe(
@@ -99,16 +111,19 @@ def read_comparison_target(
 def _validate_target(target: Mapping[str, object]) -> None:
     try:
         machines = target["machines"]
-        cluster = target["cluster"]
-        if (
-            not isinstance(machines, dict)
-            or "stack" not in machines
-            or not isinstance(cluster, dict)
-        ):
+        if not isinstance(machines, dict) or "stack" not in machines:
             raise ValueError("incomplete")
         for machine in machines.values():
             _identifier(machine["machineId"], machine=True)
             _identifier(machine["productUuid"])
+        if "engine" in target:
+            engine = target["engine"]
+            if not isinstance(engine, dict) or not engine.get("dockerId"):
+                raise ValueError("incomplete engine")
+            return
+        cluster = target["cluster"]
+        if not isinstance(cluster, dict):
+            raise ValueError("incomplete")
         _identifier(cluster["namespaceUid"])
         if not cluster["nodes"]:
             raise ValueError("empty nodes")

@@ -69,7 +69,12 @@ def _stack_operations(
     planners: list[
         Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]
     ] = [plan_vm_provision_base]
-    if scenario.backend == "k8s" or (
+    if scenario.load_profile == "experiment-02":
+        # Docker and the registry, no Kubernetes: experiment 02 measures complete
+        # platforms on Docker, and k3s would sit beside them using the budget's
+        # host. Its cgroup slices are set up by `compare`, on the VM, afterwards.
+        planners.append(plan_registry_ensure_container)
+    elif scenario.backend == "k8s" or (
         scenario.workflow in ("loadtest", "release")
         and scenario.backend != "containerd"
     ):

@@ -91,7 +91,12 @@ def test_p1_runs_the_docker_provider_and_registers_a_deployment_function():
     [control_plane] = _docker_runs(provider)
     assert "/var/run/docker.sock:/var/run/docker.sock" in control_plane
     assert "NANOFAAS_DEPLOYMENT_DEFAULT_BACKEND=container-local" in control_plane
+    assert "30080:8080" in control_plane
+    assert "30081:8081" in control_plane
     assert control_plane[-1] == "registry/control-plane:p1"
+    assert _p1().target("10.0.0.4").url == (
+        "http://10.0.0.4:30080/v1/functions/qr-code-rust:invoke"
+    )
     assert _p1().registration() == {
         "name": "qr-code-rust",
         "image": "registry/rust-qr-code:e02",
@@ -137,11 +142,11 @@ def test_direct_reference_wraps_the_payload_as_runtime_input():
     direct = DirectReference("registry/rust-qr-code:e02")
     assert json.loads(direct.body(PAYLOAD)) == {"input": {"size": 128, "text": "A"}}
     target = direct.target("10.0.0.4")
-    assert target.url == "http://10.0.0.4:9000/invoke"
+    assert target.url == "http://10.0.0.4:30080/invoke"
     assert (target.extractor, target.field) == ("json-base64", None)
     provider, _started = _deployed(direct)
     [function] = _docker_runs(provider)
-    assert "9000:8080" in function
+    assert "30080:8080" in function
     assert any(part.startswith("EXECUTION_ID=") for part in function)
 
 

@@ -39,6 +39,7 @@ from nanolab.comparison.evidence import require_recorded_publications
 from nanolab.comparison.experiment_01 import (
     DIAGNOSTICS,
     LOAD_STARTED,
+    Outcome,
     archive_cell_result,
     attempt_dir,
     classify_failure,
@@ -47,6 +48,15 @@ from nanolab.comparison.experiment_01 import (
     next_attempt,
     write_cell_result,
     write_experiment_01_report,
+)
+from nanolab.comparison.experiment_02 import (
+    CONFIGURATIONS_BY_KEY,
+    EXPERIMENT_02_EVIDENCE,
+    EXPERIMENT_02_PUBLISHER,
+    Configuration,
+    Experiment02Cell,
+    build_experiment_02_matrix,
+    experiment_02_identity,
 )
 from nanolab.comparison.manifest import (
     ComparisonManifest,
@@ -72,9 +82,13 @@ from nanolab.comparison.profiles import (
     COMPARISON_FUNCTIONS,
     EXPERIMENT_01_CONTRACT,
     EXPERIMENT_01_FUNCTIONS,
+    EXPERIMENT_02_CONTRACT,
+    EXPERIMENT_02_FUNCTIONS,
+    EXPERIMENT_02_MODULES,
     PreparedComparison,
     comparison_profiles,
     experiment_01_profiles,
+    experiment_02_profiles,
 )
 from nanolab.comparison.target import (
     read_comparison_target,
@@ -83,6 +97,7 @@ from nanolab.comparison.target import (
 )
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.experiment_01 import experiment_01_payload
+from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS_BY_KEY,
@@ -91,6 +106,14 @@ from nanolab.images.control_plane_variants import (
 )
 from nanolab.plans.runtime_comparison import EXPERIMENT_01_SCRIPT_NAME
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE
+from nanolab.tasks.experiment_02.budget import slice_setup_operation
+from nanolab.tasks.experiment_02.cell import run_cell
+from nanolab.tasks.experiment_02.platforms import (
+    DirectReference,
+    NanofaasPlatform,
+    Platform,
+)
+from nanolab.tasks.experiment_02.vm import Vm
 from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
 from nanolab.tasks.recipes.remote import remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest
@@ -98,6 +121,13 @@ from nanolab.workspace.paths import bundled_assets_root
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
 EXPERIMENT_01_DEFAULT_VARIANTS = tuple(EXPERIMENT_01_VARIANTS_BY_KEY)
+EXPERIMENT_02_DEFAULT_CONFIGURATIONS = tuple(CONFIGURATIONS_BY_KEY)
+EXPERIMENT_02_SCRIPT_NAME = "experiment-02.js"
+_EXPERIMENT_02_REASONS: dict[str, str] = {
+    "measured": "completed",
+    "oom": "OOM kill in the measured slice",
+    "startup_failed": "no correct response before the readiness timeout",
+}
 
 
 HEARTBEAT_SECONDS = 60.0
@@ -373,6 +403,322 @@ def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfi
     return config.model_copy(update={"control_plane_variant": cell.variant.key})
 
 
+def _run_experiment_02_cell(
+    cell: Experiment02Cell,
+    *,
+    root: Path,
+    identity: Mapping[str, object],
+    before_attempt: Callable[[], None],
+    run_attempt: Callable[[Path], Outcome],
+) -> Outcome:
+    """Run one experiment 02 cell to a definitive outcome, or stop the matrix.
+
+    Each attempt has its own directory and an outcome commits a receipt. A
+    refusal (`ValueError`: a budget not enforced, a process outside it) stops
+    at once. Any other failure before the load is taken as transport and
+    retried once in a new attempt; after the load started, it stops.
+    """
+    transport_retried = False
+    while True:
+        cell_dir = cell.run_dir(root)
+        archive_cell_result(cell_dir)
+        attempt = next_attempt(cell_dir)
+        run_dir = attempt_dir(cell_dir, attempt)
+        run_dir.mkdir(parents=True)
+        started = datetime.now(UTC)
+        before_attempt()
+        try:
+            outcome = run_attempt(run_dir)
+        except ValueError:
+            raise
+        except Exception as error:
+            diagnostics = run_dir / DIAGNOSTICS
+            diagnostics.mkdir(exist_ok=True)
+            (diagnostics / "error.txt").write_text(
+                "".join(format_exception_only(error))
+            )
+            if (run_dir / LOAD_STARTED).is_file() or transport_retried:
+                raise
+            transport_retried = True
+            typer.echo(f"  {cell.label} failed before load ({error}); retrying once")
+            continue
+        _ = write_cell_result(
+            cell,
+            root,
+            identity=identity,
+            attempt=attempt,
+            outcome=outcome,
+            reason=_EXPERIMENT_02_REASONS[outcome],
+            started_at=started,
+            required=EXPERIMENT_02_EVIDENCE,
+        )
+        typer.echo(f"  {cell.label}: {outcome} (attempt {attempt})")
+        return outcome
+
+
+def _experiment_02_platform(
+    configuration: Configuration,
+    prepared: PreparedComparison,
+    *,
+    function_image: str,
+    protocol: Experiment02Protocol,
+) -> Platform:
+    """Return the platform a configuration deploys, from the prepared images."""
+    if configuration.platform == "direct" or configuration.profile is None:
+        return DirectReference(function_image)
+    distribution = prepared.distributions[configuration.key]
+    return NanofaasPlatform(
+        profile=configuration.profile,
+        control_plane_image=distribution.control_plane().image.reference,
+        function_image=function_image,
+        modules=EXPERIMENT_02_MODULES[configuration.profile],
+        concurrency=protocol.fixed_concurrency,
+        queue_capacity=protocol.queue_capacity,
+        timeout_ms=protocol.http_timeout_seconds * 1000,
+        runtime=configuration.runtime,
+    )
+
+
+def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
+    *,
+    scenario: Path,
+    scenario_config: ScenarioConfig,
+    environment: Path,
+    environment_config: EnvironmentConfig,
+    selected: tuple[str, ...],
+    repetitions: int,
+    run_dir: Path | None,
+    fresh: bool,
+    native_build_memory: str | None,
+    native_parallelism: int | None,
+) -> None:
+    """Run experiment 02: complete platforms on Docker under budgeted cgroups.
+
+    The shape is experiment 01's: one manifest, one provisioning, one prepare,
+    then the cells in the protocol's seeded order, each with its receipt. What
+    differs is the stack (Docker and cgroup slices, no k3s) and the cell, which
+    `tasks.experiment_02.cell.run_cell` drives directly on the VMs.
+    """
+    from nanolab.cli.product import (  # local: the router imports this module
+        _environment,
+        _provisioning_context,
+        _scenario,
+        default_tool_paths,
+    )
+
+    protocol = scenario_config.experiment_02
+    if protocol is None:
+        raise typer.BadParameter("experiment-02 requires its experiment02 block")
+    if environment_config.provider != "azure" or set(environment_config.roles) != {
+        "stack",
+        "loadgen",
+    }:
+        raise typer.BadParameter(
+            "experiment-02 runs on Azure with exactly the stack and loadgen roles"
+        )
+    if (
+        scenario_config.control_plane_image
+        or scenario_config.function_images
+        or scenario_config.recipe_profile
+    ):
+        raise typer.BadParameter(
+            "compare requires the profile's own functions "
+            "without prebuilt image overrides"
+        )
+    paths = default_tool_paths()
+    script = bundled_assets_root() / "k6" / EXPERIMENT_02_SCRIPT_NAME
+    try:
+        profiles = experiment_02_profiles(paths.tool_root, selected)
+        configurations = tuple(CONFIGURATIONS_BY_KEY[key] for key in selected)
+        payload = experiment_01_payload(
+            protocol, paths.tool_root / "scenarios" / "payloads"
+        )
+        cells = build_experiment_02_matrix(
+            configurations,
+            tuple(protocol.budgets),
+            repetitions,
+            seed=protocol.order_seed,
+        )
+        experiment = experiment_02_identity(
+            protocol,
+            cells,
+            payload=payload,
+            script=script,
+            selected=selected,
+            seed=protocol.order_seed,
+        )
+        root = (run_dir or paths.runs_dir / "experiment-02").resolve()
+        manifest = read_comparison_manifest(root)
+        new_run = manifest is None
+        tag = (
+            f"recipe-{uuid4().hex}"
+            if manifest is None
+            else str(manifest.identity["tag"])
+        )
+        nanolab_root = Path(
+            subprocess.check_output(
+                ("git", "rev-parse", "--show-toplevel"),
+                cwd=paths.tool_root,
+                text=True,
+            ).strip()
+        )
+
+        def capture() -> dict[str, object]:
+            return capture_comparison_inputs(
+                scenario=_scenario(scenario),
+                environment=_environment(environment),
+                nanofaas_root=paths.nanofaas_root,
+                nanolab_root=nanolab_root,
+                profiles=profiles,
+                variants=selected,
+                repetitions=repetitions,
+                tag=tag,
+                build_memory=native_build_memory,
+                parallelism=native_parallelism,
+                experiment=experiment,
+                profile_options=EXPERIMENT_02_CONTRACT.options,
+            )
+
+        inputs = capture()
+        if manifest is not None:
+            require_matching_inputs(manifest, inputs)
+            if manifest.target is None:
+                raise ValueError(
+                    "Comparison manifest has no original target identity; "
+                    "use a new run directory"
+                )
+        else:
+            manifest = new_comparison_manifest(
+                inputs,
+                cells,
+                variants=[
+                    {
+                        "key": configuration.key,
+                        "label": configuration.label,
+                        "platform": configuration.platform,
+                        "profile": configuration.profile,
+                        "runtime": configuration.runtime,
+                    }
+                    for configuration in configurations
+                ],
+            )
+            write_comparison_manifest(root, manifest)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    provider = provider_for_environment(environment_config, paths.nanofaas_root)
+    requests = {
+        role: vm_request_for_role(environment_config, role, loadtest=True)
+        for role in ("stack", "loadgen")
+    }
+    request = requests["stack"]
+    provisioning = (
+        _provisioning_context(scenario_config, environment_config, paths, True)
+        if new_run
+        else nullcontext()
+    )
+
+    def read_target() -> dict[str, object]:
+        target = read_comparison_target(provider, requests, kubernetes=False)
+        target["facts"] = read_host_facts(provider, requests)
+        return target
+
+    with provisioning:
+        if new_run:
+            # Once, on the fresh stack: it recreates the empty registry outside
+            # the budget, which on a resume would discard published images.
+            _ = comparison_remote_command(
+                provider, request, slice_setup_operation().argv
+            )
+        target = read_target()
+        if new_run:
+            manifest.target = target
+            (root / "prepare").mkdir(parents=True, exist_ok=True)
+            (root / "prepare/target.json").write_text(
+                json.dumps(target, indent=2) + "\n"
+            )
+            write_comparison_manifest(root, manifest)
+        else:
+            if manifest.target is None:
+                raise ValueError("comparison resume requires a recorded target")
+            require_comparison_target(manifest.target, target)
+            require_recorded_publications(
+                manifest=manifest, provider=provider, request=request, root=root
+            )
+        prepared = _run_prepare(
+            source=paths.nanofaas_root,
+            profiles=profiles,
+            root=root,
+            manifest=manifest,
+            provider=provider,
+            request=request,
+        )
+        done = experiment_completed(manifest.identity)
+        todo = cells if fresh else pending(cells, root, done)
+        if len(todo) < len(cells):
+            typer.echo(
+                f"resuming: {len(cells) - len(todo)} of {len(cells)} cells "
+                "already have results"
+            )
+        function_image = (
+            prepared.distributions[EXPERIMENT_02_PUBLISHER]
+            .function(*EXPERIMENT_02_FUNCTIONS["qr-code-rust"])
+            .image.reference
+        )
+        stack = Vm(provider, request)
+        loadgen = Vm(provider, requests["loadgen"])
+        # The address the loadgen reaches the stack at, through the ports
+        # `secure_release_endpoints` opened to it.
+        host = str(provider.connection_host(request))  # type: ignore[attr-defined]
+        owned = remote_recipe_root(request, tag)
+
+        def before_attempt() -> None:
+            require_matching_inputs(manifest, capture())
+            require_comparison_target(target, read_target())
+
+        for index, cell in enumerate(todo, start=1):
+            typer.echo(f"[{index}/{len(todo)}] {cell.label}")
+            platform = _experiment_02_platform(
+                cell.configuration,
+                prepared,
+                function_image=function_image,
+                protocol=protocol,
+            )
+
+            def run_attempt(
+                attempt_run_dir: Path,
+                cell: Experiment02Cell = cell,
+                platform: Platform = platform,
+            ) -> Outcome:
+                return run_cell(
+                    cell,
+                    stack=stack,
+                    loadgen=loadgen,
+                    platform=platform,
+                    protocol=protocol,
+                    payload=payload,
+                    script=script,
+                    run_dir=attempt_run_dir,
+                    remote_root=owned
+                    / "cells"
+                    / attempt_run_dir.relative_to(root).as_posix(),
+                    host=host,
+                )
+
+            _ = _run_experiment_02_cell(
+                cell,
+                root=root,
+                identity=manifest.identity,
+                before_attempt=before_attempt,
+                run_attempt=run_attempt,
+            )
+        if prepared.remote_source != owned / "source":
+            raise ValueError("Comparison cleanup source is outside its owned staging")
+        _ = comparison_remote_command(
+            provider, request, ("rm", "-rf", "--", str(owned))
+        )
+    typer.echo(f"matrix complete: {root}")
+
+
 def register(app: typer.Typer) -> None:
     """Register the `compare` command on `app`."""
 
@@ -430,6 +776,27 @@ def register(app: typer.Typer) -> None:
 
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        if scenario_config.load_profile == "experiment-02":
+            if native_parallelism is not None and native_parallelism < 1:
+                raise typer.BadParameter("native parallelism must be positive")
+            chosen = tuple(part.strip() for part in variants.split(",") if part.strip())
+            _compare_experiment_02(
+                scenario=scenario,
+                scenario_config=scenario_config,
+                environment=environment,
+                environment_config=environment_config,
+                selected=(
+                    EXPERIMENT_02_DEFAULT_CONFIGURATIONS
+                    if chosen == DEFAULT_VARIANTS
+                    else chosen
+                ),
+                repetitions=repetitions,
+                run_dir=run_dir,
+                fresh=fresh,
+                native_build_memory=native_build_memory,
+                native_parallelism=native_parallelism,
+            )
+            return
         experiment = scenario_config.load_profile == "experiment-01"
         if (
             scenario_config.workflow != "loadtest"

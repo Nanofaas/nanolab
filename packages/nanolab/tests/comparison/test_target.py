@@ -106,3 +106,45 @@ def test_incomplete_identity_is_rejected_even_if_both_records_match():
     record = {"machines": {"stack": {"name": "same-name"}}, "cluster": {}}
     with pytest.raises(ValueError, match="identity"):
         require_comparison_target(record, deepcopy(record))
+
+
+class EngineProvider(IdentityProvider):
+    """A stack without Kubernetes: the Docker engine is its identity."""
+
+    def __init__(self):
+        super().__init__()
+        self.engine = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+
+    def exec_argv(self, request, argv, **kwargs):
+        if argv == ("docker", "info", "--format", "{{.ID}}"):
+            self.calls.append((request.name, argv))
+            return SimpleNamespace(return_code=0, stdout=self.engine + "\n", stderr="")
+        return super().exec_argv(request, argv, **kwargs)
+
+
+def probe_docker(provider):
+    return read_comparison_target(
+        cast(VmCommandProvider, provider),
+        {
+            "stack": VmRequest(lifecycle="multipass", name="stack"),
+            "loadgen": VmRequest(lifecycle="multipass", name="loadgen"),
+        },
+        kubernetes=False,
+    )
+
+
+def test_target_without_kubernetes_records_the_docker_engine():
+    provider = EngineProvider()
+    target = probe_docker(provider)
+    assert target["engine"] == {"dockerId": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"}
+    assert "cluster" not in target
+    assert not any("k3s" in argv for _name, argv in provider.calls)
+    require_comparison_target(target, probe_docker(provider))
+
+
+def test_resume_refuses_a_different_docker_engine():
+    provider = EngineProvider()
+    original = probe_docker(provider)
+    provider.engine = "ffffffff-4b5a-6978-8796-a5b4c3d2e1f0"
+    with pytest.raises(ValueError, match="identity"):
+        require_comparison_target(original, probe_docker(provider))

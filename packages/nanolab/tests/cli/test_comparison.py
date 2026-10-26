@@ -429,3 +429,57 @@ def test_experiment_01_refuses_historical_variants(command_case):
     result = invoke("--variants", "jvm")
     assert result.exit_code != 0
     assert events == [] and not root.exists()
+
+
+def _experiment_02_case(command_case, *, azure: bool, loadgen: bool = True):
+    from nanolab.workspace.paths import discover_tool_root
+
+    invoke, events, root, scenario, environment, _ = command_case
+    scenario.write_text(
+        (discover_tool_root() / "scenarios" / "experiment-02-pilot.yaml").read_text()
+    )
+    if azure:
+        environment.write_text(
+            "provider: azure\nroles:\n"
+            "  stack: {name: s, disk: 128G, user: azureuser}\n"
+            + ("  loadgen: {name: l, disk: 30G, user: azureuser}\n" if loadgen else "")
+            + "azure:\n  resource_group: rg\n  location: westeurope\n"
+            "  vm_size: Standard_D8s_v5\n  loadgen_vm_size: Standard_D2s_v5\n"
+            "  image_urn: Canonical:ubuntu-24_04-lts:server:24.04.202607140\n"
+            "  operator_source_cidr: 203.0.113.7/32\n"
+            "  ssh_key_path: /tmp/id.pub\n"
+        )
+    return invoke, events, root
+
+
+@pytest.mark.parametrize(("azure", "loadgen"), [(False, True), (True, False)])
+def test_experiment_02_requires_azure_with_a_loadgen_before_side_effects(
+    command_case, azure, loadgen
+):
+    invoke, events, root = _experiment_02_case(
+        command_case, azure=azure, loadgen=loadgen
+    )
+    result = invoke("--variants", "nanofaas-p1-jvm")
+    assert result.exit_code != 0
+    assert "Azure" in result.output
+    assert "loadgen" in result.output
+    assert events == [] and not root.exists()
+
+
+def test_experiment_02_refuses_unknown_configurations(command_case):
+    invoke, events, root = _experiment_02_case(command_case, azure=True)
+    result = invoke("--variants", "nanofaas-p2-jvm")
+    assert result.exit_code != 0
+    assert "unknown" in result.output
+    assert events == [] and not root.exists()
+
+
+def test_experiment_02_refuses_a_kubernetes_scenario(command_case):
+    from nanolab.workspace.paths import discover_tool_root
+
+    invoke, events, root, scenario, _environment, _ = command_case
+    pilot = discover_tool_root() / "scenarios" / "experiment-02-pilot.yaml"
+    scenario.write_text(pilot.read_text().replace("backend: container", "backend: k8s"))
+    result = invoke("--variants", "nanofaas-p1-jvm")
+    assert result.exit_code != 0
+    assert events == [] and not root.exists()

@@ -33,13 +33,17 @@ NETWORK = "nanolab-e02"
 CONTROL_PLANE = "e02-control-plane"
 FUNCTION_CONTAINER = "e02-qr-code"
 FUNCTION_NAME = "qr-code-rust"
-DIRECT_PORT = 9000
+# The stack's only inbound ports the loadgen may reach: the NodePorts that
+# `secure_release_endpoints` opens to the operator and the loadgen alone. Every
+# platform publishes its entry point on them, so no new port is ever exposed.
+ENTRY_PORT = 30080
+MANAGEMENT_PORT = 30081
 # Relative, so under the VM user's home, where every remote command starts.
 WORKDIR = PurePosixPath("nanolab-e02/readiness")
 FIRST_RESPONSE = WORKDIR / "first-response"
 _JSON = {"Content-Type": "application/json"}
-_API = "http://127.0.0.1:8080"
-_READY = "http://127.0.0.1:8081/actuator/health/readiness"
+_API = f"http://127.0.0.1:{ENTRY_PORT}"
+_READY = f"http://127.0.0.1:{MANAGEMENT_PORT}/actuator/health/readiness"
 _CALLBACK = f"http://{CONTROL_PLANE}:8080/v1/internal/executions"
 
 
@@ -251,7 +255,7 @@ class NanofaasPlatform:
         _ensure_images(vm, (self.control_plane_image, self.function_image))
         _ensure_network(vm)
         started = _clock(vm)
-        ports = ("-p", "8080:8080", "-p", "8081:8081")
+        ports = ("-p", f"{ENTRY_PORT}:8080", "-p", f"{MANAGEMENT_PORT}:8081")
         metrics = ("-e", "NANOFAAS_METRICS_PROFILE=advanced")
         if self.profile == "P0":
             _ = vm.run(
@@ -308,7 +312,7 @@ class NanofaasPlatform:
     def target(self, host: str) -> K6Target:
         """Send requests to the control plane's invocation API."""
         return K6Target(
-            f"http://{host}:8080/v1/functions/{FUNCTION_NAME}:invoke",
+            f"http://{host}:{ENTRY_PORT}/v1/functions/{FUNCTION_NAME}:invoke",
             _JSON,
             "nanofaas-envelope",
         )
@@ -361,7 +365,7 @@ class DirectReference:
         _ = vm.run(
             (
                 "docker", "run", "-d", "--name", FUNCTION_CONTAINER,
-                "--network", NETWORK, "-p", f"{DIRECT_PORT}:8080",
+                "--network", NETWORK, "-p", f"{ENTRY_PORT}:8080",
                 "-e", "PORT=8080",
                 # The runtime needs an execution id; with no platform to send
                 # one per request, every request uses this one.
@@ -383,9 +387,9 @@ class DirectReference:
         """Wait for the runtime's health, then for a correct answer."""
         return _probe_readiness(
             vm,
-            health_url=f"http://127.0.0.1:{DIRECT_PORT}/health",
+            health_url=f"{_API}/health",
             registration=None,
-            invoke_url=f"http://127.0.0.1:{DIRECT_PORT}/invoke",
+            invoke_url=f"{_API}/invoke",
             body=self.body(payload),
             target=self.target("127.0.0.1"),
             started=started,
@@ -396,7 +400,7 @@ class DirectReference:
 
     def target(self, host: str) -> K6Target:
         """Read the runtime's answer: the PNG as a base64 JSON string."""
-        return K6Target(f"http://{host}:{DIRECT_PORT}/invoke", _JSON, "json-base64")
+        return K6Target(f"http://{host}:{ENTRY_PORT}/invoke", _JSON, "json-base64")
 
     def body(self, payload: bytes) -> bytes:
         """Wrap the payload as the runtime's invocation `input`."""
