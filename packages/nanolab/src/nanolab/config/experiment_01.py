@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from itertools import pairwise
 from pathlib import Path
 from typing import Annotated, Literal, Self, TypedDict
@@ -58,7 +57,7 @@ class _StrictModel(BaseModel):
 class Plateau(_StrictModel):
     """One constant-arrival-rate step of the calendar."""
 
-    rate: PositiveNumber
+    rate: PositiveInt
     duration_seconds: PositiveInt = Field(alias="durationSeconds")
 
 
@@ -178,20 +177,6 @@ class Experiment01Protocol(_StrictModel):
             }
         )
         return phases
-
-    def vu_budget(self) -> int:
-        """Return the VUs the busiest moment can hold, overlaps included.
-
-        A plateau's VUs stay held through its `gracefulStop` while the next one
-        is already sending, so at a boundary two scenarios hold VUs at once.
-        Each is bounded by rate x HTTP timeout; the budget is the largest pair
-        of adjacent plateaux, not the largest single one.
-        """
-        loads = [
-            step.rate * self.http_timeout_seconds for step in (self.warmup, *self.steps)
-        ]
-        overlaps = [a + b for a, b in pairwise(loads)]
-        return math.ceil(max([*overlaps, *loads]))
 
 
 def experiment_01_payload(protocol: Experiment01Protocol, payload_dir: Path) -> bytes:

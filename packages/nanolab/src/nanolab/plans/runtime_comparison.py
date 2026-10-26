@@ -26,6 +26,7 @@ from pathlib import Path
 
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.http import Endpoint
 from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.application.functions import resolve_function
@@ -332,6 +333,68 @@ def build_runtime_comparison_plan(
     )
 
 
+def _verify_prepared_cell(
+    config: ScenarioConfig,
+    selected_resource: Resource[RecipeDistribution],
+    shared_resource: Resource[RecipeDistribution],
+    functions: Mapping[str, tuple[str, str]],
+    *,
+    executor: RoleBoundCommandTaskExecutor,
+    inputs: TaskInputs,
+    endpoint: Endpoint,
+    run_dir: Path,
+    repo_root: Path | None,
+    tool_root: Path | None,
+) -> None:
+    """Verify published artifacts and their running control-plane metadata."""
+    selected = inputs.resource(selected_resource)
+    shared = inputs.resource(shared_resource)
+    verify_comparison_cell_registry(
+        distributions=(selected, shared) if selected is not shared else (selected,),
+        executor=executor,
+        inputs=inputs,
+        run_dir=run_dir,
+    )
+    checks = [
+        (
+            selected_resource,
+            "nanofaas-control-plane",
+            ("control-plane", "control-plane", "java"),
+            run_dir / "images/control-plane",
+        )
+    ]
+    for key in config.functions:
+        function = resolve_function(
+            config, key, source_root=repo_root, tool_root=tool_root
+        )
+        name, sdk = functions[key]
+        checks.append(
+            (
+                shared_resource,
+                f"fn-{function.name}",
+                ("function", name, sdk),
+                run_dir / "images" / sdk,
+            )
+        )
+    for distribution, deployment, component, evidence_dir in checks:
+        _ = RecipeKubernetesImageCheckTask(
+            distribution,
+            namespace=DEFAULT_NAMESPACE,
+            deployment=deployment,
+            component=component,
+            executor=executor,
+            role="stack",
+            run_dir=evidence_dir,
+        ).run(inputs)
+    _ = RecipeMetadataCheckTask(
+        selected_resource,
+        executor=executor,
+        run_dir=run_dir,
+        endpoint=endpoint,
+        role="stack",
+    ).run(inputs)
+
+
 def _prepared_checks(
     config: ScenarioConfig,
     selected: RecipeDistribution,
@@ -355,52 +418,18 @@ def _prepared_checks(
         )
 
         def acquire(inputs: TaskInputs) -> None:
-            verify_comparison_cell_registry(
-                distributions=(selected, baseline)
-                if selected is not baseline
-                else (selected,),
+            _verify_prepared_cell(
+                config,
+                selected_resource,
+                baseline_resource,
+                COMPARISON_FUNCTIONS,
                 executor=executor,
                 inputs=inputs,
-                run_dir=run_dir,
-            )
-            _ = RecipeMetadataCheckTask(
-                selected_resource,
-                executor=executor,
-                run_dir=run_dir,
                 endpoint=platform.endpoint,
-                role="stack",
-            ).run(inputs)
-            checks = [
-                (
-                    selected_resource,
-                    "nanofaas-control-plane",
-                    ("control-plane", "control-plane", "java"),
-                    run_dir / "images/control-plane",
-                )
-            ]
-            for key in config.functions:
-                function = resolve_function(
-                    config, key, source_root=repo_root, tool_root=tool_root
-                )
-                name, sdk = COMPARISON_FUNCTIONS[key]
-                checks.append(
-                    (
-                        baseline_resource,
-                        f"fn-{function.name}",
-                        ("function", name, sdk),
-                        run_dir / "images" / sdk,
-                    )
-                )
-            for distribution, deployment, component, evidence_dir in checks:
-                _ = RecipeKubernetesImageCheckTask(
-                    distribution,
-                    namespace=DEFAULT_NAMESPACE,
-                    deployment=deployment,
-                    component=component,
-                    executor=executor,
-                    role="stack",
-                    run_dir=evidence_dir,
-                ).run(inputs)
+                run_dir=run_dir,
+                repo_root=repo_root,
+                tool_root=tool_root,
+            )
             verify_comparison_scheduler(
                 endpoint=platform.endpoint,
                 executor=executor,
@@ -472,50 +501,18 @@ def _experiment_01_plan(
         }
 
         def acquire(inputs: TaskInputs) -> None:
-            verify_comparison_cell_registry(
-                distributions=(selected, shared)
-                if selected is not shared
-                else (selected,),
+            _verify_prepared_cell(
+                config,
+                resources["selected"],
+                resources["shared"],
+                EXPERIMENT_01_FUNCTIONS,
                 executor=executor,
                 inputs=inputs,
-                run_dir=run_dir,
-            )
-            function = resolve_function(
-                config, key, source_root=repo_root, tool_root=tool_root
-            )
-            name, sdk = EXPERIMENT_01_FUNCTIONS[key]
-            for resource, deployment, component, evidence in (
-                (
-                    resources["selected"],
-                    "nanofaas-control-plane",
-                    ("control-plane", "control-plane", "java"),
-                    run_dir / "images/control-plane",
-                ),
-                (
-                    resources["shared"],
-                    f"fn-{function.name}",
-                    ("function", name, sdk),
-                    run_dir / "images" / sdk,
-                ),
-            ):
-                _ = RecipeKubernetesImageCheckTask(
-                    resource,
-                    namespace=DEFAULT_NAMESPACE,
-                    deployment=deployment,
-                    component=component,
-                    executor=executor,
-                    role="stack",
-                    run_dir=evidence,
-                ).run(inputs)
-            # The running process reports its modules and native optimisation
-            # level; a build other than the recipe's stops the cell here.
-            _ = RecipeMetadataCheckTask(
-                resources["selected"],
-                executor=executor,
-                run_dir=run_dir,
                 endpoint=platform.endpoint,
-                role="stack",
-            ).run(inputs)
+                run_dir=run_dir,
+                repo_root=repo_root,
+                tool_root=tool_root,
+            )
             # Observed rather than required: the baseline has no queue and so
             # no scheduler strategy to assert. What the process exposes, and
             # its pod spec, are kept as the evidence of what actually ran.

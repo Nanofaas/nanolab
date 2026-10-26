@@ -433,6 +433,7 @@ def _resolve_script_and_summary(
     remote_run_dir: Path | None,
     run_dir: Path,
     script_name: str | None = None,
+    preserve_attempt: bool = False,
 ) -> tuple[Path, Path]:
     script_name = script_name or load_script_name(config)
     if remote:
@@ -441,6 +442,9 @@ def _resolve_script_and_summary(
         script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
         output_dir = remote_run_dir or Path(home) / "nanofaas-loadtest"
         _validate_remote_run_dir(remote_run_dir, home)
+        if preserve_attempt:
+            # A failed transfer must survive the next cell/attempt's cleanup.
+            output_dir /= recipe_run_tag(run_dir)
         summary_path = output_dir / "k6-summary.json"
     else:
         script_path = bundled_assets_root() / "k6" / script_name
@@ -919,7 +923,6 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     concurrency_report: WriteConcurrencyReport | None = None,
     drain_minutes: int | None = None,
     management_url: str | None = None,
-    events_path: Path | None = None,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     # First, because it has to sample while the stack is still up and before the
@@ -949,18 +952,6 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                 )
             )
         )
-        if events_path is not None:
-            after.append(
-                FetchResultsTask(
-                    fetch=FetchVmResults(
-                        task_id="",
-                        title="Fetch k6 events",
-                        fetcher=cast(RemoteFileFetcher, fetcher),
-                        remote_source=str(events_path),
-                        local_dest=run_dir,
-                    )
-                )
-            )
     if concurrency_watchers is not None:
         after.append(
             ReportCoTenancyTask(watchers=concurrency_watchers, series_dir=run_dir)
@@ -1381,6 +1372,7 @@ def build_loadtest_plan(
         remote_run_dir=remote_run_dir,
         run_dir=run_dir,
         script_name=script_name,
+        preserve_attempt=k6_events,
     )
     events_path = summary_path.parent / "k6-events.jsonl" if k6_events else None
     additional_modules = _additional_modules(
@@ -1500,7 +1492,6 @@ def build_loadtest_plan(
         hpa_metrics=hpa,
         snapshot_lead_seconds=snapshot_lead_seconds,
         heap_metrics_required=heap_metrics_required,
-        events_path=events_path if remote else None,
     )
     if request.recipe is not None:
         binding = request.recipe
@@ -1565,6 +1556,17 @@ def build_loadtest_plan(
             ),
             run_k6=RunK6Task(
                 run_k6=run_k6,
+                events=(
+                    FetchVmResults(
+                        task_id="",
+                        title="Fetch k6 events",
+                        fetcher=cast(RemoteFileFetcher, fetcher),
+                        remote_source=str(events_path),
+                        local_dest=run_dir,
+                    )
+                    if remote and events_path is not None
+                    else None
+                ),
                 # One sampler slot, and the two never coexist: a concurrency run
                 # pins the replica count, an autoscaling run does not govern
                 # concurrency.

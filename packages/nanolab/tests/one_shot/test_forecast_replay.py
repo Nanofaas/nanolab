@@ -12,6 +12,7 @@ from nanolab.tasks.one_shot.forecast_replay import (
     interval_mean,
     parse_forecaster,
     record_forecast_replay,
+    series_forecasts,
 )
 from tests.one_shot.test_forecast_errors import emitted, manifest, trace
 
@@ -96,3 +97,109 @@ def test_intervals_before_any_complete_window_have_no_forecast(tmp_path):
     rows = list(csv.DictReader((output / "forecast-replay.csv").open()))
     assert {r["forecastSource"] for r in rows if r["epoch"] == "0"} == {"no-window"}
     assert {r["forecastSource"] for r in rows if r["epoch"] == "1"} == {"replay"}
+
+
+@pytest.mark.parametrize("provider", ["ewma", "holt", "ari"])
+@pytest.mark.parametrize("missing_log", [False, True])
+def test_replay_without_arrivals_reports_no_windows(tmp_path, provider, missing_log):
+    write_run(tmp_path, [])
+    # Keep a missing-guard regression bounded instead of iterating from 1969
+    # to the real fixture's 2026 anchor.
+    early = manifest().model_copy(update={"anchor": "1970-01-01T00:02:00+00:00"})
+    (tmp_path / "manifest.json").write_text(early.model_dump_json())
+    if missing_log:
+        (tmp_path / "generator.jsonl").unlink()
+    output = tmp_path / "out"
+    output.mkdir()
+    model = parse_forecaster(provider)
+
+    summary = record_forecast_replay(tmp_path, output, forecasters=[model])
+
+    rows = list(csv.DictReader((output / "forecast-replay.csv").open()))
+    assert len(rows) == 8
+    assert {row["forecastSource"] for row in rows} == {"no-window"}
+    assert {row["predictedRate"] for row in rows} == {""}
+    overall = summary["models"][model.label]["overall"]
+    assert overall["forecasts"] == 0
+    assert overall["meanAbsoluteError"] is None
+
+
+@pytest.mark.parametrize("specs", [[], ["holt", "holt:window=10"]])
+def test_invalid_model_lists_publish_no_results(tmp_path, specs):
+    write_run(tmp_path, [emitted(-35, "edge-1", "f", 0)])
+    output = tmp_path / "out"
+    output.mkdir()
+
+    with pytest.raises(ValueError, match="forecaster"):
+        record_forecast_replay(
+            tmp_path, output, forecasters=[parse_forecaster(spec) for spec in specs]
+        )
+
+    assert list(output.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "ewma:window=1,alpha=1",
+        "ewma:alpha=0.000001",
+        "holt:history=4",
+        "holt:history=100000,level=1,trend=1,damping=1",
+        "holt:level=0.000001,trend=0.000001,damping=0.000001",
+        "ari:order=1,history=4",
+        "ari:order=64,history=130",
+        "ari:history=100000",
+    ],
+)
+def test_provider_parameter_boundaries_are_accepted(spec):
+    assert parse_forecaster(spec).label
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "ewma:window=0",
+        "holt:window=-1",
+        "ari:window=0",
+        "ewma:alpha=0",
+        "ewma:alpha=1.01",
+        "ewma:alpha=nan",
+        "ewma:alpha=inf",
+        "holt:history=3",
+        "holt:history=100001",
+        "ari:history=3",
+        "ari:history=100001",
+        "ari:order=0",
+        "ari:order=65",
+        "ari:order=64,history=129",
+        *(
+            f"holt:{name}={value}"
+            for name in ("level", "trend", "damping")
+            for value in ("0", "1.01", "nan", "inf")
+        ),
+    ],
+)
+def test_invalid_provider_parameters_are_rejected(spec):
+    with pytest.raises(ValueError, match="forecaster"):
+        parse_forecaster(spec)
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        ("ewma", {"level": 0, "trend": 0, "damping": 0, "order": 0, "history": 0}),
+        ("holt", {"alpha": 0, "order": 0, "history": 4}),
+        ("ari", {"alpha": 0, "level": 0, "trend": 0, "damping": 0}),
+    ],
+)
+def test_replay_ignores_parameters_unused_by_the_provider(model):
+    provider, unused = model
+    forecast = Forecaster(provider, 10, **unused)
+    rates = series_forecasts(
+        [65], forecast, starts=[120], period=60, lead=30, registered=0
+    )
+
+    assert len(rates) == 1
+    assert rates[0] is not None
+    if provider == "ewma":
+        assert rates[0] == pytest.approx(0.0125)

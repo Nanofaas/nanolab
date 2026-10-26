@@ -108,6 +108,7 @@ class RunK6Task(Task[LoadtestOutcome]):
         # that reports somewhere else.
         watcher: Sampling | None = None,
         initial_replicas: InitialReplicaCheck | None = None,
+        events: FetchVmResults | None = None,
         title: str = "Run k6",
     ) -> None:
         """Wire the k6 run, the sampler bracketing it and the replica check."""
@@ -115,14 +116,34 @@ class RunK6Task(Task[LoadtestOutcome]):
         self._run_k6 = run_k6
         self._watcher = watcher
         self._initial_replicas: InitialReplicaCheck | None = initial_replicas
+        self._events = events
+
+    def _fetch_events(self, failure: BaseException | None = None) -> None:
+        if self._events is None:
+            return
+        try:
+            self._events.run()
+        except BaseException as error:
+            source = self._events.remote_source
+            if failure is None:
+                error.add_note(f"k6 events remain on the load generator at {source}")
+                raise
+            failure.add_note(f"Could not fetch k6 events from {source}: {error}")
 
     def _run(self) -> K6RunResult:
         # K6Task always carries its result; the outcome type allows None, and an
         # unchecked None would surface later as an attribute error on the
         # summary rather than as a load test that produced nothing.
-        outcome = self._run_k6.run(TaskInputs.empty())
-        if outcome.value is None:
-            raise RuntimeError(f"{self.title}: k6 produced no result")
+        try:
+            outcome = self._run_k6.run(TaskInputs.empty())
+            if outcome.value is None:
+                raise RuntimeError(f"{self.title}: k6 produced no result")
+        except BaseException as error:
+            self._fetch_events(error)
+            raise
+        # Fetch before any post-run step: even a missing summary must not hide
+        # the ledger. Failed transfers leave the attempt's remote files intact.
+        self._fetch_events()
         return outcome.value
 
     @override

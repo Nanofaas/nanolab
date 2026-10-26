@@ -48,14 +48,20 @@ class Forecaster:
 
     def __post_init__(self):
         """Refuse what NanoFaaS would refuse at startup."""
-        unit = (self.alpha, self.level, self.trend, self.damping)
+        unit = {
+            "ewma": (self.alpha,),
+            "holt": (self.level, self.trend, self.damping),
+            "ari": (),
+        }.get(self.provider, ())
         if (
             self.provider not in ("ewma", "holt", "ari")
             or self.window < 1
             or not all(0 < value <= 1 for value in unit)
-            or not 1 <= self.order <= 64
-            or not 4 <= self.history <= 100_000
-            or 2 * self.order + 2 > self.history
+            or (self.provider != "ewma" and not 4 <= self.history <= 100_000)
+            or (
+                self.provider == "ari"
+                and (not 1 <= self.order <= 64 or 2 * self.order + 2 > self.history)
+            )
         ):
             raise ValueError(f"invalid forecaster: {self}")
 
@@ -170,20 +176,23 @@ def interval_mean(path, window, lo, hi):
 
 def series_forecasts(times, model, *, starts, period, lead, registered):
     """One series' forecast for each interval start, or None before any window."""
+    if registered is None:
+        return [None] * len(starts)
     w = model.window
     first = math.floor(registered / w) + (registered % w != 0)
     counts = Counter(k for k in (math.floor(t / w) for t in times) if k >= first)
-    following, mean, retained = first, None, deque(maxlen=model.history)
+    following, mean = first, None
+    retained = deque(maxlen=model.history if model.provider != "ewma" else 0)
     out = []
     for start in starts:
         completed = math.floor((start - lead) / w)
         while following < completed:
             rate = counts.get(following, 0) / w
-            alpha = model.alpha
+            alpha = model.alpha if model.provider == "ewma" else 1.0
             mean = rate if mean is None else alpha * rate + (1 - alpha) * mean
             retained.append(rate)
             following += 1
-        if not retained:
+        if mean is None:
             out.append(None)
         elif model.provider == "ewma":
             out.append(mean)
@@ -202,6 +211,11 @@ def series_forecasts(times, model, *, starts, period, lead, registered):
 
 def replay_rows(manifest, trace, *, schedule, events, forecasters, lead):
     """Build the forecast-errors rows of every interval, edge and function per model."""
+    if not forecasters:
+        raise ValueError("at least one forecaster is required")
+    labels = [model.label for model in forecasters]
+    if len(labels) != len(set(labels)):
+        raise ValueError("duplicate forecaster labels")
     base = forecast_error_rows(
         manifest, trace, schedule=schedule, events=events, epochs=[]
     )
@@ -212,10 +226,9 @@ def replay_rows(manifest, trace, *, schedule, events, forecasters, lead):
             seen.add(row["originalId"])
             key = (row["origin"], row["function"])
             arrivals.setdefault(key, []).append(row["emittedAt"])
-    registered = (
-        min((t for times in arrivals.values() for t in times), default=0)
-        - REGISTRATION_LEAD_SECONDS
-    )
+    registered = min((t for times in arrivals.values() for t in times), default=None)
+    if registered is not None:
+        registered -= REGISTRATION_LEAD_SECONDS
     anchor = datetime.fromisoformat(manifest.anchor).timestamp()
     period = trace.period_seconds
     starts = [anchor + epoch * period for epoch in range(len(trace.windows))]

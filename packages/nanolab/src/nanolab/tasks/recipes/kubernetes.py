@@ -120,10 +120,13 @@ def _local_image_config(
     actual: RuntimeImageIdentity,
     executor: CommandTaskExecutor,
     inputs: TaskInputs,
+    config_digests: dict[str, str],
 ) -> RecipeImage:
     """Resolve Docker manifest IDs to config IDs using the immutable local image."""
     if expected.digest is not None or expected.id == actual.config_digest:
         return expected
+    if expected.id in config_digests:
+        return replace(expected, id=config_digests[expected.id])
     with tempfile.TemporaryDirectory(prefix="nanolab-image-") as directory:
         path = Path(directory) / "image.tar"
         _command(
@@ -143,6 +146,7 @@ def _local_image_config(
             if config_file is None:
                 raise ValueError("Local image archive has no config")
             digest = "sha256:" + hashlib.sha256(config_file.read()).hexdigest()
+    config_digests[expected.id] = digest
     return replace(expected, id=digest)
 
 
@@ -215,6 +219,7 @@ def minikube_images_resource(
         selected = inputs.resource(target)
         report = inputs.resource(distribution)
         images = [component.image for component in report.components]
+        config_digests: dict[str, str] = {}
         references = [
             *(image.reference for image in images),
             *((inputs.resource(probe_image),) if probe_image is not None else ()),
@@ -278,7 +283,9 @@ def minikube_images_resource(
                             )
                         actual = RuntimeImageIdentity(rows[0].get("id", ""), ())
                         verify_runtime_image(
-                            _local_image_config(expected, actual, executor, inputs),
+                            _local_image_config(
+                                expected, actual, executor, inputs, config_digests
+                            ),
                             actual,
                         )
         except Exception:
@@ -471,6 +478,7 @@ class RecipeKubernetesImageCheckTask(Task[None]):
         }
         self.run_dir.mkdir(parents=True, exist_ok=True)
         path = self.run_dir / f"k8s-image-{kind}-{name}.json"
+        config_digests: dict[str, str] = {}
         try:
             desired = deployment.get("spec", {}).get("replicas", 1)
             if not owned or len(owned) < desired:
@@ -562,7 +570,9 @@ class RecipeKubernetesImageCheckTask(Task[None]):
                     }
                 actual = RuntimeImageIdentity(row.get("id", ""), digests)
                 verify_runtime_image(
-                    _local_image_config(expected, actual, self.executor, inputs)
+                    _local_image_config(
+                        expected, actual, self.executor, inputs, config_digests
+                    )
                     if self.target is not None
                     else expected,
                     actual,

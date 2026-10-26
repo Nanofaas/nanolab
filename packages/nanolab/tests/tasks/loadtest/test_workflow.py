@@ -16,6 +16,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from nanolab.tasks.loadtest import (
     CapturePrometheusTask,
     EvaluateGateTask,
+    FetchResultsTask,
     LoadtestOutcome,
     RecordRecipeImageTask,
     RunK6Task,
@@ -26,6 +27,7 @@ from nanolab.tasks.loadtest import (
 )
 from nanolab.tasks.loadtest.autoscaling import AutoscalingSummary
 from nanolab.tasks.loadtest.models import K6RunResult, TimeWindow
+from nanolab.tasks.loadtest.tasks import FetchVmResults
 
 STARTED = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
 ENDED = datetime(2026, 7, 28, 10, 5, tzinfo=UTC)
@@ -162,6 +164,113 @@ def test_a_run_without_autoscaling_needs_no_watcher() -> None:
 
     assert outcome is not None
     assert outcome.autoscaling is None
+
+
+class LocalFetcher:
+    """Transfer real fixture bytes across the remote-file boundary."""
+
+    def fetch_from(self, remote: str, local: Path) -> None:
+        source = Path(remote)
+        (local / source.name).write_bytes(source.read_bytes())
+
+
+@dataclass
+class FailingK6(Task[K6RunResult]):
+    failure: BaseException
+    title: str = "Failing k6"
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[K6RunResult]:
+        raise self.failure
+
+
+def event_fetch(remote: Path, local: Path) -> FetchVmResults:
+    return FetchVmResults(
+        task_id="",
+        title="Fetch k6 events",
+        fetcher=LocalFetcher(),
+        remote_source=str(remote),
+        local_dest=local,
+    )
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("k6 died"), KeyboardInterrupt()])
+def test_failed_generator_still_recovers_its_events(tmp_path, failure):
+    remote = tmp_path / "remote" / "k6-events.jsonl"
+    remote.parent.mkdir()
+    remote.write_text('{"t":"send","id":"in-flight"}\n')
+    local = tmp_path / "attempt"
+    watcher = FakeWatcher()
+    task = RunK6Task(
+        run_k6=FailingK6(failure),
+        watcher=watcher,
+        events=event_fetch(remote, local),
+    )
+
+    with pytest.raises(type(failure)) as caught:
+        task.run(TaskInputs.empty())
+
+    assert caught.value is failure
+    assert (local / remote.name).read_bytes() == remote.read_bytes()
+    assert watcher.events == ["start", "stop"]
+
+
+def test_event_transfer_failure_keeps_the_generator_error_and_remote_path(tmp_path):
+    remote = tmp_path / "unreachable" / "k6-events.jsonl"
+    failure = RuntimeError("k6 died")
+    task = RunK6Task(
+        run_k6=FailingK6(failure), events=event_fetch(remote, tmp_path / "attempt")
+    )
+
+    with pytest.raises(RuntimeError, match="k6 died") as caught:
+        task.run(TaskInputs.empty())
+
+    assert caught.value is failure
+    assert str(remote) in "\n".join(caught.value.__notes__)
+
+
+def test_successful_generator_requires_its_events_to_be_recovered(tmp_path):
+    task = RunK6Task(
+        run_k6=FakeRunK6(),
+        events=event_fetch(tmp_path / "missing.jsonl", tmp_path / "attempt"),
+    )
+    with pytest.raises(FileNotFoundError):
+        task.run(TaskInputs.empty())
+
+
+def test_summary_transfer_failure_does_not_prevent_event_recovery(tmp_path):
+    remote = tmp_path / "remote" / "k6-events.jsonl"
+    remote.parent.mkdir()
+    remote.write_text('{"t":"send","id":"in-flight"}\n')
+    local = tmp_path / "attempt"
+    executor = RecordingExecutor()
+    workflow = Workflow(workflow_id="recover-evidence")
+    workflow.add(
+        loadtest_composite(
+            preflight=CommandTask(
+                title="Preflight", argv=("true",), executor=executor, role="loadgen"
+            ),
+            prepare=CommandTask(
+                title="Prepare", argv=("true",), executor=executor, role="loadgen"
+            ),
+            run_k6=RunK6Task(run_k6=FakeRunK6(), events=event_fetch(remote, local)),
+            steps_after_run=(
+                FetchResultsTask(
+                    fetch=FetchVmResults(
+                        task_id="",
+                        title="Fetch missing summary",
+                        fetcher=LocalFetcher(),
+                        remote_source=str(remote.with_name("k6-summary.json")),
+                        local_dest=local,
+                    )
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(FileNotFoundError):
+        workflow.run()
+
+    assert (local / remote.name).read_bytes() == remote.read_bytes()
 
 
 def test_the_snapshot_covers_exactly_the_window_k6_ran_in() -> None:

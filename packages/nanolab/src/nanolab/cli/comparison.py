@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
+from traceback import format_exception_only
 from uuid import uuid4
 
 import typer
@@ -38,6 +39,7 @@ from nanolab.comparison.evidence import require_recorded_publications
 from nanolab.comparison.experiment_01 import (
     DIAGNOSTICS,
     LOAD_STARTED,
+    archive_cell_result,
     attempt_dir,
     classify_failure,
     experiment_01_identity,
@@ -300,6 +302,7 @@ def _run_experiment_cell(
     transport_retried = False
     while True:
         cell_dir = cell.run_dir(root)
+        archive_cell_result(cell_dir)
         attempt = next_attempt(cell_dir)
         run_dir = attempt_dir(cell_dir, attempt)
         run_dir.mkdir(parents=True)
@@ -310,7 +313,9 @@ def _run_experiment_cell(
         except Exception as error:
             diagnostics = run_dir / DIAGNOSTICS
             diagnostics.mkdir(exist_ok=True)
-            (diagnostics / "error.txt").write_text(f"{type(error).__name__}: {error}\n")
+            (diagnostics / "error.txt").write_text(
+                "".join(format_exception_only(error))
+            )
             try:
                 listing = _pods(provider, request)
             except Exception as probe:  # the probe failing is itself evidence
