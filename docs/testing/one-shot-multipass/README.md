@@ -1,6 +1,9 @@
 # One-shot Multipass workflow validation
 
 This dossier qualifies local workflow plumbing, not Azure or algorithm performance.
+The raw artifacts it cites (JSON, JSONL, logs and archives) were removed from
+the tree to keep the repository small; `git checkout 82a1d54 --
+docs/testing/one-shot-multipass` restores them byte for byte.
 NanoFaaS runtime source: `b1aa7f65c7ed0a70c2b94f37092fe62b7e877934`.
 NanoLab base: `811fbddefca8949a823bbcc5c3cacb95d4125acb`.
 The VM nodes share the physical ARM64 operator host with other workloads.

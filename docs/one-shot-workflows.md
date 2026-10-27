@@ -236,6 +236,8 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 Use fresh run directories. Preserve the original scenarios, commands, source
 commit, distribution receipt and artifact hashes together with the output.
 The dossier in `docs/testing/one-shot-multipass/` records actual local runs.
+Its raw artifacts are kept in history, not in the tree:
+`git checkout 82a1d54 -- docs/testing/one-shot-multipass` restores them.
 
 Calibration measures warm physical handler occupancy independently of client
 latency and queues. Raw samples, per-node confidence intervals and measured
