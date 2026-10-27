@@ -132,6 +132,39 @@ def comparison_remote_command(
     return result.stdout
 
 
+def comparison_transfer_to(
+    provider: VmCommandProvider,
+    request: VmRequest,
+    local: Path,
+    remote: PurePosixPath,
+) -> None:
+    """Upload `local` to `remote` and require the copy to hash the same."""
+    result = provider.transfer_to(request, source=local, destination=str(remote))
+    if result.return_code:
+        raise RuntimeError(f"Comparison VM transfer failed: {remote}")
+    expected = hashlib.sha256(local.read_bytes()).hexdigest()
+    actual = comparison_remote_command(
+        provider, request, ("sha256sum", str(remote))
+    ).split()
+    if not actual or actual[0] != expected:
+        raise ValueError(
+            f"Comparison transferred file differs from its source: {remote}"
+        )
+
+
+def comparison_transfer_from(
+    provider: VmCommandProvider,
+    request: VmRequest,
+    remote: PurePosixPath,
+    local: Path,
+) -> None:
+    """Download `remote` to `local`, failing closed."""
+    local.parent.mkdir(parents=True, exist_ok=True)
+    result = provider.transfer_from(request, source=str(remote), destination=local)
+    if result.return_code:
+        raise RuntimeError(f"Comparison VM transfer failed: {remote}")
+
+
 def verify_comparison_source(
     stage: ComparisonStage, provider: VmCommandProvider, request: VmRequest
 ) -> dict[str, object]:
@@ -208,15 +241,7 @@ def stage_comparison(
         ),
     ]
     for local, remote in transfers:
-        result = provider.transfer_to(request, source=local, destination=str(remote))
-        if result.return_code:
-            raise RuntimeError("Comparison VM staging transfer failed")
-        expected = hashlib.sha256(local.read_bytes()).hexdigest()
-        actual = comparison_remote_command(
-            provider, request, ("sha256sum", str(remote))
-        ).split()
-        if not actual or actual[0] != expected:
-            raise ValueError("Comparison staged archive/profile hash differs")
+        comparison_transfer_to(provider, request, local, remote)
     comparison_remote_command(
         provider,
         request,

@@ -1,15 +1,15 @@
 """The platforms experiment 02 deploys on the stack VM's Docker engine.
 
-Every platform does the same five things for a cell: start its containers,
-become ready, say where requests go, record what actually ran, and leave. Here
-are nanoFaaS P0 and P1 and the function alone; the baselines follow the same
-protocol.
+Every platform does the same five things for a cell: start and become ready,
+say where requests go, record what actually ran, and leave. Here are nanoFaaS
+P0 and P1 and the function alone; the baselines follow the same protocol.
 
-Readiness is measured on the VM, from the instant the first container is
-started to the first correct response, with the API and the registration timed
-on the way. Images are pulled before that instant, so readiness never includes
-a download. The first response is fetched and checked in full: an HTTP 200
-carrying the wrong image is not readiness.
+Starting is one VM-side script, `assets/diagnostics/experiment02_readiness.py`:
+it reads the clock, runs the platform's containers and polls every 0.5 s for
+the API, the registration and the first correct response, so no SSH round trip
+of the operator lands inside a timing. Images are pulled before the clock, so
+readiness never includes a download. An HTTP 200 carrying the wrong image is
+not readiness.
 
 Teardown removes every container except the registry, including those a
 platform created on its own, which no name here could list in advance.
@@ -17,17 +17,23 @@ platform created on its own, which no name here could list in advance.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
+from nanolab.comparison.prepare import (
+    comparison_remote_command,
+    comparison_transfer_from,
+    comparison_transfer_to,
+)
+from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.tasks.experiment_02.budget import REGISTRY_CONTAINER
-from nanolab.tasks.experiment_02.generator import K6Target, png_in_response
+from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.vm import Vm
+from nanolab.workspace.paths import bundled_assets_root
 
 NETWORK = "nanolab-e02"
 CONTROL_PLANE = "e02-control-plane"
@@ -38,6 +44,8 @@ FUNCTION_NAME = "qr-code-rust"
 # platform publishes its entry point on them, so no new port is ever exposed.
 ENTRY_PORT = 30080
 MANAGEMENT_PORT = 30081
+READINESS_SCRIPT = bundled_assets_root() / "diagnostics" / "experiment02_readiness.py"
+READINESS_INTERVAL_SECONDS = 0.5
 # Relative, so under the VM user's home, where every remote command starts.
 WORKDIR = PurePosixPath("nanolab-e02/readiness")
 FIRST_RESPONSE = WORKDIR / "first-response"
@@ -53,20 +61,24 @@ EXECUTION_ID_HEADER = "X-Execution-Id"
 class Platform(Protocol):
     """What a cell needs from any platform it measures."""
 
-    def deploy(self, vm: Vm) -> float:
-        """Start the platform; return the VM time its first container started."""
+    @property
+    def metrics_url(self) -> str | None:
+        """Return where the sampler scrapes the platform's metrics, if anywhere."""
         ...
 
-    def readiness(
+    def start(
         self,
         vm: Vm,
         *,
-        started: float,
-        timeout_seconds: int,
+        protocol: Experiment02Protocol,
         payload: bytes,
         evidence: Path,
     ) -> dict[str, float] | None:
-        """Return seconds to API, registration and first correct response, or `None`."""
+        """Start; return seconds to API, registration and first correct answer.
+
+        `None` when the platform failed to start or to answer correctly before
+        the protocol's readiness timeout; `evidence/readiness.json` says which.
+        """
         ...
 
     def target(self, host: str) -> K6Target:
@@ -86,141 +98,149 @@ class Platform(Protocol):
         ...
 
 
+def _probe(vm: Vm, argv: tuple[str, ...]) -> Any:
+    return vm.provider.exec_argv(
+        vm.request, argv, env=None, remote_dir=None, dry_run=False
+    )
+
+
 def leftover_containers(vm: Vm) -> list[str]:
     """Return every container on the VM except the registry."""
-    names = vm.run(("docker", "ps", "-a", "--format", "{{.Names}}")).split()
+    names = comparison_remote_command(
+        vm.provider, vm.request, ("docker", "ps", "-a", "--format", "{{.Names}}")
+    ).split()
     return [name for name in names if name != REGISTRY_CONTAINER]
 
 
 def _remove_containers(vm: Vm) -> None:
     names = leftover_containers(vm)
     if names:
-        _ = vm.run(("docker", "rm", "-f", *names))
+        _ = comparison_remote_command(
+            vm.provider, vm.request, ("docker", "rm", "-f", *names)
+        )
 
 
 def _record_containers(vm: Vm, evidence: Path) -> None:
     evidence.mkdir(parents=True, exist_ok=True)
     names = leftover_containers(vm)
     if names:
-        inspected = vm.run(("docker", "inspect", *names))
+        inspected = comparison_remote_command(
+            vm.provider, vm.request, ("docker", "inspect", *names)
+        )
         (evidence / "containers.json").write_text(inspected)
 
 
 def _ensure_images(vm: Vm, images: Sequence[str]) -> None:
     for image in images:
         quoted = shlex.quote(image)
-        _ = vm.run(
+        _ = comparison_remote_command(
+            vm.provider,
+            vm.request,
             (
                 "sh",
                 "-c",
                 f"docker image inspect {quoted} >/dev/null 2>&1 "
                 f"|| docker pull -q {quoted} >/dev/null",
-            )
+            ),
         )
 
 
 def _ensure_network(vm: Vm) -> None:
-    if vm.probe(("docker", "network", "inspect", NETWORK))[0]:
-        _ = vm.run(("docker", "network", "create", NETWORK))
+    if _probe(vm, ("docker", "network", "inspect", NETWORK)).return_code:
+        _ = comparison_remote_command(
+            vm.provider, vm.request, ("docker", "network", "create", NETWORK)
+        )
 
 
-def _clock(vm: Vm) -> float:
-    return float(vm.run(("date", "+%s.%N")).strip())
-
-
-def _wait_script(steps: Sequence[tuple[str, str]], timeout_seconds: int) -> str:
-    """Return a script that waits for each check in turn and prints when it passed."""
-    lines = [f"deadline=$(( $(date +%s) + {timeout_seconds} ))"]
-    for name, check in steps:
-        lines += [
-            f"until {check}; do",
-            '  if [ "$(date +%s)" -ge "$deadline" ]; then',
-            f'    echo "timeout {name}"; exit 0',
-            "  fi",
-            "  sleep 0.5",
-            "done",
-            f'echo "{name} $(date +%s.%N)"',
-        ]
-    return "\n".join(lines)
-
-
-def _probe_readiness(
+def _start(
     vm: Vm,
     *,
-    health_url: str,
-    registration: dict[str, object] | None,
-    invoke_url: str,
-    body: bytes,
+    images: Sequence[str],
+    commands: Sequence[Sequence[str]],
+    api: str,
+    registration: Mapping[str, object] | None,
     target: K6Target,
-    started: float,
-    timeout_seconds: int,
+    body: bytes,
+    protocol: Experiment02Protocol,
     payload: bytes,
     evidence: Path,
 ) -> dict[str, float] | None:
-    """Wait on the VM for API, registration and a first 200; then check the PNG."""
-    body_file = WORKDIR / "body.json"
-    spec_file = WORKDIR / "spec.json"
-    setup = [
-        f"rm -rf {WORKDIR} && mkdir -p {WORKDIR}",
-        f"printf '%s' {shlex.quote(body.decode())} > {body_file}",
-    ]
-    steps = [
-        ("api", shlex.join(("curl", "-fsS", "-m", "2", "-o", "/dev/null", health_url)))
-    ]
-    if registration is not None:
-        setup.append(
-            f"printf '%s' {shlex.quote(json.dumps(registration))} > {spec_file}"
-        )
-        steps.append(
-            (
-                "registered",
-                shlex.join(
-                    (
-                        "curl", "-fsS", "-m", "10", "-o", "/dev/null", "-X", "POST",
-                        f"{_API}/v1/functions", "-H", "Content-Type: application/json",
-                        "--data-binary", f"@{spec_file}",
-                    )
-                ),
-            )
-        )  # fmt: skip
-    invoke = shlex.join(
-        (
-            "curl", "-sS", "-m", "30", "-o", str(FIRST_RESPONSE), "-w", "%{http_code}",
-            "-X", "POST", invoke_url, "-H", "Content-Type: application/json",
-            "--data-binary", f"@{body_file}",
-        )
-    )  # fmt: skip
-    steps.append(("first", f'[ "$({invoke})" = 200 ]'))
-    output = vm.run(
-        ("sh", "-c", "\n".join((*setup, _wait_script(steps, timeout_seconds))))
-    )
-    stamps: dict[str, float] = {}
-    for line in output.splitlines():
-        name, _, value = line.partition(" ")
-        if name == "timeout":
-            return None
-        stamps[name] = float(value)
+    """Pull and prepare, then start and time the platform in one VM-side run."""
+    _ensure_images(vm, images)
+    _ensure_network(vm)
     evidence.mkdir(parents=True, exist_ok=True)
-    first = evidence / "first-response.body"
-    if not vm.get(FIRST_RESPONSE, first):
-        return None
-    png = png_in_response(target, first.read_bytes(), size=json.loads(payload)["size"])
+    spec = {
+        "start": [list(command) for command in commands],
+        "api": api,
+        "register": None
+        if registration is None
+        else {
+            "url": f"{_API}/v1/functions",
+            "check": f"{_API}/v1/functions/{FUNCTION_NAME}",
+            "body": dict(registration),
+        },
+        "invoke": {
+            "url": target.url,
+            "headers": dict(target.headers),
+            "body": body.decode("utf-8"),
+            "extractor": target.extractor,
+            "field": target.field,
+            "idHeader": target.id_header,
+            "size": json.loads(payload)["size"],
+            "pngSha256": protocol.png_sha256,
+            "timeoutSeconds": protocol.http_timeout_seconds,
+        },
+        "timeoutSeconds": protocol.readiness_timeout_seconds,
+        "intervalSeconds": READINESS_INTERVAL_SECONDS,
+        "out": str(FIRST_RESPONSE),
+    }
+    local_spec = evidence / "readiness-spec.json"
+    local_spec.write_text(json.dumps(spec, indent=2) + "\n")
+    _ = comparison_remote_command(
+        vm.provider,
+        vm.request,
+        ("sh", "-c", f"rm -rf {WORKDIR} && mkdir -p {WORKDIR}"),
+    )
+    remote_script = WORKDIR / READINESS_SCRIPT.name
+    remote_spec = WORKDIR / "spec.json"
+    comparison_transfer_to(vm.provider, vm.request, READINESS_SCRIPT, remote_script)
+    comparison_transfer_to(vm.provider, vm.request, local_spec, remote_spec)
+    probe = json.loads(
+        comparison_remote_command(
+            vm.provider,
+            vm.request,
+            ("python3", "-I", str(remote_script), str(remote_spec)),
+        )
+    )
+    started = float(probe["started"])
+
+    def since(stage: str) -> float | None:
+        return float(probe[stage]) - started if stage in probe else None
+
     timings = {
-        "apiReadySeconds": stamps["api"] - started,
-        "registeredSeconds": stamps.get("registered", stamps["api"]) - started,
-        "firstCorrectSeconds": stamps["first"] - started,
+        "apiReadySeconds": since("api"),
+        # Without a registration step the function is registered when it is up.
+        "registeredSeconds": since("registered" if registration else "api"),
+        "firstCorrectSeconds": since("first"),
     }
     (evidence / "readiness.json").write_text(
         json.dumps(
             {
                 **timings,
-                "pngSha256": hashlib.sha256(png).hexdigest() if png else None,
+                "pngSha256": probe.get("pngSha256"),
+                "intervalSeconds": READINESS_INTERVAL_SECONDS,
+                "probe": probe,
             },
             indent=2,
         )
         + "\n"
     )
-    return timings if png is not None else None
+    if "first" not in probe:
+        return None
+    comparison_transfer_from(
+        vm.provider, vm.request, FIRST_RESPONSE, evidence / "first-response.body"
+    )
+    return {name: value for name, value in timings.items() if value is not None}
 
 
 @dataclass(frozen=True)
@@ -235,6 +255,7 @@ class NanofaasPlatform:
     queue_capacity: int
     timeout_ms: int
     runtime: Literal["jvm", "native"] | None = None
+    metrics_url: str | None = f"http://127.0.0.1:{MANAGEMENT_PORT}/actuator/prometheus"
 
     def registration(self) -> dict[str, object]:
         """Return the function registration this composition receives."""
@@ -253,29 +274,23 @@ class NanofaasPlatform:
             }
         return spec | {"maxRetries": 0, "timeoutMs": self.timeout_ms}
 
-    def deploy(self, vm: Vm) -> float:
-        """Start the control plane, and for P0 the function it fronts."""
-        _ensure_images(vm, (self.control_plane_image, self.function_image))
-        _ensure_network(vm)
-        started = _clock(vm)
+    def commands(self) -> list[tuple[str, ...]]:
+        """Return the containers to start, in order: for P0 the function first."""
         ports = ("-p", f"{ENTRY_PORT}:8080", "-p", f"{MANAGEMENT_PORT}:8081")
         metrics = ("-e", "NANOFAAS_METRICS_PROFILE=advanced")
         if self.profile == "P0":
-            _ = vm.run(
+            return [
                 (
                     "docker", "run", "-d", "--name", FUNCTION_CONTAINER,
                     "--network", NETWORK, "-e", "PORT=8080",
                     "-e", f"CALLBACK_URL={_CALLBACK}", self.function_image,
-                )
-            )  # fmt: skip
-            _ = vm.run(
+                ),
                 (
                     "docker", "run", "-d", "--name", CONTROL_PLANE,
                     "--network", NETWORK, *ports, *metrics, self.control_plane_image,
-                )
-            )  # fmt: skip
-            return started
-        _ = vm.run(
+                ),
+            ]  # fmt: skip
+        return [
             (
                 "docker", "run", "-d", "--name", CONTROL_PLANE, "--user", "0:0",
                 "--network", NETWORK, *ports,
@@ -286,28 +301,26 @@ class NanofaasPlatform:
                 "-e", f"NANOFAAS_CONTAINER_LOCAL_CALLBACK_URL={_CALLBACK}",
                 *metrics, self.control_plane_image,
             )
-        )  # fmt: skip
-        return started
+        ]  # fmt: skip
 
-    def readiness(
+    def start(
         self,
         vm: Vm,
         *,
-        started: float,
-        timeout_seconds: int,
+        protocol: Experiment02Protocol,
         payload: bytes,
         evidence: Path,
     ) -> dict[str, float] | None:
-        """Wait for the API, register the function, and wait for a correct answer."""
-        return _probe_readiness(
+        """Start the control plane, register the function, wait for a correct PNG."""
+        return _start(
             vm,
-            health_url=_READY,
+            images=(self.control_plane_image, self.function_image),
+            commands=self.commands(),
+            api=_READY,
             registration=self.registration(),
-            invoke_url=f"{_API}/v1/functions/{FUNCTION_NAME}:invoke",
-            body=self.body(payload),
             target=self.target("127.0.0.1"),
-            started=started,
-            timeout_seconds=timeout_seconds,
+            body=self.body(payload),
+            protocol=protocol,
             payload=payload,
             evidence=evidence,
         )
@@ -327,7 +340,9 @@ class NanofaasPlatform:
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers and refuse a control plane with other modules."""
         _record_containers(vm, evidence)
-        metadata = vm.run(("curl", "-fsS", f"{_API}/modules/build-metadata"))
+        metadata = comparison_remote_command(
+            vm.provider, vm.request, ("curl", "-fsS", f"{_API}/modules/build-metadata")
+        )
         (evidence / "build-metadata.json").write_text(metadata)
         data = json.loads(metadata)
         running = sorted(data.get("modules", []))
@@ -344,14 +359,15 @@ class NanofaasPlatform:
 
     def teardown(self, vm: Vm) -> None:
         """Deregister the function and remove every container but the registry."""
-        _ = vm.probe(
+        _ = _probe(
+            vm,
             (
                 "curl", "-s", "-o", "/dev/null", "-m", "5", "-X", "DELETE",
                 f"{_API}/v1/functions/{FUNCTION_NAME}",
-            )
+            ),
         )  # fmt: skip
         _remove_containers(vm)
-        _ = vm.probe(("docker", "network", "rm", NETWORK))
+        _ = _probe(vm, ("docker", "network", "rm", NETWORK))
 
 
 @dataclass(frozen=True)
@@ -359,44 +375,36 @@ class DirectReference:
     """The function alone, invoked through its own runtime with no platform."""
 
     function_image: str
+    metrics_url: str | None = None
 
-    def deploy(self, vm: Vm) -> float:
-        """Start the function container, publishing its runtime port."""
-        _ensure_images(vm, (self.function_image,))
-        _ensure_network(vm)
-        started = _clock(vm)
-        _ = vm.run(
+    def commands(self) -> list[tuple[str, ...]]:
+        """Return the one container to start, publishing the runtime's port."""
+        return [
             (
                 "docker", "run", "-d", "--name", FUNCTION_CONTAINER,
                 "--network", NETWORK, "-p", f"{ENTRY_PORT}:8080",
-                "-e", "PORT=8080",
-                # The runtime needs an execution id; with no platform to send
-                # one per request, every request uses this one.
-                "-e", "EXECUTION_ID=e02-direct-reference",
-                self.function_image,
+                "-e", "PORT=8080", self.function_image,
             )
-        )  # fmt: skip
-        return started
+        ]  # fmt: skip
 
-    def readiness(
+    def start(
         self,
         vm: Vm,
         *,
-        started: float,
-        timeout_seconds: int,
+        protocol: Experiment02Protocol,
         payload: bytes,
         evidence: Path,
     ) -> dict[str, float] | None:
-        """Wait for the runtime's health, then for a correct answer."""
-        return _probe_readiness(
+        """Start the function container and wait for a correct answer."""
+        return _start(
             vm,
-            health_url=f"{_API}/health",
+            images=(self.function_image,),
+            commands=self.commands(),
+            api=f"{_API}/health",
             registration=None,
-            invoke_url=f"{_API}/invoke",
-            body=self.body(payload),
             target=self.target("127.0.0.1"),
-            started=started,
-            timeout_seconds=timeout_seconds,
+            body=self.body(payload),
+            protocol=protocol,
             payload=payload,
             evidence=evidence,
         )
@@ -423,4 +431,4 @@ class DirectReference:
     def teardown(self, vm: Vm) -> None:
         """Remove every container but the registry."""
         _remove_containers(vm)
-        _ = vm.probe(("docker", "network", "rm", NETWORK))
+        _ = _probe(vm, ("docker", "network", "rm", NETWORK))

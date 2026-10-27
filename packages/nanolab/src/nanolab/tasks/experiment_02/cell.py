@@ -132,13 +132,8 @@ def run_cell(
     remote_samples = _start_sampler(stack, remote_root)
     outcome: Outcome = "measured"
     try:
-        started = platform.deploy(stack)
-        timings = platform.readiness(
-            stack,
-            started=started,
-            timeout_seconds=protocol.readiness_timeout_seconds,
-            payload=payload,
-            evidence=run_dir,
+        timings = platform.start(
+            stack, protocol=protocol, payload=payload, evidence=run_dir
         )
         if timings is None:
             _diagnose(stack, diagnostics, "no correct response before the timeout")

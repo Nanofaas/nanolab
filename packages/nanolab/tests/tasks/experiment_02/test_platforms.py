@@ -1,49 +1,37 @@
-"""nanoFaaS P0/P1 and the function alone, deployed, probed and removed on Docker."""
+"""nanoFaaS P0/P1 and the function alone, started, probed and removed on Docker."""
 
-import base64
-import hashlib
 import json
-import struct
-import subprocess
-import zlib
-from pathlib import Path
 
 import pytest
+import yaml
 
 from nanolab.comparison.profiles import EXPERIMENT_02_MODULES
+from nanolab.config.scenario import ScenarioConfig
 from nanolab.tasks.experiment_02.platforms import (
     FIRST_RESPONSE,
+    WORKDIR,
     DirectReference,
     NanofaasPlatform,
     leftover_containers,
 )
+from nanolab.workspace.paths import discover_tool_root
 
 from .fakes import RecordingProvider, Result, vm
 
 PAYLOAD = b'{"size":128,"text":"A"}\n'
+SPEC = str(WORKDIR / "spec.json")
 
 
-def _png(size: int) -> bytes:
-    header = struct.pack(">IIBBBBB", size, size, 8, 0, 0, 0, 0)
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + struct.pack(">I", len(header))
-        + b"IHDR"
-        + header
-        + struct.pack(">I", zlib.crc32(b"IHDR" + header))
+def _protocol():
+    config = ScenarioConfig.model_validate(
+        yaml.safe_load(
+            (
+                discover_tool_root() / "scenarios" / "experiment-02-pilot.yaml"
+            ).read_text()
+        )
     )
-
-
-PNG = _png(128)
-ENVELOPE = json.dumps(
-    {
-        "status": "success",
-        "statusCode": 200,
-        "encoding": "base64",
-        "headers": {"content-type": "image/png"},
-        "output": base64.b64encode(PNG).decode(),
-    }
-).encode()
+    assert config.experiment_02 is not None
+    return config.experiment_02
 
 
 def _p1() -> NanofaasPlatform:
@@ -70,33 +58,41 @@ def _p0() -> NanofaasPlatform:
     )
 
 
-def _docker_runs(provider: RecordingProvider) -> list[tuple[str, ...]]:
-    return [argv for argv in provider.commands() if argv[:2] == ("docker", "run")]
+PROBE = {
+    "started": 100.0,
+    "api": 100.5,
+    "registered": 101.0,
+    "first": 102.25,
+    "pngSha256": "ab" * 32,
+    "attempts": 1,
+    "intervalSeconds": 0.5,
+}
 
 
-def _deployed(platform) -> tuple[RecordingProvider, float]:
+def _start(platform, tmp_path, probe=PROBE):
     def handler(argv, _env):
-        if argv == ("date", "+%s.%N"):
-            return Result(0, "100.0\n")
+        if argv[0] == "python3":
+            if "first" in probe:
+                provider.files[str(FIRST_RESPONSE)] = b'{"output": "..."}'
+            return Result(0, json.dumps(probe))
         return None
 
     provider = RecordingProvider(handler=handler)
-    return provider, platform.deploy(vm(provider))
+    timings = platform.start(
+        vm(provider), protocol=_protocol(), payload=PAYLOAD, evidence=tmp_path
+    )
+    return provider, timings, json.loads(provider.files[SPEC])
 
 
-def test_p1_runs_the_docker_provider_and_registers_a_deployment_function():
-    provider, started = _deployed(_p1())
-    assert started == 100.0
-    [control_plane] = _docker_runs(provider)
+def test_p1_runs_the_docker_provider_and_registers_a_deployment_function(tmp_path):
+    _provider, _timings, spec = _start(_p1(), tmp_path)
+    [control_plane] = spec["start"]
     assert "/var/run/docker.sock:/var/run/docker.sock" in control_plane
     assert "NANOFAAS_DEPLOYMENT_DEFAULT_BACKEND=container-local" in control_plane
     assert "30080:8080" in control_plane
     assert "30081:8081" in control_plane
     assert control_plane[-1] == "registry/control-plane:p1"
-    assert _p1().target("10.0.0.4").url == (
-        "http://10.0.0.4:30080/v1/functions/qr-code-rust:invoke"
-    )
-    assert _p1().registration() == {
+    assert spec["register"]["body"] == {
         "name": "qr-code-rust",
         "image": "registry/rust-qr-code:e02",
         "executionMode": "DEPLOYMENT",
@@ -105,39 +101,38 @@ def test_p1_runs_the_docker_provider_and_registers_a_deployment_function():
         "maxRetries": 0,
         "timeoutMs": 30000,
     }
+    assert spec["invoke"]["url"] == (
+        "http://127.0.0.1:30080/v1/functions/qr-code-rust:invoke"
+    )
+    assert spec["intervalSeconds"] == 0.5
+    assert _p1().metrics_url == "http://127.0.0.1:30081/actuator/prometheus"
 
 
-def test_p0_registers_an_external_endpoint_without_the_docker_socket():
-    provider, _started = _deployed(_p0())
-    function, control_plane = _docker_runs(provider)
+def test_p0_registers_an_external_endpoint_without_the_docker_socket(tmp_path):
+    _provider, _timings, spec = _start(_p0(), tmp_path)
+    function, control_plane = spec["start"]
     assert function[-1] == "registry/rust-qr-code:e02"
     assert "PORT=8080" in function
     assert not any("docker.sock" in part for part in control_plane)
-    assert _p0().registration() == {
-        "name": "qr-code-rust",
-        "image": "registry/rust-qr-code:e02",
-        "executionMode": "EXTERNAL",
-        "endpointUrl": "http://e02-qr-code:8080/invoke",
-        "concurrency": 2,
-        "maxRetries": 0,
-        "timeoutMs": 30000,
-    }
+    assert spec["register"]["body"]["executionMode"] == "EXTERNAL"
+    assert spec["register"]["body"]["endpointUrl"] == "http://e02-qr-code:8080/invoke"
+    assert "queueSize" not in spec["register"]["body"]
 
 
-def test_images_are_present_before_the_clock_starts():
-    provider, _started = _deployed(_p1())
+def test_images_are_present_before_the_clock_starts(tmp_path):
+    provider, _timings, _spec = _start(_p1(), tmp_path)
     commands = provider.commands()
-    clock = commands.index(("date", "+%s.%N"))
+    clock = next(i for i, argv in enumerate(commands) if argv[0] == "python3")
     pulls = [
         index
         for index, argv in enumerate(commands)
         if argv[0] == "sh" and "docker pull" in argv[-1]
     ]
-    assert pulls
+    assert len(pulls) == 2
     assert max(pulls) < clock
 
 
-def test_direct_reference_wraps_the_payload_as_runtime_input():
+def test_direct_reference_wraps_the_payload_and_numbers_each_request(tmp_path):
     direct = DirectReference("registry/rust-qr-code:e02")
     assert json.loads(direct.body(PAYLOAD)) == {"input": {"size": 128, "text": "A"}}
     target = direct.target("10.0.0.4")
@@ -145,76 +140,45 @@ def test_direct_reference_wraps_the_payload_as_runtime_input():
     assert (target.extractor, target.field) == ("json-base64", None)
     # One id per request: the runtime refuses a second active execution of an id.
     assert target.id_header == "X-Execution-Id"
-    provider, _started = _deployed(direct)
-    [function] = _docker_runs(provider)
+    assert direct.metrics_url is None
+    _provider, timings, spec = _start(direct, tmp_path, {**PROBE, "registered": 0})
+    [function] = spec["start"]
     assert "30080:8080" in function
-    assert any(part.startswith("EXECUTION_ID=") for part in function)
+    assert not any(part.startswith("EXECUTION_ID=") for part in function)
+    assert spec["register"] is None
+    assert spec["invoke"]["idHeader"] == "X-Execution-Id"
+    assert timings is not None
+    assert timings["registeredSeconds"] == timings["apiReadySeconds"]
 
 
-def _probe(platform, output: str, first: bytes | None, tmp_path: Path):
-    def handler(argv, _env):
-        if argv[0] == "sh":
-            if first is not None:
-                provider.files[str(FIRST_RESPONSE)] = first
-            return Result(0, output)
-        return None
-
-    provider = RecordingProvider(handler=handler)
-    return platform.readiness(
-        vm(provider),
-        started=100.0,
-        timeout_seconds=300,
-        payload=PAYLOAD,
-        evidence=tmp_path,
-    )
-
-
-def test_readiness_reports_seconds_from_the_deployment_start(tmp_path):
-    timings = _probe(
-        _p1(), "api 100.5\nregistered 101.0\nfirst 102.25\n", ENVELOPE, tmp_path
-    )
+def test_readiness_reports_seconds_from_the_start_measured_on_the_vm(tmp_path):
+    _provider, timings, spec = _start(_p1(), tmp_path)
     assert timings == {
         "apiReadySeconds": 0.5,
         "registeredSeconds": 1.0,
         "firstCorrectSeconds": 2.25,
     }
     recorded = json.loads((tmp_path / "readiness.json").read_text())
-    assert recorded["pngSha256"] == hashlib.sha256(PNG).hexdigest()
+    assert recorded["pngSha256"] == "ab" * 32
+    assert recorded["probe"]["attempts"] == 1
+    assert (tmp_path / "first-response.body").is_file()
+    assert spec["timeoutSeconds"] == _protocol().readiness_timeout_seconds
 
 
 @pytest.mark.parametrize(
-    "platform", [_p1(), _p0(), DirectReference("registry/rust-qr-code:e02")]
+    "probe",
+    [
+        {"started": 100.0, "api": 100.5, "timeout": "registered", "last": {}},
+        {"started": 100.0, "failed": "start", "code": 125, "stderr": "conflict"},
+    ],
 )
-def test_readiness_script_is_valid_shell(platform, tmp_path):
-    provider_scripts: list[str] = []
-
-    def handler(argv, _env):
-        if argv[0] == "sh":
-            provider_scripts.append(argv[-1])
-            return Result(0, "timeout api\n")
-        return None
-
-    platform.readiness(
-        vm(RecordingProvider(handler=handler)),
-        started=100.0,
-        timeout_seconds=1,
-        payload=PAYLOAD,
-        evidence=tmp_path,
-    )
-    [script] = provider_scripts
-    subprocess.run(("sh", "-n", "-c", script), check=True)
-
-
-def test_readiness_timeout_is_none(tmp_path):
-    assert _probe(_p1(), "api 100.5\ntimeout registered\n", None, tmp_path) is None
-
-
-def test_readiness_refuses_an_incorrect_first_response(tmp_path):
-    wrong = ENVELOPE.replace(b"iVBOR", b"AAAAA")
-    timings = _probe(
-        _p1(), "api 100.5\nregistered 101.0\nfirst 102.25\n", wrong, tmp_path
-    )
+def test_no_correct_answer_is_none_with_the_reason_recorded(tmp_path, probe):
+    _provider, timings, _spec = _start(_p1(), tmp_path, probe)
     assert timings is None
+    recorded = json.loads((tmp_path / "readiness.json").read_text())
+    assert recorded["firstCorrectSeconds"] is None
+    assert recorded["probe"] == probe
+    assert not (tmp_path / "first-response.body").exists()
 
 
 def test_teardown_removes_every_container_but_the_registry():

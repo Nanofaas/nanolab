@@ -58,12 +58,10 @@ class FakePlatform:
     ready: bool = True
     calls: list[str] = field(default_factory=list)
 
-    def deploy(self, vm: Vm) -> float:
-        self.calls.append("deploy")
-        return 100.0
+    metrics_url: str | None = None
 
-    def readiness(self, vm, *, started, timeout_seconds, payload, evidence):
-        self.calls.append("readiness")
+    def start(self, vm: Vm, *, protocol, payload, evidence):
+        self.calls.append("start")
         if not self.ready:
             return None
         return {
@@ -161,7 +159,7 @@ def test_cell_measures_in_order(tmp_path):
         _index(commands, ("sudo", "systemd-run")),
     ]
     assert order == sorted(order)
-    assert platform.calls == ["deploy", "readiness", "record", "teardown"]
+    assert platform.calls == ["start", "record", "teardown"]
     assert (tmp_path / LOAD_STARTED).is_file()
     assert (tmp_path / SAMPLES).is_file()
     assert (tmp_path / "k6-events.jsonl").is_file()

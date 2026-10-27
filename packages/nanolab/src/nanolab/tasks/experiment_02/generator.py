@@ -13,10 +13,7 @@ generator that crashed halfway still sent the first half.
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
-import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -49,47 +46,6 @@ class K6Target:
     # A header the script fills with each request's own ledger id, for targets
     # that admit one active execution per id.
     id_header: str | None = None
-
-
-_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-
-
-def png_in_response(target: K6Target, body: bytes, *, size: int) -> bytes | None:
-    """Return the PNG a response carries for `target`, or `None` if it is wrong.
-
-    The same rule as the script's check: a PNG signature and a square IHDR at
-    least `size` wide. Used where Python reads a response, such as readiness.
-    """
-    try:
-        if target.extractor == "raw-png":
-            png = body
-        else:
-            value = json.loads(body)
-            if target.extractor == "nanofaas-envelope":
-                if (
-                    not isinstance(value, dict)
-                    or value.get("status") != "success"
-                    or value.get("encoding") != "base64"
-                ):
-                    return None
-                text = value.get("output")
-            elif target.field is None:
-                text = value
-            else:
-                if not isinstance(value, dict) or value.get("error") is not None:
-                    return None
-                text = value.get(target.field)
-            if not isinstance(text, str):
-                return None
-            png = base64.b64decode(text, validate=True)
-    except (ValueError, binascii.Error):
-        return None
-    if len(png) < 24 or not png.startswith(_PNG_SIGNATURE):
-        return None
-    width, height = struct.unpack(">II", png[16:24])
-    if width != height or width < size:
-        return None
-    return png
 
 
 def generator_environment(
