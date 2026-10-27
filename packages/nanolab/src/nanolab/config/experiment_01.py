@@ -179,11 +179,16 @@ class Experiment01Protocol(_StrictModel):
         return phases
 
 
-def experiment_01_payload(protocol: Experiment01Protocol, payload_dir: Path) -> bytes:
-    """Return the exact body every request sends, verified against its hash.
+def invocation_body(payload: bytes) -> bytes:
+    """Wrap the protocol payload as a compact invocation request."""
+    return json.dumps({"input": json.loads(payload)}, separators=(",", ":")).encode()
 
-    The bytes are sent as they are on disk, not re-serialized: the hash in the
-    protocol is the hash of what goes over the wire.
+
+def experiment_01_payload(protocol: Experiment01Protocol, payload_dir: Path) -> bytes:
+    """Return the validated payload file bytes, verified against the protocol hash.
+
+    The generator wraps these bytes' JSON value with `invocation_body`; the
+    sent body's hash is recorded separately in the experiment identity.
     """
     raw = (payload_dir / protocol.payload_file).read_bytes()
     if hashlib.sha256(raw).hexdigest() != protocol.payload_sha256:

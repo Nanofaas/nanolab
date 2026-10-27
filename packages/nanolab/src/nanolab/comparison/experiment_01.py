@@ -42,7 +42,7 @@ from nanolab.comparison.matrix import (
     ComparisonCell,
     MatrixCell,
 )
-from nanolab.config.experiment_01 import Experiment01Protocol
+from nanolab.config.experiment_01 import Experiment01Protocol, invocation_body
 from nanolab.images.control_plane_variants import EXPERIMENT_01_VARIANTS_BY_KEY
 
 CELL_RESULT = "cell-result.json"
@@ -707,6 +707,7 @@ def experiment_01_identity(
         "payload": {
             "file": protocol.payload_file,
             "sha256": hashlib.sha256(payload).hexdigest(),
+            "bodySha256": hashlib.sha256(invocation_body(payload)).hexdigest(),
             "bytes": len(payload),
         },
         "script": {"name": script.name, "sha256": _sha256(script)},

@@ -209,6 +209,7 @@ def _complete_experiment(
     if (
         not isinstance(payload, dict)
         or not _sha(payload.get("sha256"))
+        or not _sha(payload.get("bodySha256"))
         or not isinstance(script, dict)
         or not _sha(script.get("sha256"))
         or not isinstance(builds, dict)

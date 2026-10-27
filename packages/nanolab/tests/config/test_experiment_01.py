@@ -15,6 +15,22 @@ from nanolab.workspace.paths import discover_tool_root
 SCENARIOS = discover_tool_root() / "scenarios"
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (b'{"text":"A","size":1024}', b'{"input":{"text":"A","size":1024}}'),
+        (
+            '{ "text": "è", "size": 128 }'.encode(),
+            b'{"input":{"text":"\\u00e8","size":128}}',
+        ),
+    ],
+)
+def test_invocation_body_wraps_the_payload_once(payload, expected):
+    from nanolab.config.experiment_01 import invocation_body
+
+    assert invocation_body(payload) == expected
+
+
 def _pilot() -> dict:
     return yaml.safe_load((SCENARIOS / "experiment-01-pilot.yaml").read_text())
 

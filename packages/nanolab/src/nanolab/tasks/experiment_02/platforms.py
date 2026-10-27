@@ -29,6 +29,7 @@ from nanolab.comparison.prepare import (
     comparison_transfer_from,
     comparison_transfer_to,
 )
+from nanolab.config.experiment_01 import invocation_body
 from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.tasks.experiment_02.budget import REGISTRY_CONTAINER
 from nanolab.tasks.experiment_02.generator import K6Target
@@ -96,11 +97,6 @@ class Platform(Protocol):
     def teardown(self, vm: Vm) -> None:
         """Remove everything the platform started."""
         ...
-
-
-def _as_input(payload: bytes) -> bytes:
-    """Return `{"input": payload}`, the body every invocation API here reads."""
-    return json.dumps({"input": json.loads(payload)}, separators=(",", ":")).encode()
 
 
 def leftover_containers(vm: Vm) -> list[str]:
@@ -334,7 +330,7 @@ class NanofaasPlatform:
 
     def body(self, payload: bytes) -> bytes:
         """Wrap the payload as the invocation request's `input`."""
-        return _as_input(payload)
+        return invocation_body(payload)
 
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers and refuse a control plane with other modules."""
@@ -419,7 +415,7 @@ class DirectReference:
 
     def body(self, payload: bytes) -> bytes:
         """Wrap the payload as the runtime's invocation `input`."""
-        return _as_input(payload)
+        return invocation_body(payload)
 
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers; there is no build to check."""

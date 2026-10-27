@@ -1,5 +1,6 @@
 """Experiment 01: builds, order, definitive outcomes, ledger and verdicts."""
 
+import hashlib
 import json
 from collections import Counter
 from datetime import UTC, datetime
@@ -698,7 +699,8 @@ def test_k6_environment_carries_one_protocol_and_the_exact_payload():
     payload = b'{"size":1024,"text":"A"}'
     environment = experiment_01_k6_environment(scenario, payload)
     protocol = json.loads(environment["E01_PROTOCOL"])
-    assert environment["E01_PAYLOAD"] == payload.decode()
+    assert environment["E01_PAYLOAD"] == '{"input":{"size":1024,"text":"A"}}'
+    assert json.loads(environment["E01_PAYLOAD"]) == {"input": json.loads(payload)}
     assert environment["NANOFAAS_FUNCTION"] == "qr-code-rust"
     assert "NANOFAAS_NEIGHBOUR" not in environment
     assert protocol["gracefulStopSeconds"] == 40
@@ -793,6 +795,69 @@ def test_experiment_identity_records_order_protocol_and_builds(experiment_inputs
     assert experiment["subset"] is True
     assert inputs["scheduler"]["strategy"] is None
     assert inputs["profiles"][JVM_KEYS[0]]["options"]["runtime"] == "tiered"
+
+
+def test_payload_identity_hashes_the_sent_body(experiment_inputs):
+    capture, _ = experiment_inputs
+    payload = capture()["experiment"]["payload"]
+    raw = (TOOL_ROOT / "scenarios/payloads/experiment-01-qr-1024.json").read_bytes()
+    body = b'{"input":{"size":1024,"text":"' + b"A" * 1024 + b'"}}'
+    assert payload["bodySha256"] == hashlib.sha256(body).hexdigest()
+    assert payload["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert payload["bytes"] == len(raw)
+    assert payload["sha256"] != payload["bodySha256"]
+
+
+@pytest.mark.parametrize("value", [None, "invalid", "A" * 64])
+def test_resume_refuses_missing_or_invalid_body_hash(experiment_inputs, value):
+    from nanolab.comparison.manifest import (
+        new_comparison_manifest,
+        require_matching_inputs,
+    )
+
+    capture, cells = experiment_inputs
+    inputs = capture()
+    manifest = new_comparison_manifest(inputs, cells)
+    changed = json.loads(json.dumps(inputs))
+    payload = changed["experiment"]["payload"]
+    if value is None:
+        payload.pop("bodySha256", None)
+    else:
+        payload["bodySha256"] = value
+    with pytest.raises(ValueError, match="identity"):
+        require_matching_inputs(manifest, changed)
+
+
+def test_resume_refuses_legacy_body_identity(tmp_path, experiment_inputs):
+    from nanolab.comparison.manifest import (
+        new_comparison_manifest,
+        require_matching_inputs,
+    )
+
+    capture, cells = experiment_inputs
+    inputs = capture()
+    # A legacy manifest differs only in the absence of the sent-body identity.
+    legacy = json.loads(json.dumps(inputs))
+    legacy["experiment"]["payload"].pop("bodySha256", None)
+    old_manifest = new_comparison_manifest(inputs, cells).model_copy(
+        update={"identity": legacy}
+    )
+    with pytest.raises(ValueError, match=r"identity|differ"):
+        require_matching_inputs(old_manifest, inputs)
+    cell = cells[0]
+    _measured_attempt(tmp_path, cell)
+    write_cell_result(
+        cell,
+        tmp_path,
+        identity=legacy,
+        attempt=1,
+        outcome="measured",
+        reason="legacy",
+        started_at=datetime.now(UTC),
+    )
+    with pytest.raises(ValueError, match="belong"):
+        read_cell_result(cell, tmp_path, inputs)
+    require_matching_inputs(new_comparison_manifest(inputs, cells), capture())
 
 
 def test_experiment_resume_refuses_any_determining_change(tmp_path, experiment_inputs):

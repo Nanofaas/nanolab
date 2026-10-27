@@ -71,7 +71,12 @@ reported as delivered.
 The scenario must declare explicit requests and limits for both `control-plane`
 and `qr-code-rust`; the container limits are separate from the 64 MiB heap. The
 payload is `payloads/experiment-01-qr-1024.json` (`"A"` × 1024, `size: 1024`),
-sent byte for byte and checked against its sha256.
+validated against its file sha256. Each invocation sends compact JSON
+`{"input": <payload>}`. The protocol hash and the identity's `payload.sha256`
+and `payload.bytes` describe the unchanged file; `payload.bodySha256` hashes
+exactly the UTF-8 bytes sent in `E01_PAYLOAD`. Experiment 02 uses the same
+wrapping helper. Manifests without the sent-body hash and receipts from those
+identities cannot be resumed: keep them intact and use a new run directory.
 
 `experiment-01-pilot.yaml` holds provisional values. `experiment-01.yaml` is
 marked `frozen` but **still carries the pilot's values and placeholder

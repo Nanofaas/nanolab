@@ -45,7 +45,11 @@ from nanolab.comparison.profiles import (
     PreparedComparison,
 )
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.experiment_01 import experiment_01_payload, k6_protocol
+from nanolab.config.experiment_01 import (
+    experiment_01_payload,
+    invocation_body,
+    k6_protocol,
+)
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS,
@@ -118,7 +122,7 @@ def experiment_01_k6_environment(
         raise ValueError("experiment-01 requires its experiment01 block")
     return {
         "NANOFAAS_FUNCTION": config.functions[0],
-        "E01_PAYLOAD": payload.decode("utf-8"),
+        "E01_PAYLOAD": invocation_body(payload).decode("utf-8"),
         "E01_PROTOCOL": k6_protocol(protocol, size=json.loads(payload)["size"]),
     }
 
