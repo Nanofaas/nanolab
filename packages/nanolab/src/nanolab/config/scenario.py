@@ -8,6 +8,7 @@ discovered mid-run.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -18,7 +19,7 @@ from nanolab.config.experiment_01 import EXPERIMENT_01_FUNCTION, Experiment01Pro
 from nanolab.config.experiment_02 import EXPERIMENT_02_FUNCTION, Experiment02Protocol
 from nanolab.config.heap_analysis import HeapAnalysisConfig
 from nanolab.config.one_shot import OneShotConfig
-from nanolab.config.soak import SoakConfig
+from nanolab.config.soak import RolePolicy, SoakConfig
 
 WorkflowName = Literal[
     "one-shot-calibration",
@@ -153,6 +154,30 @@ ControlPlaneRuntime = Literal["jvm", "native"]
 PayloadProfile = Literal["small", "medium", "large"]
 
 
+_MIB = 1024 * 1024
+# The options each self-contained workflow reads. Any other option a scenario
+# sets is refused rather than silently ignored.
+_ONE_SHOT_OPTIONS = frozenset(
+    {
+        "workflow",
+        "backend",
+        "functions",
+        "one_shot",
+        "recipe_profile",
+        "control_plane_runtime",
+        "control_plane_image",
+        "function_images",
+    }
+)
+_CONTRACT_OPTIONS = frozenset({"workflow", "backend", "functions", "contract", "build"})
+_SOAK_OPTIONS = frozenset(
+    {"workflow", "backend", "functions", "resources", "soak", "recipe_profile"}
+)
+_HEAP_ANALYSIS_OPTIONS = frozenset(
+    {"workflow", "backend", "functions", "resources", "heap_analysis"}
+)
+
+
 class ScenarioConfig(BaseModel):
     """Scenario file settings: workflow, functions and load shaping.
 
@@ -277,70 +302,123 @@ class ScenarioConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_workflow(
-        self,
-    ) -> ScenarioConfig:  # NOSONAR (S3776): declarative validation rules
+    def validate_workflow(self) -> ScenarioConfig:
         """Reject a scenario whose options do not fit its workflow.
 
-        Checks the backend against the workflow, then the autoscaler, the
-        concurrency governor and the load profile against what each supports,
-        and returns the instance unchanged once every rule holds.
+        The one-shot, contract, soak and heap-analysis workflows are
+        self-contained: each reads its own block and a fixed set of options.
+        The others are checked against the load-test options they support:
+        the backend, the autoscaler, the concurrency governor and the load
+        profile. Returns the instance unchanged once every rule holds.
         """
         if self.workflow.startswith("one-shot-"):
-            if self.one_shot is None or self.backend != "container":
-                raise ValueError(
-                    "one-shot requires container backend and oneShot settings"
-                )
-            if self.control_plane_image is not None or self.function_images:
-                raise ValueError(
-                    "one-shot does not support controlPlaneImage or functionImages "
-                    "overrides; select images through recipeProfile and the runtime "
-                    "distribution"
-                )
-            unexpected = self.model_fields_set - {
-                "workflow",
-                "backend",
-                "functions",
-                "one_shot",
-                "recipe_profile",
-                "control_plane_runtime",
-                "control_plane_image",
-                "function_images",
-            }
-            if unexpected:
-                raise ValueError("one-shot does not consume these scenario options")
-            if set(self.functions) != set(self.one_shot.functions):
-                raise ValueError("oneShot functions must match the scenario")
-            if (
-                self.workflow != "one-shot-calibration"
-                and self.one_shot.profile is None
-            ):
-                raise ValueError("one-shot qualification/experiment requires a profile")
-            if (
-                self.workflow == "one-shot-experiment"
-                and self.one_shot.qualification is None
-            ):
-                raise ValueError("one-shot experiment requires timing qualification")
+            self._validate_one_shot()
             return self
         if self.one_shot is not None:
             raise ValueError("oneShot settings require a one-shot workflow")
         if self.workflow == "contract":
-            if self.backend != "container" or self.contract is None:
-                raise ValueError(
-                    "contract requires container backend and contract settings"
-                )
-            unexpected = self.model_fields_set - {
-                "workflow",
-                "backend",
-                "functions",
-                "contract",
-                "build",
-            }
-            if unexpected or self.build != "docker":
-                raise ValueError("contract does not consume these scenario options")
+            self._validate_contract()
             return self
         if self.contract is not None:
             raise ValueError("contract settings require workflow contract")
+        self._validate_cli_runtime_and_recipe()
+        if self.workflow == "soak":
+            self._validate_soak()
+            return self
+        if self.workflow == "heap-analysis":
+            self._validate_heap_analysis()
+            return self
+        if self.heap_analysis is not None:
+            raise ValueError(
+                "heapAnalysis block belongs only to the heap-analysis workflow"
+            )
+        if self.soak is not None:
+            raise ValueError("soak protocol belongs only to the soak workflow")
+        self._validate_workload_options()
+        self._validate_load_profile()
+        self._validate_platform_options()
+        return self
+
+    def _unconsumed(self, consumed: frozenset[str]) -> set[str]:
+        return self.model_fields_set - consumed
+
+    def _undeclared_resources(self) -> set[str]:
+        return set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}
+
+    def _sets_legacy_load_options(self) -> bool:
+        """Whether an option a protocol-driven load profile replaces is set."""
+        return bool(
+            self.concurrency_control
+            or self.autoscaling
+            or self.payload_profile is not None
+            or self.load_vus is not None
+            or self.load_scale != 1.0
+            or self.drain_minutes is not None
+            or self.soak_minutes is not None
+        )
+
+    def _require_resources_within(
+        self,
+        roles: Mapping[str, RolePolicy],
+        *,
+        owner: str,
+        limits_message: str,
+        requests_message: str,
+    ) -> None:
+        """Require every resource override to agree with its role's policy."""
+        for name, resource in self.resources.items():
+            role = roles.get(name)
+            if role is None:
+                raise ValueError(f"resources must refer to a declared {owner} role")
+            limits = resource.limits
+            if limits is not None and (
+                (limits.cpu is not None and limits.cpu != role.expected_cpu)
+                or (
+                    limits.memory_mib is not None
+                    and limits.memory_mib * _MIB != role.memory_limit_bytes
+                )
+            ):
+                raise ValueError(limits_message)
+            requests = resource.requests
+            if requests is not None and (
+                (requests.cpu is not None and requests.cpu > role.expected_cpu)
+                or (
+                    requests.memory_mib is not None
+                    and requests.memory_mib * _MIB > role.memory_limit_bytes
+                )
+            ):
+                raise ValueError(requests_message)
+
+    def _validate_one_shot(self) -> None:
+        if self.one_shot is None or self.backend != "container":
+            raise ValueError("one-shot requires container backend and oneShot settings")
+        if self.control_plane_image is not None or self.function_images:
+            raise ValueError(
+                "one-shot does not support controlPlaneImage or functionImages "
+                "overrides; select images through recipeProfile and the runtime "
+                "distribution"
+            )
+        if self._unconsumed(_ONE_SHOT_OPTIONS):
+            raise ValueError("one-shot does not consume these scenario options")
+        if set(self.functions) != set(self.one_shot.functions):
+            raise ValueError("oneShot functions must match the scenario")
+        if self.workflow != "one-shot-calibration" and self.one_shot.profile is None:
+            raise ValueError("one-shot qualification/experiment requires a profile")
+        if (
+            self.workflow == "one-shot-experiment"
+            and self.one_shot.qualification is None
+        ):
+            raise ValueError("one-shot experiment requires timing qualification")
+
+    def _validate_contract(self) -> None:
+        if self.backend != "container" or self.contract is None:
+            raise ValueError(
+                "contract requires container backend and contract settings"
+            )
+        if self._unconsumed(_CONTRACT_OPTIONS) or self.build != "docker":
+            raise ValueError("contract does not consume these scenario options")
+
+    def _validate_cli_runtime_and_recipe(self) -> None:
         if self.cli_runtime != "jvm" and self.workflow != "cli":
             raise ValueError("cliRuntime native/parity requires workflow cli")
         if self.cli_runtime != "jvm" and (
@@ -354,169 +432,112 @@ class ScenarioConfig(BaseModel):
                 "validate native requires the recipe scenario "
                 "deployment-lifecycle-k8s-native.yaml"
             )
-        if self.recipe_profile is not None:
-            if (
-                not (
-                    (
-                        self.workflow == "validate"
-                        and self.backend in {"container", "containerd", "k8s"}
-                    )
-                    or (self.workflow == "loadtest" and self.backend == "container")
-                    or (self.workflow == "cli" and self.backend == "k8s")
-                    or (
-                        self.workflow == "soak"
-                        and self.backend == "container"
-                        and self.soak is not None
-                        and self.soak.purpose in {"smoke", "p24"}
-                        and all(
-                            role.runtime in {"jvm", "node"}
-                            for role in self.soak.roles.values()
-                        )
-                    )
-                )
-                or self.build != "docker"
-                or self.control_plane_image is not None
-                or self.control_plane_variant is not None
-                or self.function_images
-                or self.control_plane_runtime != "jvm"
-                or self.async_load
-                or self.handler_envelope
-                or self.persistent_recovery
-                or self.retry_backoff_burst
-            ):
-                raise ValueError(
-                    "recipeProfile is incompatible with these scenario options"
-                )
-            if not self.recipe_profile.is_absolute():
-                raise ValueError("recipeProfile must be an absolute resolved path")
-            if not self.recipe_profile.is_file():
-                raise ValueError(f"recipeProfile does not exist: {self.recipe_profile}")
-
-        if self.workflow == "soak":
-            if self.soak is None:
-                raise ValueError("soak workflow requires its protocol block")
-            if self.backend not in {"container", "containerd"}:
-                raise ValueError("soak requires a container or containerd backend")
-            unexpected = self.model_fields_set - {
-                "workflow",
-                "backend",
-                "functions",
-                "resources",
-                "soak",
-                "recipe_profile",
-            }
-            if unexpected:
-                raise ValueError(
-                    "soak does not consume legacy workload options: "
-                    + ", ".join(sorted(unexpected))
-                )
-            self.soak.validate_functions(self.functions)
-            for name, role in self.soak.roles.items():
-                image = self.soak.images[name]
-                if self.backend == "containerd":
-                    expected = "process" if name == "control-plane" else "oci-image"
-                    if image.artifact_kind != expected:
-                        raise ValueError(f"{name} requires {expected} artifact")
-                    if (
-                        "docker-engine" in role.collection_sources
-                        or "docker-engine" in role.required_capabilities
-                    ):
-                        raise ValueError(
-                            "containerd soak cannot claim Docker engine observations"
-                        )
-                elif image.artifact_kind != "oci-image":
-                    raise ValueError("Docker soak requires OCI images for every role")
-            if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
-                raise ValueError(
-                    "resources must refer to selected functions or control-plane"
-                )
-            for name, resource in self.resources.items():
-                role = self.soak.roles[name]
-                if resource.limits is not None:
-                    limits = resource.limits
-                    if (limits.cpu is not None and limits.cpu != role.expected_cpu) or (
-                        limits.memory_mib is not None
-                        and limits.memory_mib * 1024 * 1024 != role.memory_limit_bytes
-                    ):
-                        raise ValueError(
-                            "resource limits disagree with the soak role policy"
-                        )
-                if resource.requests is not None:
-                    requests = resource.requests
-                    if (
-                        requests.cpu is not None and requests.cpu > role.expected_cpu
-                    ) or (
-                        requests.memory_mib is not None
-                        and requests.memory_mib * 1024 * 1024 > role.memory_limit_bytes
-                    ):
-                        raise ValueError(
-                            "resource requests exceed the soak role limits"
-                        )
-            return self
-        if self.workflow == "heap-analysis":
-            if self.heap_analysis is None:
-                raise ValueError(
-                    "heap-analysis workflow requires its heapAnalysis block"
-                )
-            if self.backend != "container":
-                raise ValueError(
-                    "heap-analysis currently requires the container backend"
-                )
-            unexpected = self.model_fields_set - {
-                "workflow",
-                "backend",
-                "functions",
-                "resources",
-                "heap_analysis",
-            }
-            if unexpected:
-                raise ValueError(
-                    "heap-analysis does not consume legacy workload options: "
-                    + ", ".join(sorted(unexpected))
-                )
-            if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
-                raise ValueError(
-                    "resources must refer to selected functions or control-plane"
-                )
-            # The same coherence soak enforces above: an incoherent scenario
-            # must fail `inspect`/`plan`, not twenty minutes into a live run.
-            if set(self.functions) != set(self.heap_analysis.workload.rates):
-                raise ValueError(
-                    "workload rates must cover exactly the selected functions"
-                )
-            for name, resource in self.resources.items():
-                role = self.heap_analysis.roles.get(name)
-                if role is None:
-                    raise ValueError(
-                        "resources must refer to a declared heap-analysis role"
-                    )
-                if resource.limits is not None:
-                    limits = resource.limits
-                    if (limits.cpu is not None and limits.cpu != role.expected_cpu) or (
-                        limits.memory_mib is not None
-                        and limits.memory_mib * 1024 * 1024 != role.memory_limit_bytes
-                    ):
-                        raise ValueError(
-                            "resource limits disagree with the heap-analysis role"
-                        )
-                if resource.requests is not None:
-                    requests = resource.requests
-                    if (
-                        requests.cpu is not None and requests.cpu > role.expected_cpu
-                    ) or (
-                        requests.memory_mib is not None
-                        and requests.memory_mib * 1024 * 1024 > role.memory_limit_bytes
-                    ):
-                        raise ValueError(
-                            "resource requests exceed the heap-analysis role limits"
-                        )
-            return self
-        if self.heap_analysis is not None:
+        if self.recipe_profile is None:
+            return
+        if (
+            not self._recipe_backend_supported()
+            or self.build != "docker"
+            or self.control_plane_image is not None
+            or self.control_plane_variant is not None
+            or self.function_images
+            or self.control_plane_runtime != "jvm"
+            or self.async_load
+            or self.handler_envelope
+            or self.persistent_recovery
+            or self.retry_backoff_burst
+        ):
             raise ValueError(
-                "heapAnalysis block belongs only to the heap-analysis workflow"
+                "recipeProfile is incompatible with these scenario options"
             )
-        if self.soak is not None:
-            raise ValueError("soak protocol belongs only to the soak workflow")
+        if not self.recipe_profile.is_absolute():
+            raise ValueError("recipeProfile must be an absolute resolved path")
+        if not self.recipe_profile.is_file():
+            raise ValueError(f"recipeProfile does not exist: {self.recipe_profile}")
+
+    def _recipe_backend_supported(self) -> bool:
+        """Whether a recipe profile can build this workflow on this backend."""
+        if self.workflow == "validate":
+            return self.backend in {"container", "containerd", "k8s"}
+        if self.workflow == "loadtest":
+            return self.backend == "container"
+        if self.workflow == "cli":
+            return self.backend == "k8s"
+        return (
+            self.workflow == "soak"
+            and self.backend == "container"
+            and self.soak is not None
+            and self.soak.purpose in {"smoke", "p24"}
+            and all(
+                role.runtime in {"jvm", "node"} for role in self.soak.roles.values()
+            )
+        )
+
+    def _validate_soak(self) -> None:
+        if self.soak is None:
+            raise ValueError("soak workflow requires its protocol block")
+        if self.backend not in {"container", "containerd"}:
+            raise ValueError("soak requires a container or containerd backend")
+        unexpected = self._unconsumed(_SOAK_OPTIONS)
+        if unexpected:
+            raise ValueError(
+                "soak does not consume legacy workload options: "
+                + ", ".join(sorted(unexpected))
+            )
+        self.soak.validate_functions(self.functions)
+        for name in self.soak.roles:
+            image = self.soak.images[name]
+            if self.backend == "containerd":
+                expected = "process" if name == "control-plane" else "oci-image"
+                if image.artifact_kind != expected:
+                    raise ValueError(f"{name} requires {expected} artifact")
+                role = self.soak.roles[name]
+                if (
+                    "docker-engine" in role.collection_sources
+                    or "docker-engine" in role.required_capabilities
+                ):
+                    raise ValueError(
+                        "containerd soak cannot claim Docker engine observations"
+                    )
+            elif image.artifact_kind != "oci-image":
+                raise ValueError("Docker soak requires OCI images for every role")
+        if self._undeclared_resources():
+            raise ValueError(
+                "resources must refer to selected functions or control-plane"
+            )
+        self._require_resources_within(
+            self.soak.roles,
+            owner="soak",
+            limits_message="resource limits disagree with the soak role policy",
+            requests_message="resource requests exceed the soak role limits",
+        )
+
+    def _validate_heap_analysis(self) -> None:
+        if self.heap_analysis is None:
+            raise ValueError("heap-analysis workflow requires its heapAnalysis block")
+        if self.backend != "container":
+            raise ValueError("heap-analysis currently requires the container backend")
+        unexpected = self._unconsumed(_HEAP_ANALYSIS_OPTIONS)
+        if unexpected:
+            raise ValueError(
+                "heap-analysis does not consume legacy workload options: "
+                + ", ".join(sorted(unexpected))
+            )
+        if self._undeclared_resources():
+            raise ValueError(
+                "resources must refer to selected functions or control-plane"
+            )
+        # The same coherence soak enforces: an incoherent scenario must fail
+        # `inspect`/`plan`, not twenty minutes into a live run.
+        if set(self.functions) != set(self.heap_analysis.workload.rates):
+            raise ValueError("workload rates must cover exactly the selected functions")
+        self._require_resources_within(
+            self.heap_analysis.roles,
+            owner="heap-analysis",
+            limits_message="resource limits disagree with the heap-analysis role",
+            requests_message="resource requests exceed the heap-analysis role limits",
+        )
+
+    def _validate_workload_options(self) -> None:
         if self.workflow in ("validate", "cli") and self.backend is None:
             raise ValueError(f"backend is required for {self.workflow} workflow")
         if self.retry_backoff_burst and (
@@ -529,7 +550,7 @@ class ScenarioConfig(BaseModel):
             )
         if self.workflow == "offload" and self.backend is not None:
             raise ValueError("offload workflow does not take a backend")
-        if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
+        if self._undeclared_resources():
             raise ValueError(
                 "resources must refer to selected functions, or to "
                 f"{CONTROL_PLANE_RESOURCES!r}"
@@ -544,6 +565,8 @@ class ScenarioConfig(BaseModel):
             raise ValueError("concurrencyMode requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
+
+    def _validate_load_profile(self) -> None:
         if self.load_profile != "mixed" and (
             self.async_share is not None or self.idem_share is not None
         ):
@@ -556,73 +579,14 @@ class ScenarioConfig(BaseModel):
                 "which requires it"
             )
         if self.load_profile == "experiment-02":
-            if (
-                self.workflow != "loadtest"
-                or self.backend != "container"
-                or self.functions != [EXPERIMENT_02_FUNCTION]
-                or self.experiment_01 is not None
-            ):
-                raise ValueError(
-                    "experiment-02 is a container loadtest of qr-code-rust alone"
-                )
-            if (
-                self.concurrency_control
-                or self.autoscaling
-                or self.payload_profile is not None
-                or self.load_vus is not None
-                or self.load_scale != 1.0
-                or self.drain_minutes is not None
-                or self.soak_minutes is not None
-            ):
-                raise ValueError(
-                    "experiment-02 takes its load from the experiment02 block; "
-                    "governors, autoscaling and legacy load options do not apply"
-                )
+            self._validate_experiment_02()
         if (self.load_profile == "experiment-01") != (self.experiment_01 is not None):
             raise ValueError(
                 "the experiment01 block belongs to loadProfile: experiment-01, "
                 "which requires it"
             )
         if self.load_profile == "experiment-01":
-            if (
-                self.workflow != "loadtest"
-                or self.backend != "k8s"
-                or self.functions != [EXPERIMENT_01_FUNCTION]
-            ):
-                raise ValueError(
-                    "experiment-01 is a Kubernetes loadtest of qr-code-rust alone"
-                )
-            if (
-                self.concurrency_control
-                or self.autoscaling
-                or self.payload_profile is not None
-                or self.load_vus is not None
-                or self.load_scale != 1.0
-                or self.drain_minutes is not None
-                or self.soak_minutes is not None
-            ):
-                raise ValueError(
-                    "experiment-01 takes its load from the experiment01 block; "
-                    "governors, autoscaling and legacy load options do not apply"
-                )
-            for name in (CONTROL_PLANE_RESOURCES, EXPERIMENT_01_FUNCTION):
-                spec = self.resources.get(name)
-                if (
-                    spec is None
-                    or spec.requests is None
-                    or spec.limits is None
-                    or None
-                    in (
-                        spec.requests.cpu,
-                        spec.requests.memory_mib,
-                        spec.limits.cpu,
-                        spec.limits.memory_mib,
-                    )
-                ):
-                    raise ValueError(
-                        "experiment-01 declares explicit CPU and memory requests "
-                        f"and limits for {name}"
-                    )
+            self._validate_experiment_01()
         elif self.load_profile in ("comparison", "mixed"):
             # The script drives a named pair, and holds the functions fixed so the
             # control-plane build is the only thing that varies between runs.
@@ -641,6 +605,57 @@ class ScenarioConfig(BaseModel):
                 "controlPlaneVariant selects one of the builds the comparison profile "
                 "compares; no other profile builds them"
             )
+
+    def _validate_experiment_02(self) -> None:
+        if (
+            self.workflow != "loadtest"
+            or self.backend != "container"
+            or self.functions != [EXPERIMENT_02_FUNCTION]
+            or self.experiment_01 is not None
+        ):
+            raise ValueError(
+                "experiment-02 is a container loadtest of qr-code-rust alone"
+            )
+        if self._sets_legacy_load_options():
+            raise ValueError(
+                "experiment-02 takes its load from the experiment02 block; "
+                "governors, autoscaling and legacy load options do not apply"
+            )
+
+    def _validate_experiment_01(self) -> None:
+        if (
+            self.workflow != "loadtest"
+            or self.backend != "k8s"
+            or self.functions != [EXPERIMENT_01_FUNCTION]
+        ):
+            raise ValueError(
+                "experiment-01 is a Kubernetes loadtest of qr-code-rust alone"
+            )
+        if self._sets_legacy_load_options():
+            raise ValueError(
+                "experiment-01 takes its load from the experiment01 block; "
+                "governors, autoscaling and legacy load options do not apply"
+            )
+        for name in (CONTROL_PLANE_RESOURCES, EXPERIMENT_01_FUNCTION):
+            spec = self.resources.get(name)
+            if (
+                spec is None
+                or spec.requests is None
+                or spec.limits is None
+                or None
+                in (
+                    spec.requests.cpu,
+                    spec.requests.memory_mib,
+                    spec.limits.cpu,
+                    spec.limits.memory_mib,
+                )
+            ):
+                raise ValueError(
+                    "experiment-01 declares explicit CPU and memory requests "
+                    f"and limits for {name}"
+                )
+
+    def _validate_platform_options(self) -> None:
         if self.autoscaling_strategy == "HPA" and not self.autoscaling:
             raise ValueError("HPA autoscaling requires autoscaling=true")
         if self.autoscaling_strategy == "HPA" and self.backend != "k8s":
@@ -660,4 +675,3 @@ class ScenarioConfig(BaseModel):
             )
         if self.workflow == "release" and self.release is None:
             raise ValueError("release workflow requires a 'release' config block")
-        return self
