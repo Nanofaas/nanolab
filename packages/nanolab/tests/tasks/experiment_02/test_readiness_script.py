@@ -242,3 +242,17 @@ def test_failed_registration_command_is_retried_until_the_deadline(tmp_path, pla
         register={"commands": [[sys.executable, "-c", "raise SystemExit(1)"]]},
     )
     assert result["timeout"] == "registered"
+
+
+def test_secret_headers_come_from_a_command_and_stay_out_of_the_output(
+    tmp_path, platform
+):
+    platform.routes.update(
+        {("GET", "/health"): [(200, {})], ("POST", "/invoke"): [(200, ENVELOPE)]}
+    )
+    command = [sys.executable, "-c", 'print(\'{"Authorization": "Bearer s3cret"}\')']
+    result = _run(tmp_path, platform, register=None, invoke={"headersCommand": command})
+    assert "first" in result
+    [headers] = [h for m, p, h in platform.seen if (m, p) == ("POST", "/invoke")]
+    assert headers["Authorization"] == "Bearer s3cret"
+    assert "s3cret" not in json.dumps(result)

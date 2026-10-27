@@ -55,6 +55,7 @@ def generator_environment(
     payload: bytes,
     body: bytes,
     target: K6Target,
+    secret_headers: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Return the script's environment: the protocol, the exact body, the target.
 
@@ -64,7 +65,8 @@ def generator_environment(
     """
     target_values = {
         "url": target.url,
-        "headers": dict(target.headers),
+        # Secrets reach k6's environment only, never the evidence.
+        "headers": {**target.headers, **(secret_headers or {})},
         "extractor": target.extractor,
         "field": target.field,
         "idHeader": target.id_header,

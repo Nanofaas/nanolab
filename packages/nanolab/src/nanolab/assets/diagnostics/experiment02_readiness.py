@@ -177,7 +177,11 @@ def main(argv: list[str] | None = None) -> int:
             spec["api"], timeout=max(0.5, min(2.0, remaining()))
         )
         note(status, body, error)
-        return status is not None and 200 <= status < 300
+        # Some platforms have no 2xx endpoint before registration: any answer
+        # then means the API is up.
+        return status is not None and (
+            200 <= status < 300 or bool(spec.get("apiAnyStatus"))
+        )
 
     register = spec.get("register")
 
@@ -215,11 +219,20 @@ def main(argv: list[str] | None = None) -> int:
 
     invoke = spec["invoke"]
     attempts = 0
+    secret: dict[str, str] = {}
 
     def first() -> bool:
         nonlocal attempts
         attempts += 1
-        headers = dict(invoke["headers"])
+        if invoke.get("headersCommand") and not secret:
+            done = subprocess.run(
+                invoke["headersCommand"], capture_output=True, text=True, check=False
+            )
+            if done.returncode:
+                note(done.returncode, b"", "headers command failed")
+                return False
+            secret.update(json.loads(done.stdout))
+        headers = {**invoke["headers"], **secret}
         if invoke.get("idHeader"):
             headers[invoke["idHeader"]] = f"readiness-{attempts}"
         status, body, answer_headers, error = call(

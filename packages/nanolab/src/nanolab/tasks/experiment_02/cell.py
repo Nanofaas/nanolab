@@ -302,6 +302,7 @@ def run_cell(
                     payload=payload,
                     body=platform.body(payload),
                     target=platform.target(host),
+                    secret_headers=platform.secret_headers(stack),
                 ),
                 remote_dir=remote_root,
                 local_dir=run_dir,

@@ -1,0 +1,29 @@
+# FunLess 0.9.0 as funlessdev/fl-deploy@413ea08 deploys it with docker compose,
+# keeping only what runs functions: no Prometheus, no ELK (experiment 02 does
+# not measure them, and they do not run functions). The core publishes its API
+# on the entry port; everything here runs in Docker, so inside the budget.
+services:
+  postgres:
+    image: postgres:16
+    environment: [POSTGRES_PASSWORD=postgres, POSTGRES_USER=postgres, POSTGRES_HOST_AUTH_METHOD=trust]
+  init-postgres:
+    image: postgres:16
+    environment: [POSTGRES_PASSWORD=postgres, POSTGRES_USER=postgres]
+    command: >
+      sh -c "while ! pg_isready -h postgres -U postgres; do sleep 1; done;
+      psql -h postgres -U postgres -c 'CREATE DATABASE funless;'"
+    depends_on: [postgres]
+  core:
+    image: ghcr.io/funlessdev/core@sha256:c75155af88585663d687b478ef0e69e46668e26c3b05d0cab59bc3583fa65954
+    ports: ["30080:4000"]
+    environment:
+      - PGHOST=postgres
+      - PGUSER=postgres
+      - PGPASSWORD=postgres
+      - PGDATABASE=funless
+      - PGPORT=5432
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE:?generated per cell}
+    depends_on:
+      init-postgres: {condition: service_completed_successfully}
+  worker:
+    image: ghcr.io/funlessdev/worker@sha256:bb774f588228c704db6a4677e2915de20ce3ae2731ada0b56bd927188f9acd41

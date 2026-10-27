@@ -83,6 +83,9 @@ class FakePlatform:
     def body(self, payload: bytes) -> bytes:
         return payload
 
+    def secret_headers(self, vm: Vm) -> dict[str, str]:
+        return {}
+
     def record(self, vm: Vm, evidence: Path) -> None:
         self.calls.append("record")
 

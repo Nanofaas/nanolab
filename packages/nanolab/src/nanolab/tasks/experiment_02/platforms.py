@@ -91,6 +91,10 @@ class Platform(Protocol):
         """Return where the generator sends requests and how it reads answers."""
         ...
 
+    def secret_headers(self, vm: Vm) -> Mapping[str, str]:
+        """Return headers requests need but no evidence may hold, after start."""
+        ...
+
     def body(self, payload: bytes) -> bytes:
         """Return the exact bytes this platform is sent for the protocol's payload."""
         ...
@@ -165,27 +169,29 @@ def _start(
     images: Sequence[str],
     commands: Sequence[Sequence[str]],
     api: str,
-    registration: Mapping[str, object] | None,
+    register: Mapping[str, object] | None,
     target: K6Target,
     body: bytes,
     protocol: Experiment02Protocol,
     payload: bytes,
     evidence: Path,
+    api_any_status: bool = False,
+    headers_command: Sequence[str] | None = None,
 ) -> dict[str, float] | None:
-    """Pull and prepare, then start and time the platform in one VM-side run."""
+    """Pull and prepare, then start and time the platform in one VM-side run.
+
+    `register` is the readiness spec's registration, HTTP or commands.
+    `headers_command` prints headers the requests need but the evidence must
+    not hold, such as a token; the VM-side probe runs it itself.
+    """
     _ensure_images(vm, images)
     _ensure_network(vm)
     evidence.mkdir(parents=True, exist_ok=True)
     spec = {
         "start": [list(command) for command in commands],
         "api": api,
-        "register": None
-        if registration is None
-        else {
-            "url": f"{_API}/v1/functions",
-            "check": f"{_API}/v1/functions/{FUNCTION_NAME}",
-            "body": dict(registration),
-        },
+        "apiAnyStatus": api_any_status,
+        "register": None if register is None else dict(register),
         "invoke": {
             "url": target.url,
             "headers": dict(target.headers),
@@ -196,6 +202,9 @@ def _start(
             "size": json.loads(payload)["size"],
             "pngSha256": protocol.png_sha256,
             "timeoutSeconds": protocol.http_timeout_seconds,
+            "headersCommand": None
+            if headers_command is None
+            else list(headers_command),
         },
         "timeoutSeconds": protocol.readiness_timeout_seconds,
         "intervalSeconds": READINESS_INTERVAL_SECONDS,
@@ -227,7 +236,7 @@ def _start(
     timings = {
         "apiReadySeconds": since("api"),
         # Without a registration step the function is registered when it is up.
-        "registeredSeconds": since("registered" if registration else "api"),
+        "registeredSeconds": since("registered" if register else "api"),
         "firstCorrectSeconds": since("first"),
     }
     (evidence / "readiness.json").write_text(
@@ -325,7 +334,11 @@ class NanofaasPlatform:
             images=(self.control_plane_image, self.function_image),
             commands=self.commands(),
             api=_READY,
-            registration=self.registration(),
+            register={
+                "url": f"{_API}/v1/functions",
+                "check": f"{_API}/v1/functions/{FUNCTION_NAME}",
+                "body": self.registration(),
+            },
             target=self.target("127.0.0.1"),
             body=self.body(payload),
             protocol=protocol,
@@ -340,6 +353,10 @@ class NanofaasPlatform:
             _JSON,
             "nanofaas-envelope",
         )
+
+    def secret_headers(self, vm: Vm) -> Mapping[str, str]:
+        """Return no secret: nanoFaaS's API needs none here."""
+        return {}
 
     def body(self, payload: bytes) -> bytes:
         """Wrap the payload as the invocation request's `input`."""
@@ -418,7 +435,7 @@ class DirectReference:
             images=(self.function_image,),
             commands=self.commands(concurrency=protocol.fixed_concurrency),
             api=f"{_API}/health",
-            registration=None,
+            register=None,
             target=self.target("127.0.0.1"),
             body=self.body(payload),
             protocol=protocol,
@@ -434,6 +451,10 @@ class DirectReference:
             "json-base64",
             id_header=EXECUTION_ID_HEADER,
         )
+
+    def secret_headers(self, vm: Vm) -> Mapping[str, str]:
+        """Return no secret: the runtime needs none."""
+        return {}
 
     def body(self, payload: bytes) -> bytes:
         """Wrap the payload as the runtime's invocation `input`."""
