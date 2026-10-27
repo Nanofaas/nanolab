@@ -117,18 +117,20 @@ def leftover_containers(vm: Vm) -> list[str]:
     return [name for name in names if name != REGISTRY_CONTAINER]
 
 
-# A platform may still be removing its own containers (Fn does) when the
-# teardown runs: `docker rm` then refuses those, and they go on their own.
+# A platform may still be removing its own containers, or creating them (Fn
+# does both), when the teardown runs: `docker rm` refuses the first, misses the
+# second, so it is repeated until nothing but the registry is left.
 _REMOVAL_WAIT_SECONDS = 60.0
 _REMOVAL_POLL_SECONDS = 2.0
 
 
 def _remove_containers(vm: Vm) -> None:
-    names = leftover_containers(vm)
-    if names:
-        _ = exec_status(vm, ("docker", "rm", "-f", *names))
     deadline = time.monotonic() + _REMOVAL_WAIT_SECONDS
+    # Remove again on every pass: a platform may create containers meanwhile.
     while names := leftover_containers(vm):
+        _ = exec_status(vm, ("docker", "rm", "-f", *names))
+        if not leftover_containers(vm):
+            return
         if time.monotonic() >= deadline:
             raise RuntimeError(f"containers remain after the teardown: {names}")
         time.sleep(_REMOVAL_POLL_SECONDS)

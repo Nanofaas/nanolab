@@ -285,3 +285,26 @@ def test_teardown_fails_when_containers_never_go(monkeypatch):
 
     with pytest.raises(RuntimeError, match="fn-1"):
         platforms.baseline_teardown(vm(RecordingProvider(handler=handler)))
+
+
+def test_teardown_removes_containers_created_while_it_runs(monkeypatch):
+    # fnserver still creates function containers while the first removal runs.
+    from nanolab.tasks.experiment_02 import platforms
+
+    monkeypatch.setattr(platforms.time, "sleep", lambda _seconds: None)
+    running = ["e02-fnserver", "fn-1"]
+    removals = 0
+
+    def handler(argv, _env):
+        nonlocal removals
+        if argv[:3] == ("docker", "ps", "-a"):
+            return Result(0, "".join(f"{name}\n" for name in running))
+        if argv[:3] == ("docker", "rm", "-f"):
+            removals += 1
+            running[:] = [name for name in running if name not in argv[3:]]
+            if removals == 1:
+                running.append("fn-2")  # created during the first removal
+        return None
+
+    platforms.baseline_teardown(vm(RecordingProvider(handler=handler)))
+    assert running == []
