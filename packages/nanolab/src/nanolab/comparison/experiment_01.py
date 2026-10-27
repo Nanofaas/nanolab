@@ -1,13 +1,10 @@
-"""Experiment 01 outcomes: attempts, receipts, the request ledger and its verdicts.
+"""Experiment 01 outcomes: the request ledger and its verdicts.
 
 The historical matrix calls a cell done when its k6 summary and metrics snapshot
 exist. Experiment 01 cannot: a control plane that runs out of its 64 MiB heap,
 or never becomes ready, is a result of the experiment and produces neither file.
-So each cell carries an atomic receipt, `cell-result.json`, naming the attempt it
-selects, a definitive outcome and the hashes of the evidence behind it. Only a
-valid receipt makes a cell complete; an interruption before it is written leaves
-the cell incomplete, and the next attempt starts in a fresh directory beside the
-old ones rather than on top of them.
+So each cell is receipted (`comparison.cells`), and a definitive outcome may be
+a failure.
 
 The ledger is rebuilt from the generator's own events, one send per request id
 recorded immediately before `http.post`, and at most one terminal event. A
@@ -29,99 +26,36 @@ import csv
 import hashlib
 import json
 import math
-import os
 import statistics
-import tempfile
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from nanolab.comparison.cells import (
+    CELL_RESULT,
+    EVENTS,
+    SNAPSHOT,
+    SUMMARY,
+    attempt_dir,
+    identity_sha256,
+    sha256_file,
+    write_json_atomically,
+)
 from nanolab.comparison.matrix import (
     EXPERIMENT_01_ORDER_POLICY,
     ComparisonCell,
-    MatrixCell,
 )
 from nanolab.config.experiment_01 import Experiment01Protocol, invocation_body
 from nanolab.images.control_plane_variants import EXPERIMENT_01_VARIANTS_BY_KEY
 
-CELL_RESULT = "cell-result.json"
-EVENTS = "k6-events.jsonl"
-SUMMARY = "k6-summary.json"
-SNAPSHOT = "metrics/prometheus-snapshot.json"
-LOAD_STARTED = "load-started.json"
-DIAGNOSTICS = "diagnostics"
 # The Prometheus resolution the snapshot adapter queries at, and the window of
 # every CPU rate in the catalogue. Recorded with each summary: a plateau
 # statistic means nothing without the sampling that produced it.
 QUERY_STEP_SECONDS = 5
 CPU_RATE_WINDOW_SECONDS = 30
 
-Outcome = Literal["measured", "startup_failed", "oom"]
-DEFINITIVE: frozenset[str] = frozenset({"measured", "startup_failed", "oom"})
 Failure = Literal["startup_failed", "oom", "transport"]
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def identity_sha256(identity: Mapping[str, object]) -> str:
-    """Hash a manifest identity the way receipts refer to it."""
-    return hashlib.sha256(
-        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
-def _atomic_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", dir=path.parent, prefix=f".{path.name}-", delete=False
-    ) as stream:
-        temporary = Path(stream.name)
-        stream.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    try:
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-# ---------------------------------------------------------------- attempts
-
-
-def attempt_dir(cell_dir: Path, attempt: int) -> Path:
-    """Return the directory one attempt of a cell writes into."""
-    return cell_dir / "attempts" / str(attempt)
-
-
-def next_attempt(cell_dir: Path) -> int:
-    """Return a fresh attempt number; earlier attempts are never reused."""
-    root = cell_dir / "attempts"
-    numbers = (
-        [int(path.name) for path in root.iterdir() if path.name.isdigit()]
-        if root.is_dir()
-        else []
-    )
-    return max(numbers, default=0) + 1
-
-
-def archive_cell_result(cell_dir: Path) -> None:
-    """Leave a replacement pending while retaining the previous receipt."""
-    path = cell_dir / CELL_RESULT
-    if path.is_file():
-        receipt = json.loads(path.read_text(encoding="utf-8"))
-        path.replace(attempt_dir(cell_dir, int(receipt["attempt"])) / CELL_RESULT)
-
-
-def mark_load_started(run_dir: Path) -> None:
-    """Record that every pre-load check passed and the generator is next.
-
-    After this marker an error is no longer a transport failure before load: a
-    retry could re-measure a system the first attempt already loaded.
-    """
-    _atomic_json(run_dir / LOAD_STARTED, {"at": datetime.now(UTC).isoformat()})
 
 
 def classify_failure(pods: Mapping[str, Any], *, load_started: bool) -> Failure | None:
@@ -166,93 +100,6 @@ def classify_failure(pods: Mapping[str, Any], *, load_started: bool) -> Failure 
     ):
         return "transport"
     return None
-
-
-# ---------------------------------------------------------------- receipts
-
-
-def write_cell_result(
-    cell: MatrixCell,
-    root: Path,
-    *,
-    identity: Mapping[str, object],
-    attempt: int,
-    outcome: Outcome,
-    reason: str,
-    started_at: datetime,
-    required: tuple[str, ...] = (SUMMARY, EVENTS, SNAPSHOT),
-) -> dict[str, object]:
-    """Commit a definitive outcome for a cell, atomically, with its evidence.
-
-    `measured` requires every artefact in `required`: by default the summary,
-    the event ledger and the snapshot. A failure requires diagnostics and names
-    which of those artefacts it could not produce; none is invented to fill the
-    gap.
-    """
-    selected = attempt_dir(cell.run_dir(root), attempt)
-    needed = required if outcome == "measured" else ()
-    missing = [name for name in needed if not (selected / name).is_file()]
-    if missing:
-        raise ValueError(f"measured outcome lacks evidence: {', '.join(missing)}")
-    diagnostics = selected / DIAGNOSTICS
-    if outcome != "measured" and (
-        not diagnostics.is_dir() or not any(diagnostics.iterdir())
-    ):
-        raise ValueError(f"{outcome} outcome requires diagnostic evidence")
-    evidence = {
-        path.relative_to(selected).as_posix(): _sha256(path)
-        for path in sorted(selected.rglob("*"))
-        if path.is_file() and not path.name.startswith(".")
-    }
-    receipt: dict[str, object] = {
-        "schemaVersion": 1,
-        "cell": cell.label,
-        "variant": cell.key,
-        "repetition": cell.repetition,
-        "identitySha256": identity_sha256(identity),
-        "attempt": attempt,
-        "outcome": outcome,
-        "reason": reason,
-        "startedAt": started_at.isoformat(),
-        "recordedAt": datetime.now(UTC).isoformat(),
-        "evidence": evidence,
-        "notProduced": [name for name in required if not (selected / name).is_file()],
-    }
-    _atomic_json(cell.run_dir(root) / CELL_RESULT, receipt)
-    return receipt
-
-
-def read_cell_result(
-    cell: MatrixCell, root: Path, identity: Mapping[str, object]
-) -> dict[str, Any] | None:
-    """Return a cell's receipt if it is definitive and its evidence intact."""
-    path = cell.run_dir(root) / CELL_RESULT
-    if not path.is_file():
-        return None
-    receipt = json.loads(path.read_text(encoding="utf-8"))
-    if (
-        receipt.get("outcome") not in DEFINITIVE
-        or receipt.get("cell") != cell.label
-        or receipt.get("identitySha256") != identity_sha256(identity)
-    ):
-        raise ValueError(f"{cell.label}: receipt does not belong to this run")
-    selected = attempt_dir(cell.run_dir(root), int(receipt["attempt"]))
-    for name, digest in receipt["evidence"].items():
-        evidence = selected / name
-        if not evidence.is_file() or _sha256(evidence) != digest:
-            raise ValueError(f"{cell.label}: receipt evidence missing or changed")
-    return receipt
-
-
-def experiment_completed(
-    identity: Mapping[str, object],
-) -> Any:
-    """Return the completion rule `matrix.pending` applies to experiment 01."""
-
-    def done(cell: MatrixCell, root: Path) -> bool:
-        return read_cell_result(cell, root, identity) is not None
-
-    return done
 
 
 # ---------------------------------------------------------------- ledger
@@ -660,7 +507,7 @@ def write_experiment_01_report(
                     "phases": [],
                 }
             )
-    _atomic_json(root / "experiment-01-summary.json", summaries)
+    write_json_atomically(root / "experiment-01-summary.json", summaries)
     path = root / "experiment-01-summary.csv"
     with path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=_CSV_FIELDS)
@@ -710,7 +557,7 @@ def experiment_01_identity(
             "bodySha256": hashlib.sha256(invocation_body(payload)).hexdigest(),
             "bytes": len(payload),
         },
-        "script": {"name": script.name, "sha256": _sha256(script)},
+        "script": {"name": script.name, "sha256": sha256_file(script)},
         "builds": {
             key: {
                 "label": variant.label,

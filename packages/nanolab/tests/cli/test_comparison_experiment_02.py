@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nanolab.comparison.experiment_01 import (
+from nanolab.comparison.cells import (
     CELL_RESULT,
     DIAGNOSTICS,
     EVENTS,

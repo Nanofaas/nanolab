@@ -31,12 +31,12 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.application.functions import resolve_function
 from nanolab.application.loadtest_policy import declared_function_resources
+from nanolab.comparison.cells import mark_load_started
 from nanolab.comparison.evidence import (
     record_comparison_management,
     verify_comparison_cell_registry,
     verify_comparison_scheduler,
 )
-from nanolab.comparison.experiment_01 import mark_load_started
 from nanolab.comparison.profiles import (
     COMPARISON_FUNCTIONS,
     COMPARISON_RECIPE_MODULES,

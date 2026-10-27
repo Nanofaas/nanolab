@@ -22,7 +22,10 @@ from typing import Literal
 from sonata_tasks.k6 import k6_argv
 from sonata_tasks.k6_models import K6Config
 
-from nanolab.comparison.experiment_01 import EVENTS, SUMMARY
+from nanolab.comparison.cells import (
+    EVENTS,
+    SUMMARY,
+)
 from nanolab.comparison.prepare import comparison_remote_command, comparison_transfer_to
 from nanolab.config.experiment_01 import k6_protocol
 from nanolab.config.experiment_02 import Experiment02Protocol

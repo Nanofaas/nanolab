@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from nanolab.comparison.experiment_01 import (
+from nanolab.comparison.cells import (
     EVENTS,
     SUMMARY,
     attempt_dir,

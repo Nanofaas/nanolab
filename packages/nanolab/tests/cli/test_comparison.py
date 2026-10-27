@@ -487,7 +487,7 @@ def test_experiment_02_refuses_a_kubernetes_scenario(command_case):
 
 def test_compare_direct_and_p1_with_two_budgets_can_resume(command_case, monkeypatch):
     """The whole experiment-02 path with fake VMs: four cells, then a resume."""
-    from nanolab.comparison.experiment_01 import CELL_RESULT
+    from nanolab.comparison.cells import CELL_RESULT
     from nanolab.comparison.experiment_02 import (
         EVENTS,
         SAMPLES,

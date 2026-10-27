@@ -10,17 +10,19 @@ from typing import Any
 import pytest
 import yaml
 
-from nanolab.comparison.experiment_01 import (
+from nanolab.comparison.cells import (
     CELL_RESULT,
     attempt_dir,
-    build_ledger,
-    classify_failure,
     experiment_completed,
     next_attempt,
     read_cell_result,
+    write_cell_result,
+)
+from nanolab.comparison.experiment_01 import (
+    build_ledger,
+    classify_failure,
     read_events,
     summarize_phases,
-    write_cell_result,
     write_experiment_01_report,
 )
 from nanolab.comparison.matrix import (
@@ -939,7 +941,7 @@ def _fail(run_dir: Path) -> None:
 
 
 def _fail_after_load(run_dir: Path) -> None:
-    from nanolab.comparison.experiment_01 import mark_load_started
+    from nanolab.comparison.cells import mark_load_started
 
     mark_load_started(run_dir)
     raise RuntimeError("k6 died")
@@ -983,7 +985,7 @@ def test_error_after_load_started_stops_with_partial_evidence(tmp_path):
 
 
 def test_failed_attempt_records_remote_evidence_recovery_notes(tmp_path):
-    from nanolab.comparison.experiment_01 import mark_load_started
+    from nanolab.comparison.cells import mark_load_started
 
     def fail_with_recovery_note(run_dir):
         mark_load_started(run_dir)

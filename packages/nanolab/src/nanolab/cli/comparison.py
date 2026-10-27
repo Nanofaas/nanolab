@@ -36,18 +36,20 @@ from nanolab.application.vm_provider import (
 )
 from nanolab.cli.catalogue import environment_input, scenario_input
 from nanolab.cli.progress import ConsoleProgressSink
-from nanolab.comparison.evidence import require_recorded_publications
-from nanolab.comparison.experiment_01 import (
+from nanolab.comparison.cells import (
     DIAGNOSTICS,
     LOAD_STARTED,
     Outcome,
     archive_cell_result,
     attempt_dir,
-    classify_failure,
-    experiment_01_identity,
     experiment_completed,
     next_attempt,
     write_cell_result,
+)
+from nanolab.comparison.evidence import require_recorded_publications
+from nanolab.comparison.experiment_01 import (
+    classify_failure,
+    experiment_01_identity,
     write_experiment_01_report,
 )
 from nanolab.comparison.experiment_02 import (

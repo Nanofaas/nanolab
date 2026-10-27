@@ -34,7 +34,7 @@ from pathlib import Path, PurePosixPath
 from traceback import format_exception_only
 from typing import Any
 
-from nanolab.comparison.experiment_01 import (
+from nanolab.comparison.cells import (
     DIAGNOSTICS,
     EVENTS,
     LOAD_STARTED,

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nanolab.comparison.experiment_01 import (
+from nanolab.comparison.cells import (
     EVENTS,
     SUMMARY,
     attempt_dir,

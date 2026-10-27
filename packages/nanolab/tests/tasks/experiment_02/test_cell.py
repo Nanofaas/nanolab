@@ -7,7 +7,10 @@ from pathlib import Path, PurePosixPath
 import pytest
 import yaml
 
-from nanolab.comparison.experiment_01 import DIAGNOSTICS, LOAD_STARTED
+from nanolab.comparison.cells import (
+    DIAGNOSTICS,
+    LOAD_STARTED,
+)
 from nanolab.comparison.experiment_02 import (
     CONFIGURATIONS_BY_KEY,
     SAMPLES,

@@ -31,13 +31,15 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, Literal
 
-from nanolab.comparison.experiment_01 import (
+from nanolab.comparison.cells import (
     CELL_RESULT,
     EVENTS,
     SUMMARY,
     attempt_dir,
-    build_ledger,
     identity_sha256,
+)
+from nanolab.comparison.experiment_01 import (
+    build_ledger,
     read_events,
     summarize_phases,
 )
