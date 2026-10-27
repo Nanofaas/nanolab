@@ -51,10 +51,15 @@ class RecordingProvider:
         command = tuple(argv)
         self.calls.append(("exec", command, env))
         if command[0] == "sha256sum":
-            data = self.files.get(command[1])
-            if data is None:
+            if any(path not in self.files for path in command[1:]):
                 return Result(1, "", "No such file")
-            return Result(0, f"{hashlib.sha256(data).hexdigest()}  {command[1]}\n")
+            return Result(
+                0,
+                "".join(
+                    f"{hashlib.sha256(self.files[path]).hexdigest()}  {path}\n"
+                    for path in command[1:]
+                ),
+            )
         if command[:2] == ("test", "-f"):
             return Result(0 if command[2] in self.files else 1)
         return self.handler(command, env) or Result()
