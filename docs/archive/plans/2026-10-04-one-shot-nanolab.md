@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python >=3.12, NanoLab, `sonata-engine`/`sonata-tasks`, provider e SDK Multipass già presenti, HTTPX, k6 e report Plotly esistenti. Riferimento NanoLab letto: `76d45216487432e4dd0e7f50b22ae08363883af8`; verificare HEAD e API prima dell'esecuzione.
 
-**Spec:** [specifica](../specs/2026-10-04-one-shot-offload-design.md), [gate A → B](https://github.com/Nanofaas/nanofaas/blob/b1aa7f65c7ed0a70c2b94f37092fe62b7e877934/docs/superpowers/plans/2026-10-04-one-shot-implementation.md), [piano NanoFaaS](https://github.com/Nanofaas/nanofaas/blob/b1aa7f65c7ed0a70c2b94f37092fe62b7e877934/docs/superpowers/plans/2026-10-04-one-shot-nanofaas.md).
+**Spec:** [specifica](../specs/2026-10-04-one-shot-offload-design.md), [gate A → B](https://github.com/Nanofaas/nanofaas/blob/b1aa7f65c7ed0a70c2b94f37092fe62b7e877934/docs/archive/plans/2026-10-04-one-shot-implementation.md), [piano NanoFaaS](https://github.com/Nanofaas/nanofaas/blob/b1aa7f65c7ed0a70c2b94f37092fe62b7e877934/docs/archive/plans/2026-10-04-one-shot-nanofaas.md).
 
 ## Global Constraints
 

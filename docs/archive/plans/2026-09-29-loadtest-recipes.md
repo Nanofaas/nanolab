@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+, Pydantic, Sonata resources/tasks, Gradle recipes v2, Docker Compose, k6, pytest.
 
-**Spec:** `docs/superpowers/specs/2026-09-29-loadtest-recipes-design.md`
+**Spec:** `docs/archive/specs/2026-09-29-loadtest-recipes-design.md`
 
 ## Global Constraints
 

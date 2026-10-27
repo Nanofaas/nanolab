@@ -1,4 +1,4 @@
-# SDD ledger — plan: docs/superpowers/plans/2026-10-04-one-shot-nanolab.md
+# SDD ledger — plan: docs/archive/plans/2026-10-04-one-shot-nanolab.md
 Base: 811fbdd. User approved CLI qualification followed by all phase B workflows.
 CLI qualification: already completed in integrated NanoLab main; verified the updated 2026-10-09 evidence. Do not repeat it.
 Gate A: all technical A→B criteria marked complete in NanoFaaS handoff. NanoFaaS source is frozen b1aa7f65, including #252, #253 and #255.

@@ -82,7 +82,7 @@ Unsupported runtime directories do not
 prevent discovery of supported functions. Explicitly selecting an unsupported
 runtime fails before provisioning. Rust functions use their packaged Dockerfiles
 and support the same build, deployment and artifact-contract workflows as Go.
-See the [Rust qualification and source compatibility evidence](docs/superpowers/plans/2026-10-09-rust-functions-evidence.md).
+See the [Rust qualification and source compatibility evidence](docs/archive/plans/2026-10-09-rust-functions-evidence.md).
 
 Pure tests run without a NanoFaaS checkout:
 
@@ -200,8 +200,8 @@ benchmark or ARM smoke ran. Native ARM64 capability, the isolated staging/runtim
 slice and real resume remain incomplete; AMD64 qualification is independently
 pending. These migrations are not release-qualified. Evidence is retained under
 `/tmp/nanolab-release-arm64-verification/`; see the
-[ARM64 plan](docs/superpowers/plans/2026-10-02-release-arm64-recipes.md) and
-[AMD64 plan](docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).
+[ARM64 plan](docs/archive/plans/2026-10-02-release-arm64-recipes.md) and
+[AMD64 plan](docs/archive/plans/2026-10-01-release-amd64-recipes.md).
 
 ## Roadmap
 

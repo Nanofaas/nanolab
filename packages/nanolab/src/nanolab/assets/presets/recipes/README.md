@@ -328,8 +328,8 @@ are tested. On 2 October 2026 the real canonical run stopped at stack VM
 provisioning with Azure's MFA requirement, also after renewed login, before any build. Native ARM binary
 export, the real 44-image staging/runtime slice and unchanged real resume remain
 incomplete; AMD64 native qualification remains independently pending. See the
-[ARM64 verification plan](../../../../../../../docs/superpowers/plans/2026-10-02-release-arm64-recipes.md)
-and [AMD64 plan](../../../../../../../docs/superpowers/plans/2026-10-01-release-amd64-recipes.md).
+[ARM64 verification plan](../../../../../../../docs/archive/plans/2026-10-02-release-arm64-recipes.md)
+and [AMD64 plan](../../../../../../../docs/archive/plans/2026-10-01-release-amd64-recipes.md).
 
 
 ## P24 container preparation

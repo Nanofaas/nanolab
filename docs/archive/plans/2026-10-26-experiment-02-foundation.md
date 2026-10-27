@@ -762,7 +762,7 @@ Expected: tutto pulito; i 436 fallimenti noti del Mac restano fuori da queste ar
 ```bash
 export NANOFAAS_ROOT=$PWD/.nanofaas-source
 ./nanolab.sh compare experiment-02-pilot.yaml \
-  --environment /Users/micheleciavotta/Downloads/nanolab/packages/nanolab/environments/azure-comparison.yaml \
+  --environment environments/azure-comparison.yaml \
   --variants nanofaas-p1-jvm,direct-reference --repetitions 1 \
   --run-dir runs/experiment-02-foundation-smoke
 ```

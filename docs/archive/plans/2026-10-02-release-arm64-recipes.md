@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+, NanoLab/uv, Sonata workflows/resources, Gradle recipes v2, Docker/Buildx/BuildKit, Skopeo, native Azure ARM64 VM.
 
-**Spec:** `docs/superpowers/specs/2026-10-02-release-arm64-recipes-design.md` (approved).
+**Spec:** `docs/archive/specs/2026-10-02-release-arm64-recipes-design.md` (approved).
 
 ## Global Constraints
 

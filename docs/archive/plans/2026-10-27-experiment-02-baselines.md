@@ -288,9 +288,9 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch):
 
 ```bash
 export NANOFAAS_ROOT=$PWD/.nanofaas-source
-export NANOLAB_WORKLOADS_ROOT=/Users/micheleciavotta/Documents/nanofaas-paper/functions
+export NANOLAB_WORKLOADS_ROOT=/path/to/nanofaas-paper/functions
 ./nanolab.sh compare experiment-02-pilot.yaml \
-  --environment /Users/micheleciavotta/Downloads/nanolab/packages/nanolab/environments/azure-comparison.yaml \
+  --environment environments/azure-comparison.yaml \
   --variants funless,spin,tinyfaas,serverledge,fn,direct-reference --repetitions 1 \
   --run-dir runs/experiment-02-baselines-smoke
 ```

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python >=3.12, existing uv workspace, Sonata 0.6.4 resources/executors, NanoFaaS Gradle recipes v2, Docker/Buildx/BuildKit, existing Azure release infrastructure. No new dependency, public command or generic task.
 
-**Spec:** `docs/superpowers/specs/2026-10-01-release-amd64-recipes-design.md`
+**Spec:** `docs/archive/specs/2026-10-01-release-amd64-recipes-design.md`
 
 ## Global Constraints
 

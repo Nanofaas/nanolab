@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+, existing Sonata 0.6.2 packages, Pydantic, PyYAML, Gradle, local Docker/Compose.
 
-**Spec:** `docs/superpowers/specs/2026-09-28-recipe-validation-design.md`
+**Spec:** `docs/archive/specs/2026-09-28-recipe-validation-design.md`
 
 ## Global Constraints
 

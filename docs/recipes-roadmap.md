@@ -2,7 +2,7 @@
 
 Aggiornata il 2 ottobre 2026. Questa pagina raccoglie gli obiettivi di
 migrazione e verifica; non sostituisce le specifiche e i piani di implementazione
-in `docs/superpowers/`.
+in `docs/archive/`.
 
 ## Obiettivo
 
@@ -131,8 +131,8 @@ le differenze reali fra backend e tipi di verifica.
      Verifica nativa AMD64 ancora incompleta: Azure ha rifiutato la creazione
      della VM richiedendo MFA. Restano build/export reali, push di staging,
      runtime rappresentativi, resume e teardown. Nessuna release qualificata.
-     [Spec approvata](superpowers/specs/2026-10-01-release-amd64-recipes-design.md),
-     [piano e stato delle verifiche](superpowers/plans/2026-10-01-release-amd64-recipes.md).
+     [Spec approvata](archive/specs/2026-10-01-release-amd64-recipes-design.md),
+     [piano e stato delle verifiche](archive/plans/2026-10-01-release-amd64-recipes.md).
    - [ ] Release ARM64: implementazione locale completata con tre profili
      simmetrici AMD64/ARM64, assembly e push distinti, prove locali sulla VM
      proprietaria e resume verificato nei test. I vecchi journal del DAG
@@ -142,8 +142,8 @@ le differenze reali fra backend e tipi di verifica.
      rifiuta la creazione delle risorse di rete senza MFA. Capability nativa ARM,
      slice reale di 44 immagini/push/runtime e resume reale ancora incompleti.
      Nessuna release qualificata; gate AMD64 indipendente ancora pendente.
-     [Spec](superpowers/specs/2026-10-02-release-arm64-recipes-design.md),
-     [piano e verifiche](superpowers/plans/2026-10-02-release-arm64-recipes.md).
+     [Spec](archive/specs/2026-10-02-release-arm64-recipes-design.md),
+     [piano e verifiche](archive/plans/2026-10-02-release-arm64-recipes.md).
    - [ ] Migrazione dei preset P24 e degli altri backend soak.
      Il preset canonico `memory-soak-sync-container.yaml` ora usa
      `soak-container-p24-jvm.yaml`, conservando policy, fasi e carico (20/20).
@@ -153,7 +153,7 @@ le differenze reali fra backend e tipi di verifica.
      e cinque coperture dei prerequisiti senza ricetta di iniezione automatica.
      Nessuna campagna P24 eseguita; `p24_qualified: false`. Altri preset/backend
      restano da migrare. [Gate e prove](soak.md#p24-preparation-verification),
-     [piano](superpowers/plans/2026-10-02-soak-p24-recipes.md).
+     [piano](archive/plans/2026-10-02-soak-p24-recipes.md).
 4. **Eliminare i percorsi legacy.** Rimuovere build duplicate e flag di
    scenario ridondanti dopo la migrazione dei rispettivi workflow. Fatto
    quando non restano chiamanti e la suite pertinente passa.

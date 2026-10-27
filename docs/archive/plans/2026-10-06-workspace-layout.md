@@ -9,7 +9,7 @@ workspace owns mutable operator inputs/results, CLI resolves names or paths.
 
 **Tech Stack:** Python, pathlib, Typer, pytest, uv, Sonata 0.6.5.
 
-**Spec:** `docs/superpowers/specs/2026-10-06-workspace-layout-design.md`
+**Spec:** `docs/archive/specs/2026-10-06-workspace-layout-design.md`
 
 ## Global Constraints
 

@@ -305,7 +305,7 @@ probe argument. Use Task 1's resources and Task 3's gate without another engine.
 
 ### Task 5: Installed qualification and final whole-branch review
 
-**Files:** Create `docs/superpowers/plans/2026-10-08-native-cli-parity-evidence.md`;
+**Files:** Create `docs/archive/plans/2026-10-08-native-cli-parity-evidence.md`;
 update this plan and its approved spec status with actual results.
 
 - [x] Build/install isolated NanoLab/toolkit wheels with unchanged public Sonata

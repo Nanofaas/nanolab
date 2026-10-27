@@ -404,7 +404,7 @@ unexpected source inputs are rejected, local and published provenance invocation
 IDs are cross-checked online and offline, and serialized evidence producers share
 pre-write quota accounting. The final full NanoLab suite passed **3,145 tests**;
 Ruff, formatting, types and import contracts passed. Execution rulings and their
-costs are recorded in the [implementation plan](superpowers/plans/2026-09-30-soak-recipes.md).
+costs are recorded in the [implementation plan](archive/plans/2026-09-30-soak-recipes.md).
 
 ## Recipe preparation for the canonical P24 preset
 

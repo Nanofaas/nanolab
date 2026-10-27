@@ -44,7 +44,7 @@ All paths below are relative to the worktree. `src` abbreviates `packages/nanola
 | Build/resource ownership | `src/tasks/validation/contract_resources.py` | Private Buildx/network/helper/images/containers, identity, compensated acquisition and absence receipts. |
 | Runtime semantics | `src/tasks/validation/function_contracts.py` | Corpus execution, response/callback/PNG/log checks, per-case immutable evidence. |
 | Product integration | `src/plans/contract.py`, `src/cli/product.py`, `src/cli/catalogue.py`, two new `src/assets/presets/scenarios/artifact-contract*-container.yaml` | Workflow graph, CLI validation, installed presets and post-release finalization. |
-| Documentation/evidence | `docs/artifact-contracts.md`, `docs/superpowers/plans/2026-10-08-packaged-functions-watchdog-evidence.md`, product documentation links | Operator use, restrictions, real run evidence and exclusions. |
+| Documentation/evidence | `docs/artifact-contracts.md`, `docs/archive/plans/2026-10-08-packaged-functions-watchdog-evidence.md`, product documentation links | Operator use, restrictions, real run evidence and exclusions. |
 
 Task 1 owns `JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]`, frozen `ContractCase(name: str, input: JsonValue, expected: JsonValue, status: int, png_size: int | None)` and `ContractMatrix(images: ImagePlan, cases: dict[str, tuple[ContractCase, ...]], source_state: dict[str, object], corpus_hashes: dict[str, str], subset: tuple[str, ...])`. `png_size is not None` identifies the PNG oracle; JSON null remains a legitimate exact expectation.
 
@@ -167,7 +167,7 @@ Task 3 owns frozen `ContractRuntime(network: str, capture_container: str, probe_
 
 ## Task 6: Installed live qualification and final review
 
-**Files:** Create `docs/superpowers/plans/2026-10-08-packaged-functions-watchdog-evidence.md`; update task checkboxes only when their evidence exists.
+**Files:** Create `docs/archive/plans/2026-10-08-packaged-functions-watchdog-evidence.md`; update task checkboxes only when their evidence exists.
 
 **Interfaces:** Consume installed product CLI and all task receipts; produce evidence naming exact NanoLab wheel hash, NanoFaaS revision/patch, architecture, qualified matrix/counts, logs and cleanup proof. No new product API.
 

@@ -1,7 +1,7 @@
 # One-shot audit fixes — offline validation, 14 October 2026
 
 Plan and original audit live in the sibling NanoFaaS checkout:
-`docs/superpowers/plans/2026-10-14-one-shot-audit-fixes.md` and
+`docs/archive/plans/2026-10-14-one-shot-audit-fixes.md` and
 `docs/experiments/one-shot-audit-2026-10-14/README.md`.
 Implementation starts at NanoLab `8cb9756` on isolated branch
 `fix/one-shot-audit-2026-10-14`. No campaign, VM/container acquisition, merge,

@@ -9,7 +9,7 @@ metric interpretation; focused extraction of existing responsibilities.
 
 **Tech Stack:** Python 3.12, Sonata 0.6.5, pytest, import-linter, uv.
 
-**Spec:** `docs/superpowers/specs/2026-10-06-publication-maintainability-design.md`
+**Spec:** `docs/archive/specs/2026-10-06-publication-maintainability-design.md`
 
 ## Global Constraints
 

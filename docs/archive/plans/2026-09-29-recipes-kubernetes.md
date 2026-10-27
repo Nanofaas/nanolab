@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+, Pydantic, Sonata task/resource APIs already installed, Gradle recipes v2, Docker, Minikube, Helm, kubectl, k6, existing Multipass provider.
 
-**Spec:** `docs/superpowers/specs/2026-09-28-recipes-kubernetes-design.md` (reviewed 2026-09-29).
+**Spec:** `docs/archive/specs/2026-09-28-recipes-kubernetes-design.md` (reviewed 2026-09-29).
 
 ## Global Constraints
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+, uv, existing Sonata pins, Gradle recipes v2, native ARM64 Linux Docker/Buildx, local registry, existing soak observers.
 
-**Spec:** `docs/superpowers/specs/2026-10-02-soak-p24-recipes-design.md` (approved; current soak selection contract corrected during plan review).
+**Spec:** `docs/archive/specs/2026-10-02-soak-p24-recipes-design.md` (approved; current soak selection contract corrected during plan review).
 
 ## Global Constraints
 

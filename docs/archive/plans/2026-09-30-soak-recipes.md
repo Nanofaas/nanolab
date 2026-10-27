@@ -8,7 +8,7 @@
 
 **Tech Stack:** Existing Python/uv workspace, Sonata resources and owned command executor, NanoFaaS Gradle recipes v2, Docker Buildx, local Registry v2, existing soak observers and k6. No new Python dependency or generic infrastructure task.
 
-**Spec:** `docs/superpowers/specs/2026-09-30-soak-recipes-design.md`
+**Spec:** `docs/archive/specs/2026-09-30-soak-recipes-design.md`
 
 ## Global Constraints
 
