@@ -30,4 +30,5 @@ answer = select(
 
 ## Status
 
-Pre-1.0. The first consumer is `tools/controlplane/`. See the design doc at [`../../docs/archive/specs/2026-05-01-tui-toolkit-extraction-design.md`](../../docs/archive/specs/2026-05-01-tui-toolkit-extraction-design.md).
+Pre-1.0. Published on its own; in this workspace, nanolab's TUI
+(`packages/nanolab/src/nanolab/tui`) consumes it.

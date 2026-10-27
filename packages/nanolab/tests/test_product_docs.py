@@ -114,4 +114,8 @@ def test_readme_quotes_the_nanofaas_commit_ci_actually_pins() -> None:
     pinned = re.search(r"^\s*ref:\s*([0-9a-f]{40})\s*$", action, re.MULTILINE)
 
     assert pinned is not None, "setup-workspace pins nanoFaaS by full commit sha"
-    assert pinned.group(1) in (WORKSPACE_ROOT / "README.md").read_text(encoding="utf-8")
+    readme = (WORKSPACE_ROOT / "README.md").read_text(encoding="utf-8")
+    # The CI section itself, not just any paragraph: it once named a stale pin
+    # while another section quoted the right one.
+    ci_gate = readme.split("## CI gate", 1)[1].split("\n## ", 1)[0]
+    assert set(re.findall(r"\b[0-9a-f]{40}\b", ci_gate)) == {pinned.group(1)}

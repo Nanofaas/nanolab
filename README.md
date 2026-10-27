@@ -105,7 +105,7 @@ The public console command is `nanolab`.
 
 `.github/workflows/ci.yml` runs on every push and pull request against
 `main`. It checks out this repo and the pinned nanoFaaS source at
-`550d8f7a3379e5441fe90afb8ade3cf345aadbac` into `.nanofaas-source`, points
+`3327c4aa723d743a07d6b5bcd4110d4c917bef84` into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below. The gate
 validates all checked-in recipe profiles. To reproduce profile validation
 and the full container lifecycles locally, use the commands below.
