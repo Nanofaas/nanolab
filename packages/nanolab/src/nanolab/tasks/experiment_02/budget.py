@@ -8,8 +8,9 @@ creates there as well, including those a platform creates on its own.
 
 What must not count is the measurement: the registry the images come from and
 the sampler that reads the cgroup. They live in `nanolab-infra.slice`, beside
-the budget rather than inside it. Both slices are children of `nanolab.slice`,
-which systemd derives from the dash in their names.
+the budget rather than inside it; the agents in its own child,
+`nanolab-infra-observers.slice`, so their cost is measured without the
+registry's. The slices nest as systemd derives from the dashes in their names.
 
 The budget is applied as a CPU quota and a memory limit on the slice, with swap
 forbidden, and read back from the cgroup files before a cell measures anything:
@@ -26,7 +27,11 @@ from nanolab.tasks.components.operations import RemoteCommandOperation
 
 SUT_SLICE = "nanolab-sut.slice"
 INFRA_SLICE = "nanolab-infra.slice"
+OBSERVER_SLICE = "nanolab-infra-observers.slice"
 SUT_CGROUP = PurePosixPath("/sys/fs/cgroup/nanolab.slice/nanolab-sut.slice")
+OBSERVER_CGROUP = PurePosixPath(
+    "/sys/fs/cgroup/nanolab.slice/nanolab-infra.slice/nanolab-infra-observers.slice"
+)
 _INFRA_CGROUP = "/nanolab.slice/nanolab-infra.slice"
 _SUT_CGROUP = "/nanolab.slice/nanolab-sut.slice"
 # The engine's own cgroups inside the slice, reported apart from the platform.
@@ -58,6 +63,8 @@ printf '[Unit]\\nDescription=Deployment under measurement\\n\\n[Slice]\\n' \\
   > "$units/{SUT_SLICE}"
 printf '[Unit]\\nDescription=Measurement infrastructure\\n\\n[Slice]\\n' \\
   > "$units/{INFRA_SLICE}"
+printf '[Unit]\\nDescription=Measurement agents\\n\\n[Slice]\\n' \\
+  > "$units/{OBSERVER_SLICE}"
 for service in docker containerd; do
   printf '[Service]\\nSlice={SUT_SLICE}\\n' \\
     > "$units/$service.service.d/nanolab-slice.conf"

@@ -85,6 +85,9 @@ def test_slice_setup_moves_the_engine_into_the_budget_and_the_registry_out(tmp_p
         assert "Slice=nanolab-sut.slice" in dropin.read_text().splitlines()
     assert (units / "nanolab-sut.slice").is_file()
     assert (units / "nanolab-infra.slice").is_file()
+    # The agents measure from their own slice, inside infra but apart from the
+    # registry.
+    assert (units / "nanolab-infra-observers.slice").is_file()
     daemon = json.loads((tmp_path / "etc" / "docker" / "daemon.json").read_text())
     assert daemon["cgroup-parent"] == "nanolab-sut.slice"
     restart = calls.index("systemctl restart containerd docker")

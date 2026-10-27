@@ -7,9 +7,13 @@ over the 30 s before each sample. Per-response efficiency needs totals over a
 window instead: CPU seconds from the cumulative counter, and memory occupancy as
 the time integral of the working set.
 
-A window the samples do not cover, or one with a gap longer than two
-intervals, has no total: `None`, never zero. A sampler that died for a minute
-did not see a minute of zero memory.
+A window the samples do not cover, one with a gap longer than two intervals,
+or one across which a counter went backwards has no value: `None`, never zero.
+A sampler that died for a minute did not see a minute of zero memory. The same
+rule holds for a CPU rate, whose 30 s look-back is a window too.
+
+The measurement agents' own cgroup is sampled under `@observers`, outside the
+budget, so their cost is reported apart and never added to the deployment's.
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ DEPLOYMENT_CPU = "deployment_cpu_cores"
 ENGINE_MEMORY = "engine_working_set_bytes"
 ENGINE_CPU = "engine_cpu_cores"
 ROOT: tuple[str, ...] = (".",)
+OBSERVERS: tuple[str, ...] = ("@observers",)
+_COUNTERS = frozenset({"cpuUsageUsec", "oomKill"})
 
 Samples = Sequence[Mapping[str, Any]]
 Series = list[tuple[float, float]]
@@ -100,36 +106,62 @@ def cpu_cores(
     samples: Samples,
     cgroups: tuple[str, ...] = ROOT,
     window_seconds: float = CPU_WINDOW_SECONDS,
+    interval: float = SAMPLE_INTERVAL_SECONDS,
 ) -> Series:
     """Return the CPU rate of `cgroups`, in cores, over the window before each sample.
 
-    The rate starts from the latest sample at least `window_seconds` earlier; a
-    sample with no such predecessor, or after a counter reset, has no rate.
+    The rate starts from the latest sample at least `window_seconds` earlier. A
+    sample with no such predecessor, with a gap or a counter reset inside its
+    window, has no rate.
     """
     usage = _sum(samples, cgroups, "cpuUsageUsec")
     times = [at for at, _ in usage]
     points: Series = []
     for index, (at, value) in enumerate(usage):
         earlier = bisect_right(times, at - window_seconds, hi=index) - 1
-        if earlier < 0:
+        if earlier < 0 or not _unbroken(usage[earlier : index + 1], interval, True):
             continue
         start, start_value = usage[earlier]
-        if value < start_value:
-            continue
         points.append((at, (value - start_value) / (at - start) / 1e6))
     return points
 
 
-def _covered(series: Series, start: float, end: float, interval: float) -> bool:
-    """Whether samples bracket the window with no gap longer than two intervals."""
+def _unbroken(series: Series, interval: float, counter: bool) -> bool:
+    """Whether consecutive points are within two intervals, a counter never falling."""
+    return all(
+        later - earlier <= 2 * interval and (not counter or high >= low)
+        for (earlier, low), (later, high) in pairwise(series)
+    )
+
+
+def _covered(
+    series: Series, start: float, end: float, interval: float, counter: bool = False
+) -> bool:
+    """Whether points bracket the window, unbroken from the first to the last."""
     times = [at for at, _ in series]
     first = bisect_right(times, start) - 1
     last = bisect_left(times, end)
     if first < 0 or last >= len(times):
         return False
-    return all(
-        times[index + 1] - times[index] <= 2 * interval for index in range(first, last)
-    )
+    return _unbroken(series[first : last + 1], interval, counter)
+
+
+def window_covered(
+    samples: Samples,
+    start: float,
+    end: float,
+    *,
+    cgroups: tuple[str, ...] = ROOT,
+    fields: tuple[str, ...] = ("memoryCurrent", "inactiveFile"),
+    interval: float = SAMPLE_INTERVAL_SECONDS,
+) -> bool:
+    """Whether samples carrying `fields` for every cgroup cover the window.
+
+    Both ends must be bracketed, no gap may exceed two intervals, and a
+    cumulative counter among `fields` may not go backwards in between.
+    """
+    series = _sum(samples, cgroups, *fields)
+    return _covered(series, start, end, interval, bool(_COUNTERS & set(fields)))
 
 
 def _at(series: Series, at: float) -> float:
@@ -151,7 +183,7 @@ def cpu_seconds(
 ) -> float | None:
     """Return the CPU time `cgroups` used in the window, or `None` if unknown."""
     usage = _sum(samples, cgroups, "cpuUsageUsec")
-    if not _covered(usage, start, end, interval):
+    if not _covered(usage, start, end, interval, counter=True):
         return None
     return (_at(usage, end) - _at(usage, start)) / 1e6
 
@@ -175,11 +207,15 @@ def memory_byte_seconds(
     )
 
 
-def oom_kills(samples: Samples, cgroups: tuple[str, ...] = ROOT) -> int:
-    """Return how many processes the OOM killer took during the samples."""
+def oom_kills(samples: Samples, cgroups: tuple[str, ...] = ROOT) -> int | None:
+    """Return how many processes the OOM killer took between the first and last sample.
+
+    The increase within the attempt, never the total a previous cell left in
+    the counter. `None` without samples or after a reset: unknown, not zero.
+    """
     kills = _sum(samples, cgroups, "oomKill")
-    if not kills:
-        return 0
+    if not kills or not all(high >= low for (_, low), (_, high) in pairwise(kills)):
+        return None
     return int(kills[-1][1] - kills[0][1])
 
 
