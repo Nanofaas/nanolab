@@ -9,6 +9,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from nanolab.workspace.git import git_output
+
 
 @dataclass(frozen=True, slots=True)
 class RecipeRun:
@@ -20,15 +22,9 @@ class RecipeRun:
     tag: str
 
 
-def _git(source: Path, *args: str) -> bytes:
-    return subprocess.run(
-        ("git", *args), cwd=source, check=True, capture_output=True
-    ).stdout
-
-
 def _verify_staged_inputs(source: Path, staged: Path) -> None:
     """Check every tracked source path, including additions absent from HEAD."""
-    for raw_name in _git(source, "ls-files", "-z").split(b"\0"):
+    for raw_name in git_output(source, "ls-files", "-z").split(b"\0"):
         if not raw_name:
             continue
         name = os.fsdecode(raw_name)
@@ -60,8 +56,8 @@ def prepare_recipe_run(
     source = source.resolve()
     recipe = recipe.resolve()
     run_dir = run_dir.resolve()
-    revision = _git(source, "rev-parse", "HEAD").decode().strip()
-    patch = _git(source, "diff", "HEAD", "--binary", "--no-ext-diff")
+    revision = git_output(source, "rev-parse", "HEAD").decode().strip()
+    patch = git_output(source, "diff", "HEAD", "--binary", "--no-ext-diff")
     profile = recipe.read_bytes()
     identity = {
         "source": str(source),
@@ -95,7 +91,7 @@ def prepare_recipe_run(
         check=True,
         capture_output=True,
     )
-    _git(result.source_dir, "checkout", "-q", "--detach", revision)
+    git_output(result.source_dir, "checkout", "-q", "--detach", revision)
     if patch:
         subprocess.run(
             ("git", "apply", "--index", "--binary", "-"),
@@ -106,8 +102,8 @@ def prepare_recipe_run(
         )
     _verify_staged_inputs(source, result.source_dir)
     if (
-        _git(source, "rev-parse", "HEAD").decode().strip() != revision
-        or _git(source, "diff", "HEAD", "--binary", "--no-ext-diff") != patch
+        git_output(source, "rev-parse", "HEAD").decode().strip() != revision
+        or git_output(source, "diff", "HEAD", "--binary", "--no-ext-diff") != patch
     ):
         raise RuntimeError("NanoFaaS source changed while preparing recipe run")
     result.recipe.write_bytes(profile)

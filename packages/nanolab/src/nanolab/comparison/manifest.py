@@ -24,6 +24,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.vm.models import VmRequest
+from nanolab.workspace.git import git_output
 from nanolab.workspace.paths import discover_tool_root
 
 
@@ -238,9 +239,7 @@ def _hash(value: object) -> str:
 
 def _git(root: Path, *args: str) -> bytes:
     try:
-        return subprocess.run(
-            ("git", *args), cwd=root, check=True, capture_output=True
-        ).stdout
+        return git_output(root, *args)
     except (OSError, subprocess.CalledProcessError) as error:
         raise ValueError(f"Cannot establish Git identity: {root}") from error
 

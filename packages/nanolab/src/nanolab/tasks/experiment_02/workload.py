@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 
 from nanolab.comparison.prepare import comparison_remote_command, comparison_transfer_to
 from nanolab.tasks.experiment_02.vm import Vm, exec_status
+from nanolab.workspace.git import git_output
 
 WORKLOADS_ENV = "NANOLAB_WORKLOADS_ROOT"
 WORKLOAD = "qr-code"
@@ -44,7 +45,7 @@ _BUILD = (
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.check_output(("git", *args), cwd=root, text=True).strip()
+    return git_output(root, *args).decode().strip()
 
 
 def capture_workloads(root: Path) -> dict[str, str]:
