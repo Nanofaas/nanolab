@@ -23,9 +23,10 @@ from sonata_tasks.k6 import k6_argv
 from sonata_tasks.k6_models import K6Config
 
 from nanolab.comparison.experiment_01 import EVENTS, SUMMARY
+from nanolab.comparison.prepare import comparison_remote_command, comparison_transfer_to
 from nanolab.config.experiment_01 import k6_protocol
 from nanolab.config.experiment_02 import Experiment02Protocol
-from nanolab.tasks.experiment_02.vm import Vm
+from nanolab.tasks.experiment_02.vm import Vm, fetch_if_present
 
 Extractor = Literal["nanofaas-envelope", "json-base64", "raw-png"]
 
@@ -94,15 +95,24 @@ def run_generator(
     remote_script = remote_dir / script.name
     events = remote_dir / EVENTS
     summary = remote_dir / SUMMARY
-    _ = loadgen.run(("mkdir", "-p", str(remote_dir)))
-    _ = loadgen.run(("rm", "-f", str(events), str(summary)))
-    loadgen.put(script, remote_script)
+    provider, request = loadgen.provider, loadgen.request
+    _ = comparison_remote_command(provider, request, ("mkdir", "-p", str(remote_dir)))
+    _ = comparison_remote_command(
+        provider, request, ("rm", "-f", str(events), str(summary))
+    )
+    comparison_transfer_to(provider, request, script, remote_script)
     argv = k6_argv(
         K6Config(Path(str(remote_script)), Path(str(summary)), (), dict(env))
     )
-    code, _stdout, stderr = loadgen.probe(argv, env={"K6_CONSOLE_OUTPUT": str(events)})
+    result = provider.exec_argv(
+        request,
+        argv,
+        env={"K6_CONSOLE_OUTPUT": str(events)},
+        remote_dir=None,
+        dry_run=False,
+    )
     local_dir.mkdir(parents=True, exist_ok=True)
-    (local_dir / "k6-stderr.txt").write_text(stderr)
-    _ = loadgen.get(events, local_dir / EVENTS)
-    _ = loadgen.get(summary, local_dir / SUMMARY)
-    return code
+    (local_dir / "k6-stderr.txt").write_text(result.stderr)
+    _ = fetch_if_present(loadgen, events, local_dir / EVENTS)
+    _ = fetch_if_present(loadgen, summary, local_dir / SUMMARY)
+    return result.return_code

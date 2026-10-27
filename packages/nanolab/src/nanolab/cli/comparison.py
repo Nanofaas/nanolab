@@ -51,12 +51,12 @@ from nanolab.comparison.experiment_01 import (
 )
 from nanolab.comparison.experiment_02 import (
     CONFIGURATIONS_BY_KEY,
-    EXPERIMENT_02_EVIDENCE,
     EXPERIMENT_02_PUBLISHER,
     Configuration,
     Experiment02Cell,
     build_experiment_02_matrix,
     experiment_02_identity,
+    required_evidence,
     write_experiment_02_report,
 )
 from nanolab.comparison.manifest import (
@@ -108,7 +108,7 @@ from nanolab.images.control_plane_variants import (
 from nanolab.plans.runtime_comparison import EXPERIMENT_01_SCRIPT_NAME
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE
 from nanolab.tasks.experiment_02.budget import slice_setup_operation
-from nanolab.tasks.experiment_02.cell import run_cell
+from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS, run_cell
 from nanolab.tasks.experiment_02.platforms import (
     DirectReference,
     NanofaasPlatform,
@@ -418,7 +418,10 @@ def _run_experiment_02_cell(
     Each attempt has its own directory and an outcome commits a receipt. A
     refusal (`ValueError`: a budget not enforced, a process outside it) stops
     at once. Any other failure before the load is taken as transport and
-    retried once in a new attempt; after the load started, it stops.
+    retried once in a new attempt, provided the attempt cleaned up after
+    itself; after the load started, it stops. A cleanup that failed leaves
+    the remote state unknown: a documented `oom` or `startup_failed` keeps its
+    receipt, a `measured` cell does not, and the matrix stops either way.
     """
     transport_retried = False
     while True:
@@ -429,6 +432,7 @@ def _run_experiment_02_cell(
         run_dir.mkdir(parents=True)
         started = datetime.now(UTC)
         before_attempt()
+        cleanup_errors = run_dir / DIAGNOSTICS / CLEANUP_ERRORS
         try:
             outcome = run_attempt(run_dir)
         except ValueError:
@@ -439,11 +443,20 @@ def _run_experiment_02_cell(
             (diagnostics / "error.txt").write_text(
                 "".join(format_exception_only(error))
             )
-            if (run_dir / LOAD_STARTED).is_file() or transport_retried:
+            if (
+                (run_dir / LOAD_STARTED).is_file()
+                or transport_retried
+                or cleanup_errors.is_file()
+            ):
                 raise
             transport_retried = True
             typer.echo(f"  {cell.label} failed before load ({error}); retrying once")
             continue
+        if cleanup_errors.is_file() and outcome == "measured":
+            raise RuntimeError(
+                f"{cell.label}: cleanup failed, see {cleanup_errors}; "
+                "the remote state is unknown, so the measurement is not kept"
+            )
         _ = write_cell_result(
             cell,
             root,
@@ -452,9 +465,14 @@ def _run_experiment_02_cell(
             outcome=outcome,
             reason=_EXPERIMENT_02_REASONS[outcome],
             started_at=started,
-            required=EXPERIMENT_02_EVIDENCE,
+            required=required_evidence(cell.configuration),
         )
         typer.echo(f"  {cell.label}: {outcome} (attempt {attempt})")
+        if cleanup_errors.is_file():
+            raise RuntimeError(
+                f"{cell.label}: cleanup failed, see {cleanup_errors}; "
+                "stopping before the next cell"
+            )
         return outcome
 
 

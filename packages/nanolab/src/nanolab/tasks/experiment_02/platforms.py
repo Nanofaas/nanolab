@@ -22,7 +22,7 @@ import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from nanolab.comparison.prepare import (
     comparison_remote_command,
@@ -32,7 +32,7 @@ from nanolab.comparison.prepare import (
 from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.tasks.experiment_02.budget import REGISTRY_CONTAINER
 from nanolab.tasks.experiment_02.generator import K6Target
-from nanolab.tasks.experiment_02.vm import Vm
+from nanolab.tasks.experiment_02.vm import Vm, exec_status
 from nanolab.workspace.paths import bundled_assets_root
 
 NETWORK = "nanolab-e02"
@@ -98,12 +98,6 @@ class Platform(Protocol):
         ...
 
 
-def _probe(vm: Vm, argv: tuple[str, ...]) -> Any:
-    return vm.provider.exec_argv(
-        vm.request, argv, env=None, remote_dir=None, dry_run=False
-    )
-
-
 def leftover_containers(vm: Vm) -> list[str]:
     """Return every container on the VM except the registry."""
     names = comparison_remote_command(
@@ -146,7 +140,7 @@ def _ensure_images(vm: Vm, images: Sequence[str]) -> None:
 
 
 def _ensure_network(vm: Vm) -> None:
-    if _probe(vm, ("docker", "network", "inspect", NETWORK)).return_code:
+    if exec_status(vm, ("docker", "network", "inspect", NETWORK)).return_code:
         _ = comparison_remote_command(
             vm.provider, vm.request, ("docker", "network", "create", NETWORK)
         )
@@ -359,7 +353,7 @@ class NanofaasPlatform:
 
     def teardown(self, vm: Vm) -> None:
         """Deregister the function and remove every container but the registry."""
-        _ = _probe(
+        _ = exec_status(
             vm,
             (
                 "curl", "-s", "-o", "/dev/null", "-m", "5", "-X", "DELETE",
@@ -367,7 +361,7 @@ class NanofaasPlatform:
             ),
         )  # fmt: skip
         _remove_containers(vm)
-        _ = _probe(vm, ("docker", "network", "rm", NETWORK))
+        _ = exec_status(vm, ("docker", "network", "rm", NETWORK))
 
 
 @dataclass(frozen=True)
@@ -431,4 +425,4 @@ class DirectReference:
     def teardown(self, vm: Vm) -> None:
         """Remove every container but the registry."""
         _remove_containers(vm)
-        _ = _probe(vm, ("docker", "network", "rm", NETWORK))
+        _ = exec_status(vm, ("docker", "network", "rm", NETWORK))

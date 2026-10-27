@@ -58,7 +58,10 @@ from nanolab.tasks.experiment_02.samples import (
 Platform = Literal["nanofaas", "direct"]
 
 SAMPLES = "metrics/cgroup-samples.jsonl"
+# nanoFaaS's raw Prometheus exposition, scraped beside the samples.
+SCHEDULER = "metrics/scheduler-samples.jsonl"
 EXPERIMENT_02_EVIDENCE: tuple[str, ...] = (SUMMARY, EVENTS, SAMPLES)
+
 EXPERIMENT_02_ORDER_POLICY = "experiment-02-seeded-shuffle-v1"
 
 
@@ -99,6 +102,13 @@ CONFIGURATIONS_BY_KEY = {
     configuration.key: configuration for configuration in EXPERIMENT_02_CONFIGURATIONS
 }
 EXPERIMENT_02_PUBLISHER = EXPERIMENT_02_CONFIGURATIONS[0].key
+
+
+def required_evidence(configuration: Configuration) -> tuple[str, ...]:
+    """Return what a measured cell of `configuration` must leave behind."""
+    if configuration.platform == "nanofaas":
+        return (*EXPERIMENT_02_EVIDENCE, SCHEDULER)
+    return EXPERIMENT_02_EVIDENCE
 
 
 @dataclass(frozen=True, slots=True)

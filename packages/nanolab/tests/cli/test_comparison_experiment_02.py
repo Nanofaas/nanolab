@@ -16,9 +16,11 @@ from nanolab.comparison.experiment_01 import (
 from nanolab.comparison.experiment_02 import (
     CONFIGURATIONS_BY_KEY,
     SAMPLES,
+    SCHEDULER,
     Experiment02Cell,
 )
 from nanolab.config.experiment_02 import Budget
+from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS
 
 IDENTITY = {"tag": "recipe-test", "experiment": {"profile": "experiment-02"}}
 CELL = Experiment02Cell(
@@ -28,7 +30,7 @@ CELL = Experiment02Cell(
 
 def _measured(run_dir: Path) -> Outcome:
     (run_dir / "metrics").mkdir(parents=True, exist_ok=True)
-    for name in (SUMMARY, EVENTS, SAMPLES):
+    for name in (SUMMARY, EVENTS, SAMPLES, SCHEDULER):
         (run_dir / name).write_text("{}\n")
     return "measured"
 
@@ -90,7 +92,7 @@ def test_startup_failure_is_a_result_not_an_error(tmp_path):
     outcome, calls, _checks = _run(tmp_path, [_startup_failed])
     assert outcome == "startup_failed"
     assert len(calls) == 1
-    assert _receipt(tmp_path)["notProduced"] == [SUMMARY, EVENTS, SAMPLES]
+    assert _receipt(tmp_path)["notProduced"] == [SUMMARY, EVENTS, SAMPLES, SCHEDULER]
 
 
 def test_transport_failure_before_load_is_retried_once(tmp_path):
@@ -119,3 +121,35 @@ def test_failure_after_the_load_started_is_not_retried(tmp_path):
     with pytest.raises(RuntimeError, match="k6"):
         _run(tmp_path, [_after_load, _measured])
     assert not (CELL.run_dir(tmp_path) / CELL_RESULT).exists()
+
+
+def _cleanup_failed(outcome):
+    def behaviour(run_dir: Path) -> Outcome:
+        result = (_measured if outcome == "measured" else _startup_failed)(run_dir)
+        (run_dir / DIAGNOSTICS).mkdir(parents=True, exist_ok=True)
+        (run_dir / DIAGNOSTICS / CLEANUP_ERRORS).write_text('[{"step": "teardown"}]')
+        return result
+
+    return behaviour
+
+
+def test_cleanup_failure_records_a_documented_failure_but_stops_the_matrix(tmp_path):
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        _run(tmp_path, [_cleanup_failed("startup_failed"), _measured])
+    assert _receipt(tmp_path)["outcome"] == "startup_failed"
+
+
+def test_cleanup_failure_never_keeps_a_measurement(tmp_path):
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        _run(tmp_path, [_cleanup_failed("measured"), _measured])
+    assert not (CELL.run_dir(tmp_path) / CELL_RESULT).exists()
+
+
+def test_transport_failure_with_a_failed_cleanup_is_not_retried(tmp_path):
+    def failed(run_dir: Path) -> Outcome:
+        (run_dir / DIAGNOSTICS).mkdir(parents=True, exist_ok=True)
+        (run_dir / DIAGNOSTICS / CLEANUP_ERRORS).write_text("[]")
+        raise RuntimeError("channel closed")
+
+    with pytest.raises(RuntimeError, match="channel closed"):
+        _run(tmp_path, [failed, _measured])
