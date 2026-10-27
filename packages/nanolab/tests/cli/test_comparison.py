@@ -666,18 +666,26 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
             events.append(("workloads", kwargs["record"].name)) or {"qr-spin": "a" * 64}
         ),
     )
+    observed = {"version": "spin 4.2.5"}
     monkeypatch.setattr(
         comparison,
         "install_baselines",
         lambda stack, keys, **kwargs: (
-            events.append(("install", tuple(keys))) or dict.fromkeys(keys, "x")
+            events.append(("install", tuple(keys)))
+            or {
+                key: {"root": f"/opt/nanolab-e02/{key}/id", "image": "", **observed}
+                for key in keys
+            }
         ),
     )
 
     def cell(cell, **kwargs):
         from nanolab.comparison.experiment_02 import EVENTS, SAMPLES, SCHEDULER, SUMMARY
 
-        events.append(("cell", cell.key, type(kwargs["platform"]).__name__))
+        platform = kwargs["platform"]
+        events.append(("cell", cell.key, type(platform).__name__))
+        if cell.key == "spin":  # the cell runs what this run installed
+            assert str(platform.root) == "/opt/nanolab-e02/spin/id"
         (kwargs["run_dir"] / "metrics").mkdir(parents=True, exist_ok=True)
         for name in (SUMMARY, EVENTS, SAMPLES, SCHEDULER):
             (kwargs["run_dir"] / name).write_text("{}\n")
@@ -704,3 +712,7 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
     assert not [event for event in events if event[0] == "cell"]
     # The resume checks the recorded artifacts again rather than trusting them.
     assert ("workloads", "workloads.json") in events
+    # An installation that no longer matches what was recorded stops the run.
+    observed["version"] = "spin 4.3.0"
+    result = invoke(*arguments, "--fresh")
+    assert result.exit_code != 0 and "changed" in str(result.exception)

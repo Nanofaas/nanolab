@@ -268,6 +268,7 @@ class Serverledge(_Baseline):
 
     budget: Budget
     root: PurePosixPath = OPT / "serverledge"
+    image: str = SERVERLEDGE_IMAGE
     host_commands: tuple[str, ...] = ("serverledge",)
 
     def start(
@@ -286,7 +287,7 @@ class Serverledge(_Baseline):
         )
         return _start(
             vm,
-            images=(ETCD, SERVERLEDGE_IMAGE),
+            images=(ETCD, self.image),
             commands=[
                 ("sudo", "sh", "-c", f"printf '{settings}' > {conf}"),
                 (
@@ -381,6 +382,7 @@ class Fn(_Baseline):
     """Fn 0.3.770 in single-server mode, starting function containers itself."""
 
     root: PurePosixPath = OPT / "fn"
+    image: str = FN_IMAGE
 
     def start(
         self,
@@ -392,10 +394,12 @@ class Fn(_Baseline):
     ) -> dict[str, float] | None:
         """Start fnserver, create app, function and trigger, probe the trigger."""
         iofs = self.root / "iofs"
-        register = _FN_REGISTER.replace("TIMEOUT", str(protocol.http_timeout_seconds))
+        register = _FN_REGISTER.replace(
+            "TIMEOUT", str(protocol.http_timeout_seconds)
+        ).replace(FN_IMAGE, self.image)
         return _start(
             vm,
-            images=(FNSERVER, FN_IMAGE),
+            images=(FNSERVER, self.image),
             commands=[
                 (
                     "docker",
@@ -440,6 +444,8 @@ class Fn(_Baseline):
 SPIN_VERSION = "v4.2.5"
 TINYFAAS_COMMIT = "eff00d060f6f6e96bf8f35475a0e9a8e6e42de32"
 SERVERLEDGE_COMMIT = "45419f50675aa7c8cc3813f626e17f6c28c8a641"
+# ponytail: tags, not digests; install records the digest each one resolved to.
+GOLANG = "golang:1.24"
 _FUNLESS_IMAGES = (
     "postgres:16",
     "ghcr.io/funlessdev/core@sha256:"
@@ -447,8 +453,20 @@ _FUNLESS_IMAGES = (
     "ghcr.io/funlessdev/worker@sha256:"
     "bb774f588228c704db6a4677e2915de20ce3ae2731ada0b56bd927188f9acd41",
 )
-
-
+# What an installation pins, per baseline: a change here is another identity.
+_PINS = {
+    "funless": " ".join(_FUNLESS_IMAGES),
+    "spin": SPIN_VERSION,
+    "tinyfaas": TINYFAAS_COMMIT,
+    "serverledge": f"{SERVERLEDGE_COMMIT} {GOLANG} {ETCD}",
+    "fn": FNSERVER,
+}
+# Images whose digest is recorded, the tags among them included.
+_PULLED = {
+    "funless": _FUNLESS_IMAGES,
+    "serverledge": (ETCD, GOLANG),
+    "fn": (FNSERVER,),
+}
 _GIT = {
     "tinyfaas": "https://github.com/OpenFogStack/tinyFaaS",
     "serverledge": "https://github.com/serverledge-faas/serverledge",
@@ -464,68 +482,105 @@ _TINYFAAS_UPLOAD = (
 )
 
 
-def _install_script(key: str, source: PurePosixPath) -> str:
-    """Return the root shell script that installs one baseline under OPT."""
-    root = OPT / key
+def _image(key: str, identity: str) -> str:
+    """Return the registry tag of a baseline's function image for one identity."""
+    return f"127.0.0.1:5000/qr-{key}:{identity}"
+
+
+def _install_script(
+    key: str, source: PurePosixPath, root: PurePosixPath, identity: str
+) -> str:
+    """Return the root shell script that installs one baseline into `root`.
+
+    One command per line, run under `set -e`: a failed step stops the script.
+    """
     release = source / "target" / "release"
     if key == "funless":
         compose = (
             bundled_assets_root() / "experiment02" / "funless-compose.yaml"
         ).read_text()
-        pulls = "; ".join(f"docker pull -q {image}" for image in _FUNLESS_IMAGES)
-        return (
-            f"cat > {root}/compose.yaml <<'NANOLAB_EOF'\n{compose}NANOLAB_EOF\n"
-            f"cp {source}/target/wasm32-wasip1/release/qr_funless.wasm {root}/\n{pulls}"
+        return "\n".join(
+            (
+                f"cat > {root}/compose.yaml <<'NANOLAB_EOF'\n{compose}NANOLAB_EOF",
+                f"cp {source}/target/wasm32-wasip1/release/qr_funless.wasm {root}/",
+                *(f"docker pull -q {image}" for image in _FUNLESS_IMAGES),
+            )
         )
     if key == "spin":
         tarball = f"spin-{SPIN_VERSION}-static-linux-amd64.tar.gz"
         url = f"https://github.com/spinframework/spin/releases/download/{SPIN_VERSION}"
-        return (
-            f"cd {root} && curl -fsSLO {url}/{tarball} && "
-            f"curl -fsSLO {url}/checksums-{SPIN_VERSION}.txt && "
-            f"grep ' {tarball}$' checksums-{SPIN_VERSION}.txt | sha256sum -c - && "
-            f"tar xzf {tarball} spin && "
-            f"cp {source}/target/wasm32-wasip2/release/qr_spin.wasm "
-            f"{source}/spin/spin.toml {root}/"
+        return "\n".join(
+            (
+                f"cd {root}",
+                f"curl -fsSLO {url}/{tarball}",
+                f"curl -fsSLO {url}/checksums-{SPIN_VERSION}.txt",
+                f"grep ' {tarball}$' checksums-{SPIN_VERSION}.txt > {tarball}.sha256",
+                f"sha256sum -c {tarball}.sha256",
+                f"tar xzf {tarball} spin",
+                f"cp {source}/target/wasm32-wasip2/release/qr_spin.wasm"
+                f" {source}/spin/spin.toml {root}/",
+            )
         )
     if key == "tinyfaas":
         return "\n".join(
             (
                 "apt-get install -y -q make golang-go >/dev/null",
-                f"[ -d {root}/.git ] || git clone -q {_GIT['tinyfaas']} {root}",
-                f"cd {root} && git checkout -q {TINYFAAS_COMMIT}",
-                "[ -x tinyfaas-linux-amd64 ] || make build >/dev/null",
+                f"git clone -q {_GIT['tinyfaas']} {root}/src",
+                f"cd {root}/src",
+                f"git checkout -q {TINYFAAS_COMMIT}",
+                "make build >/dev/null",
+                f"mv tinyfaas-linux-amd64 {root}/",
                 f"python3 -c '{_TINYFAAS_UPLOAD}' {source}/tinyfaas/fn.sh"
                 f" {release}/qr-stdio {root}/upload.json",
             )
         )
     if key == "serverledge":
-        go = "docker run --rm -v $PWD:/src -w /src golang:1.24"
+        image = _image(key, identity)
         return "\n".join(
             (
-                f"[ -d {root}/src/.git ] || git clone -q {_GIT['serverledge']}"
-                f" {root}/src",
-                f"cd {root}/src && git checkout -q {SERVERLEDGE_COMMIT}",
-                f"{go} make serverledge serverledge-cli >/dev/null",
+                f"git clone -q {_GIT['serverledge']} {root}/src",
+                f"cd {root}/src",
+                f"git checkout -q {SERVERLEDGE_COMMIT}",
+                f"docker run --rm -v $PWD:/src -w /src {GOLANG}"
+                " make serverledge serverledge-cli >/dev/null",
                 f"mkdir -p {root}/bin {root}/image",
                 f"cp bin/serverledge bin/serverledge-cli {root}/bin/",
                 "docker build -q -t serverledge-base:45419f5"
                 " -f images/base-alpine/Dockerfile . >/dev/null",
                 f"cp {source}/serverledge/Dockerfile {source}/serverledge/run.sh"
                 f" {release}/qr-stdio {root}/image/",
-                f"docker build -q -t {SERVERLEDGE_IMAGE} {root}/image >/dev/null",
-                f"docker push -q {SERVERLEDGE_IMAGE} >/dev/null",
+                f"docker build -q -t {image} {root}/image >/dev/null",
+                f"docker push -q {image} >/dev/null",
                 f"docker pull -q {ETCD}",
             )
         )
     if key == "fn":
-        return (
-            f"mkdir -p {root}/iofs {root}/image && docker pull -q {FNSERVER} && "
-            f"cp {source}/fn/Dockerfile {release}/qr-fn {root}/image/ && "
-            f"docker build -q -t {FN_IMAGE} {root}/image >/dev/null && "
-            f"docker push -q {FN_IMAGE} >/dev/null"
+        image = _image(key, identity)
+        return "\n".join(
+            (
+                f"mkdir -p {root}/iofs {root}/image",
+                f"docker pull -q {FNSERVER}",
+                f"cp {source}/fn/Dockerfile {release}/qr-fn {root}/image/",
+                f"docker build -q -t {image} {root}/image >/dev/null",
+                f"docker push -q {image} >/dev/null",
+            )
         )
     raise ValueError(f"unknown experiment-02 baseline: {key}")
+
+
+def _observe(stack: Vm, key: str, root: PurePosixPath) -> str:
+    """Return the versions an installation actually holds, for the evidence."""
+    probes = [
+        f"docker image inspect --format '{{{{index .RepoDigests 0}}}}' {image}"
+        for image in _PULLED.get(key, ())
+    ]
+    if key == "spin":
+        probes.append(f"{root}/spin --version")
+    if key in _GIT:
+        probes.append(f"git -C {root}/src rev-parse HEAD")
+    if not probes:
+        return ""
+    return exec_status(stack, ("sh", "-c", "; ".join(probes))).stdout
 
 
 def install_baselines(
@@ -534,21 +589,23 @@ def install_baselines(
     *,
     source: PurePosixPath,
     artifacts: Mapping[str, str],
-) -> dict[str, str]:
-    """Install the selected baselines once; return each installation's identity.
+) -> dict[str, dict[str, str]]:
+    """Install each selected baseline once per identity, beside any other.
 
-    The identity hashes the installing script, which pins every version, and
-    the wrappers' sha256: the same identity is installed once, a different one
-    installs again. Everything is installed before any cell, outside any clock.
+    The identity hashes what the baseline pins and the wrappers' sha256. Each
+    identity has its own directory and image tag, so another run on the same
+    VM never changes what this one installed. The marker is written only after
+    the whole script succeeded. Everything happens before any cell.
     """
-    installed: dict[str, str] = {}
+    installed: dict[str, dict[str, str]] = {}
     for key in keys:
-        script = _install_script(key, source)
         identity = hashlib.sha256(
-            (script + json.dumps(dict(artifacts), sort_keys=True)).encode()
+            json.dumps([key, _PINS[key], dict(artifacts)], sort_keys=True).encode()
         ).hexdigest()[:16]
-        marker = OPT / key / f".installed-{identity}"
+        root = OPT / key / identity
+        marker = root / ".installed"
         if exec_status(stack, ("test", "-f", str(marker))).return_code:
+            script = _install_script(key, source, root, identity)
             _ = comparison_remote_command(
                 stack.provider,
                 stack.request,
@@ -556,8 +613,16 @@ def install_baselines(
                     "sudo",
                     "sh",
                     "-c",
-                    f"set -e\nmkdir -p {OPT / key}\n{script}\ntouch {marker}",
+                    f"set -e\nrm -rf {root}\nmkdir -p {root}\n{script}",
                 ),
             )
-        installed[key] = identity
+            _ = comparison_remote_command(
+                stack.provider, stack.request, ("sudo", "touch", str(marker))
+            )
+        installed[key] = {
+            "identity": identity,
+            "root": str(root),
+            "image": _image(key, identity) if key in ("serverledge", "fn") else "",
+            "observed": _observe(stack, key, root),
+        }
     return installed

@@ -496,18 +496,24 @@ def _experiment_02_platform(
     *,
     function_image: str,
     protocol: Experiment02Protocol,
+    installed: Mapping[str, Mapping[str, str]],
 ) -> Platform:
-    """Return the platform a cell deploys, from the prepared images."""
+    """Return the platform a cell deploys, from the prepared images and installs."""
     configuration = cell.configuration
     if configuration.platform == "baseline":
-        baselines: dict[str, Platform] = {
-            "funless": FunLess(),
-            "spin": Spin(),
-            "tinyfaas": TinyFaas(),
-            "serverledge": Serverledge(budget=cell.budget),
-            "fn": Fn(),
+        key = configuration.key
+        root = PurePosixPath(installed[key]["root"])
+        image = installed[key]["image"]
+        baselines: dict[str, Callable[[], Platform]] = {
+            "funless": lambda: FunLess(root=root),
+            "spin": lambda: Spin(root=root),
+            "tinyfaas": lambda: TinyFaas(root=root),
+            "serverledge": lambda: Serverledge(
+                budget=cell.budget, root=root, image=image
+            ),
+            "fn": lambda: Fn(root=root, image=image),
         }
-        return baselines[configuration.key]
+        return baselines[key]()
     if configuration.platform == "direct" or configuration.profile is None:
         return DirectReference(function_image)
     distribution = prepared.distributions[configuration.key]
@@ -725,6 +731,7 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
         )
         stack = Vm(provider, request)
         loadgen = Vm(provider, requests["loadgen"])
+        installed: dict[str, dict[str, str]] = {}
         if workloads_root is not None:
             # Outside the run's owned staging, which a finished run removes: a
             # resume verifies these artifacts instead of rebuilding them.
@@ -740,9 +747,13 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             installed = install_baselines(
                 stack, baselines, source=workload_dir / WORKLOAD, artifacts=artifacts
             )
-            (root / "prepare" / "baselines.json").write_text(
-                json.dumps(installed, indent=2) + "\n"
-            )
+            record = root / "prepare" / "baselines.json"
+            if record.is_file() and json.loads(record.read_text()) != installed:
+                raise RuntimeError(
+                    f"the baselines' installation changed since {record}; "
+                    "start a new run directory"
+                )
+            record.write_text(json.dumps(installed, indent=2) + "\n")
         # The address the loadgen reaches the stack at, through the ports
         # `secure_release_endpoints` opened to it.
         host = str(provider.connection_host(request))  # type: ignore[attr-defined]
@@ -758,6 +769,7 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
                 cell,
                 prepared,
                 function_image=function_image,
+                installed=installed,
                 protocol=protocol,
             )
 
