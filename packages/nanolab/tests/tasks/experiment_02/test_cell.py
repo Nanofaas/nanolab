@@ -361,3 +361,27 @@ def test_cleanup_errors_preserve_the_original_exception(tmp_path):
     assert platform.calls[-1] == "teardown"
     errors = json.loads((tmp_path / DIAGNOSTICS / CLEANUP_ERRORS).read_text())
     assert [error["step"] for error in errors] == ["fetch-samples"]
+
+
+def test_host_process_outside_the_slice_stops_before_load(tmp_path):
+    # A baseline's host process (here Spin) found outside the measured slice.
+    outside = INSIDE + "301 spin /system.slice/run-x.service\n"
+    loadgen = _loadgen()
+    platform = FakePlatform(host_commands=("spin",))
+    with pytest.raises(ValueError, match="outside the measured slice"):
+        _run(_stack(listing=outside), loadgen, platform, tmp_path)
+    assert not any(argv[:2] == ("k6", "run") for argv in loadgen.commands())
+    # The same process inside the slice is fine.
+    inside = (
+        INSIDE
+        + "302 spin /nanolab.slice/nanolab-sut.slice/nanolab-e02-platform.service\n"
+    )
+    assert (
+        _run(
+            _stack(listing=inside),
+            _loadgen(),
+            FakePlatform(host_commands=("spin",)),
+            tmp_path / "ok",
+        )
+        == "measured"
+    )
