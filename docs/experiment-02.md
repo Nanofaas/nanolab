@@ -20,9 +20,13 @@ Every baseline runs the paper's one qr-code implementation,
 `nanofaas-paper/functions/qr-code`, through a thin wrapper. The source is
 taken at a commit (`NANOLAB_WORKLOADS_ROOT`, recorded in the identity), built
 once per run on the stack in `rust:1.99-alpine` (pinned by digest), and
-refused unless `qr-stdio` renders the measured PNG. Platforms are installed
-once per run under `/opt/nanolab-e02`, at pinned versions; a resume verifies
-the built artifacts and installs nothing again.
+refused unless `qr-stdio` renders the measured PNG. Each platform is
+installed under `/opt/nanolab-e02/<key>/<identity>`, with its own image tag,
+where the identity hashes the pinned versions and the wrappers' sha256: a
+failed step stops the install, and another run on the same VM never changes
+what this one installed. The digests and versions an install resolves to are
+recorded in `prepare/baselines.json`; a resume that finds them changed stops.
+Every cell first tears down whatever an earlier baseline left.
 
 | Key | Platform | How it runs the function | Generator target |
 | --- | --- | --- | --- |
