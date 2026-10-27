@@ -160,8 +160,22 @@ def main(argv: list[str] | None = None) -> int:
                 return False
             time.sleep(min(interval, max(0.0, remaining())))
 
+    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        # A command hung on an engine or a platform that never answers ends at
+        # the deadline.
+        try:
+            return subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=max(1.0, remaining()),
+            )
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(command, 124, "", "timed out")
+
     for command in spec["start"]:
-        done = subprocess.run(command, capture_output=True, text=True, check=False)
+        done = run(command)
         if done.returncode:
             result.update(
                 failed="start",
@@ -182,19 +196,6 @@ def main(argv: list[str] | None = None) -> int:
         return status is not None and (
             200 <= status < 300 or bool(spec.get("apiAnyStatus"))
         )
-
-    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
-        # A command hung on a platform that never answers ends at the deadline.
-        try:
-            return subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=max(1.0, remaining()),
-            )
-        except subprocess.TimeoutExpired:
-            return subprocess.CompletedProcess(command, 124, "", "timed out")
 
     register = spec.get("register")
 

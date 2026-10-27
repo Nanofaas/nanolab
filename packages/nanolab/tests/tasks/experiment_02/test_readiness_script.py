@@ -259,6 +259,18 @@ def test_secret_headers_come_from_a_command_and_stay_out_of_the_output(
     assert "s3cret" not in json.dumps(result)
 
 
+def test_a_hung_start_command_fails_the_start_at_the_readiness_deadline(
+    tmp_path, platform
+):
+    # An engine that never answers `docker compose up` or `docker run`.
+    hang = [sys.executable, "-c", "import time; time.sleep(30)"]
+    began = time.monotonic()
+    result = _run(tmp_path, platform, timeoutSeconds=0.5, start=[hang])
+    assert time.monotonic() - began < 10
+    assert (result["failed"], result["code"]) == ("start", 124)
+    assert platform.seen == []
+
+
 @pytest.mark.parametrize("stage", ["register", "headers"])
 def test_a_hung_command_ends_at_the_readiness_deadline(tmp_path, platform, stage):
     # A platform that accepts the connection and never answers.
