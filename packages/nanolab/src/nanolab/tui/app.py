@@ -14,10 +14,8 @@ from tui_toolkit.console import console as default_console
 
 from nanolab.application.execution import resolve_loadtest_urls
 from nanolab.application.inputs import load_environment, load_scenario
+from nanolab.application.run_options import validate_cli_container_options
 from nanolab.cli import diagnostics
-from nanolab.cli.product import (
-    _validate_cli_container_options,
-)
 from nanolab.cli.provisioning import provision_environment
 from nanolab.cli.soak import terminal_status
 from nanolab.plans.dispatch import build_scenario_workflow, scenario_observers
@@ -440,7 +438,7 @@ class NanofaasTUI:
         try:
             scenario = load_scenario(scenario_path)
             environment = load_environment(environment_path)
-            _validate_cli_container_options(scenario, environment)
+            validate_cli_container_options(scenario, environment)
             return scenario, environment
         except Exception as exc:
             self._show_static(
@@ -481,7 +479,7 @@ class NanofaasTUI:
         keep: bool,
     ) -> bool:
         try:
-            _validate_cli_container_options(scenario, environment, keep=keep)
+            validate_cli_container_options(scenario, environment, keep=keep)
             return True
         except Exception as exc:
             self._show_static(

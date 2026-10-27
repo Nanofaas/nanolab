@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
-from contextlib import ExitStack, nullcontext, suppress
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict, cast
@@ -38,6 +39,11 @@ from nanolab.application.execution import (
     resolve_loadtest_urls,
 )
 from nanolab.application.inputs import load_environment, load_scenario
+from nanolab.application.run_options import (
+    require_cli_endpoint,
+    validate_cli_container_options,
+    validate_contract_options,
+)
 from nanolab.application.vm_provider import (
     provider_for_environment,
     vm_request_for_role,
@@ -245,75 +251,13 @@ def _release_request(
     )
 
 
-def _require_cli_endpoint(
-    scenario: ScenarioConfig,
-    environment: EnvironmentConfig,
-    control_plane_url: str | None,
-) -> None:
-    if (
-        scenario.workflow == "cli"
-        and scenario.backend == "k8s"
-        and scenario.recipe_profile is None
-        and environment.provider == "local"
-        and control_plane_url is None
-    ):
-        raise typer.BadParameter(
-            "--control-plane-url is required for a k8s cli scenario"
-        )
-
-
-def _validate_contract_options(
-    scenario: ScenarioConfig,
-    environment: EnvironmentConfig,
-    *,
-    keep: bool = False,
-    resume: bool = False,
-    teardown: bool = False,
-    only: str | None = None,
-    start: str | None = None,
-    until: str | None = None,
-    control_plane_url: str | None = None,
-    prometheus_url: str | None = None,
-    release_config: Path | None = None,
-) -> None:
-    if scenario.workflow != "contract":
-        return
-    if environment.provider != "local":
-        raise typer.BadParameter("contract requires a local environment")
-    if (
-        keep
-        or resume
-        or teardown
-        or any(
-            value is not None
-            for value in (
-                only,
-                start,
-                until,
-                control_plane_url,
-                prometheus_url,
-                release_config,
-            )
-        )
-    ):
-        raise typer.BadParameter(
-            "contract requires its complete owned lifecycle; keep, resume, teardown, "
-            "partial selection, external endpoints and release settings are unsupported"
-        )
-
-
-def _validate_cli_container_options(
-    scenario: ScenarioConfig,
-    environment: EnvironmentConfig,
-    *,
-    keep: bool = False,
-) -> None:
-    if scenario.workflow != "cli" or scenario.backend != "container":
-        return
-    if environment.provider != "local":
-        raise typer.BadParameter("cli container scenario requires a local environment")
-    if keep:
-        raise typer.BadParameter("--keep is not supported for a cli container scenario")
+@contextmanager
+def _bad_parameter() -> Iterator[None]:
+    """Report a failed option check as a usage error."""
+    try:
+        yield
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
 
 
 def _require_local_loadtest_tools(
@@ -900,19 +844,20 @@ def install_product_commands(
                     )
         except ValueError as error:
             raise typer.BadParameter(str(error)) from None
-        _validate_contract_options(
-            scenario_config,
-            environment_config,
-            keep=keep,
-            resume=resume,
-            teardown=teardown,
-            only=only,
-            start=start,
-            until=until,
-            control_plane_url=control_plane_url,
-            prometheus_url=prometheus_url,
-            release_config=release_config,
-        )
+        with _bad_parameter():
+            validate_contract_options(
+                scenario_config,
+                environment_config,
+                keep=keep,
+                resume=resume,
+                teardown=teardown,
+                only=only,
+                start=start,
+                until=until,
+                control_plane_url=control_plane_url,
+                prometheus_url=prometheus_url,
+                release_config=release_config,
+            )
         release = scenario_config.workflow == "release"
         if scenario_config.workflow == "soak":
             try:
@@ -1016,13 +961,15 @@ def install_product_commands(
             return
         if resume and not release:
             raise typer.BadParameter("--resume is only supported for release workflows")
-        _validate_cli_container_options(
-            scenario_config,
-            environment_config,
-            keep=keep,
-        )
+        with _bad_parameter():
+            validate_cli_container_options(
+                scenario_config,
+                environment_config,
+                keep=keep,
+            )
         _require_local_loadtest_tools(scenario_config, environment_config)
-        _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
+        with _bad_parameter():
+            require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         paths = default_tool_paths()
         effective_run_dir = _default_run_dir(
             run_dir,
@@ -1200,17 +1147,19 @@ def install_product_commands(
     ) -> None:
         scenario_config = load_scenario(scenario)
         environment_config = load_environment(environment)
-        _validate_contract_options(
-            scenario_config,
-            environment_config,
-            only=only,
-            start=start,
-            until=until,
-            control_plane_url=control_plane_url,
-            prometheus_url=prometheus_url,
-            release_config=release_config,
-        )
-        _validate_cli_container_options(scenario_config, environment_config)
+        with _bad_parameter():
+            validate_contract_options(
+                scenario_config,
+                environment_config,
+                only=only,
+                start=start,
+                until=until,
+                control_plane_url=control_plane_url,
+                prometheus_url=prometheus_url,
+                release_config=release_config,
+            )
+        with _bad_parameter():
+            validate_cli_container_options(scenario_config, environment_config)
         if scenario_config.workflow == "soak":
             try:
                 validate_soak_selection(
@@ -1248,7 +1197,8 @@ def install_product_commands(
                     )
             except ValueError as error:
                 raise typer.BadParameter(str(error)) from None
-        _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
+        with _bad_parameter():
+            require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         if scenario_config.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment_config,

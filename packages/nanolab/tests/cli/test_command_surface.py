@@ -116,14 +116,14 @@ def test_recipe_workflows_get_unique_default_run_directory(
 def test_recipe_cli_uses_its_owned_endpoint_at_product_entry(
     command, tmp_path, monkeypatch
 ):
+    from nanolab.application.run_options import require_cli_endpoint
     from nanolab.config.environment import EnvironmentConfig
 
     scenario = product_module.load_scenario(Path("cli-contract-k8s-native-parity.yaml"))
-    product_module._require_cli_endpoint(
-        scenario, EnvironmentConfig(provider="local"), None
-    )
+    require_cli_endpoint(scenario, EnvironmentConfig(provider="local"), None)
     monkeypatch.setattr(
-        product_module, "build_cli_plan", lambda *args, **kwargs: _sonata_workflow()
+        "nanolab.plans.dispatch.build_cli_plan",
+        lambda *args, **kwargs: _sonata_workflow(),
     )
     result = CliRunner().invoke(
         app,
