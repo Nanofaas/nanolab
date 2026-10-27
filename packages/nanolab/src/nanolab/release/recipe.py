@@ -250,9 +250,8 @@ def prepare_release_recipe_groups(
             raw = (profiles_root / f"{name}.yaml").read_bytes()
         except OSError as error:
             raise ValueError(f"Cannot read release recipe profile {name}") from error
-        profile = require_object(
-            yaml.load(raw, Loader=_ProfileLoader), "release profile"
-        )  # nosec B506 - SafeLoader subclass rejects duplicate keys
+        loaded = yaml.load(raw, Loader=_ProfileLoader)  # nosec B506 - SafeLoader subclass rejects duplicate keys
+        profile = require_object(loaded, "release profile")
         _check_profile(profile, name=name, flavor=flavor, cells=cells, modules=modules)
         tag = (
             image_plan.version
