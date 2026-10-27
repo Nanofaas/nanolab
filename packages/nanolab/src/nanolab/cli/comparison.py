@@ -30,6 +30,7 @@ from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.application.functions import resolve_function
+from nanolab.application.inputs import load_environment, load_scenario
 from nanolab.application.vm_provider import (
     provider_for_environment,
     vm_request_for_role,
@@ -552,9 +553,7 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
     `tasks.experiment_02.cell.run_cell` drives directly on the VMs.
     """
     from nanolab.cli.product import (  # local: the router imports this module
-        _environment,
         _provisioning_context,
-        _scenario,
         default_tool_paths,
     )
 
@@ -633,8 +632,8 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
 
         def capture() -> dict[str, object]:
             return capture_comparison_inputs(
-                scenario=_scenario(scenario),
-                environment=_environment(environment),
+                scenario=load_scenario(scenario),
+                environment=load_environment(environment),
                 nanofaas_root=paths.nanofaas_root,
                 nanolab_root=nanolab_root,
                 profiles=profiles,
@@ -860,14 +859,12 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Compare control-plane builds under one varying load."""
         from nanolab.cli.product import (  # local: the router imports this module
-            _environment,
             _provisioning_context,
-            _scenario,
             default_tool_paths,
         )
 
-        scenario_config = _scenario(scenario)
-        environment_config = _environment(environment)
+        scenario_config = load_scenario(scenario)
+        environment_config = load_environment(environment)
         if scenario_config.load_profile == "experiment-02":
             if native_parallelism is not None and native_parallelism < 1:
                 raise typer.BadParameter("native parallelism must be positive")
@@ -970,8 +967,8 @@ def register(app: typer.Typer) -> None:
 
             def capture() -> dict[str, object]:
                 return capture_comparison_inputs(
-                    scenario=_scenario(scenario),
-                    environment=_environment(environment),
+                    scenario=load_scenario(scenario),
+                    environment=load_environment(environment),
                     nanofaas_root=paths.nanofaas_root,
                     nanolab_root=nanolab_root,
                     profiles=profiles,

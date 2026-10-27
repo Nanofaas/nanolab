@@ -13,10 +13,9 @@ from tui_toolkit import Choice, render_screen_frame, select
 from tui_toolkit.console import console as default_console
 
 from nanolab.application.execution import resolve_loadtest_urls
+from nanolab.application.inputs import load_environment, load_scenario
 from nanolab.cli import diagnostics
 from nanolab.cli.product import (
-    _environment,
-    _scenario,
     _validate_cli_container_options,
     _workflow,
     _workflow_observers,
@@ -272,7 +271,7 @@ class NanofaasTUI:
             if selected == "back":
                 return
             try:
-                scenario = _scenario(discover_tool_root() / "scenarios" / selected)
+                scenario = load_scenario(discover_tool_root() / "scenarios" / selected)
                 body = scenario.model_dump_json(by_alias=True, indent=2)
             except Exception as exc:
                 body = str(exc)
@@ -439,8 +438,8 @@ class NanofaasTUI:
         title: str,
     ) -> tuple[Any, Any] | None:
         try:
-            scenario = _scenario(scenario_path)
-            environment = _environment(environment_path)
+            scenario = load_scenario(scenario_path)
+            environment = load_environment(environment_path)
             _validate_cli_container_options(scenario, environment)
             return scenario, environment
         except Exception as exc:

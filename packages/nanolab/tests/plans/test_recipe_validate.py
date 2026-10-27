@@ -15,9 +15,9 @@ from tests.plans.test_validate import RecordingExecutor
 
 
 def test_bundled_native_k8s_recipe_plans_without_building(nanofaas_root, tmp_path):
-    from nanolab.cli.catalogue import _scenario
+    from nanolab.application.inputs import load_scenario
 
-    config = _scenario(Path("deployment-lifecycle-k8s-native.yaml"))
+    config = load_scenario(Path("deployment-lifecycle-k8s-native.yaml"))
     executor = RecordingExecutor()
     workflow = build_validate_plan(
         config,
@@ -69,7 +69,7 @@ def test_legacy_native_validate_is_rejected_before_planning(
 def test_default_recipe_outputs_belong_to_operator_workspace(
     tmp_path, monkeypatch, nanofaas_root, backend, explicit
 ):
-    from nanolab.cli.catalogue import _scenario
+    from nanolab.application.inputs import load_scenario
     from nanolab.plans import validate
 
     workspace = tmp_path / "operator"
@@ -91,7 +91,7 @@ def test_default_recipe_outputs_belong_to_operator_workspace(
         else "recipe_run_resource",
         capture,
     )
-    config = _scenario(Path(f"deployment-lifecycle-{backend}.yaml"))
+    config = load_scenario(Path(f"deployment-lifecycle-{backend}.yaml"))
     environment = EnvironmentConfig.model_validate(
         {
             "provider": "multipass" if backend == "containerd" else "local",

@@ -6,7 +6,7 @@ import pytest
 import yaml
 from sonata_engine import Workflow
 
-from nanolab.cli.catalogue import _scenario
+from nanolab.application.inputs import load_scenario
 from nanolab.cli.product import _workflow
 
 pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
@@ -72,7 +72,7 @@ def test_relative_prerequisite_paths_resolve_from_scenario_not_operator_director
     path.write_text(yaml.safe_dump(data))
     for cwd in (directory, tmp_path):
         monkeypatch.chdir(cwd)
-        config = _scenario(path)
+        config = load_scenario(path)
         assert config.one_shot is not None
         for name in ["profile", "qualification", "runtime_distribution"]:
             artifact = getattr(config.one_shot, name)
@@ -122,7 +122,7 @@ def test_public_cli_load_failure_still_reports_and_preserves_original_error(
         Path(__file__).parents[2]
         / "src/nanolab/assets/presets/scenarios/one-shot-experiment.yaml"
     )
-    scenario = _scenario(preset)
+    scenario = load_scenario(preset)
     calls = []
     monkeypatch.setattr(product, "require_supported_runtimes", lambda *args: None)
     monkeypatch.setattr(product, "require_recipe_environment", lambda *args: None)

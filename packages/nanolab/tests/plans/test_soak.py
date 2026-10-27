@@ -318,7 +318,7 @@ SCENARIOS = discover_tool_root() / "scenarios"
 
 def _load_soak_scenario(name: str) -> ScenarioConfig:
     """Load a scenario file the way the CLI does, policy file and all."""
-    from nanolab.cli.soak import load_soak_policy
+    from nanolab.application.inputs import load_soak_policy
 
     path = SCENARIOS / name
     resolved, receipt = load_soak_policy(yaml.safe_load(path.read_text()), path)
@@ -474,10 +474,10 @@ def test_the_switch_soaks_gc_evidence_names_sources_the_worker_emits():
 
 
 def recipe_scenario():
-    from nanolab.cli.product import _scenario
+    from nanolab.application.inputs import load_scenario
 
     path = discover_tool_root() / "scenarios/memory-soak-smoke-recipe-container.yaml"
-    return _scenario(path)
+    return load_scenario(path)
 
 
 def test_recipe_selection_reaches_deferred_preparation(tmp_path):
@@ -530,7 +530,7 @@ def test_recipe_owned_resources_cleanup_preserves_selection(
     from sonata_tasks.execution.models import TaskResult
 
     import nanolab.tasks.soak.runtime as runtime
-    from nanolab.cli.product import _scenario
+    from nanolab.application.inputs import load_scenario
 
     seen = []
 
@@ -580,7 +580,7 @@ def test_recipe_owned_resources_cleanup_preserves_selection(
     workflow = build_soak_plan(
         recipe_scenario()
         if purpose == "smoke"
-        else _scenario(
+        else load_scenario(
             discover_tool_root() / "scenarios/memory-soak-sync-container.yaml"
         ),
         EnvironmentConfig(provider="local"),
@@ -609,11 +609,11 @@ def test_recipe_environment_accepts_container_smoke_soak():
 
 
 def test_p24_recipe_plan_is_deferred(tmp_path):
-    from nanolab.cli.product import _scenario
+    from nanolab.application.inputs import load_scenario
     from nanolab.plans.validate import require_recipe_environment
     from nanolab.tasks.soak.runtime import RunSingleVersionSoak
 
-    config = _scenario(
+    config = load_scenario(
         discover_tool_root() / "scenarios/memory-soak-sync-container.yaml"
     )
     require_recipe_environment(config, EnvironmentConfig(provider="local"))

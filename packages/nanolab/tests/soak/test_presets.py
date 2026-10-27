@@ -68,7 +68,7 @@ def fixture_criteria():
 
 
 def resolve(data, path):
-    from nanolab.cli.soak import load_soak_policy
+    from nanolab.application.inputs import load_soak_policy
 
     return load_soak_policy(data, path)[0]
 

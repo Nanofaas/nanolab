@@ -187,8 +187,8 @@ def _install_workflow_helpers(
         call_log.append(("workflow", loaded_scenario, loaded_environment, kwargs))
         return workflow
 
-    monkeypatch.setattr(tui_app, "_scenario", load_scenario)
-    monkeypatch.setattr(tui_app, "_environment", load_environment)
+    monkeypatch.setattr(tui_app, "load_scenario", load_scenario)
+    monkeypatch.setattr(tui_app, "load_environment", load_environment)
     monkeypatch.setattr(tui_app, "_workflow", build_workflow)
 
 
@@ -254,7 +254,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         loaded_paths.append(path)
         return Scenario()
 
-    monkeypatch.setattr(tui_app, "_scenario", load_scenario)
+    monkeypatch.setattr(tui_app, "load_scenario", load_scenario)
     frame = object()
     frame_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -480,7 +480,7 @@ def test_configuration_error_uses_the_shared_branded_static_view(
     environment_path = _install_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(
         tui_app,
-        "_scenario",
+        "load_scenario",
         lambda _path: (_ for _ in ()).throw(ValueError("invalid scenario")),
     )
     frame = object()
@@ -1119,11 +1119,13 @@ def test_remote_environment_runs_with_automatic_provisioning(
     remote_path.write_text("provider: multipass\n", encoding="utf-8")
     workflow = FakeSonataWorkflow()
     monkeypatch.setattr(
-        tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="offload-loadtest")
+        tui_app,
+        "load_scenario",
+        lambda _path: SimpleNamespace(workflow="offload-loadtest"),
     )
     monkeypatch.setattr(
         tui_app,
-        "_environment",
+        "load_environment",
         lambda path: SimpleNamespace(
             provider="multipass" if path == remote_path else "local"
         ),
@@ -1370,7 +1372,7 @@ def test_provider_setup_never_loads_template_as_executable_yaml(
         loaded_paths.append(path)
         return SimpleNamespace(provider="local")
 
-    monkeypatch.setattr(tui_app, "_environment", load_environment)
+    monkeypatch.setattr(tui_app, "load_environment", load_environment)
     chooser = ScriptedChooser(iter(["setup:azure", str(environment_path), "plan"]))
     tui = NanofaasTUI(choose=chooser)
     monkeypatch.setattr(tui, "_show_static", lambda *args, **kwargs: None)

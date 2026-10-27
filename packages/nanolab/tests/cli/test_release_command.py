@@ -417,7 +417,7 @@ def test_generic_release_interrupt_still_releases_infrastructure(
 def test_generic_release_run_rejects_a_concurrent_coordinator(
     release_cli_harness,
 ) -> None:
-    environment = product_module._environment(release_cli_harness.environment)
+    environment = product_module.load_environment(release_cli_harness.environment)
 
     with release_run_lock(release_lock_path(environment)):
         result = release_cli_harness.invoke()
@@ -434,7 +434,7 @@ def test_locked_release_does_not_supersede_the_active_journal(
     assert release_cli_harness.invoke().exit_code == 0
     receipt = release_cli_harness.release_dir / "source-tests.json"
     receipt.write_text("active receipt", encoding="utf-8")
-    environment = product_module._environment(release_cli_harness.environment)
+    environment = product_module.load_environment(release_cli_harness.environment)
 
     with release_run_lock(release_lock_path(environment)):
         result = release_cli_harness.invoke()

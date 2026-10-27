@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nanolab.cli.product import _scenario
+from nanolab.application.inputs import load_scenario
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.config.soak import SoakConfig
 from nanolab.tasks.soak.sources import capture_source_snapshot
@@ -80,14 +80,14 @@ def test_soak_recipe_path_is_relative_to_scenario(tmp_path, monkeypatch):
     scenario = directory / "soak.yaml"
     scenario.write_text(yaml.safe_dump(data))
     monkeypatch.chdir(tmp_path.parent)
-    assert _scenario(scenario).recipe_profile == profile
+    assert load_scenario(scenario).recipe_profile == profile
 
 
 def test_checked_in_recipe_smoke_resolves_and_matches_policy():
     from nanolab.tasks.soak.recipe import validate_soak_recipe
 
     path = discover_tool_root() / "scenarios/memory-soak-smoke-recipe-container.yaml"
-    config = _scenario(path)
+    config = load_scenario(path)
     assert config.recipe_profile is not None
     assert config.soak is not None
     validate_soak_recipe(config.recipe_profile, config.soak, platform="linux/arm64")
@@ -283,7 +283,7 @@ def p24_config():
 def test_p24_recipe_preset_preserves_experiment():
     baseline = json.loads(P24_BASELINE.read_text())
     baseline.pop("recipe_profile")
-    config = _scenario(P24_SCENARIO)
+    config = load_scenario(P24_SCENARIO)
     actual = config.model_dump(mode="json")
     actual.pop("recipe_profile")
     assert actual.pop("contract") is None
@@ -352,7 +352,9 @@ def test_p24_recipe_rejects_policy_drift_before_acquisition(tmp_path, role, opti
 def test_smoke_profile_keeps_explicit_jvm_options():
     from nanolab.tasks.soak.recipe import validate_soak_recipe
 
-    config = _scenario(P24_SCENARIO.parent / "memory-soak-smoke-recipe-container.yaml")
+    config = load_scenario(
+        P24_SCENARIO.parent / "memory-soak-smoke-recipe-container.yaml"
+    )
     assert config.soak is not None and config.recipe_profile is not None
     validate_soak_recipe(config.recipe_profile, config.soak, platform="linux/arm64")
 
@@ -384,10 +386,10 @@ def test_p24_recipe_loader_preserves_path_and_policy_guards(
     scenario.write_text(yaml.safe_dump(raw))
     monkeypatch.chdir(tmp_path.parent)
     if failure is None:
-        assert _scenario(scenario).recipe_profile == profile
+        assert load_scenario(scenario).recipe_profile == profile
     else:
         with pytest.raises(ValueError, match=r"(?i)recipe|policy|steady"):
-            _scenario(scenario)
+            load_scenario(scenario)
 
 
 def p24_profile_data():
@@ -399,7 +401,7 @@ def p24_profile_data():
 
 
 def test_p24_checked_in_recipe_preserves_effective_launcher_settings():
-    config = _scenario(P24_SCENARIO)
+    config = load_scenario(P24_SCENARIO)
     assert config.recipe_profile is not None
     data = yaml.safe_load(config.recipe_profile.read_text())
     assert data["controlPlane"]["jvm"] == {

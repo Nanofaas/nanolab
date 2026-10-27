@@ -5,8 +5,6 @@ from pathlib import Path
 import typer
 import yaml
 
-from nanolab.cli.soak import load_soak_policy
-from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.workspace.paths import resolve_input_path
 
 _ENVIRONMENT_PROVIDERS = ("local", "multipass", "external", "azure", "proxmox")
@@ -27,49 +25,6 @@ def _input(value: Path, directory: str) -> Path:
         return resolve_input_path(value, directory)
     except ValueError as error:
         raise typer.BadParameter(str(error)) from None
-
-
-def _read(path: Path) -> dict[str, object]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError(f"configuration must be an object: {path}")
-    return data
-
-
-def _scenario(path: Path) -> ScenarioConfig:
-    path = resolve_input_path(path, "scenarios")
-    data = _read(path)
-    if "recipeProfile" in data:
-        data["recipeProfile"] = (
-            path.resolve().parent / str(data["recipeProfile"])
-        ).resolve()
-    if data.get("workflow") == "soak" or "soakPolicyFile" in data:
-        resolved, receipt = load_soak_policy(data, path)
-        config = ScenarioConfig.model_validate(resolved)
-        if receipt is not None:
-            object.__setattr__(config, "_soak_policy_receipt", receipt)
-        return config
-    config = ScenarioConfig.model_validate(data)
-    if config.one_shot is not None:
-        for artifact in (
-            config.one_shot.profile,
-            config.one_shot.qualification,
-            config.one_shot.runtime_distribution,
-            config.one_shot.observability.vm_resource_overhead,
-        ):
-            if artifact is not None:
-                artifact.path = (path.resolve().parent / artifact.path).resolve()
-    return config
-
-
-def _environment(path: Path | None) -> EnvironmentConfig:
-    return (
-        EnvironmentConfig.model_validate(
-            _read(resolve_input_path(path, "environments"))
-        )
-        if path
-        else EnvironmentConfig(provider="local")
-    )
 
 
 def _workflow_catalog(

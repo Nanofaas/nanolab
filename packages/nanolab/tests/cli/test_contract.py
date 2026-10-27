@@ -42,10 +42,10 @@ def test_forbidden_options_rejected_before_acquisition(
     "name", ["artifact-contract-container", "artifact-contract-smoke-container"]
 )
 def test_installed_contract_preset_resolution(name):
-    from nanolab.cli.catalogue import _scenario
+    from nanolab.application.inputs import load_scenario
     from nanolab.workspace.paths import discover_tool_root
 
-    config = _scenario(discover_tool_root() / "scenarios" / f"{name}.yaml")
+    config = load_scenario(discover_tool_root() / "scenarios" / f"{name}.yaml")
     assert config.workflow == "contract"
     assert config.contract is not None
     assert config.backend == "container"

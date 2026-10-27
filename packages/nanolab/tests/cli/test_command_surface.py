@@ -118,7 +118,7 @@ def test_recipe_cli_uses_its_owned_endpoint_at_product_entry(
 ):
     from nanolab.config.environment import EnvironmentConfig
 
-    scenario = product_module._scenario(Path("cli-contract-k8s-native-parity.yaml"))
+    scenario = product_module.load_scenario(Path("cli-contract-k8s-native-parity.yaml"))
     product_module._require_cli_endpoint(
         scenario, EnvironmentConfig(provider="local"), None
     )
@@ -790,7 +790,7 @@ def test_containerd_recipe_staging_survives_kept_run(
     scenario_path = (
         discover_tool_root() / "scenarios/deployment-lifecycle-containerd.yaml"
     )
-    scenario = product_module._scenario(scenario_path)
+    scenario = product_module.load_scenario(scenario_path)
     environment = product_module.EnvironmentConfig.model_validate(
         {
             "provider": "multipass",

@@ -118,7 +118,7 @@ def test_missing_or_invalid_terminal_never_passes(tmp_path):
 
 
 def test_policy_overlay_is_explicit_and_only_replaces_criteria(tmp_path):
-    from nanolab.cli.soak import load_soak_policy
+    from nanolab.application.inputs import load_soak_policy
 
     policy = tmp_path / "policy.yaml"
     policy.write_text("schema: nanolab-soak-policy-v1\ncriteria:\n  - id: chosen\n")
@@ -138,7 +138,7 @@ def test_policy_overlay_is_explicit_and_only_replaces_criteria(tmp_path):
 
 
 def test_policy_cannot_override_images_or_timing(tmp_path):
-    from nanolab.cli.soak import load_soak_policy
+    from nanolab.application.inputs import load_soak_policy
 
     (tmp_path / "policy.yaml").write_text(
         "schema: nanolab-soak-policy-v1\ncriteria: []\nimages: {}\n"
@@ -151,7 +151,7 @@ def test_policy_cannot_override_images_or_timing(tmp_path):
 
 
 def test_missing_policy_is_not_filled_with_permissive_defaults(tmp_path):
-    from nanolab.cli.soak import load_soak_policy
+    from nanolab.application.inputs import load_soak_policy
 
     with pytest.raises(ValueError, match="required soak policy file unavailable"):
         load_soak_policy(

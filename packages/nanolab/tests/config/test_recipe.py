@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from nanolab.cli.product import _scenario
+from nanolab.application.inputs import load_scenario
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.workspace.paths import discover_tool_root
 
@@ -24,7 +24,7 @@ def test_scenario_resolves_recipe_relative_to_yaml(
         "functions: [word-stats-java]\nrecipeProfile: ../recipes/profile.yaml\n"
     )
     monkeypatch.chdir(tmp_path.parent)
-    config = _scenario(scenario)
+    config = load_scenario(scenario)
     assert config.recipe_profile == recipe.resolve()
     assert config.model_copy().recipe_profile == recipe.resolve()
 
@@ -117,7 +117,7 @@ def test_container_loadtest_recipe_rejects_incompatible_options(
 def test_autoscaling_container_scenario_selects_loadtest_recipe() -> None:
     scenario = discover_tool_root() / "scenarios/autoscaling-cycle-container.yaml"
 
-    config = _scenario(scenario)
+    config = load_scenario(scenario)
 
     assert (
         config.recipe_profile

@@ -74,7 +74,7 @@ def test_installed_wheel_catalogue_presets_and_writable_workspace(
 def test_bundled_scenario_recipe_and_policy_references_resolve() -> None:
     import yaml
 
-    from nanolab.cli.catalogue import _scenario
+    from nanolab.application.inputs import load_scenario
     from nanolab.workspace.paths import discover_tool_root
 
     scenarios = discover_tool_root() / "scenarios"
@@ -83,7 +83,7 @@ def test_bundled_scenario_recipe_and_policy_references_resolve() -> None:
         data = yaml.safe_load(path.read_text())
         if not isinstance(data, dict) or "workflow" not in data:
             continue
-        config = _scenario(path)
+        config = load_scenario(path)
         if config.recipe_profile is not None:
             assert config.recipe_profile.is_file(), path
         if "soakPolicyFile" in data:

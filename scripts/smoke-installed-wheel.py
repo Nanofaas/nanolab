@@ -32,7 +32,7 @@ def main() -> None:
 
         import nanolab
         from nanolab.app.main import app
-        from nanolab.cli.product import _environment, _scenario
+        from nanolab.application.inputs import load_environment, load_scenario
         from nanolab.functions.catalog import list_functions
         from nanolab.tasks.soak.helper_build import (
             BASES_LOCK,
@@ -64,7 +64,7 @@ def main() -> None:
             preset = Path(
                 str(assets.joinpath(f"presets/scenarios/one-shot-{mode}.yaml"))
             )
-            assert _scenario(preset).workflow == f"one-shot-{mode}"
+            assert load_scenario(preset).workflow == f"one-shot-{mode}"
         assert (BUILD_CONTEXT / DOCKERFILE).is_file()
         assert MAT_LOCK.is_file() and BASES_LOCK.is_file()
         for probe in ("retry_hint_probe.py", "retry_backoff_burst.py"):
@@ -79,7 +79,7 @@ def main() -> None:
             for line in listing.output.splitlines()
             if line.endswith("/deployment-lifecycle-container.yaml")
         )
-        config = _scenario(scenario)
+        config = load_scenario(scenario)
         assert config.recipe_profile.is_file()
         inspected = CliRunner().invoke(
             app, ["inspect", "deployment-lifecycle-container.yaml"]
@@ -113,12 +113,14 @@ def main() -> None:
             )
 
         environment = NanofaasTUI(choose=choose)._select_environment()
-        assert _environment(environment).provider == "local"
+        assert load_environment(environment).provider == "local"
         assert any(choice.value == "setup:azure" for choice in selected)
         for name in NanofaasTUI.SCENARIO_FILES.values():
             assert (scenario.parent / name).is_file(), name
         for stage in ("calibration", "qualification", "pilot"):
-            config = _scenario(scenario.parent / f"one-shot-heterogeneous-{stage}.yaml")
+            config = load_scenario(
+                scenario.parent / f"one-shot-heterogeneous-{stage}.yaml"
+            )
             assert config.one_shot is not None
             assert len(config.one_shot.nodes) == 6
             assert config.one_shot.purpose == "scientific-experiment"

@@ -38,20 +38,12 @@ from nanolab.application.execution import (
     prometheus_over_ssh,
     resolve_loadtest_urls,
 )
+from nanolab.application.inputs import load_environment, load_scenario
 from nanolab.application.vm_provider import (
     provider_for_environment,
     vm_request_for_role,
 )
 from nanolab.cli import diagnostics
-from nanolab.cli.catalogue import (
-    _environment as _environment,
-)
-from nanolab.cli.catalogue import (
-    _read as _read,
-)
-from nanolab.cli.catalogue import (
-    _scenario as _scenario,
-)
 from nanolab.cli.catalogue import (
     _workflow_catalog as _workflow_catalog,
 )
@@ -1071,8 +1063,8 @@ def install_product_commands(
             None, "--release-config", exists=True
         ),
     ) -> None:
-        scenario_config = _scenario(scenario)
-        environment_config = _environment(environment)
+        scenario_config = load_scenario(scenario)
+        environment_config = load_environment(environment)
         try:
             if (
                 scenario_config.workflow != "soak"
@@ -1385,8 +1377,8 @@ def install_product_commands(
             None, "--release-config", exists=True
         ),
     ) -> None:
-        scenario_config = _scenario(scenario)
-        environment_config = _environment(environment)
+        scenario_config = load_scenario(scenario)
+        environment_config = load_environment(environment)
         _validate_contract_options(
             scenario_config,
             environment_config,
@@ -1516,7 +1508,7 @@ def install_product_commands(
     ) -> None:
         typer.echo(
             json.dumps(
-                _scenario(scenario).model_dump(by_alias=True, mode="json"), indent=2
+                load_scenario(scenario).model_dump(by_alias=True, mode="json"), indent=2
             )
         )
 
