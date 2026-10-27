@@ -135,6 +135,7 @@ _EXPERIMENT_02_FIELDS = {
     "configurations",
     "budgets",
     "subset",
+    "workloads",
 }
 
 

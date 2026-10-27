@@ -599,3 +599,108 @@ def test_compare_direct_and_p1_with_two_budgets_can_resume(command_case, monkeyp
     assert not [event for event in events if event[0] == "cell"]
     assert "provision" not in events and "slices" not in events
     assert "publications-checked" in events
+
+
+def _workloads_repository(tmp_path):
+    import subprocess
+
+    root = tmp_path / "paper"
+    (root / "functions" / "qr-code").mkdir(parents=True)
+    (root / "functions" / "qr-code" / "Cargo.toml").write_text("[workspace]\n")
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "T"),
+        ("add", "."),
+        ("commit", "-qm", "w"),
+    ):
+        subprocess.run(("git", *args), cwd=root, check=True, capture_output=True)
+    return root / "functions"
+
+
+def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_path):
+    from nanolab.tasks.experiment_02.baselines import Spin
+
+    invoke, events, _root = _experiment_02_case(command_case, azure=True)
+
+    class Provider:
+        def exec_argv(self, request, argv, **kwargs):
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+        def connection_host(self, request):
+            return "20.0.0.4"
+
+    machine = {
+        "machineId": "a" * 32,
+        "productUuid": "11111111-2222-3333-4444-555555555555",
+    }
+    monkeypatch.setattr(comparison, "provider_for_environment", lambda *a: Provider())
+    monkeypatch.setattr(
+        comparison,
+        "read_comparison_target",
+        lambda *a, **k: {"machines": {"stack": machine}, "engine": {"dockerId": "d"}},
+    )
+    monkeypatch.setattr(comparison, "read_host_facts", lambda *a: {})
+    monkeypatch.setattr(comparison, "require_recorded_publications", lambda **k: None)
+    image = SimpleNamespace(image=SimpleNamespace(reference="registry/qr:e02"))
+
+    def prepare(**kwargs):
+        from nanolab.tasks.recipes.remote import remote_recipe_root
+
+        owned = remote_recipe_root(
+            kwargs["request"], str(kwargs["manifest"].identity["tag"])
+        )
+        distribution = SimpleNamespace(
+            function=lambda *a: image, control_plane=lambda: image
+        )
+        return SimpleNamespace(
+            distributions={"nanofaas-p1-jvm": distribution},
+            remote_source=owned / "source",
+        )
+
+    monkeypatch.setattr(comparison, "_run_prepare", prepare)
+    monkeypatch.setattr(
+        comparison,
+        "ensure_workloads",
+        lambda stack, **kwargs: (
+            events.append(("workloads", kwargs["record"].name)) or {"qr-spin": "a" * 64}
+        ),
+    )
+    monkeypatch.setattr(
+        comparison,
+        "install_baselines",
+        lambda stack, keys, **kwargs: (
+            events.append(("install", tuple(keys))) or dict.fromkeys(keys, "x")
+        ),
+    )
+
+    def cell(cell, **kwargs):
+        from nanolab.comparison.experiment_02 import EVENTS, SAMPLES, SCHEDULER, SUMMARY
+
+        events.append(("cell", cell.key, type(kwargs["platform"]).__name__))
+        (kwargs["run_dir"] / "metrics").mkdir(parents=True, exist_ok=True)
+        for name in (SUMMARY, EVENTS, SAMPLES, SCHEDULER):
+            (kwargs["run_dir"] / name).write_text("{}\n")
+        return "measured"
+
+    monkeypatch.setattr(comparison, "run_cell", cell)
+    monkeypatch.setattr(
+        comparison, "write_experiment_02_report", lambda root, cells, p: root / "r.csv"
+    )
+    arguments = ("--variants", "spin,direct-reference", "--repetitions", "1")
+    result = invoke(*arguments)
+    assert result.exit_code != 0 and "NANOLAB_WORKLOADS_ROOT" in result.output
+    monkeypatch.setenv("NANOLAB_WORKLOADS_ROOT", str(_workloads_repository(tmp_path)))
+    result = invoke(*arguments)
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert ("install", ("spin",)) in events and (
+        "workloads",
+        "workloads.json",
+    ) in events
+    assert ("cell", "spin", Spin.__name__) in events
+    events.clear()
+    result = invoke(*arguments)
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert not [event for event in events if event[0] == "cell"]
+    # The resume checks the recorded artifacts again rather than trusting them.
+    assert ("workloads", "workloads.json") in events

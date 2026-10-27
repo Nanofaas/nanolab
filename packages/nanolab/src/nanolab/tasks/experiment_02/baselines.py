@@ -10,8 +10,9 @@ and quirks are the portability check's of 27 October 2026
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -25,7 +26,8 @@ from nanolab.tasks.experiment_02.platforms import (
     _start,
     baseline_teardown,
 )
-from nanolab.tasks.experiment_02.vm import Vm
+from nanolab.tasks.experiment_02.vm import Vm, exec_status
+from nanolab.workspace.paths import bundled_assets_root
 
 # Where the run installs platforms and wrappers on the stack; absolute, since
 # host processes run as root from systemd.
@@ -430,3 +432,131 @@ class Fn(_Baseline):
     def body(self, payload: bytes) -> bytes:
         """Send the payload itself."""
         return payload
+
+
+# ---------------------------------------------------------------- installation
+
+SPIN_VERSION = "v4.2.5"
+TINYFAAS_COMMIT = "eff00d060f6f6e96bf8f35475a0e9a8e6e42de32"
+SERVERLEDGE_COMMIT = "45419f50675aa7c8cc3813f626e17f6c28c8a641"
+_FUNLESS_IMAGES = (
+    "postgres:16",
+    "ghcr.io/funlessdev/core@sha256:"
+    "c75155af88585663d687b478ef0e69e46668e26c3b05d0cab59bc3583fa65954",
+    "ghcr.io/funlessdev/worker@sha256:"
+    "bb774f588228c704db6a4677e2915de20ce3ae2731ada0b56bd927188f9acd41",
+)
+
+
+_GIT = {
+    "tinyfaas": "https://github.com/OpenFogStack/tinyFaaS",
+    "serverledge": "https://github.com/serverledge-faas/serverledge",
+}
+# Zip fn.sh and qr-stdio into tinyFaaS's upload request; threads are set per cell.
+_TINYFAAS_UPLOAD = (
+    "import base64, io, json, sys, zipfile; out = io.BytesIO()\n"
+    'with zipfile.ZipFile(out, "w") as z:\n'
+    '    z.write(sys.argv[1], "fn.sh"); z.write(sys.argv[2], "qr-stdio")\n'
+    'body = {"name": "qr", "env": "binary", "threads": 1,'
+    ' "zip": base64.b64encode(out.getvalue()).decode()}\n'
+    'json.dump(body, open(sys.argv[3], "w"))'
+)
+
+
+def _install_script(key: str, source: PurePosixPath) -> str:
+    """Return the root shell script that installs one baseline under OPT."""
+    root = OPT / key
+    release = source / "target" / "release"
+    if key == "funless":
+        compose = (
+            bundled_assets_root() / "experiment02" / "funless-compose.yaml"
+        ).read_text()
+        pulls = "; ".join(f"docker pull -q {image}" for image in _FUNLESS_IMAGES)
+        return (
+            f"cat > {root}/compose.yaml <<'NANOLAB_EOF'\n{compose}NANOLAB_EOF\n"
+            f"cp {source}/target/wasm32-wasip1/release/qr_funless.wasm {root}/\n{pulls}"
+        )
+    if key == "spin":
+        tarball = f"spin-{SPIN_VERSION}-static-linux-amd64.tar.gz"
+        url = f"https://github.com/spinframework/spin/releases/download/{SPIN_VERSION}"
+        return (
+            f"cd {root} && curl -fsSLO {url}/{tarball} && "
+            f"curl -fsSLO {url}/checksums-{SPIN_VERSION}.txt && "
+            f"grep ' {tarball}$' checksums-{SPIN_VERSION}.txt | sha256sum -c - && "
+            f"tar xzf {tarball} spin && "
+            f"cp {source}/target/wasm32-wasip2/release/qr_spin.wasm "
+            f"{source}/spin/spin.toml {root}/"
+        )
+    if key == "tinyfaas":
+        return "\n".join(
+            (
+                "apt-get install -y -q make golang-go >/dev/null",
+                f"[ -d {root}/.git ] || git clone -q {_GIT['tinyfaas']} {root}",
+                f"cd {root} && git checkout -q {TINYFAAS_COMMIT}",
+                "[ -x tinyfaas-linux-amd64 ] || make build >/dev/null",
+                f"python3 -c '{_TINYFAAS_UPLOAD}' {source}/tinyfaas/fn.sh"
+                f" {release}/qr-stdio {root}/upload.json",
+            )
+        )
+    if key == "serverledge":
+        go = "docker run --rm -v $PWD:/src -w /src golang:1.24"
+        return "\n".join(
+            (
+                f"[ -d {root}/src/.git ] || git clone -q {_GIT['serverledge']}"
+                f" {root}/src",
+                f"cd {root}/src && git checkout -q {SERVERLEDGE_COMMIT}",
+                f"{go} make serverledge serverledge-cli >/dev/null",
+                f"mkdir -p {root}/bin {root}/image",
+                f"cp bin/serverledge bin/serverledge-cli {root}/bin/",
+                "docker build -q -t serverledge-base:45419f5"
+                " -f images/base-alpine/Dockerfile . >/dev/null",
+                f"cp {source}/serverledge/Dockerfile {source}/serverledge/run.sh"
+                f" {release}/qr-stdio {root}/image/",
+                f"docker build -q -t {SERVERLEDGE_IMAGE} {root}/image >/dev/null",
+                f"docker push -q {SERVERLEDGE_IMAGE} >/dev/null",
+                f"docker pull -q {ETCD}",
+            )
+        )
+    if key == "fn":
+        return (
+            f"mkdir -p {root}/iofs {root}/image && docker pull -q {FNSERVER} && "
+            f"cp {source}/fn/Dockerfile {release}/qr-fn {root}/image/ && "
+            f"docker build -q -t {FN_IMAGE} {root}/image >/dev/null && "
+            f"docker push -q {FN_IMAGE} >/dev/null"
+        )
+    raise ValueError(f"unknown experiment-02 baseline: {key}")
+
+
+def install_baselines(
+    stack: Vm,
+    keys: Sequence[str],
+    *,
+    source: PurePosixPath,
+    artifacts: Mapping[str, str],
+) -> dict[str, str]:
+    """Install the selected baselines once; return each installation's identity.
+
+    The identity hashes the installing script, which pins every version, and
+    the wrappers' sha256: the same identity is installed once, a different one
+    installs again. Everything is installed before any cell, outside any clock.
+    """
+    installed: dict[str, str] = {}
+    for key in keys:
+        script = _install_script(key, source)
+        identity = hashlib.sha256(
+            (script + json.dumps(dict(artifacts), sort_keys=True)).encode()
+        ).hexdigest()[:16]
+        marker = OPT / key / f".installed-{identity}"
+        if exec_status(stack, ("test", "-f", str(marker))).return_code:
+            _ = comparison_remote_command(
+                stack.provider,
+                stack.request,
+                (
+                    "sudo",
+                    "sh",
+                    "-c",
+                    f"set -e\nmkdir -p {OPT / key}\n{script}\ntouch {marker}",
+                ),
+            )
+        installed[key] = identity
+    return installed

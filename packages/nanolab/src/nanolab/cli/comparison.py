@@ -15,12 +15,13 @@ pay for a fresh k3s and would also destroy the images the prepare phase built.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from traceback import format_exception_only
 from uuid import uuid4
 
@@ -52,7 +53,6 @@ from nanolab.comparison.experiment_01 import (
 from nanolab.comparison.experiment_02 import (
     CONFIGURATIONS_BY_KEY,
     EXPERIMENT_02_PUBLISHER,
-    Configuration,
     Experiment02Cell,
     build_experiment_02_matrix,
     experiment_02_identity,
@@ -107,6 +107,14 @@ from nanolab.images.control_plane_variants import (
 )
 from nanolab.plans.runtime_comparison import EXPERIMENT_01_SCRIPT_NAME
 from nanolab.tasks.deployment import DEFAULT_NAMESPACE
+from nanolab.tasks.experiment_02.baselines import (
+    Fn,
+    FunLess,
+    Serverledge,
+    Spin,
+    TinyFaas,
+    install_baselines,
+)
 from nanolab.tasks.experiment_02.budget import slice_setup_operation
 from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS, run_cell
 from nanolab.tasks.experiment_02.platforms import (
@@ -115,9 +123,15 @@ from nanolab.tasks.experiment_02.platforms import (
     Platform,
 )
 from nanolab.tasks.experiment_02.vm import Vm
+from nanolab.tasks.experiment_02.workload import (
+    WORKLOAD,
+    WORKLOADS_ENV,
+    capture_workloads,
+    ensure_workloads,
+)
 from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
 from nanolab.tasks.recipes.remote import remote_recipe_root
-from nanolab.tasks.vm.models import VmRequest
+from nanolab.tasks.vm.models import VmRequest, vm_remote_home
 from nanolab.workspace.paths import bundled_assets_root
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
@@ -477,13 +491,23 @@ def _run_experiment_02_cell(
 
 
 def _experiment_02_platform(
-    configuration: Configuration,
+    cell: Experiment02Cell,
     prepared: PreparedComparison,
     *,
     function_image: str,
     protocol: Experiment02Protocol,
 ) -> Platform:
-    """Return the platform a configuration deploys, from the prepared images."""
+    """Return the platform a cell deploys, from the prepared images."""
+    configuration = cell.configuration
+    if configuration.platform == "baseline":
+        baselines: dict[str, Platform] = {
+            "funless": FunLess(),
+            "spin": Spin(),
+            "tinyfaas": TinyFaas(),
+            "serverledge": Serverledge(budget=cell.budget),
+            "fn": Fn(),
+        }
+        return baselines[configuration.key]
     if configuration.platform == "direct" or configuration.profile is None:
         return DirectReference(function_image)
     distribution = prepared.distributions[configuration.key]
@@ -559,6 +583,18 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             repetitions,
             seed=protocol.order_seed,
         )
+        baselines = tuple(
+            key for key in selected if CONFIGURATIONS_BY_KEY[key].platform == "baseline"
+        )
+        workloads_root = None
+        if baselines:
+            location = os.environ.get(WORKLOADS_ENV)
+            if not location:
+                raise ValueError(
+                    f"{WORKLOADS_ENV} must name nanofaas-paper/functions "
+                    "to measure a baseline"
+                )
+            workloads_root = Path(location)
         experiment = experiment_02_identity(
             protocol,
             cells,
@@ -566,6 +602,9 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             script=script,
             selected=selected,
             seed=protocol.order_seed,
+            workloads=None
+            if workloads_root is None
+            else capture_workloads(workloads_root),
         )
         root = (run_dir or paths.runs_dir / "experiment-02").resolve()
         manifest = read_comparison_manifest(root)
@@ -686,6 +725,24 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
         )
         stack = Vm(provider, request)
         loadgen = Vm(provider, requests["loadgen"])
+        if workloads_root is not None:
+            # Outside the run's owned staging, which a finished run removes: a
+            # resume verifies these artifacts instead of rebuilding them.
+            workload_dir = PurePosixPath(vm_remote_home(request)) / f"nanolab-e02-{tag}"
+            artifacts = ensure_workloads(
+                stack,
+                workloads=workloads_root,
+                remote_root=workload_dir,
+                payload=payload,
+                png_sha256=protocol.png_sha256,
+                record=root / "prepare" / "workloads.json",
+            )
+            installed = install_baselines(
+                stack, baselines, source=workload_dir / WORKLOAD, artifacts=artifacts
+            )
+            (root / "prepare" / "baselines.json").write_text(
+                json.dumps(installed, indent=2) + "\n"
+            )
         # The address the loadgen reaches the stack at, through the ports
         # `secure_release_endpoints` opened to it.
         host = str(provider.connection_host(request))  # type: ignore[attr-defined]
@@ -698,7 +755,7 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
         for index, cell in enumerate(todo, start=1):
             typer.echo(f"[{index}/{len(todo)}] {cell.label}")
             platform = _experiment_02_platform(
-                cell.configuration,
+                cell,
                 prepared,
                 function_image=function_image,
                 protocol=protocol,

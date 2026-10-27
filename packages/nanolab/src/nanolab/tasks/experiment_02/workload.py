@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 from nanolab.comparison.prepare import comparison_remote_command, comparison_transfer_to
-from nanolab.tasks.experiment_02.vm import Vm
+from nanolab.tasks.experiment_02.vm import Vm, exec_status
 
 WORKLOADS_ENV = "NANOLAB_WORKLOADS_ROOT"
 WORKLOAD = "qr-code"
@@ -115,3 +115,40 @@ def build_workloads(
         stack.provider, stack.request, ("sha256sum", *paths)
     ).split()
     return dict(zip(ARTIFACTS, sums[0::2], strict=True))
+
+
+def ensure_workloads(
+    stack: Vm,
+    *,
+    workloads: Path,
+    remote_root: PurePosixPath,
+    payload: bytes,
+    png_sha256: str | None,
+    record: Path,
+) -> dict[str, str]:
+    """Build the wrappers once per run; on a resume, require the ones recorded.
+
+    `record` keeps the first build's sha256 per artifact. A resume rebuilds
+    nothing and refuses artifacts that are missing or differ on the stack.
+    """
+    if not record.is_file():
+        artifacts = build_workloads(
+            stack,
+            workloads=workloads,
+            remote_root=remote_root,
+            payload=payload,
+            png_sha256=png_sha256,
+        )
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps(artifacts, indent=2) + "\n")
+        return artifacts
+    recorded = json.loads(record.read_text())
+    paths = [str(remote_root / WORKLOAD / path) for path in ARTIFACTS.values()]
+    listed = exec_status(stack, ("sha256sum", *paths))
+    current = dict(zip(ARTIFACTS, listed.stdout.split()[0::2], strict=False))
+    if listed.return_code or current != recorded:
+        raise ValueError(
+            "the workload artifacts on the stack changed since this run built them; "
+            "use a new run directory"
+        )
+    return recorded

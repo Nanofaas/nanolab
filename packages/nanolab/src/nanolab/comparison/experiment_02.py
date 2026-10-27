@@ -58,7 +58,7 @@ from nanolab.tasks.experiment_02.samples import (
     working_set,
 )
 
-Platform = Literal["nanofaas", "direct"]
+Platform = Literal["nanofaas", "direct", "baseline"]
 
 SAMPLES = "metrics/cgroup-samples.jsonl"
 # nanoFaaS's raw Prometheus exposition, scraped beside the samples.
@@ -100,6 +100,12 @@ EXPERIMENT_02_CONFIGURATIONS: tuple[Configuration, ...] = (
         "experiment-02-p0-native",
     ),
     Configuration("direct-reference", "Function without a platform", "direct"),
+    # The baselines on the stack VM; they run the paper's qr-code wrappers.
+    Configuration("funless", "FunLess 0.9.0", "baseline"),
+    Configuration("spin", "Spin 4.2.5", "baseline"),
+    Configuration("tinyfaas", "tinyFaaS eff00d0", "baseline"),
+    Configuration("serverledge", "Serverledge 45419f5", "baseline"),
+    Configuration("fn", "Fn 0.3.770", "baseline"),
 )  # fmt: skip
 CONFIGURATIONS_BY_KEY = {
     configuration.key: configuration for configuration in EXPERIMENT_02_CONFIGURATIONS
@@ -179,8 +185,13 @@ def experiment_02_identity(
     script: Path,
     selected: tuple[str, ...],
     seed: int,
+    workloads: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """Return what the manifest records about experiment 02 beyond the scenario."""
+    """Return what the manifest records about experiment 02 beyond the scenario.
+
+    `workloads` is the commit and tree of the paper's wrappers, when a
+    baseline is selected.
+    """
     values = protocol.model_dump(mode="json", by_alias=True)
     return {
         "profile": "experiment-02",
@@ -210,6 +221,7 @@ def experiment_02_identity(
         },
         "budgets": [budget.label for budget in protocol.budgets],
         "subset": set(selected) != set(CONFIGURATIONS_BY_KEY),
+        "workloads": None if workloads is None else dict(workloads),
     }
 
 
