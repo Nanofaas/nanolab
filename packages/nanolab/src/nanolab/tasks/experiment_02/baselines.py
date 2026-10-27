@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from nanolab.comparison.prepare import comparison_remote_command
-from nanolab.config.experiment_02 import Experiment02Protocol
+from nanolab.config.experiment_02 import Budget, Experiment02Protocol
 from nanolab.tasks.experiment_02.budget import host_service
 from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.platforms import (
@@ -178,6 +178,254 @@ class Spin(_Baseline):
     def target(self, host: str) -> K6Target:
         """Read the component's answer: the PNG as a base64 JSON string."""
         return K6Target(f"http://{host}:{ENTRY_PORT}/", _JSON, "json-base64")
+
+    def body(self, payload: bytes) -> bytes:
+        """Send the payload itself."""
+        return payload
+
+
+@dataclass(frozen=True)
+class TinyFaas(_Baseline):
+    """tinyFaaS eff00d0: its manager on the host, the function in Docker.
+
+    The `binary` runtime forks `fn.sh` per request; HTTP on the entry port,
+    CoAP and gRPC off.
+    """
+
+    root: PurePosixPath = OPT / "tinyfaas"
+    # `comm` keeps 15 characters of a process name.
+    host_commands: tuple[str, ...] = ("tinyfaas-linux-", "rproxy-linux-am")
+
+    def start(
+        self,
+        vm: Vm,
+        *,
+        protocol: Experiment02Protocol,
+        payload: bytes,
+        evidence: Path,
+    ) -> dict[str, float] | None:
+        """Run the manager in the platform unit, upload the function, probe it."""
+        upload = (
+            "import json, sys; d = json.load(open(sys.argv[1]));"
+            f' d["threads"] = {protocol.fixed_concurrency};'
+            " sys.stdout.write(json.dumps(d))"
+        )
+        return _start(
+            vm,
+            images=(),
+            commands=[
+                host_service(
+                    ("sh", "-c", f"cd {self.root} && exec ./tinyfaas-linux-amd64"),
+                    env={
+                        "http_PORT": str(ENTRY_PORT),
+                        "coap_PORT": "-1",
+                        "grpc_PORT": "-1",
+                    },
+                )
+            ],
+            api="http://127.0.0.1:8080/list",
+            api_any_status=True,
+            register={
+                "commands": [
+                    (
+                        "sh",
+                        "-c",
+                        f"python3 -c '{upload}' {self.root}/upload.json"
+                        " | curl -fsS --data-binary @- http://127.0.0.1:8080/upload",
+                    )
+                ]
+            },
+            target=self.target("127.0.0.1"),
+            body=self.body(payload),
+            protocol=protocol,
+            payload=payload,
+            evidence=evidence,
+        )
+
+    def target(self, host: str) -> K6Target:
+        """Read the function's stdout: the PNG as a base64 JSON string."""
+        return K6Target(f"http://{host}:{ENTRY_PORT}/qr", _JSON, "json-base64")
+
+    def body(self, payload: bytes) -> bytes:
+        """Send the payload itself, the function's stdin."""
+        return payload
+
+
+ETCD = "gcr.io/etcd-development/etcd:v3.5.13"
+SERVERLEDGE_IMAGE = "127.0.0.1:5000/qr-serverledge:e02"
+
+
+@dataclass(frozen=True)
+class Serverledge(_Baseline):
+    """Serverledge 45419f5 with etcd; the function is a `custom` image.
+
+    The container pool gets the cell's budget, so the platform admits no more
+    than the budget holds.
+    """
+
+    budget: Budget
+    root: PurePosixPath = OPT / "serverledge"
+    host_commands: tuple[str, ...] = ("serverledge",)
+
+    def start(
+        self,
+        vm: Vm,
+        *,
+        protocol: Experiment02Protocol,
+        payload: bytes,
+        evidence: Path,
+    ) -> dict[str, float] | None:
+        """Start etcd and Serverledge, register the function, probe it."""
+        conf = self.root / "serverledge-conf.yaml"
+        settings = (
+            f"api:\\n  port: {ENTRY_PORT}\\ncontainer:\\n  pool:\\n"
+            f"    memory: {self.budget.memory_mib}\\n    cpus: {self.budget.cpus:g}\\n"
+        )
+        return _start(
+            vm,
+            images=(ETCD, SERVERLEDGE_IMAGE),
+            commands=[
+                ("sudo", "sh", "-c", f"printf '{settings}' > {conf}"),
+                (
+                    "docker",
+                    "run",
+                    "-d",
+                    "--name",
+                    "e02-etcd",
+                    "-p",
+                    "127.0.0.1:2379:2379",
+                    ETCD,
+                    "/usr/local/bin/etcd",
+                    "--listen-client-urls",
+                    "http://0.0.0.0:2379",
+                    "--advertise-client-urls",
+                    "http://0.0.0.0:2379",
+                ),
+                host_service((str(self.root / "bin" / "serverledge"), str(conf))),
+            ],
+            api=f"{_LOCAL}/status",
+            api_any_status=True,
+            register={
+                "commands": [
+                    (
+                        str(self.root / "bin" / "serverledge-cli"),
+                        "-P",
+                        str(ENTRY_PORT),
+                        "create",
+                        "--function",
+                        "qr",
+                        "--memory",
+                        "512",
+                        "--runtime",
+                        "custom",
+                        "--custom_image",
+                        SERVERLEDGE_IMAGE,
+                        "--max_concurrency",
+                        str(protocol.fixed_concurrency),
+                    )
+                ]
+            },
+            target=self.target("127.0.0.1"),
+            body=self.body(payload),
+            protocol=protocol,
+            payload=payload,
+            evidence=evidence,
+        )
+
+    def target(self, host: str) -> K6Target:
+        """Read the PNG from `Result`, a JSON string holding its base64."""
+        return K6Target(
+            f"http://{host}:{ENTRY_PORT}/invoke/qr",
+            _JSON,
+            "json-string-base64",
+            "Result",
+        )
+
+    def body(self, payload: bytes) -> bytes:
+        """Send the payload as the invocation's `Params`."""
+        return json.dumps(
+            {"Params": json.loads(payload)}, separators=(",", ":")
+        ).encode()
+
+
+FNSERVER = (
+    "fnproject/fnserver@sha256:"
+    "16dedb58b2f1be5e02d7a851a66041ea97076801cbdb09cdfee0100296a68686"
+)
+FN_IMAGE = "127.0.0.1:5000/qr-fn:e02"
+# Idempotent: a retried registration finds what an earlier attempt created.
+_FN_REGISTER = f"""
+import json, urllib.request
+api = "{_LOCAL}/v2"
+def call(path, body=None):
+    request = urllib.request.Request(api + path, method="POST" if body else "GET",
+        data=json.dumps(body).encode() if body else None,
+        headers={{"Content-Type": "application/json"}})
+    return json.load(urllib.request.urlopen(request, timeout=30))
+def ensure(kind, query, body):
+    found = call(f"/{{kind}}?{{query}}")["items"]
+    return found[0]["id"] if found else call(f"/{{kind}}", body)["id"]
+app = ensure("apps", "name=e02", {{"name": "e02"}})
+fn = ensure("fns", f"app_id={{app}}&name=qr", {{"name": "qr", "app_id": app,
+    "image": "{FN_IMAGE}", "memory": 256, "timeout": TIMEOUT}})
+ensure("triggers", f"app_id={{app}}&name=qr", {{"name": "qr", "app_id": app,
+    "fn_id": fn, "type": "http", "source": "/qr"}})
+"""
+
+
+@dataclass(frozen=True)
+class Fn(_Baseline):
+    """Fn 0.3.770 in single-server mode, starting function containers itself."""
+
+    root: PurePosixPath = OPT / "fn"
+
+    def start(
+        self,
+        vm: Vm,
+        *,
+        protocol: Experiment02Protocol,
+        payload: bytes,
+        evidence: Path,
+    ) -> dict[str, float] | None:
+        """Start fnserver, create app, function and trigger, probe the trigger."""
+        iofs = self.root / "iofs"
+        register = _FN_REGISTER.replace("TIMEOUT", str(protocol.http_timeout_seconds))
+        return _start(
+            vm,
+            images=(FNSERVER, FN_IMAGE),
+            commands=[
+                (
+                    "docker",
+                    "run",
+                    "-d",
+                    "--privileged",
+                    "--name",
+                    "e02-fnserver",
+                    "-v",
+                    f"{iofs}:/iofs",
+                    "-e",
+                    f"FN_IOFS_DOCKER_PATH={iofs}",
+                    "-e",
+                    "FN_IOFS_PATH=/iofs",
+                    "-v",
+                    "/var/run/docker.sock:/var/run/docker.sock",
+                    "-p",
+                    f"{ENTRY_PORT}:8080",
+                    FNSERVER,
+                )
+            ],
+            api=f"{_LOCAL}/version",
+            register={"commands": [("python3", "-c", register)]},
+            target=self.target("127.0.0.1"),
+            body=self.body(payload),
+            protocol=protocol,
+            payload=payload,
+            evidence=evidence,
+        )
+
+    def target(self, host: str) -> K6Target:
+        """Invoke through the HTTP trigger; the PNG is a base64 JSON string."""
+        return K6Target(f"http://{host}:{ENTRY_PORT}/t/e02/qr", _JSON, "json-base64")
 
     def body(self, payload: bytes) -> bytes:
         """Send the payload itself."""
