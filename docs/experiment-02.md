@@ -7,11 +7,40 @@ the receipts and the per-step verdicts are experiment 01's; what this experiment
 adds is the budget, the Docker stack, the platforms and the cost per useful
 response.
 
-**Status: foundation implemented and verified locally; Azure smoke pending
-after the review fixes.** This covers nanoFaaS P0 and P1 and the function
-alone. The baseline platforms (tinyFaaS, Fn, Serverledge, faasd, FunLess,
-Sledge, Spin) are later work and have no adapter yet. No result, capacity or
-budget follows from the local tests.
+**Status: foundation implemented and run on Azure for nanoFaaS P1 JVM and the
+function alone, one cell each at 2 CPUs and 2048 MiB (27 October 2026).** This
+covers nanoFaaS P0 and P1 and the function alone. The baseline platforms
+(tinyFaaS, Fn, Serverledge, faasd, FunLess, Sledge, Spin) are later work and
+have no adapter yet. The pilot thresholds are not frozen, so no step is
+qualified and no result, capacity or budget follows from these runs.
+
+## First Azure runs
+
+Pilot calendar, budget `cpu2-mem2048`, `Standard_D8s_v5` stack and
+`Standard_D2s_v5` loadgen. The runs exercised the whole path: slices, budget
+read-back, sampler with agents and scrapes, VM-side readiness, the shared
+generator, per-step cleanup, receipts and the report.
+
+- `nanofaas-p1-jvm` (`runs/experiment-02-smoke-3`): `measured`.
+  - Readiness: API at 8.9 s, registered at 10.5 s, first correct PNG at
+    10.7 s.
+  - Warmup and step-01: all responses within the threshold, p99 about 30 ms,
+    about 0.68 cores.
+  - From step-02 on: 429s and p99 above 6 s.
+  - Working set: from 634 MiB idle to 790 MiB. Agents: 12 MiB.
+  - Scheduler scrapes: cover the calendar.
+- `direct-reference` (`runs/experiment-02-smoke-2`): `measured`, with each
+  request under its own execution id.
+  - From step-01 on, the runtime saturates the 2-CPU quota and serves about
+    4.5 correct responses per second. The rest are 429s.
+  - CPU per correct response rises about thirtyfold over the warmup's, and the
+    cgroup is heavily throttled.
+  - The cause is under investigation (`notes/experiment-02-followup-prompt.md`
+    in the paper repository); the row is not comparable until it is
+    understood.
+- The first smoke (`runs/experiment-02-foundation-smoke`) predates the review
+  fixes and is not usable: it shared one execution id, and its P1 cell failed
+  readiness on the registration retry.
 
 ## Configurations
 

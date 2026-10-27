@@ -260,3 +260,10 @@ def test_report_lists_incomplete_cells_without_values(tmp_path):
     assert float(step["cpuSecondsPerUseful"]) == 0.3
     assert step["deploymentCoverage"] == "complete"
     assert step["schedulerCoverage"] == "complete"
+
+
+def test_scrape_errors_before_the_calendar_do_not_make_coverage_partial(tmp_path):
+    # The sampler starts before the platform: its first scrapes are refused.
+    cell = _measured_cell(tmp_path, scrapes=_scrapes(failed_at=995))
+    summary = summarize_experiment_02_cell(cell, tmp_path, PROTOCOL)
+    assert summary["schedulerCoverage"] == "complete"

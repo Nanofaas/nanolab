@@ -318,8 +318,13 @@ def _scheduler_coverage(
         except ValueError:
             failed = True
             continue
-        times.append(float(scrape["ts"]))
-        failed = failed or scrape.get("status") != "ok"
+        at = float(scrape["ts"])
+        if scrape.get("status") == "ok":
+            times.append(at)
+        # Refused scrapes before the platform is up are expected; only the
+        # measured calendar must be covered.
+        elif start <= at <= end:
+            failed = True
     times.sort()
     first = bisect_right(times, start) - 1
     last = bisect_left(times, end)
