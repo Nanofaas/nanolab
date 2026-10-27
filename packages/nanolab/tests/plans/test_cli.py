@@ -24,7 +24,9 @@ from nanolab.release.publish import (
 )
 from nanolab.release.versioning import normalize_version, read_project_version
 from nanolab.tasks.components import bootstrap
-from nanolab.tasks.testing import (
+from nanolab.tasks.vm.models import VmInfo, VmRequest
+from nanolab.workspace.paths import default_tool_paths
+from tests.cli_responses import (
     CLI_CONTRACT_STEPS,
     CLI_RUNTIME_CONFIG_STEPS,
     INVOCATION_SUCCESS,
@@ -32,8 +34,6 @@ from nanolab.tasks.testing import (
     cli_response,
     cli_task_ids,
 )
-from nanolab.tasks.vm.models import VmInfo, VmRequest
-from nanolab.workspace.paths import default_tool_paths
 
 SUCCESS = INVOCATION_SUCCESS
 

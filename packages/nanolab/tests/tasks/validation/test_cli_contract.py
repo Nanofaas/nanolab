@@ -15,20 +15,20 @@ from nanolab.tasks.cli import (
     build_cli_workflow,
 )
 from nanolab.tasks.execution import ExecutionRole
-from nanolab.tasks.testing import (
+from tests.cli_responses import (
     CLI_CONTRACT_STEPS as CONTRACT_STEPS,
 )
-from nanolab.tasks.testing import (
+from tests.cli_responses import (
     INVOCATION_SUCCESS,
     cli_response,
 )
-from nanolab.tasks.testing import (
+from tests.cli_responses import (
     cli_function_steps as _function_steps,
 )
-from nanolab.tasks.testing import (
+from tests.cli_responses import (
     cli_task_ids as _ids,
 )
-from nanolab.tasks.testing import (
+from tests.cli_responses import (
     passed as _passed,
 )
 

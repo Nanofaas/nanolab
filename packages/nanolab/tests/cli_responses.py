@@ -1,8 +1,8 @@
 """Canned answers from a control plane that honours the whole CLI surface.
 
-Shipped rather than kept in one test file because two suites drive the same
-workflow — `sonata_tasks`' own tests and nanolab's plan tests — and a second
-copy of these fixtures would drift the day a command's output changes.
+Shared rather than kept in one test file because two suites drive the same
+workflow — the CLI plan tests and the CLI contract tests — and a second copy
+of these fixtures would drift the day a command's output changes.
 
 Keyed by the fragment of the joined argv that identifies each command, ordered
 because the `--replace` apply and the refusal that precedes it differ only by
