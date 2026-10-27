@@ -7,14 +7,73 @@ the receipts and the per-step verdicts are experiment 01's; what this experiment
 adds is the budget, the Docker stack, the platforms and the cost per useful
 response.
 
-**Status: foundation implemented and run on Azure for nanoFaaS P1 JVM and the
-function alone, one cell each at 2 CPUs and 2048 MiB (27 October 2026).** This
-covers nanoFaaS P0 and P1 and the function alone. The baseline platforms
-(tinyFaaS, Fn, Serverledge, faasd, FunLess, Sledge, Spin) are later work and
-have no adapter yet. The pilot thresholds are not frozen, so no step is
-qualified and no result, capacity or budget follows from these runs.
+**Status: nanoFaaS P1 JVM, the function alone and five baselines (FunLess,
+Spin, tinyFaaS, Serverledge, Fn) run on Azure, one cell each at 2 CPUs and
+2048 MiB (27 October 2026).** faasd, on its own containerd VM, is the next
+plan; Sledge is out of the comparison (it cannot compile the shared function,
+see below). The pilot thresholds are not frozen, so no step is qualified and
+no result, capacity or budget follows from these runs.
+
+## Baselines
+
+Every baseline runs the paper's one qr-code implementation,
+`nanofaas-paper/functions/qr-code`, through a thin wrapper. The source is
+taken at a commit (`NANOLAB_WORKLOADS_ROOT`, recorded in the identity), built
+once per run on the stack in `rust:1.99-alpine` (pinned by digest), and
+refused unless `qr-stdio` renders the measured PNG. Platforms are installed
+once per run under `/opt/nanolab-e02`, at pinned versions; a resume verifies
+the built artifacts and installs nothing again.
+
+| Key | Platform | How it runs the function | Generator target |
+| --- | --- | --- | --- |
+| `funless` | FunLess 0.9.0 (core, worker, Postgres in compose; no Prometheus, no ELK) | Wasm module, FunLess's ABI | `POST /v1/fn/e02/qr`, PNG at `data` |
+| `spin` | Spin 4.2.5 (`spin up`, checksum verified) | Wasm component (WASI preview 2) | `POST /` |
+| `tinyfaas` | tinyFaaS `eff00d0` (manager on the host) | `binary` runtime, a process per request | `POST /qr` |
+| `serverledge` | Serverledge `45419f5` with etcd 3.5.13 | `custom` image, stock Executor, a process per request | `POST /invoke/qr`, PNG in `Result` |
+| `fn` | Fn 0.3.770 single-server | FDK contract over a Unix socket | `POST /t/e02/qr` (HTTP trigger) |
+
+What runs on the host (Spin, tinyFaaS's manager and proxy, Serverledge) runs
+in one systemd unit inside the measured slice; a process found outside stops
+the cell. Concurrency knobs follow the protocol where a platform has one
+(tinyFaaS `threads`, Serverledge `--max_concurrency`); Serverledge's container
+pool gets the cell's budget. Otherwise the documented defaults hold, with the
+platform's own services (FunLess's Postgres, Serverledge's etcd) inside the
+budget. FunLess's guest token is read on the stack at each cell and reaches
+only the generator, never the evidence.
+
+Behaviour to declare with any result:
+
+- **Fn creates and removes function containers with the load** (up to 109 in
+  a cell at 200 requests/s), unlike the fixed replica of the P1 pairing. The
+  pairing is kept and this is reported, as the spec asks.
+- **A failed function answers HTTP 200** on tinyFaaS (`exit status 1`) and on
+  Fn's trigger and `/invoke`, and **500 with a misleading message** on
+  Serverledge; the generator judges the PNG, so such answers are incorrect.
+- **tinyFaaS keeps CoAP and gRPC on their default ports**: its proxy at
+  `eff00d0` exits with fewer than two protocols (`cmd/rproxy/main.go:22`).
+- **tinyFaaS and Serverledge's stock Executor fork a process per request.**
+- **Sledge is excluded**: aWsm does not compile the bulk-memory instructions of
+  the WASI target's precompiled libc (`nanofaas-paper/notes/evidence.md`).
 
 ## First Azure runs
+
+Baselines (`runs/experiment-02-baselines-smoke-3` and `-4`): every platform
+reached its first correct PNG, sha256 `aa04cabc…`.
+
+| Configuration | First correct PNG | Within threshold at 25 / 50 / 100 / 200 requests/s |
+| --- | --- | --- |
+| `direct-reference` (admission 2) | 1.6 s | 1501/1501, 2994/3001, 5617/6001, 2609/12001 (429s) |
+| `spin` | 0.6 s | 1501/1501, 3000/3000, 6001/6001, 88/11620 |
+| `serverledge` | 4.1 s | 1499/1501, 2989/3001, 4483/6001, 4240/11938 (500s) |
+| `fn` | 5.9 s | 1501/1501, 3000/3000, 3596/5709, 808/8185 (timeouts) |
+| `tinyfaas` | 4.8 s | 1501/1501, 3001/3001, 83/4533, 0/7705 (timeouts) |
+| `funless` | 14.4 s | 1501/1501, 3001/3001, 62/4001, 0/7662 (timeouts) |
+
+At the higher steps several generators sent fewer requests than scheduled;
+with no frozen generator thresholds those steps are only `unverified`. A
+resume of the finished run ran no cell and rebuilt nothing.
+
+nanoFaaS and the function alone:
 
 Pilot calendar, budget `cpu2-mem2048`, `Standard_D8s_v5` stack and
 `Standard_D2s_v5` loadgen. The runs exercised the whole path: slices, budget
@@ -228,7 +287,8 @@ export NANOFAAS_ROOT=/path/to/nanofaas   # a revision with Nanofaas/nanofaas#256
   --run-dir /path/runs/experiment-02-pilot
 ```
 
-Without `--variants` all five configurations run; the native ones compile on
+Without `--variants` all ten configurations run, which needs
+`NANOLAB_WORKLOADS_ROOT` (the `functions/` directory of the paper repository); the native ones compile on
 the stack VM, which is sized for that. The environment must be Azure with
 exactly the `stack` and `loadgen` roles. As with every `compare`, the VMs are
 kept after the run; remove them with the provider's teardown or list what is
