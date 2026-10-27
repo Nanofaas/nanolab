@@ -249,6 +249,12 @@ def _start(
             ("python3", "-I", str(remote_script), str(remote_spec)),
         )
     )
+    if probe.get("failed") == "start":
+        # The engine or a busy port, not the platform: an error, never a result.
+        (evidence / "readiness.json").write_text(json.dumps(probe, indent=2) + "\n")
+        raise RuntimeError(
+            f"start command failed ({probe.get('code')}): {probe.get('command')}"
+        )
     started = float(probe["started"])
 
     def since(stage: str) -> float | None:

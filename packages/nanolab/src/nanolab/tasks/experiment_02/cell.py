@@ -48,6 +48,7 @@ from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.tasks.experiment_02.budget import (
     OBSERVER_CGROUP,
     OBSERVER_SLICE,
+    PLATFORM_UNIT,
     SUT_CGROUP,
     apply_budget_argv,
     parse_budget,
@@ -57,7 +58,11 @@ from nanolab.tasks.experiment_02.budget import (
     restart_engine_argv,
 )
 from nanolab.tasks.experiment_02.generator import generator_environment, run_generator
-from nanolab.tasks.experiment_02.platforms import Platform, leftover_containers
+from nanolab.tasks.experiment_02.platforms import (
+    Platform,
+    baseline_teardown,
+    leftover_containers,
+)
 from nanolab.tasks.experiment_02.samples import (
     SAMPLE_INTERVAL_SECONDS,
     SAMPLER_SCRIPT,
@@ -87,15 +92,17 @@ def _sampler_running(stack: Vm) -> bool:
 
 
 def _require_clean(stack: Vm) -> None:
-    leftovers = leftover_containers(stack)
-    if leftovers:
-        _ = _run(stack, ("docker", "rm", "-f", *leftovers))
+    # An interrupted cell may have left a baseline's unit, project or networks.
+    baseline_teardown(stack)
     remaining = leftover_containers(stack)
     if remaining:
         raise ValueError(f"containers from an earlier cell remain: {remaining}")
     _ = exec_status(stack, ("sudo", "systemctl", "stop", SAMPLER_UNIT))
     if _sampler_running(stack):
         raise ValueError(f"an earlier cell's sampler still runs: {SAMPLER_UNIT}")
+    unit = ("systemctl", "is-active", "--quiet", PLATFORM_UNIT)
+    if exec_status(stack, unit).return_code == 0:
+        raise ValueError(f"an earlier cell's platform still runs: {PLATFORM_UNIT}")
 
 
 def _stop_sampler(stack: Vm) -> None:

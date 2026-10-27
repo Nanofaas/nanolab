@@ -16,7 +16,7 @@ from nanolab.comparison.experiment_02 import (
 )
 from nanolab.config.experiment_02 import Budget
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.tasks.experiment_02.budget import OBSERVER_SLICE
+from nanolab.tasks.experiment_02.budget import OBSERVER_SLICE, PLATFORM_UNIT
 from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS, SAMPLER_UNIT, run_cell
 from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.vm import Vm
@@ -108,6 +108,7 @@ def _stack(
     after_fails: bool = False,
     restart_fails: bool = False,
     stale_sampler: bool = False,
+    stale_platform: bool = False,
     oom_killed: bool = False,
 ) -> RecordingProvider:
     remaining = list(leftovers or [])
@@ -125,7 +126,8 @@ def _stack(
         if argv[:4] == ("timeout", "30", "docker", "ps"):
             return Result(0, "CONTAINER ID   NAMES\n")
         if argv[:2] == ("systemctl", "is-active"):
-            return Result(0 if stale_sampler else 3)
+            stale = stale_platform if argv[-1] == PLATFORM_UNIT else stale_sampler
+            return Result(0 if stale else 3)
         if argv[0] == "sh" and "stat -c %i" in argv[-1]:
             if after_fails and state.started:
                 return Result(1, "", "ssh: connection closed")
@@ -314,6 +316,27 @@ def test_leftover_containers_are_removed_before_deploy(tmp_path):
     assert _index(commands, ("docker", "rm", "-f", "e02-control-plane")) < _index(
         commands, ("sudo", "systemctl", "set-property")
     )
+
+
+def test_an_earlier_baseline_is_torn_down_before_deploy(tmp_path):
+    # A cell killed mid-run leaves its host unit, compose project or networks.
+    stack = _stack()
+    assert _run(stack, _loadgen(), FakePlatform(), tmp_path) == "measured"
+    commands = stack.commands()
+    budget = _index(commands, ("sudo", "systemctl", "set-property"))
+    for step in (
+        ("sudo", "systemctl", "stop", PLATFORM_UNIT),
+        ("sudo", "docker", "compose", "-p", "e02", "down", "-v"),
+        ("docker", "network", "prune", "-f"),
+    ):
+        assert _index(commands, step) < budget
+
+
+def test_a_platform_unit_left_running_refuses_the_cell(tmp_path):
+    platform = FakePlatform()
+    with pytest.raises(ValueError, match="platform"):
+        _run(_stack(stale_platform=True), _loadgen(), platform, tmp_path)
+    assert platform.calls == []
 
 
 def test_a_sampler_left_running_refuses_the_cell(tmp_path):

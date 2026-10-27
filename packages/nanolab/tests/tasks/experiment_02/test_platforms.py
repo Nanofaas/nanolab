@@ -166,14 +166,8 @@ def test_readiness_reports_seconds_from_the_start_measured_on_the_vm(tmp_path):
     assert spec["timeoutSeconds"] == _protocol().readiness_timeout_seconds
 
 
-@pytest.mark.parametrize(
-    "probe",
-    [
-        {"started": 100.0, "api": 100.5, "timeout": "registered", "last": {}},
-        {"started": 100.0, "failed": "start", "code": 125, "stderr": "conflict"},
-    ],
-)
-def test_no_correct_answer_is_none_with_the_reason_recorded(tmp_path, probe):
+def test_no_correct_answer_is_none_with_the_reason_recorded(tmp_path):
+    probe = {"started": 100.0, "api": 100.5, "timeout": "registered", "last": {}}
     _provider, timings, _spec = _start(_p1(), tmp_path, probe)
     assert timings is None
     recorded = json.loads((tmp_path / "readiness.json").read_text())
@@ -328,3 +322,10 @@ def test_recorded_containers_leave_out_their_environment(tmp_path):
     [recorded] = json.loads((tmp_path / "containers.json").read_text())
     assert recorded["Name"] == "/e02-core-1"
     assert "s3" not in (tmp_path / "containers.json").read_text()
+
+
+def test_a_failed_start_command_is_an_error_not_a_result(tmp_path):
+    # A start command fails on the engine or a busy port, not on the platform.
+    probe = {"started": 1.0, "failed": "start", "command": ["docker"], "code": 125}
+    with pytest.raises(RuntimeError, match="start command failed"):
+        _start(DirectReference("registry/qr:e02"), tmp_path, probe)
