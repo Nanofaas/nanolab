@@ -34,6 +34,7 @@ from nanolab.config.experiment_01 import invocation_body
 from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.tasks.experiment_02.budget import PLATFORM_UNIT, REGISTRY_CONTAINER
 from nanolab.tasks.experiment_02.generator import K6Target
+from nanolab.tasks.experiment_02.refusal import CellRefusedError
 from nanolab.tasks.experiment_02.vm import Vm, exec_status
 from nanolab.workspace.paths import bundled_assets_root
 
@@ -83,8 +84,9 @@ class Platform(Protocol):
     ) -> dict[str, float] | None:
         """Start; return seconds to API, registration and first correct answer.
 
-        `None` when the platform failed to start or to answer correctly before
-        the protocol's readiness timeout; `evidence/readiness.json` says which.
+        `None` when the platform gave no correct answer before the protocol's
+        readiness timeout; `evidence/readiness.json` says at which stage. A
+        start command that fails raises: that is the engine, not the platform.
         """
         ...
 
@@ -124,6 +126,15 @@ _REMOVAL_WAIT_SECONDS = 60.0
 _REMOVAL_POLL_SECONDS = 2.0
 
 
+class ContainersRemainError(RuntimeError):
+    """Containers the teardown could not remove before its deadline."""
+
+    def __init__(self, names: Sequence[str]) -> None:
+        """Name the containers that remain."""
+        super().__init__(f"containers remain after the teardown: {list(names)}")
+        self.names = list(names)
+
+
 def _remove_containers(vm: Vm) -> None:
     deadline = time.monotonic() + _REMOVAL_WAIT_SECONDS
     # Remove again on every pass: a platform may create containers meanwhile.
@@ -132,7 +143,7 @@ def _remove_containers(vm: Vm) -> None:
         if not leftover_containers(vm):
             return
         if time.monotonic() >= deadline:
-            raise RuntimeError(f"containers remain after the teardown: {names}")
+            raise ContainersRemainError(names)
         time.sleep(_REMOVAL_POLL_SECONDS)
 
 
@@ -399,13 +410,13 @@ class NanofaasPlatform:
         data = json.loads(metadata)
         running = sorted(data.get("modules", []))
         if running != sorted(self.modules):
-            raise ValueError(
+            raise CellRefusedError(
                 f"running control plane has modules {running}, "
                 f"expected {sorted(self.modules)}"
             )
         kind = data.get("build", {}).get("type")
         if self.runtime is not None and kind != self.runtime:
-            raise ValueError(
+            raise CellRefusedError(
                 f"running control plane is {kind}, expected {self.runtime}"
             )
 

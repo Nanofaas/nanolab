@@ -122,6 +122,7 @@ from nanolab.tasks.experiment_02.platforms import (
     NanofaasPlatform,
     Platform,
 )
+from nanolab.tasks.experiment_02.refusal import CellRefusedError
 from nanolab.tasks.experiment_02.vm import Vm
 from nanolab.tasks.experiment_02.workload import (
     WORKLOAD,
@@ -430,8 +431,8 @@ def _run_experiment_02_cell(
     """Run one experiment 02 cell to a definitive outcome, or stop the matrix.
 
     Each attempt has its own directory and an outcome commits a receipt. A
-    refusal (`ValueError`: a budget not enforced, a process outside it) stops
-    at once. Any other failure before the load is taken as transport and
+    refusal (`CellRefusedError`: a budget not enforced, a process outside it)
+    stops at once. Any other failure before the load is taken as transport and
     retried once in a new attempt, provided the attempt cleaned up after
     itself; after the load started, it stops. A cleanup that failed leaves
     the remote state unknown: a documented `oom` or `startup_failed` keeps its
@@ -449,8 +450,6 @@ def _run_experiment_02_cell(
         cleanup_errors = run_dir / DIAGNOSTICS / CLEANUP_ERRORS
         try:
             outcome = run_attempt(run_dir)
-        except ValueError:
-            raise
         except Exception as error:
             diagnostics = run_dir / DIAGNOSTICS
             diagnostics.mkdir(exist_ok=True)
@@ -458,7 +457,8 @@ def _run_experiment_02_cell(
                 "".join(format_exception_only(error))
             )
             if (
-                (run_dir / LOAD_STARTED).is_file()
+                isinstance(error, CellRefusedError)
+                or (run_dir / LOAD_STARTED).is_file()
                 or transport_retried
                 or cleanup_errors.is_file()
             ):

@@ -11,6 +11,7 @@ from nanolab.comparison.experiment_01 import (
     EVENTS,
     SUMMARY,
     Outcome,
+    attempt_dir,
     mark_load_started,
 )
 from nanolab.comparison.experiment_02 import (
@@ -21,6 +22,7 @@ from nanolab.comparison.experiment_02 import (
 )
 from nanolab.config.experiment_02 import Budget
 from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS
+from nanolab.tasks.experiment_02.refusal import CellRefusedError
 
 IDENTITY = {"tag": "recipe-test", "experiment": {"profile": "experiment-02"}}
 CELL = Experiment02Cell(
@@ -46,7 +48,12 @@ def _transport(run_dir: Path) -> Outcome:
 
 
 def _refused(run_dir: Path) -> Outcome:
-    raise ValueError("the measured slice enforces cpu1-mem2048")
+    raise CellRefusedError("the measured slice enforces cpu1-mem2048")
+
+
+def _garbled(run_dir: Path) -> Outcome:
+    # Output cut short by a dropped channel: a ValueError, but no refusal.
+    return json.loads('{"started": 1.')
 
 
 def _after_load(run_dir: Path) -> Outcome:
@@ -112,9 +119,18 @@ def test_second_transport_failure_stops_the_matrix(tmp_path):
 
 
 def test_refusal_stops_without_retry(tmp_path):
-    with pytest.raises(ValueError, match="cpu1-mem2048"):
+    with pytest.raises(CellRefusedError, match="cpu1-mem2048"):
         _run(tmp_path, [_refused, _measured])
     assert not (CELL.run_dir(tmp_path) / CELL_RESULT).exists()
+    error = attempt_dir(CELL.run_dir(tmp_path), 1) / DIAGNOSTICS / "error.txt"
+    assert "cpu1-mem2048" in error.read_text()
+
+
+def test_unparseable_output_before_load_is_retried_not_refused(tmp_path):
+    outcome, calls, _checks = _run(tmp_path, [_garbled, _measured])
+    assert outcome == "measured"
+    assert [path.name for path in calls] == ["1", "2"]
+    assert "JSONDecodeError" in (calls[0] / DIAGNOSTICS / "error.txt").read_text()
 
 
 def test_failure_after_the_load_started_is_not_retried(tmp_path):

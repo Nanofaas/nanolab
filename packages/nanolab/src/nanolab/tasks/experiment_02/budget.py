@@ -25,6 +25,7 @@ from pathlib import PurePosixPath
 
 from nanolab.config.experiment_02 import Budget
 from nanolab.tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.experiment_02.refusal import CellRefusedError
 
 SUT_SLICE = "nanolab-sut.slice"
 INFRA_SLICE = "nanolab-infra.slice"
@@ -133,15 +134,15 @@ def parse_budget(text: str) -> Budget:
     """Read the budget the kernel enforces from `read_budget_argv`'s output."""
     lines = text.split()
     if len(lines) != 4:
-        raise ValueError(f"unexpected cgroup budget files: {text!r}")
+        raise CellRefusedError(f"unexpected cgroup budget files: {text!r}")
     quota, period, memory, swap = lines
     if quota == "max" or memory == "max":
-        raise ValueError("the measured slice is unbounded")
+        raise CellRefusedError("the measured slice is unbounded")
     if swap != "0":
-        raise ValueError("the measured slice may swap")
+        raise CellRefusedError("the measured slice may swap")
     memory_bytes = int(memory)
     if memory_bytes % _MIB:
-        raise ValueError(f"memory.max is not a whole number of MiB: {memory}")
+        raise CellRefusedError(f"memory.max is not a whole number of MiB: {memory}")
     return Budget(cpus=int(quota) / int(period), memoryMiB=memory_bytes // _MIB)
 
 

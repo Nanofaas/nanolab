@@ -59,10 +59,12 @@ from nanolab.tasks.experiment_02.budget import (
 )
 from nanolab.tasks.experiment_02.generator import generator_environment, run_generator
 from nanolab.tasks.experiment_02.platforms import (
+    ContainersRemainError,
     Platform,
     baseline_teardown,
     leftover_containers,
 )
+from nanolab.tasks.experiment_02.refusal import CellRefusedError
 from nanolab.tasks.experiment_02.samples import (
     SAMPLE_INTERVAL_SECONDS,
     SAMPLER_SCRIPT,
@@ -93,16 +95,23 @@ def _sampler_running(stack: Vm) -> bool:
 
 def _require_clean(stack: Vm) -> None:
     # An interrupted cell may have left a baseline's unit, project or networks.
-    baseline_teardown(stack)
+    try:
+        baseline_teardown(stack)
+    except ContainersRemainError as error:
+        raise CellRefusedError(
+            f"containers from an earlier cell remain: {error.names}"
+        ) from error
     remaining = leftover_containers(stack)
     if remaining:
-        raise ValueError(f"containers from an earlier cell remain: {remaining}")
+        raise CellRefusedError(f"containers from an earlier cell remain: {remaining}")
     _ = exec_status(stack, ("sudo", "systemctl", "stop", SAMPLER_UNIT))
     if _sampler_running(stack):
-        raise ValueError(f"an earlier cell's sampler still runs: {SAMPLER_UNIT}")
+        raise CellRefusedError(f"an earlier cell's sampler still runs: {SAMPLER_UNIT}")
     unit = ("systemctl", "is-active", "--quiet", PLATFORM_UNIT)
     if exec_status(stack, unit).return_code == 0:
-        raise ValueError(f"an earlier cell's platform still runs: {PLATFORM_UNIT}")
+        raise CellRefusedError(
+            f"an earlier cell's platform still runs: {PLATFORM_UNIT}"
+        )
 
 
 def _stop_sampler(stack: Vm) -> None:
@@ -186,7 +195,7 @@ def _apply_budget(stack: Vm, cell: Experiment02Cell, run_dir: Path) -> None:
         },
     )
     if observed != cell.budget:
-        raise ValueError(
+        raise CellRefusedError(
             f"the measured slice enforces {observed.label}, not {cell.budget.label}"
         )
 
@@ -265,7 +274,7 @@ def run_cell(
     Raises instead of returning when the cell cannot be measured as the
     protocol requires: a budget the kernel does not enforce, a process outside
     it, a generator that did not finish, OOM evidence that is missing. A
-    `ValueError` is a refusal. The caller decides on retries and checks
+    `CellRefusedError` is a refusal. The caller decides on retries and checks
     `diagnostics/cleanup-errors.json` before any other cell.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -297,7 +306,7 @@ def run_cell(
                 (diagnostics / "processes-outside.txt").write_text(
                     "\n".join(outside) + "\n"
                 )
-                raise ValueError(
+                raise CellRefusedError(
                     f"deployment processes outside the measured slice: {outside}"
                 )
             platform.record(stack, run_dir)

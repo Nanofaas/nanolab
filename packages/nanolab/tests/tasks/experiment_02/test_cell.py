@@ -16,9 +16,11 @@ from nanolab.comparison.experiment_02 import (
 )
 from nanolab.config.experiment_02 import Budget
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.tasks.experiment_02 import platforms
 from nanolab.tasks.experiment_02.budget import OBSERVER_SLICE, PLATFORM_UNIT
 from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS, SAMPLER_UNIT, run_cell
 from nanolab.tasks.experiment_02.generator import K6Target
+from nanolab.tasks.experiment_02.refusal import CellRefusedError
 from nanolab.tasks.experiment_02.vm import Vm
 from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
@@ -110,6 +112,7 @@ def _stack(
     stale_sampler: bool = False,
     stale_platform: bool = False,
     oom_killed: bool = False,
+    stuck: bool = False,
 ) -> RecordingProvider:
     remaining = list(leftovers or [])
     reads = iter(oom)
@@ -121,7 +124,8 @@ def _stack(
             names = ["nanofaas-e2e-registry", *remaining, *running]
             return Result(0, "\n".join(names) + "\n")
         if argv[:3] == ("docker", "rm", "-f"):
-            remaining.clear()
+            if not stuck:
+                remaining.clear()
             return None
         if argv[:4] == ("timeout", "30", "docker", "ps"):
             return Result(0, "CONTAINER ID   NAMES\n")
@@ -294,7 +298,7 @@ def test_unknown_oom_evidence_stops_without_a_measured_receipt(tmp_path):
 def test_budget_mismatch_stops_before_deploy(tmp_path):
     stack = _stack(budget="100000 100000\n2147483648\n0\n")
     platform = FakePlatform()
-    with pytest.raises(ValueError, match="cpu1-mem2048"):
+    with pytest.raises(CellRefusedError, match="cpu1-mem2048"):
         _run(stack, _loadgen(), platform, tmp_path)
     assert platform.calls == ["teardown"]
     assert _stopped_after_start(stack)
@@ -303,7 +307,7 @@ def test_budget_mismatch_stops_before_deploy(tmp_path):
 def test_process_outside_the_slice_stops_before_load(tmp_path):
     outside = INSIDE + "101 containerd-shim /system.slice/containerd.service\n"
     loadgen, platform = _loadgen(), FakePlatform()
-    with pytest.raises(ValueError, match="outside the measured slice"):
+    with pytest.raises(CellRefusedError, match="outside the measured slice"):
         _run(_stack(listing=outside), loadgen, platform, tmp_path)
     assert not any(argv[:2] == ("k6", "run") for argv in loadgen.commands())
     assert platform.calls[-1] == "teardown"
@@ -316,6 +320,19 @@ def test_leftover_containers_are_removed_before_deploy(tmp_path):
     assert _index(commands, ("docker", "rm", "-f", "e02-control-plane")) < _index(
         commands, ("sudo", "systemctl", "set-property")
     )
+
+
+def test_containers_that_survive_removal_refuse_the_cell(tmp_path, monkeypatch):
+    monkeypatch.setattr(platforms, "_REMOVAL_WAIT_SECONDS", 0.0)
+    platform = FakePlatform()
+    with pytest.raises(CellRefusedError, match="earlier cell remain"):
+        _run(
+            _stack(leftovers=["e02-fnserver"], stuck=True),
+            _loadgen(),
+            platform,
+            tmp_path,
+        )
+    assert platform.calls == []
 
 
 def test_an_earlier_baseline_is_torn_down_before_deploy(tmp_path):
@@ -334,14 +351,14 @@ def test_an_earlier_baseline_is_torn_down_before_deploy(tmp_path):
 
 def test_a_platform_unit_left_running_refuses_the_cell(tmp_path):
     platform = FakePlatform()
-    with pytest.raises(ValueError, match="platform"):
+    with pytest.raises(CellRefusedError, match="platform"):
         _run(_stack(stale_platform=True), _loadgen(), platform, tmp_path)
     assert platform.calls == []
 
 
 def test_a_sampler_left_running_refuses_the_cell(tmp_path):
     platform = FakePlatform()
-    with pytest.raises(ValueError, match="sampler"):
+    with pytest.raises(CellRefusedError, match="sampler"):
         _run(_stack(stale_sampler=True), _loadgen(), platform, tmp_path)
     assert platform.calls == []
 
@@ -391,7 +408,7 @@ def test_host_process_outside_the_slice_stops_before_load(tmp_path):
     outside = INSIDE + "301 spin /system.slice/run-x.service\n"
     loadgen = _loadgen()
     platform = FakePlatform(host_commands=("spin",))
-    with pytest.raises(ValueError, match="outside the measured slice"):
+    with pytest.raises(CellRefusedError, match="outside the measured slice"):
         _run(_stack(listing=outside), loadgen, platform, tmp_path)
     assert not any(argv[:2] == ("k6", "run") for argv in loadgen.commands())
     # The same process inside the slice is fine.
