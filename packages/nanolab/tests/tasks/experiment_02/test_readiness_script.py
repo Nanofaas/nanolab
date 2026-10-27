@@ -192,3 +192,23 @@ def test_a_frozen_png_hash_must_match(tmp_path, platform):
         invoke={"pngSha256": "0" * 64},
     )
     assert result["timeout"] == "first"
+
+
+def test_serverledge_result_needs_its_inner_json_string(tmp_path, platform):
+    platform.routes.update(
+        {
+            ("GET", "/health"): [(200, {})],
+            ("POST", "/invoke"): [
+                (200, {"Success": True, "Result": ENVELOPE["output"]}),
+                (200, {"Success": True, "Result": json.dumps(ENVELOPE["output"])}),
+            ],
+        }
+    )
+    result = _run(
+        tmp_path,
+        platform,
+        register=None,
+        invoke={"extractor": "json-string-base64", "field": "Result"},
+    )
+    assert result["attempts"] == 2
+    assert "first" in result

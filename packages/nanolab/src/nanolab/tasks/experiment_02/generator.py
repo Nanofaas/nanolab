@@ -28,7 +28,7 @@ from nanolab.config.experiment_01 import k6_protocol
 from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.tasks.experiment_02.vm import Vm, fetch_if_present
 
-Extractor = Literal["nanofaas-envelope", "json-base64", "raw-png"]
+Extractor = Literal["nanofaas-envelope", "json-base64", "json-string-base64", "raw-png"]
 
 
 @dataclass(frozen=True)

@@ -141,7 +141,8 @@ function mediaType(headers) {
 
 // `nanofaas-envelope` is the control plane's invocation envelope; `json-base64`
 // a base64 PNG at `field` of a JSON object, or the whole JSON body when `field`
-// is null; `raw-png` the PNG as the response body.
+// is null; `json-string-base64` the same base64 JSON string encoded once more
+// at `field`; `raw-png` the PNG as the response body.
 export function correct(response) {
     if (response.status !== 200) {
         return false;
@@ -168,6 +169,11 @@ export function correct(response) {
         if (TARGET.extractor === 'json-base64') {
             return (body.error === undefined || body.error === null)
                 && base64Png(body[TARGET.field]);
+        }
+        // Serverledge: the PNG's base64 is a JSON string inside a string field.
+        if (TARGET.extractor === 'json-string-base64') {
+            return typeof body[TARGET.field] === 'string'
+                && base64Png(JSON.parse(body[TARGET.field]));
         }
         return false;
     } catch (error) {

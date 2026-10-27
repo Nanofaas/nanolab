@@ -103,6 +103,9 @@ def png_of(
                 text = value.get("output")
             elif invoke.get("field") is None:
                 text = value
+            elif invoke["extractor"] == "json-string-base64":
+                inner = value.get(invoke["field"]) if isinstance(value, dict) else None
+                text = json.loads(inner) if isinstance(inner, str) else None
             else:
                 if not isinstance(value, dict) or value.get("error") is not None:
                     return None

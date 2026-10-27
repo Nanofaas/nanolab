@@ -178,3 +178,32 @@ def test_each_request_carries_its_own_execution_id():
         "X-Execution-Id": "warmup-0",
     }
     assert observed["events"][0]["id"] == "warmup-0"
+
+
+@pytest.mark.parametrize(
+    ("body", "correct"),
+    [
+        ({"Success": True, "Result": json.dumps(B64)}, True),
+        ({"Success": True, "Result": B64}, False),
+        ({"Success": False, "Result": ""}, False),
+    ],
+)
+def test_serverledge_result_is_a_json_string_holding_the_png(body, correct):
+    sample = {"target": _target("json-string-base64", "Result"), "body": body}
+    assert _run(sample)["events"][1]["ok"] is correct
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        # tinyFaaS reports a failed function as 200 "exit status 1".
+        {
+            "target": _target("json-base64"),
+            "raw": base64.b64encode(b"exit status 1").decode(),
+        },
+        # Fn's /invoke reports it as 200 with the core's error body.
+        {"target": _target("json-base64"), "body": {"error": "field 'text' ..."}},
+    ],
+)
+def test_status_200_with_an_error_body_is_incorrect(sample):
+    assert _run(sample)["events"][1]["ok"] is False
