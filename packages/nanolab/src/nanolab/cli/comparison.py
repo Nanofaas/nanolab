@@ -36,7 +36,9 @@ from nanolab.application.vm_provider import (
     vm_request_for_role,
 )
 from nanolab.cli.catalogue import environment_input, scenario_input
+from nanolab.cli.product import execute_workflow, prepare_run
 from nanolab.cli.progress import ConsoleProgressSink
+from nanolab.cli.provisioning import provisioning_context
 from nanolab.comparison.cells import (
     DIAGNOSTICS,
     LOAD_STARTED,
@@ -136,7 +138,7 @@ from nanolab.tasks.experiment_02.workload import (
 from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
 from nanolab.tasks.recipes.remote import remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest, vm_remote_home
-from nanolab.workspace.paths import bundled_assets_root
+from nanolab.workspace.paths import bundled_assets_root, default_tool_paths
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
 EXPERIMENT_01_DEFAULT_VARIANTS = tuple(EXPERIMENT_01_VARIANTS_BY_KEY)
@@ -272,12 +274,10 @@ def _run_attempt(
     prepared: PreparedComparison,
 ) -> None:
     """Execute one cell's workflow into `run_dir`, building nothing."""
-    from nanolab.cli.product import _execute_workflow, _prepare_run
-
     cell_dir = run_dir
     lifetime = ExitStack()
     try:
-        sink, *_rest = _prepare_run(
+        sink, *_rest = prepare_run(
             lifetime,
             release=False,
             scenario=scenario,
@@ -289,7 +289,7 @@ def _run_attempt(
             paths=paths,  # type: ignore[arg-type]
             effective_run_dir=cell_dir,
         )
-        _execute_workflow(
+        execute_workflow(
             sink=sink,
             scenario_config=cell_scenario(scenario_config, cell),
             environment_config=environment_config,
@@ -552,11 +552,6 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
     differs is the stack (Docker and cgroup slices, no k3s) and the cell, which
     `tasks.experiment_02.cell.run_cell` drives directly on the VMs.
     """
-    from nanolab.cli.product import (  # local: the router imports this module
-        _provisioning_context,
-        default_tool_paths,
-    )
-
     protocol = scenario_config.experiment_02
     if protocol is None:
         raise typer.BadParameter("experiment-02 requires its experiment02 block")
@@ -679,7 +674,7 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
     }
     request = requests["stack"]
     provisioning = (
-        _provisioning_context(scenario_config, environment_config, paths, True)
+        provisioning_context(scenario_config, environment_config, paths, True)
         if new_run
         else nullcontext()
     )
@@ -858,11 +853,6 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Compare control-plane builds under one varying load."""
-        from nanolab.cli.product import (  # local: the router imports this module
-            _provisioning_context,
-            default_tool_paths,
-        )
-
         scenario_config = load_scenario(scenario)
         environment_config = load_environment(environment)
         if scenario_config.load_profile == "experiment-02":
@@ -1005,7 +995,7 @@ def register(app: typer.Typer) -> None:
         }
         request = requests["stack"]
         provisioning = (
-            _provisioning_context(scenario_config, environment_config, paths, True)
+            provisioning_context(scenario_config, environment_config, paths, True)
             if new_run
             else nullcontext()
         )

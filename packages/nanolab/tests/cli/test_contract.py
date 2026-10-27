@@ -30,7 +30,7 @@ def test_forbidden_options_rejected_before_acquisition(
     def unexpected(*args, **kwargs):
         pytest.fail("forbidden options reached platform acquisition")
 
-    monkeypatch.setattr(product, "_provisioning_context", unexpected)
+    monkeypatch.setattr(product, "provisioning_context", unexpected)
     monkeypatch.setattr(product, "build_scenario_workflow", unexpected)
     monkeypatch.setattr(product, "_run_teardown", unexpected)
     result = CliRunner().invoke(app, [command, str(scenario), *options])
@@ -116,7 +116,7 @@ def test_contract_skips_control_plane_provisioning_and_finalizes_after_release(
     import nanolab.plans.contract as contract
 
     monkeypatch.setattr(product, "build_scenario_workflow", build)
-    monkeypatch.setattr(product, "_provisioning_context", unexpected)
+    monkeypatch.setattr(product, "provisioning_context", unexpected)
     monkeypatch.setattr(contract, "finalize_contract_run", finalize)
     result = CliRunner().invoke(app, ["run", str(scenario), "--run-dir", str(run_dir)])
     assert result.exit_code == (1 if failure else 0), result.output

@@ -54,7 +54,7 @@ from nanolab.cli.catalogue import (
 )
 from nanolab.cli.catalogue import environment_input, scenario_input
 from nanolab.cli.progress import ConsoleProgressSink
-from nanolab.cli.provisioning import provision_environment
+from nanolab.cli.provisioning import provisioning_context
 from nanolab.cli.soak import (
     install_soak_commands,
     require_unused_run_dir,
@@ -355,7 +355,7 @@ def _run_teardown(
         raise typer.BadParameter(str(error)) from None
 
 
-def _prepare_run(
+def prepare_run(
     lifetime: ExitStack,
     *,
     release: bool,
@@ -424,27 +424,6 @@ def _prepare_run(
         release_provider,
         release_journal,
     )
-
-
-def _provisioning_context(
-    scenario_config: ScenarioConfig,
-    environment_config: EnvironmentConfig,
-    paths: ToolPaths,
-    keep: bool,
-):
-    if (
-        scenario_config.workflow != "release"
-        and not scenario_config.workflow.startswith("one-shot-")
-        and environment_config.provider != "local"
-        and not (scenario_config.workflow == "cli" and scenario_config.backend == "k8s")
-    ):
-        return provision_environment(
-            scenario_config,
-            environment_config,
-            repo_root=paths.nanofaas_root,
-            keep=keep,
-        )
-    return nullcontext()
 
 
 def _forward_loadtest_urls(
@@ -552,7 +531,7 @@ def _run_selected_workflow(
         sonata_workflow.run(select=selection)
 
 
-def _execute_workflow(
+def execute_workflow(
     *,  # NOSONAR (S107): keyword-only execution context
     sink: ConsoleProgressSink,
     scenario_config: ScenarioConfig,
@@ -573,6 +552,11 @@ def _execute_workflow(
     prepared_comparison: PreparedComparison | None = None,
     provision: bool = True,
 ) -> None:
+    """Provision what the scenario needs, then build and run its workflow.
+
+    `run` and every comparison cell go through here; a comparison passes
+    `provision=False` and reuses the machines it already holds.
+    """
     # Command output routing (SubprocessShell._emit_output) reads the
     # same contextvar, so one bind covers the whole execution layer.
     with bind_workflow_sink(sink):
@@ -584,7 +568,7 @@ def _execute_workflow(
             raise typer.BadParameter(str(error)) from None
         require_recipe_environment(scenario_config, environment_config)
         provisioning = (
-            _provisioning_context(scenario_config, environment_config, paths, keep)
+            provisioning_context(scenario_config, environment_config, paths, keep)
             if provision and scenario_config.workflow != "contract"
             else nullcontext()
         )
@@ -1004,7 +988,7 @@ def install_product_commands(
                 release_request,
                 release_provider,
                 release_journal,
-            ) = _prepare_run(
+            ) = prepare_run(
                 lifetime,
                 release=release,
                 scenario=scenario,
@@ -1023,7 +1007,7 @@ def install_product_commands(
             lifetime.close()
             raise
         try:
-            _execute_workflow(
+            execute_workflow(
                 sink=sink,
                 scenario_config=scenario_config,
                 environment_config=environment_config,

@@ -94,13 +94,13 @@ def test_relative_prerequisite_paths_resolve_from_scenario_not_operator_director
 def test_public_cli_does_not_provision_legacy_stack_before_one_shot_preflight(
     monkeypatch,
 ):
-    from nanolab.cli.product import _provisioning_context
+    from nanolab.cli.provisioning import provisioning_context
 
     def forbidden(*args, **kwargs):
         pytest.fail("one-shot must acquire only its run-owned topology after preflight")
 
-    monkeypatch.setattr("nanolab.cli.product.provision_environment", forbidden)
-    context = _provisioning_context(
+    monkeypatch.setattr("nanolab.cli.provisioning.provision_environment", forbidden)
+    context = provisioning_context(
         cast(Any, SimpleNamespace(workflow="one-shot-experiment", backend="container")),
         cast(Any, SimpleNamespace(provider="multipass")),
         cast(Any, SimpleNamespace(nanofaas_root=Path("/unused"))),
@@ -143,7 +143,7 @@ def test_public_cli_load_failure_still_reports_and_preserves_original_error(
     monkeypatch.setattr(product, "_run_selected_workflow", fail_load)
     monkeypatch.setattr("nanolab.one_shot.report.render_campaign", report)
     with pytest.raises(RuntimeError, match="load aborted"):
-        product._execute_workflow(
+        product.execute_workflow(
             sink=MagicMock(),
             scenario_config=scenario,
             environment_config=cast(Any, object()),

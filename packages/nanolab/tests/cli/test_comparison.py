@@ -31,6 +31,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
     state = {"cluster": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
     paths = ToolPaths.from_roots(nanofaas_checkout, discover_tool_root())
     monkeypatch.setattr(product, "default_tool_paths", lambda: paths)
+    monkeypatch.setattr(comparison, "default_tool_paths", lambda: paths)
 
     @contextmanager
     def provision(*args):
@@ -42,7 +43,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
         )
         yield
 
-    monkeypatch.setattr(product, "_provisioning_context", provision)
+    monkeypatch.setattr(comparison, "provisioning_context", provision)
 
     class Provider:
         def exec_argv(self, request, argv, **kwargs):
@@ -364,7 +365,7 @@ def test_cell_retry_preserves_prepared_artifacts_and_checks_each_attempt(
     prepared = PreparedComparison(PurePosixPath("/owned/source"), {})
     checks = []
     attempts = []
-    monkeypatch.setattr(product, "_prepare_run", lambda *args, **kwargs: (None,))
+    monkeypatch.setattr(comparison, "prepare_run", lambda *args, **kwargs: (None,))
 
     def execute(**kwargs):
         assert kwargs["prepared_comparison"] is prepared
@@ -374,7 +375,7 @@ def test_cell_retry_preserves_prepared_artifacts_and_checks_each_attempt(
         if len(attempts) == 1:
             raise ConnectionError("transport lost")
 
-    monkeypatch.setattr(product, "_execute_workflow", execute)
+    monkeypatch.setattr(comparison, "execute_workflow", execute)
     comparison._run_cell(
         build_matrix(resolve_variants(("jvm",)), 1)[0],
         scenario=tmp_path / "scenario.yaml",

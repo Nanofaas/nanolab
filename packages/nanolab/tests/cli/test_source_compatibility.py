@@ -25,7 +25,7 @@ def test_unsupported_runtime_fails_before_provisioning(tmp_path, monkeypatch):
         calls.append("provision")
         raise AssertionError("source compatibility must precede provisioning")
 
-    monkeypatch.setattr(product, "provision_environment", provision)
+    monkeypatch.setattr("nanolab.cli.provisioning.provision_environment", provision)
     result = CliRunner().invoke(
         app,
         [

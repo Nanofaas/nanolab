@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
@@ -46,7 +46,7 @@ from nanolab.tasks.provisioning import (
     scenario_context,
 )
 from nanolab.tasks.vm.models import VmRequest
-from nanolab.workspace.paths import bundled_assets_root
+from nanolab.workspace.paths import ToolPaths, bundled_assets_root
 
 
 def _request(
@@ -334,3 +334,29 @@ def provision_environment(
             after_ensure=after_ensure,
         ):
             yield
+
+
+def provisioning_context(
+    scenario_config: ScenarioConfig,
+    environment_config: EnvironmentConfig,
+    paths: ToolPaths,
+    keep: bool,
+) -> AbstractContextManager[object]:
+    """Return the provisioning a run of this scenario needs, or none.
+
+    Releases, one-shot and k8s cli workflows provision their own machines, and
+    a local environment has none to provision.
+    """
+    if (
+        scenario_config.workflow != "release"
+        and not scenario_config.workflow.startswith("one-shot-")
+        and environment_config.provider != "local"
+        and not (scenario_config.workflow == "cli" and scenario_config.backend == "k8s")
+    ):
+        return provision_environment(
+            scenario_config,
+            environment_config,
+            repo_root=paths.nanofaas_root,
+            keep=keep,
+        )
+    return nullcontext()

@@ -36,7 +36,7 @@ def test_multiarch_rejects_incomplete_cleanup_or_resume_before_provisioning(
     def unexpected(*args, **kwargs):
         pytest.fail("Must reject unsupported selection before provisioning")
 
-    monkeypatch.setattr(product_module, "_provisioning_context", unexpected)
+    monkeypatch.setattr(product_module, "provisioning_context", unexpected)
     monkeypatch.setattr(product_module, "_run_teardown", unexpected)
     result = CliRunner().invoke(app, ["run", str(scenario), option])
     assert result.exit_code == 2
@@ -268,7 +268,7 @@ def test_generic_release_run_requires_an_environment_and_never_provisions(
 ) -> None:
     provision = MagicMock(side_effect=AssertionError("must not provision"))
     build = MagicMock(side_effect=AssertionError("must not build workflow"))
-    monkeypatch.setattr(product_module, "provision_environment", provision)
+    monkeypatch.setattr("nanolab.cli.provisioning.provision_environment", provision)
     monkeypatch.setattr(product_module, "build_release_workflow", build)
 
     result = CliRunner().invoke(
@@ -444,7 +444,8 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
         raise AssertionError("legacy provision_environment must not run for cli/k8s")
 
     monkeypatch.setattr(
-        product_module, "provision_environment", _legacy_provision_must_not_run
+        "nanolab.cli.provisioning.provision_environment",
+        _legacy_provision_must_not_run,
     )
 
     result = CliRunner().invoke(
@@ -499,7 +500,7 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
         finally:
             actions.append("cleanup")
 
-    monkeypatch.setattr("nanolab.cli.product.provision_environment", provision)
+    monkeypatch.setattr("nanolab.cli.provisioning.provision_environment", provision)
     monkeypatch.setattr(
         "nanolab.cli.product.build_scenario_workflow",
         lambda *args, **kwargs: (
@@ -803,7 +804,7 @@ def test_containerd_recipe_staging_survives_kept_run(
     workflow = MagicMock()
     cleanup = MagicMock()
     monkeypatch.setattr(
-        product_module, "_provisioning_context", lambda *_: nullcontext()
+        product_module, "provisioning_context", lambda *_: nullcontext()
     )
     monkeypatch.setattr(product_module, "_build_run_workflow", lambda **_: workflow)
     monkeypatch.setattr(
@@ -813,7 +814,7 @@ def test_containerd_recipe_staging_survives_kept_run(
     monkeypatch.setattr(product_module, "provider_for_environment", lambda *_: object())
     monkeypatch.setattr(product_module, "cleanup_remote_recipe_run", cleanup)
 
-    product_module._execute_workflow(
+    product_module.execute_workflow(
         sink=MagicMock(),
         scenario_config=scenario,
         environment_config=environment,
