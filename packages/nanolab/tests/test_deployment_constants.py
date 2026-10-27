@@ -1,4 +1,4 @@
-from nanolab.tasks.deployment import (
+from nanolab.core.deployment import (
     CONTROL_PLANE_NODE_PORT,
     DEFAULT_NAMESPACE,
     LOCAL_CONTROL_PLANE_API_PORT,

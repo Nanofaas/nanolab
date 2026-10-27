@@ -16,12 +16,12 @@ from sonata_tasks.execution.models import CommandOptions, TaskResult
 from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.http import Endpoint, endpoint_argv
 
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.compose import (
     DestroyDockerCompose,
     DockerComposeProject,
     WaitForDockerCompose,
 )
-from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.http_function import HttpFunctionRegisterTask
 from nanolab.tasks.managed_containers import inspect_managed_container
 from nanolab.tasks.recipes.workflow import RecipeDistribution

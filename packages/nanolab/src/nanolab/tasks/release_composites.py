@@ -34,7 +34,7 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.skopeo import SkopeoInspectTask
 from sonata_tasks.syft import SYFT_IMAGE, SyftTask
 
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.execution import ExecutionRole
 
 __all__ = [
     "attest_composite",

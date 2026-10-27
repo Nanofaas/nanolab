@@ -100,13 +100,13 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.experiment_01 import experiment_01_payload
 from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.core.deployment import DEFAULT_NAMESPACE
 from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS_BY_KEY,
     VARIANTS_BY_KEY,
     resolve_variants,
 )
 from nanolab.plans.runtime_comparison import EXPERIMENT_01_SCRIPT_NAME
-from nanolab.tasks.deployment import DEFAULT_NAMESPACE
 from nanolab.tasks.experiment_02.baselines import (
     Fn,
     FunLess,

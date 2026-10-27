@@ -15,8 +15,8 @@ from pathlib import Path
 
 from nanolab.config import EnvironmentConfig
 from nanolab.config.environment import ExecutionRole
+from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.release.versioning import normalize_version, verify_version_consistency
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.tasks.vm.models import VmRequest
 
 _STACK_VM_SIZE = "Standard_D8s_v5"

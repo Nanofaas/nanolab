@@ -32,8 +32,8 @@ from sonata_tasks.minikube import minikube_target_resource as _minikube_target_r
 from sonata_tasks.vm.logged import run_remote_logged
 from sonata_tasks.vm.ports import VmCommandProvider
 
-from nanolab.tasks.deployment import LOCAL_REGISTRY
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.deployment import LOCAL_REGISTRY
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.recipes.remote import RemoteRecipeRun
 from nanolab.tasks.recipes.workflow import RecipeDistribution, RecipeImage
 from nanolab.tasks.vm.models import VmRequest

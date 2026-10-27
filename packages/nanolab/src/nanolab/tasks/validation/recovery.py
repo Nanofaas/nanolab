@@ -15,9 +15,9 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
 
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.compose import DockerComposeProject, WaitForDockerCompose
 from nanolab.tasks.containerd_rootless import RootlessRun
-from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.http_function import (
     Endpoint,
     HttpFunctionBackendTask,

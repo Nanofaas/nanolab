@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
+from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.tasks.provisioning.providers import command_provider_for
 from nanolab.tasks.vm.models import VmRequest
 

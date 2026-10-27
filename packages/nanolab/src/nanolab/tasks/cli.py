@@ -17,6 +17,8 @@ from sonata_tasks.execution.bindings import (
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.gradle import GradleTask
 
+from nanolab.core.deployment import DEFAULT_NAMESPACE
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.cli_function import (
     CliFunctionApplyTask,
     CliFunctionDeleteTask,
@@ -31,8 +33,6 @@ from nanolab.tasks.cli_function import (
     runtime_config_readback_task,
     runtime_config_tasks,
 )
-from nanolab.tasks.deployment import DEFAULT_NAMESPACE
-from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.function import function_resource
 from nanolab.tasks.kubectl import k8s_deployment_readiness
 from nanolab.tasks.manifest import FunctionManifest

@@ -51,12 +51,12 @@ from nanolab.config.experiment_01 import (
     k6_protocol,
 )
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.core.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS,
     resolve_variants,
 )
 from nanolab.plans.loadtest import build_loadtest_plan
-from nanolab.tasks.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 from nanolab.tasks.platform import Platform
 from nanolab.tasks.recipes.kubernetes import RecipeKubernetesImageCheckTask

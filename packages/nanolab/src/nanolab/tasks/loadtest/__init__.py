@@ -11,7 +11,7 @@ from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workfl
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
-from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
+from nanolab.core.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from nanolab.tasks.loadtest.autoscaling import (
     AutoscalingSummary,
     InitialReplicaCheck,

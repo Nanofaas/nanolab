@@ -18,6 +18,7 @@ from sonata_tasks.vm.azure import AzureVmProvider
 
 from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
+from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import (
     _ArchiveProvider,
@@ -46,7 +47,6 @@ from nanolab.tasks.components.bootstrap import (
     plan_registry_ensure_container,
     plan_vm_provision_base,
 )
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.tasks.provisioning import (
     remote_operations,
     retarget_cloud_operations,

@@ -12,7 +12,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
 
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.execution import ExecutionRole
 
 
 def inspect_managed_container(

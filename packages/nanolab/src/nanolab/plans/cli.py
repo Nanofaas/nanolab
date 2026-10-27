@@ -29,6 +29,13 @@ from nanolab.application.vm_provider import (
 )
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.core.deployment import (
+    CONTROL_PLANE_NODE_PORT,
+    DEFAULT_NAMESPACE,
+    LOCAL_REGISTRY,
+    REGISTRY_CONTAINER_NAME,
+)
+from nanolab.core.execution import ExecutionRole
 from nanolab.plans import _local_control_plane
 from nanolab.release.environment import secure_release_endpoints
 from nanolab.release.publish import GHCR_REPOSITORY
@@ -59,13 +66,6 @@ from nanolab.tasks.containerd_rootless import (
     registry_resource,
     run_for_environment,
 )
-from nanolab.tasks.deployment import (
-    CONTROL_PLANE_NODE_PORT,
-    DEFAULT_NAMESPACE,
-    LOCAL_REGISTRY,
-    REGISTRY_CONTAINER_NAME,
-)
-from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 

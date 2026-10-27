@@ -13,8 +13,8 @@ from sonata_tasks.containerd import (
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
 
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.containerd_rootless import RootlessRun
-from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.recipes.workflow import RecipeDistribution
 
 

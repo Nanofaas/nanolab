@@ -1,1 +1,1 @@
-"""Shared type definitions used across the nanolab packages."""
+"""Shared types and lab constants; imports no other nanolab package."""

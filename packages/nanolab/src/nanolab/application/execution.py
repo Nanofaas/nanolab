@@ -33,7 +33,7 @@ from sonata_tasks.vm.ports import VmCommandProvider
 from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
 from nanolab.config.scenario import BackendName
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
+from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.vm.models import VmRequest, vm_remote_home
 from nanolab.tasks.vm.orchestrator import VmOrchestrator

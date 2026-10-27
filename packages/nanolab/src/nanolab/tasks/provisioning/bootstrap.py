@@ -15,13 +15,13 @@ from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
+from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.tasks.components.bootstrap import retarget_bootstrap_operation
 from nanolab.tasks.components.context import ScenarioExecutionContext
 from nanolab.tasks.components.operations import (
     RemoteCommandOperation,
     ScenarioOperation,
 )
-from nanolab.tasks.deployment import LOCAL_REGISTRY
 from nanolab.tasks.vm.models import VmRequest
 
 

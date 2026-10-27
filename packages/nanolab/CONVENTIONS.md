@@ -11,7 +11,12 @@ independently. File length alone is not a reason to split a module.
 - `plans/` composes scenario workflows; `tasks/` owns runtime behavior and resources.
 - `release/` owns release data, evidence and execution; `comparison/` owns matrix data.
 - `cli/` and `tui/` parse, present and invoke the product.
-- `core/` remains independent of product packages.
+- `app/` is the composition root: the `nanolab` entry point that installs the
+  CLI commands and launches the TUI. `application/` is the shared use-case
+  layer below both.
+- `core/` holds the types and lab constants every layer shares (execution
+  roles, runtime kinds, namespace, registry and ports) and remains
+  independent of product packages.
 
 Import contracts in `.importlinter` forbid runtime dependencies on presentation
 and plan builders. Sonata is a published dependency, not local source. Reuse its

@@ -12,9 +12,9 @@ from multipass_vm_sdk import find_ssh_public_key
 from sonata_tasks.ansible import build_ansible_argv
 from sonata_tasks.vm.ssh import find_ssh_private_key_path, ssh_command
 
+from nanolab.core.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.components.context import ScenarioExecutionContext
 from nanolab.tasks.components.operations import RemoteCommandOperation
-from nanolab.tasks.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.tasks.vm.sync import repo_rsync_command
 

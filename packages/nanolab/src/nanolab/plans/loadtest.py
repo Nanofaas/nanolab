@@ -96,6 +96,8 @@ from nanolab.application.loadtest_policy import (
 from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
+from nanolab.core.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.core.execution import ExecutionRole
 from nanolab.metrics.catalogue import queries_for
 from nanolab.plans.diagnostics import collect_control_plane_log
 from nanolab.plans.validate import recipe_run_tag, require_recipe_environment
@@ -110,8 +112,6 @@ from nanolab.tasks.containerd_rootless import (
     registry_resource,
     run_for_environment,
 )
-from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
-from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.k6 import K6Task
 from nanolab.tasks.loadtest import (
     CapturePrometheusTask,

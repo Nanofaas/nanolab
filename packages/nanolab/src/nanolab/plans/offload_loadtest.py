@@ -26,10 +26,10 @@ from sonata_tasks.vm.multipass import resolve_connection_host
 from nanolab.application.functions import resolve_function, sonata_function
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, REGISTRY_CONTAINER_NAME
 from nanolab.plans.diagnostics import collect_control_plane_log
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
-from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.k6 import K6Task
 from nanolab.tasks.loadtest import FetchResultsTask, RunK6Task, SideCommandTask
 from nanolab.tasks.loadtest.models import K6Config

@@ -27,7 +27,7 @@ from nanolab.assets.diagnostics.native_k8s_runtime import (
     parse_procfs,
     verify_native_runtime,
 )
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.http_function import (
     Endpoint,
     HttpFunctionContractTask,

@@ -19,12 +19,12 @@ from sonata_tasks.execution.models import CommandOptions, TaskResult
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.helm import HelmInstallTask, HelmReleaseSpec, HelmUninstallTask
 
-from nanolab.tasks.deployment import (
+from nanolab.core.deployment import (
     DEFAULT_NAMESPACE,
     LOCAL_CONTROL_PLANE_API_PORT,
     LOCAL_REGISTRY,
 )
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.function import function_resource
 from nanolab.tasks.http_function import (
     Endpoint,

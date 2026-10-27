@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from nanolab.tasks.deployment import (
+from nanolab.core.deployment import (
     CONTROL_PLANE_NODE_PORT,
     PROMETHEUS_NODE_PORT,
 )

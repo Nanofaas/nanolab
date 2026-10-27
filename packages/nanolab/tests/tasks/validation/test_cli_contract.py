@@ -8,13 +8,13 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.cli import (
     RUNTIME_CONFIG_NAMESPACE,
     CliFunction,
     CliWorkflowRequest,
     build_cli_workflow,
 )
-from nanolab.tasks.execution import ExecutionRole
 from tests.cli_responses import (
     CLI_CONTRACT_STEPS as CONTRACT_STEPS,
 )

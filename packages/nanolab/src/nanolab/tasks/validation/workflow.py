@@ -19,9 +19,9 @@ from sonata_tasks.execution.bindings import (
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.http import endpoint_argv
 
+from nanolab.core.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.containerd_rootless import RootlessRun
-from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from nanolab.tasks.http_function import (
     HttpExecutionSuccessTask,
     HttpFunctionContractTask,

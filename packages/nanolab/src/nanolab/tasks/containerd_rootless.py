@@ -13,7 +13,7 @@ from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.execution import ExecutionRole
 from nanolab.workspace.paths import bundled_assets_root
 
 

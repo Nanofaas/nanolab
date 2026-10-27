@@ -22,7 +22,7 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
 
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.execution import ExecutionRole
 
 CONTROL_PLANE_DEPLOYMENT = "deploy/nanofaas-control-plane"
 

@@ -17,7 +17,7 @@ from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.core.deployment import REGISTRY_CONTAINER_NAME
 from nanolab.tasks.soak.helper_build import HELPER_BUILDER
 
 

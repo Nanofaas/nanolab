@@ -24,7 +24,7 @@ from sonata_tasks.http import Endpoint, endpoint_argv
 from sonata_tasks.http import HttpStatusCheckTask as SharedHttpStatusCheckTask
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from nanolab.tasks.execution import ExecutionRole
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.invocation import verify_invocation
 from nanolab.tasks.manifest import FunctionManifest
 

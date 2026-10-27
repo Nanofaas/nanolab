@@ -30,6 +30,7 @@ from nanolab.application.vm_provider import (
 )
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.core.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
@@ -39,7 +40,6 @@ from nanolab.tasks.containerd_rootless import (
     registry_resource,
     run_for_environment,
 )
-from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.http_function import HttpFunctionExpectation
 from nanolab.tasks.recipes.builder import recipe_builder_resource
 from nanolab.tasks.recipes.kubernetes import (

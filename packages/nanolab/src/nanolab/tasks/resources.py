@@ -15,8 +15,8 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
 
+from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.containerd_rootless import RootlessRun
-from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.kubectl import KubectlTask
 from nanolab.tasks.managed_containers import inspect_managed_container
 

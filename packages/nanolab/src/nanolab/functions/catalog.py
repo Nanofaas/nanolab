@@ -12,8 +12,8 @@ from typing import cast
 
 import yaml
 
+from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.core.models import FunctionRuntimeKind
-from nanolab.tasks.deployment import LOCAL_REGISTRY
 from nanolab.workspace.paths import discover_tool_root, nanofaas_root_from_env
 
 

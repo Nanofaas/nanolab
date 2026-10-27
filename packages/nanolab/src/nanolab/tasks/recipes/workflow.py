@@ -15,8 +15,8 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
 
+from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.tasks.compose import DockerComposeProject
-from nanolab.tasks.deployment import LOCAL_REGISTRY
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
 if TYPE_CHECKING:
