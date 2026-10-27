@@ -191,13 +191,14 @@ def _container_evidence(stack: Vm, diagnostics: Path) -> list[str]:
     names = leftover_containers(stack)
     killed: list[str] = []
     if names:
-        state = _run(
+        # Containers a platform removes meanwhile are missing, not an error.
+        state = exec_status(
             stack,
             (
                 *_PROBE_TIMEOUT, "docker", "inspect", "--format",
                 "{{.Name}} {{.State.OOMKilled}}", *names,
             ),
-        )  # fmt: skip
+        ).stdout  # fmt: skip
         (diagnostics / "containers-state.txt").write_text(state)
         killed = [
             line.split()[0].lstrip("/")

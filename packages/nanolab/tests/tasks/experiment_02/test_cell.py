@@ -385,3 +385,17 @@ def test_host_process_outside_the_slice_stops_before_load(tmp_path):
         )
         == "measured"
     )
+
+
+def test_container_evidence_tolerates_containers_vanishing(tmp_path):
+    from nanolab.tasks.experiment_02.cell import _container_evidence
+
+    def handler(argv, _env):
+        if argv[:3] == ("docker", "ps", "-a"):
+            return Result(0, "a\nb\n")
+        if "inspect" in argv:
+            return Result(1, "/a true\n", "Error: No such container: b")
+        return None
+
+    killed = _container_evidence(vm(RecordingProvider(handler=handler)), tmp_path)
+    assert killed == ["a"]

@@ -182,9 +182,13 @@ def test_no_correct_answer_is_none_with_the_reason_recorded(tmp_path, probe):
 
 
 def test_teardown_removes_every_container_but_the_registry():
+    running = ["e02-control-plane", "nanofaas-e2e-registry", "qr-code-1"]
+
     def handler(argv, _env):
         if argv[:3] == ("docker", "ps", "-a"):
-            return Result(0, "e02-control-plane\nnanofaas-e2e-registry\nqr-code-1\n")
+            return Result(0, "".join(f"{name}\n" for name in running))
+        if argv[:3] == ("docker", "rm", "-f"):
+            running[:] = [name for name in running if name not in argv[3:]]
         return None
 
     provider = RecordingProvider(handler=handler)
@@ -249,3 +253,35 @@ def test_teardown_stops_units_and_compose_projects():
     assert ("sudo", "systemctl", "stop", PLATFORM_UNIT) in commands
     assert ("sudo", "docker", "compose", "-p", "e02", "down", "-v") in commands
     assert commands[-1][:3] == ("docker", "ps", "-a")
+
+
+def test_teardown_waits_out_containers_a_platform_is_already_removing(monkeypatch):
+    # Fn removes its own function containers while the teardown runs.
+    from nanolab.tasks.experiment_02 import platforms
+
+    monkeypatch.setattr(platforms.time, "sleep", lambda _seconds: None)
+    listings = iter(["e02-fnserver\nfn-1\n", "e02-fnserver\nfn-1\n", "fn-1\n", ""])
+
+    def handler(argv, _env):
+        if argv[:3] == ("docker", "ps", "-a"):
+            return Result(0, next(listings, ""))
+        if argv[:3] == ("docker", "rm", "-f"):
+            return Result(1, "", "removal of container fn-1 is already in progress")
+        return None
+
+    platforms.baseline_teardown(vm(RecordingProvider(handler=handler)))
+
+
+def test_teardown_fails_when_containers_never_go(monkeypatch):
+    from nanolab.tasks.experiment_02 import platforms
+
+    monkeypatch.setattr(platforms.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(platforms, "_REMOVAL_WAIT_SECONDS", 0.0)
+
+    def handler(argv, _env):
+        if argv[:3] == ("docker", "ps", "-a"):
+            return Result(0, "fn-1\n")
+        return None
+
+    with pytest.raises(RuntimeError, match="fn-1"):
+        platforms.baseline_teardown(vm(RecordingProvider(handler=handler)))

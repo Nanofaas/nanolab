@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -116,12 +117,21 @@ def leftover_containers(vm: Vm) -> list[str]:
     return [name for name in names if name != REGISTRY_CONTAINER]
 
 
+# A platform may still be removing its own containers (Fn does) when the
+# teardown runs: `docker rm` then refuses those, and they go on their own.
+_REMOVAL_WAIT_SECONDS = 60.0
+_REMOVAL_POLL_SECONDS = 2.0
+
+
 def _remove_containers(vm: Vm) -> None:
     names = leftover_containers(vm)
     if names:
-        _ = comparison_remote_command(
-            vm.provider, vm.request, ("docker", "rm", "-f", *names)
-        )
+        _ = exec_status(vm, ("docker", "rm", "-f", *names))
+    deadline = time.monotonic() + _REMOVAL_WAIT_SECONDS
+    while names := leftover_containers(vm):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"containers remain after the teardown: {names}")
+        time.sleep(_REMOVAL_POLL_SECONDS)
 
 
 def baseline_teardown(vm: Vm) -> None:
