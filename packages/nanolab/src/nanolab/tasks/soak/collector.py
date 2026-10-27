@@ -80,7 +80,8 @@ class _UnixConnection(http.client.HTTPConnection):
         self.sock.connect(self._path)
 
 
-def _docker_get(path: str, docker_socket: str, timeout: float) -> dict[str, Any]:
+def docker_get(path: str, docker_socket: str, timeout: float) -> dict[str, Any]:
+    """GET a Docker Engine API path over the socket and return its JSON object."""
     connection = _UnixConnection(docker_socket, timeout)
     try:
         connection.request("GET", path)
@@ -96,11 +97,11 @@ def _docker_get(path: str, docker_socket: str, timeout: float) -> dict[str, Any]
 
 
 def _identity(container_id: str, docker_socket: str, remaining) -> dict[str, Any]:
-    container = _docker_get(
+    container = docker_get(
         f"/containers/{container_id}/json", docker_socket, remaining()
     )
     image_id = urllib.parse.quote(container["Image"], safe="")
-    image = _docker_get(f"/images/{image_id}/json", docker_socket, remaining())
+    image = docker_get(f"/images/{image_id}/json", docker_socket, remaining())
     state = container["State"]
     return {
         "container_id": container["Id"],
@@ -111,8 +112,11 @@ def _identity(container_id: str, docker_socket: str, remaining) -> dict[str, Any
     }
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse HTTP redirects: a metrics endpoint must answer itself."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Refuse the redirect."""
         raise ValueError("metrics endpoint redirects are unsupported")
 
 
@@ -122,7 +126,7 @@ def collect_http(endpoint: str, timeout: float) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("metrics endpoint must use HTTP(S)")
     # Local measurements must not be silently routed through environment proxies.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     request = urllib.request.Request(
         endpoint, headers={"Accept": "text/plain; version=0.0.4"}
     )
@@ -157,7 +161,7 @@ def collect(request: dict[str, Any]) -> dict[str, Any]:
         ("procfs", lambda: collect_procfs(target["process_id"], container_id)),
         (
             "stats",
-            lambda: _docker_get(
+            lambda: docker_get(
                 f"/containers/{container_id}/stats?stream=false&one-shot=true",
                 docker_socket,
                 remaining(),

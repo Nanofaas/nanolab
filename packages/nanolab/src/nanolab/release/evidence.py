@@ -10,7 +10,7 @@ from pathlib import Path
 from sonata_engine import Evidence, Verifier
 from sonata_tasks.cosign import COSIGN_IMAGE
 
-from nanolab.release.build import _provider_exec, _remote_image_digest
+from nanolab.release.build import provider_exec, remote_image_digest
 from nanolab.release.model import ArtifactEvidence, CredentialFiles, digest_path
 from nanolab.release.publish import ghcr_username
 from nanolab.release.secrets import stage_cosign_credentials, stage_ghcr_credentials
@@ -159,7 +159,7 @@ def authenticated_signature_verifier(
             ) as signing,
         ):
             public_key = f"{signing.key_file}.pub"
-            _provider_exec(
+            provider_exec(
                 provider,
                 request,
                 (
@@ -210,7 +210,7 @@ def authenticated_signature_verifier(
                     reference,
                 ),
             ):
-                _provider_exec(provider, request, (*base, *operation), bounded=True)
+                provider_exec(provider, request, (*base, *operation), bounded=True)
         return True
 
     return lambda evidence: signature_evidence_verifier(
@@ -241,10 +241,10 @@ def release_evidence_verifiers(
             owner = image_requests[reference]
         else:
             owner = request
-        return _remote_image_digest(provider, owner, "remote", reference)
+        return remote_image_digest(provider, owner, "remote", reference)
 
     def remote(reference: str, *, authfile: str | None = None) -> str | None:
-        return _remote_image_digest(
+        return remote_image_digest(
             provider,
             request,
             "remote",

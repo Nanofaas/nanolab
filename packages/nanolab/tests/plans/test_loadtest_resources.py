@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from nanolab.config import ScenarioConfig
 from nanolab.config.scenario import ResourceSpec
-from nanolab.plans.loadtest import _concurrency_function_resources
+from nanolab.plans.loadtest import concurrency_function_resources
 
 
 def test_concurrency_uses_the_calibrated_default_when_the_scenario_says_nothing() -> (
@@ -18,7 +18,7 @@ def test_concurrency_uses_the_calibrated_default_when_the_scenario_says_nothing(
     )
 
     assert (
-        _concurrency_function_resources(config, "word-stats-java")["limits"]["cpu"]
+        concurrency_function_resources(config, "word-stats-java")["limits"]["cpu"]
         == 4.0
     )
 
@@ -45,7 +45,7 @@ def test_a_scenario_declared_cpu_cap_overrides_the_default() -> None:
         },
     )
 
-    resolved = _concurrency_function_resources(config, "word-stats-java")
+    resolved = concurrency_function_resources(config, "word-stats-java")
 
     assert resolved["limits"]["cpu"] == 2.0
     assert resolved["requests"]["cpu"] == 1.0
@@ -65,6 +65,6 @@ def test_an_unlisted_function_keeps_the_default() -> None:
     )
 
     assert (
-        _concurrency_function_resources(config, "word-stats-java-lite")["limits"]["cpu"]
+        concurrency_function_resources(config, "word-stats-java-lite")["limits"]["cpu"]
         == 4.0
     )

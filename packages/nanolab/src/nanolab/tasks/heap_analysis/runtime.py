@@ -60,8 +60,8 @@ from nanolab.tasks.soak.helper_build import (
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparationOptions, PreparedSoak
 from nanolab.tasks.soak.workflow import (
-    _publish_run_document,
     make_workload_driver_factory,
+    publish_run_document,
     write_terminal_receipt,
 )
 from nanolab.workspace.paths import bundled_assets_root
@@ -562,12 +562,12 @@ class LocalHeapAnalysisSession:
         return evidence
 
     def _capture(self, checkpoint: str, operation: str) -> Path:
-        from nanolab.tasks.soak.runtime import _capture_owned_diagnostic
+        from nanolab.tasks.soak.runtime import capture_owned_diagnostic
 
         target, helper = self._bind()
         output = self._root / f"{checkpoint}-{operation}"
         output.mkdir(mode=0o700)
-        return _capture_owned_diagnostic(
+        return capture_owned_diagnostic(
             self._adapters[checkpoint],
             helper,
             target,
@@ -746,7 +746,7 @@ class RunControlPlaneHeapAnalysis(Task[HeapAnalysisResult]):
         }
         report: Path | None = None
         try:
-            report = _publish_run_document(
+            report = publish_run_document(
                 self.run_dir,
                 "report.json",
                 {

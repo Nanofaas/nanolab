@@ -38,7 +38,7 @@ from nanolab.tasks.soak.artifacts import (
     measure_tree,
     retained,
 )
-from nanolab.tasks.soak.collector import _docker_get, read_bounded
+from nanolab.tasks.soak.collector import docker_get, read_bounded
 from nanolab.tasks.soak.diagnostic_helper import (
     DockerHelperSpec,
     LocalDockerDiagnosticProvisioner,
@@ -832,7 +832,7 @@ class _MemoryHelperTransport:
                 if target.role in self.helpers:
                     raise ValueError("duplicate memory helper target role")
                 uid, gid = _target_effective_ids(target)
-                image = _docker_get(
+                image = docker_get(
                     f"/images/{quote(target.image_digest, safe='')}/json",
                     self.docker_socket,
                     5,
@@ -857,7 +857,7 @@ class _MemoryHelperTransport:
                             raise ValueError(
                                 "owned Node controller changed since deployment"
                             )
-                        container = _docker_get(
+                        container = docker_get(
                             f"/containers/{quote(target.container_id, safe='')}/json",
                             self.docker_socket,
                             5,
@@ -1313,7 +1313,7 @@ def create_local_deployment(
             raise ValueError("Recipe runtime configuration identities omit roles")
         for service in services:
             name = f"{project.name}-{service}-1"
-            container = _docker_get(
+            container = docker_get(
                 f"/containers/{quote(name, safe='')}/json", docker_socket, 5
             )
             state = container["State"]
@@ -1324,7 +1324,7 @@ def create_local_deployment(
                 or not state["Running"]
             ):
                 raise ValueError("running process does not belong to this soak")
-            image = _docker_get(
+            image = docker_get(
                 f"/images/{quote(container['Image'], safe='')}/json", docker_socket, 5
             )
             if prepared.images[role] not in image.get("RepoDigests", []):
@@ -1400,7 +1400,7 @@ def create_local_deployment(
     )
 
 
-def _capture_owned_diagnostic(
+def capture_owned_diagnostic(
     adapter, helper, target, operation, output, timeout_s, cancelled
 ):
     """Stop an exact owned remote writer on external cancellation, not just its CLI."""
@@ -1895,7 +1895,7 @@ def create_soak_lifecycle(
                         )
                     if memory_transport is None:
                         raise RuntimeError("memory transport was not initialized")
-                    receipt = _capture_owned_diagnostic(
+                    receipt = capture_owned_diagnostic(
                         diagnostic_adapters[(target.role, phase)],
                         memory_transport.helpers[target.role][1],
                         target,
@@ -2479,7 +2479,7 @@ def capture_function_owner(name, api_endpoint, control_plane_image, project_name
     """Bind function ownership to the running CP container and catalog lifetime."""
     from nanolab.tasks.soak.owned_functions import FunctionOwnership
 
-    container = _docker_get(
+    container = docker_get(
         f"/containers/{quote(project_name + '-control-plane-1', safe='')}/json",
         "/var/run/docker.sock",
         5,
@@ -2501,7 +2501,7 @@ def verify_function_owner(owner) -> None:
     """Reject a replaced/restarted CP before interpreting any function HTTP status."""
     from urllib.parse import urlsplit
 
-    container = _docker_get(
+    container = docker_get(
         f"/containers/{owner.control_plane_container_id}/json",
         "/var/run/docker.sock",
         5,

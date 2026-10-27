@@ -15,7 +15,7 @@ from sonata_engine import Evidence
 
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.images.plan import NATIVE_RELEASE_PROFILE
-from nanolab.release.build import _registry_digest_map, _write_json
+from nanolab.release.build import registry_digest_map, write_json_artifact
 from nanolab.release.evidence import receipt_artifacts as _receipt_artifacts
 from nanolab.release.metrics import (
     PerformanceAggregate,
@@ -106,7 +106,8 @@ def _aggregate_from_record(record: Mapping[str, Any]) -> PerformanceAggregate:
     )
 
 
-def _aggregate_from_payload(payload: Mapping[str, Any]) -> PerformanceAggregate:
+def aggregate_from_payload(payload: Mapping[str, Any]) -> PerformanceAggregate:
+    """Rebuild a performance aggregate from its recorded JSON evidence."""
     profile = payload["profile"]
     metrics = payload["metrics"]
     if not isinstance(profile, Mapping) or not isinstance(metrics, Mapping):
@@ -155,7 +156,7 @@ def run_sonata_benchmark(
     registry_receipt: Path,
 ) -> Evidence:
     """Run one isolated load test against the digest-pinned release matrix."""
-    digests = _registry_digest_map(
+    digests = registry_digest_map(
         plan.image_plan,
         _receipt_artifacts(
             registry_receipt, "local-registry-push", "local-registry-digest"
@@ -267,7 +268,7 @@ def run_sonata_aggregate(
         summaries.append(_read_json_file(expected))
     aggregate = aggregate_runs(_performance_profile(plan), tuple(summaries))
     return _file_evidence(
-        _write_json(plan.run_dir / "aggregate.json", asdict(aggregate))
+        write_json_artifact(plan.run_dir / "aggregate.json", asdict(aggregate))
     )
 
 
@@ -290,7 +291,7 @@ def run_sonata_regression_gate(
             or artifacts[0].digest != digest_path(aggregate_path)
         ):
             raise RuntimeError("aggregate evidence changed")
-    aggregate = _aggregate_from_payload(_read_json_file(aggregate_path))
+    aggregate = aggregate_from_payload(_read_json_file(aggregate_path))
     record = newest_comparable_record(
         tuple(
             item
@@ -309,7 +310,7 @@ def run_sonata_regression_gate(
         autoscaling_passed=True,
     )
     evidence = _file_evidence(
-        _write_json(plan.run_dir / "regression-decision.json", asdict(decision))
+        write_json_artifact(plan.run_dir / "regression-decision.json", asdict(decision))
     )
     if not decision.passed:
         raise RuntimeError(

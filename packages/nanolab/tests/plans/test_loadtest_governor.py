@@ -16,18 +16,18 @@ from sonata_tasks.execution.bindings import RoleBindings
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import (
-    _BURST_TOTAL_BUDGET,
-    _CONCURRENCY_CEILING,
-    _CONCURRENCY_QUEUE_SIZE,
-    _OPEN_LOOP_PEAK_RPS,
+    BURST_TOTAL_BUDGET,
+    CONCURRENCY_CEILING,
+    CONCURRENCY_QUEUE_SIZE,
+    OPEN_LOOP_PEAK_RPS,
     _additional_modules,
-    _concurrency_control_setup,
-    _controller_settings,
     _default_stages,
     build_loadtest_plan,
     burst_peak_vus,
     compose_control_plane_modules,
     concurrency_budget,
+    concurrency_control_setup,
+    controller_settings,
     is_co_tenancy,
     k6_environment,
     load_script_name,
@@ -109,7 +109,7 @@ def test_autoscaling_uses_only_the_queue_that_supplies_scaling_metrics() -> None
 
 
 def test_replicas_are_pinned_so_the_reading_is_attributable() -> None:
-    scaling = _concurrency_control_setup(CONCURRENCY_SCENARIO)
+    scaling = concurrency_control_setup(CONCURRENCY_SCENARIO)
 
     assert scaling is not None
     assert scaling["strategy"] == "NONE"
@@ -117,7 +117,7 @@ def test_replicas_are_pinned_so_the_reading_is_attributable() -> None:
 
 
 def test_the_governor_is_adaptive_and_has_room_under_the_ceiling() -> None:
-    scaling = _concurrency_control_setup(CONCURRENCY_SCENARIO)
+    scaling = concurrency_control_setup(CONCURRENCY_SCENARIO)
 
     assert scaling is not None
     control = scaling["concurrencyControl"]
@@ -126,7 +126,7 @@ def test_the_governor_is_adaptive_and_has_room_under_the_ceiling() -> None:
     # The effective limit is clamped to the function's `concurrency`, so the
     # ceiling has to sit at or above the highest per-replica target the governor
     # may pick, or the trajectory is flat however the function behaves.
-    assert control["maxTargetInFlightPerPod"] <= _CONCURRENCY_CEILING
+    assert control["maxTargetInFlightPerPod"] <= CONCURRENCY_CEILING
     assert control["minTargetInFlightPerPod"] < control["maxTargetInFlightPerPod"]
 
 
@@ -139,7 +139,7 @@ def test_setup_is_inert_for_scenarios_that_did_not_ask_for_it() -> None:
         }
     )
 
-    assert _concurrency_control_setup(plain) is None
+    assert concurrency_control_setup(plain) is None
 
 
 def test_the_load_profile_goes_light_heavy_light() -> None:
@@ -314,8 +314,8 @@ def test_the_burst_peak_is_calibrated_against_the_tightest_limit_on_offer() -> N
 
     # 12 shared by two, plus the queue, three short of overflowing.
     assert env["K6_PEAK_VUS"] == "103"
-    share = _BURST_TOTAL_BUDGET // len(BURST_SCENARIO.functions)
-    assert int(env["K6_PEAK_VUS"]) < share + _CONCURRENCY_QUEUE_SIZE
+    share = BURST_TOTAL_BUDGET // len(BURST_SCENARIO.functions)
+    assert int(env["K6_PEAK_VUS"]) < share + CONCURRENCY_QUEUE_SIZE
 
 
 def test_both_modes_are_offered_exactly_the_same_load() -> None:
@@ -332,8 +332,8 @@ def test_the_budget_stays_inside_the_window_that_makes_it_mean_anything() -> Non
     functions = len(BURST_SCENARIO.functions)
     peak = burst_peak_vus(BURST_SCENARIO)
 
-    assert functions * _CONCURRENCY_CEILING > _BURST_TOTAL_BUDGET
-    assert functions * (peak - _CONCURRENCY_QUEUE_SIZE) <= _BURST_TOTAL_BUDGET
+    assert functions * CONCURRENCY_CEILING > BURST_TOTAL_BUDGET
+    assert functions * (peak - CONCURRENCY_QUEUE_SIZE) <= BURST_TOTAL_BUDGET
 
 
 def test_the_burst_profile_drives_the_two_function_script() -> None:
@@ -374,7 +374,7 @@ def test_sojourn_is_held_to_the_promise_the_load_generator_checks() -> None:
     alone was measured at four times it — so it would search continuously and
     never rest.
     """
-    settings = _controller_settings(SOJOURN_SCENARIO)
+    settings = controller_settings(SOJOURN_SCENARIO)
 
     assert settings["mode"] == "SOJOURN"
     assert settings["targetLatencyMs"] == 50
@@ -433,7 +433,7 @@ def test_the_open_loop_peak_asks_for_more_than_the_pair_can_serve() -> None:
     The queue only grows if demand exceeds capacity. Measured saturation on the
     shared cores was around 1,400 served per second per function.
     """
-    assert _OPEN_LOOP_PEAK_RPS > 1_400
+    assert OPEN_LOOP_PEAK_RPS > 1_400
 
 
 def test_the_control_plane_runtime_defaults_to_the_jvm_build() -> None:

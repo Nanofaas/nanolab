@@ -14,10 +14,10 @@ from nanolab.tasks.recipes.registry import RegistryResponse
 from nanolab.tasks.soak.artifacts import fingerprint
 from nanolab.tasks.soak.build_provenance import (
     BuildProvenanceCollector,
-    _decode,
-    _materials,
-    _predicate,
-    _read,
+    decode_provenance,
+    provenance_materials,
+    provenance_predicate,
+    read_bounded_file,
 )
 from nanolab.tasks.soak.images import BuildRecipe
 from nanolab.tasks.soak.recipe import validate_soak_recipe
@@ -39,7 +39,7 @@ def verify_soak_recipe_receipt(
         path = Path(descriptor["path"])
         if not path.is_absolute():
             path = root / path
-        body = _read(path, root)
+        body = read_bounded_file(path, root)
         if descriptor.get("sha256") != hashlib.sha256(
             body
         ).hexdigest() or descriptor.get("size_bytes") != len(body):
@@ -49,7 +49,7 @@ def verify_soak_recipe_receipt(
     def read(path: Path) -> bytes:
         if path not in sealed:
             raise ValueError("Recipe acceptance input is absent from frozen receipt")
-        return _read(path, root)
+        return read_bounded_file(path, root)
 
     role = build["role"]
     base = root / "builds/recipe"
@@ -57,7 +57,7 @@ def verify_soak_recipe_receipt(
     profile = base / "recipe.yaml"
     profile_hash = hashlib.sha256(read(profile)).hexdigest()
     validate_soak_recipe(profile, config, platform=build["platform"])
-    identity = _decode(read(base / "source-identity.json"))
+    identity = decode_provenance(read(base / "source-identity.json"))
     if (
         any(
             identity.get(key) != value
@@ -72,7 +72,7 @@ def verify_soak_recipe_receipt(
     ):
         raise ValueError("Recipe acceptance source/profile identity differs")
     report = base / "distribution/distribution.json"
-    data = _decode(read(report))
+    data = decode_provenance(read(report))
     if data.get("source", {}).get("revision") != identity.get("staging_revision"):
         raise ValueError("Recipe staging revision differs from publication")
     distribution = read_buildx_distribution(
@@ -108,7 +108,7 @@ def verify_soak_recipe_receipt(
         body = read(raw / (name + ".json"))
         digest = "sha256:" + hashlib.sha256(body).hexdigest()
         responses[kind, digest] = RegistryResponse(
-            body, digest, _decode(body).get("mediaType", "")
+            body, digest, decode_provenance(body).get("mediaType", "")
         )
     tags = [read(raw / "tag-before.json"), read(raw / "tag-after.json")]
 
@@ -133,8 +133,8 @@ def verify_soak_recipe_receipt(
         != f"{LOCAL_REGISTRY}/{repository}@{image.manifest_digest}"
     ):
         raise ValueError("Recipe executable digest differs from frozen receipt")
-    facts = _decode(read(observer / (role + "-observations.json")))
-    request = _decode(read(observer / "publication-request.json"))
+    facts = decode_provenance(read(observer / (role + "-observations.json")))
+    request = decode_provenance(read(observer / "publication-request.json"))
     if (
         facts.get("request_id") != request.get("request_id")
         or facts.get("source_fingerprint") != source.fingerprint
@@ -144,20 +144,20 @@ def verify_soak_recipe_receipt(
     ):
         raise ValueError("Recipe compiler observation is unbound")
     publication = facts["publication"]
-    metadata = _decode(read(observer / publication["metadata"]["path"]))
+    metadata = decode_provenance(read(observer / publication["metadata"]["path"]))
     if (
         metadata.get("containerimage.digest") != image.publication_digest
         or metadata.get("image.name") != component.image.reference
     ):
         raise ValueError("Recipe build metadata differs from registry")
-    published_predicate = _predicate(
+    published_predicate = provenance_predicate(
         image.provenance[0], build["platform"], image.manifest_digest
     )
-    local_predicate = _predicate(
+    local_predicate = provenance_predicate(
         metadata["buildx.build.provenance"], build["platform"], image.manifest_digest
     )
     verify_recipe_provenance(local_predicate, published_predicate)
-    bases = _materials(published_predicate)
+    bases = provenance_materials(published_predicate)
     recipe = BuildRecipe(**facts["recipe"])
     command = next(item for item in facts["commands"] if item["kind"] == "build")
     if (

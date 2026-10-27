@@ -488,7 +488,7 @@ def _add_build_tasks(
             _add_function_build(workflow, request, function, executor, cwd, requires)
 
 
-def _resolve_platform_endpoint(
+def resolve_platform_endpoint(
     request: PlatformRequest,
     control_plane_process: Callable[[], Resource[Any]] | None,
     executor: CommandTaskExecutor,
@@ -496,6 +496,7 @@ def _resolve_platform_endpoint(
     requires: tuple[Resource[Any], ...],
     local_endpoint: str,
 ) -> tuple[tuple[Resource[Any], ...], Endpoint]:
+    """Return the resources a platform needs and the endpoint it serves on."""
     resources: tuple[Resource[Any], ...] = ()
     endpoint: Endpoint = local_endpoint
     if request.backend == "k8s":
@@ -651,7 +652,7 @@ def add_platform(
 
     _add_build_tasks(workflow, request, executor, cwd, requires)
 
-    resources, endpoint = _resolve_platform_endpoint(
+    resources, endpoint = resolve_platform_endpoint(
         request, control_plane_process, executor, cwd, requires, local_endpoint
     )
 

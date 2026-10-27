@@ -33,7 +33,7 @@ from nanolab.tasks.soak.runtime import (
 )
 from nanolab.tasks.soak.sources import capture_source_snapshot
 from nanolab.tasks.soak.workflow import (
-    _publish_run_document,
+    publish_run_document,
     write_policy_input,
     write_terminal_receipt,
 )
@@ -461,7 +461,7 @@ class ContainerdSoakRun(Task):
             )
             result = holder.run(inputs)
             evaluation = holder.state.evaluation
-            _publish_run_document(
+            publish_run_document(
                 self.run_dir,
                 "measurement-verdict.json",
                 {
@@ -478,7 +478,7 @@ class ContainerdSoakRun(Task):
         except BaseException as error:
             if not (self.run_dir / "measurement-verdict.json").exists():
                 evaluation = getattr(getattr(holder, "state", None), "evaluation", None)
-                _publish_run_document(
+                publish_run_document(
                     self.run_dir,
                     "measurement-verdict.json",
                     {

@@ -125,7 +125,7 @@ def check_preparation_support(config: SoakConfig, options: PreparationOptions) -
 
 def check_local_process_support(config: SoakConfig) -> None:
     """Check the default host-UID collector before allocating a source/build tree."""
-    from nanolab.tasks.soak.collector import _docker_get
+    from nanolab.tasks.soak.collector import docker_get
 
     if any(role.runtime not in {"jvm", "node"} for role in config.roles.values()):
         raise ValueError(
@@ -139,7 +139,7 @@ def check_local_process_support(config: SoakConfig) -> None:
         raise ValueError(
             "Compose runtime options cannot contain environment interpolation"
         )
-    info = _docker_get("/info", "/var/run/docker.sock", 5)
+    info = docker_get("/info", "/var/run/docker.sock", 5)
     reported = str(info["Architecture"])
     architecture = {"aarch64": "arm64", "x86_64": "amd64"}.get(reported, reported)
     if any(

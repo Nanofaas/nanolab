@@ -55,7 +55,7 @@ def _apply_script(manifest: FunctionManifest, cli_argv: tuple[str, ...]) -> str:
     )
 
 
-def _json_stdout(result: TaskResult) -> dict[str, Any]:
+def json_stdout(result: TaskResult) -> dict[str, Any]:
     """Parse a CLI command's stdout as the JSON object it should have printed.
 
     A command that answered with anything else is a contract break, so the raw
@@ -159,7 +159,7 @@ class CliFunctionGetTask(CommandTask):
         )
 
         def verify(result: TaskResult) -> None:
-            details = _json_stdout(result)
+            details = json_stdout(result)
             for key, value in expected.items():
                 _expect(details, key, value)
 
@@ -327,7 +327,7 @@ class CliFunctionInvokeTask(CommandTask):
         def verify(result: TaskResult) -> None:
             verify_invocation(result)
             if expected_output is not None:
-                actual = _json_stdout(result)["output"]
+                actual = json_stdout(result)["output"]
                 if json.dumps(actual, sort_keys=True) != json.dumps(
                     expected_output, sort_keys=True
                 ):
@@ -367,7 +367,7 @@ def control_plane_contract_tasks(
     """
 
     def verify_info(result: TaskResult) -> None:
-        capabilities = _json_stdout(result).get("capabilities")
+        capabilities = json_stdout(result).get("capabilities")
         if not isinstance(capabilities, dict):
             raise RuntimeError(
                 f"control-plane info carried no capabilities: {result.stdout[:200]!r}"
@@ -426,7 +426,7 @@ def function_update_task(
     """
 
     def verify(result: TaskResult) -> None:
-        details = _json_stdout(result)
+        details = json_stdout(result)
         for field, expected in patch.items():
             _expect(details, field, expected)
 
@@ -468,12 +468,12 @@ def function_replicas_tasks(
     """
 
     def verify_set(result: TaskResult) -> None:
-        payload = _json_stdout(result)
+        payload = json_stdout(result)
         _expect(payload, "function", name)
         _expect(payload, "replicas", replicas)
 
     def verify_get(result: TaskResult) -> None:
-        payload = _json_stdout(result)
+        payload = json_stdout(result)
         _expect(payload, "name", name)
         _expect(payload, "desiredReplicas", replicas)
         ready = payload.get("readyReplicas")
@@ -549,7 +549,7 @@ def function_replace_tasks(
             raise RuntimeError("unreplaced immutable change exited successfully")
 
     def verify_replaced(result: TaskResult) -> None:
-        _expect(_json_stdout(result), "queueSize", changed.queue_size)
+        _expect(json_stdout(result), "queueSize", changed.queue_size)
 
     return (
         CommandTask(
@@ -595,7 +595,7 @@ def runtime_config_patch_task(
     )
 
     def verify(result: TaskResult) -> None:
-        payload = _json_stdout(result)
+        payload = json_stdout(result)
         revision = payload.get("revision")
         if type(revision) is not int or (
             expected_revision is not None and revision != expected_revision + 1
@@ -650,7 +650,7 @@ def runtime_config_readback_task(
     """Read effective values independently of the mutation response."""
 
     def verify(result: TaskResult) -> None:
-        payload = _json_stdout(result)
+        payload = json_stdout(result)
         if type(payload.get("revision")) is not int:
             raise RuntimeError("runtime config readback returned no integer revision")
         applied = payload.get("namespaces", {}).get(namespace, {})
@@ -690,7 +690,7 @@ def runtime_config_tasks(
     prefix = (*cli_argv, "control-plane", "config")
 
     def verify_snapshot(result: TaskResult) -> None:
-        snapshot = _json_stdout(result)
+        snapshot = json_stdout(result)
         if type(snapshot.get("revision")) is not int:
             raise RuntimeError(
                 f"runtime config carried no revision: {result.stdout[:200]!r}"
@@ -699,7 +699,7 @@ def runtime_config_tasks(
             raise RuntimeError(f"runtime config has no '{namespace}' namespace")
 
     def verify_valid(result: TaskResult) -> None:
-        _expect(_json_stdout(result), "valid", True)
+        _expect(json_stdout(result), "valid", True)
 
     def verify_rejected(result: TaskResult) -> None:
         if "is invalid" not in result.stderr:

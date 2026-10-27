@@ -34,14 +34,14 @@ from nanolab.tasks.http_function import (
     HttpFunctionExpectation,
     HttpFunctionReplicaStatusTask,
     HttpFunctionSetReplicasTask,
-    _parse_contract_response,
-    _split_final_response,
+    parse_contract_response,
+    split_final_response,
 )
 from nanolab.tasks.platform import PlatformFunction
 from nanolab.tasks.recipes.kubernetes import (
     RecipeKubernetesImageCheckTask,
-    _command,
-    _json_command,
+    command_json,
+    command_stdout,
 )
 from nanolab.tasks.recipes.validation import RecipeMetadataCheckTask
 from nanolab.tasks.recipes.workflow import RecipeDistribution
@@ -158,7 +158,7 @@ def check_native_api(
         if result is None:
             raise RuntimeError("native API returned no response")
         if expected_status == 204:
-            headers, body = _split_final_response(result.stdout)
+            headers, body = split_final_response(result.stdout)
             if (
                 not headers.splitlines()
                 or headers.splitlines()[0].split()[1] != "204"
@@ -166,7 +166,7 @@ def check_native_api(
             ):
                 raise RuntimeError("native DELETE did not return an empty HTTP 204")
             return {}
-        status, _, response = _parse_contract_response(name, result.stdout)
+        status, _, response = parse_contract_response(name, result.stdout)
         if status != expected_status:
             raise RuntimeError(
                 f"native API {method} returned {status}, expected {expected_status}"
@@ -222,7 +222,7 @@ def check_native_api(
         )
         if invocation is None:
             raise RuntimeError("native invocation returned no response")
-        _, _, body = _parse_contract_response(name, invocation.stdout)
+        _, _, body = parse_contract_response(name, invocation.stdout)
         if body.get("error") is not None:
             raise RuntimeError("native invocation returned an error envelope")
         status_code = body.get("statusCode")
@@ -250,7 +250,7 @@ def configure_native_quota(
 ) -> dict[str, Any]:
     """Change only the owned control plane's quota, with an atomic UID guard."""
     name = deployment["metadata"]["name"]
-    current = _json_command(
+    current = command_json(
         executor,
         inputs,
         "Verify native quota Deployment owner",
@@ -285,7 +285,7 @@ def configure_native_quota(
             "value": env,
         },
     ]
-    updated = _json_command(
+    updated = command_json(
         executor,
         inputs,
         "Set owned native invocation quota",
@@ -304,7 +304,7 @@ def configure_native_quota(
     )
     if updated.get("metadata", {}).get("uid") != uid:
         raise RuntimeError("native quota Deployment was replaced during patch")
-    _command(
+    command_stdout(
         executor,
         inputs,
         "Await owned native quota rollout",
@@ -386,7 +386,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         executor = _ApiCommands(self.executor, None)
         prefix = self._prefix(inputs)
-        deployment = _json_command(
+        deployment = command_json(
             executor,
             inputs,
             "Read owned native Deployment",
@@ -395,14 +395,14 @@ class NativeKubernetesLifecycleTask(Task[None]):
         )
         if deployment.get("metadata", {}).get("uid") != uid:
             raise RuntimeError("native Deployment was replaced")
-        sets = _json_command(
+        sets = command_json(
             executor,
             inputs,
             "Read native ReplicaSets",
             (*prefix, "get", "replicasets", "-o", "json"),
             role=self.role,
         ).get("items", [])
-        pods = _json_command(
+        pods = command_json(
             executor,
             inputs,
             "Read native Pods",
@@ -419,7 +419,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
         return deployment, owned[0]
 
     def _logs(self, inputs: TaskInputs, pod: dict[str, Any], label: str) -> str:
-        text = _command(
+        text = command_stdout(
             _ApiCommands(self.executor, None, max_bytes=LOG_LIMIT),
             inputs,
             f"Read native {label} logs",
@@ -499,13 +499,13 @@ class NativeKubernetesLifecycleTask(Task[None]):
         inspect_argv = self._node_argv(
             inputs, node, (*cri, "inspect", "-o", "json", container_id)
         )
-        inspect_before = _json_command(
+        inspect_before = command_json(
             executor, inputs, "Inspect native CRI process", inspect_argv, role=self.role
         )
         pid = cri_pid(
             inspect_before, container_id=container_id, pod_uid=before["podUid"]
         )
-        raw = _command(
+        raw = command_stdout(
             executor,
             inputs,
             "Read native procfs threads",
@@ -517,7 +517,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
             role=self.role,
         )
         process = parse_procfs(raw)
-        inspect_after = _json_command(
+        inspect_after = command_json(
             executor, inputs, "Recheck native CRI process", inspect_argv, role=self.role
         )
         after_pid = cri_pid(
@@ -533,7 +533,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
         if len(containers) != 1:
             raise RuntimeError("native Pod container is ambiguous")
         container = containers[0]
-        node_info = _json_command(
+        node_info = command_json(
             executor,
             inputs,
             "Read native Pod architecture",
@@ -602,7 +602,7 @@ class NativeKubernetesLifecycleTask(Task[None]):
             task.run(inputs)
         finally:
             if self.remote_root:
-                text = _command(
+                text = command_stdout(
                     _ApiCommands(self.executor, None, max_bytes=4 * RUNTIME_LIMIT),
                     inputs,
                     "Retain native quota receipt",

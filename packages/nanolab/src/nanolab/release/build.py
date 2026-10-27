@@ -51,7 +51,7 @@ _RUST_TOOLCHAIN = (
 _SHA256_PREFIX = "sha256:"
 
 
-def _provider_exec(
+def provider_exec(
     provider: object,
     request: object,
     argv: tuple[str, ...],
@@ -60,6 +60,11 @@ def _provider_exec(
     env: dict[str, str] | None = None,
     bounded: bool = False,
 ) -> object:
+    """Run `argv` on the VM, retrying a dead connection, and fail on an error.
+
+    `bounded` keeps only the last 64 KiB of output: the command's stdout must
+    not be parsed then.
+    """
     if bounded:
         # The SSH executor waits for the exit status before draining output,
         # so a command whose output exceeds the channel window (~2MB)
@@ -81,10 +86,10 @@ def _provider_exec(
         ),
         describe="remote command",
     )
-    return _require_result(result, "remote release command")
+    return require_result(result, "remote release command")
 
 
-def _provider_transfer_to(
+def provider_transfer_to(
     provider: object,
     request: object,
     *,
@@ -92,16 +97,18 @@ def _provider_transfer_to(
     destination: str,
     action: str,
 ) -> object:
+    """Upload `source` to the VM, retrying a dead connection, and fail on an error."""
     result = retry_on_connection_death(
         lambda: provider.transfer_to(  # type: ignore[attr-defined]
             request, source=source, destination=destination
         ),
         describe=f"transfer {source.name}",
     )
-    return _require_result(result, action)
+    return require_result(result, action)
 
 
-def _require_result(result: object, action: str) -> object:
+def require_result(result: object, action: str) -> object:
+    """Return a remote result, or raise with its output when it failed."""
     return_code = int(getattr(result, "return_code", 0))
     if return_code != 0:
         detail = str(getattr(result, "stderr", "") or getattr(result, "stdout", ""))
@@ -117,7 +124,8 @@ def _assert_guarded_source(plan: Amd64ReleasePlan) -> None:
         raise ValueError("release source commit changed after planning")
 
 
-def _write_json(path: Path, payload: Mapping[str, Any]) -> ArtifactEvidence:
+def write_json_artifact(path: Path, payload: Mapping[str, Any]) -> ArtifactEvidence:
+    """Write `payload` as JSON atomically and return its local artifact evidence."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -484,7 +492,7 @@ def create_source_archive(
 
 
 @dataclass(frozen=True)
-class _ArchiveProvider:
+class ArchiveProvider:
     """Keep release connection retries while supplying Sonata's existing port."""
 
     provider: object
@@ -492,6 +500,7 @@ class _ArchiveProvider:
     def exec_argv(
         self, request: object, argv: tuple[str, ...]
     ) -> RemoteOperationResult:
+        """Run a command, retrying a dropped connection."""
         return cast(
             RemoteOperationResult,
             retry_on_connection_death(
@@ -505,6 +514,7 @@ class _ArchiveProvider:
     def transfer_to(
         self, request: object, *, source: Path, destination: str
     ) -> RemoteOperationResult:
+        """Upload a file, retrying a dropped connection."""
         return cast(
             RemoteOperationResult,
             retry_on_connection_death(
@@ -527,7 +537,7 @@ def stage_source_archive(
 ) -> None:
     """Stage the guarded release archive through Sonata's verified transfer."""
     _stage_source_archive(
-        _ArchiveProvider(provider),
+        ArchiveProvider(provider),
         request,
         archive=archive,
         remote_archive=remote_archive,
@@ -548,9 +558,7 @@ def _smoke_arm64_images(
 ) -> tuple[ArtifactEvidence, ...]:
     _assert_guarded_source(plan)
     if ensure_tunnel:
-        _provider_exec(
-            provider, request, arm.registry_tunnel_command(registry_upstream)
-        )
+        provider_exec(provider, request, arm.registry_tunnel_command(registry_upstream))
     expected = tuple(expected_build_evidence)
     arm.require_complete_arm64_evidence(image_plan, expected)
     current = tuple(
@@ -597,7 +605,7 @@ def _smoke_arm64_images(
         str(getattr(watchdog_result, "stdout", "")),
         str(getattr(watchdog_result, "stderr", "")),
     )
-    marker = _write_json(
+    marker = write_json_artifact(
         plan.run_dir / "arm64-smoke.json",
         {
             "architecture": arm.ARM64_PLATFORM,
@@ -623,7 +631,7 @@ def _smoke_arm64_server(
     image: str,
 ) -> None:
     try:
-        _provider_exec(
+        provider_exec(
             provider,
             request,
             (
@@ -640,7 +648,7 @@ def _smoke_arm64_server(
                 image,
             ),
         )
-        port = _provider_exec(
+        port = provider_exec(
             provider,
             request,
             ("docker", "port", smoke.container_name, f"{smoke.container_port}/tcp"),
@@ -651,7 +659,7 @@ def _smoke_arm64_server(
             raise RuntimeError(
                 f"invalid ARM64 smoke port mapping: {endpoint or 'empty'}"
             )
-        _provider_exec(
+        provider_exec(
             provider,
             request,
             (
@@ -683,7 +691,7 @@ def _smoke_arm64_server(
                 dry_run=False,
             )
         raise
-    _provider_exec(
+    provider_exec(
         provider,
         request,
         ("docker", "rm", "--force", smoke.container_name),
@@ -705,7 +713,7 @@ def _evidence_map(
 
 
 def _inspect_image_digest(provider: object, request: object, reference: str) -> str:
-    result = _provider_exec(
+    result = provider_exec(
         provider,
         request,
         ("docker", "image", "inspect", "--format={{.Id}}", reference),
@@ -716,7 +724,7 @@ def _inspect_image_digest(provider: object, request: object, reference: str) -> 
     return digest
 
 
-def _remote_image_digest(
+def remote_image_digest(
     provider: object,
     request: object,
     location: str,
@@ -724,6 +732,7 @@ def _remote_image_digest(
     *,
     ghcr_authfile: str | None = None,
 ) -> str | None:
+    """Return the digest a remote image reference resolves to, or None."""
     if location != "remote":
         return None
     try:
@@ -753,7 +762,7 @@ def _inspect_ghcr_digest(
     *,
     authfile: str,
 ) -> str:
-    result = _provider_exec(
+    result = provider_exec(
         provider,
         request,
         (
@@ -771,7 +780,7 @@ def _inspect_ghcr_digest(
 
 
 def _inspect_registry_digest(provider: object, request: object, reference: str) -> str:
-    result = _provider_exec(
+    result = provider_exec(
         provider,
         request,
         (
@@ -788,10 +797,11 @@ def _inspect_registry_digest(provider: object, request: object, reference: str) 
     return digest
 
 
-def _registry_digest_map(
+def registry_digest_map(
     image_plan: ImagePlan,
     artifacts: Iterable[ArtifactEvidence],
 ) -> dict[str, str]:
+    """Map each planned image to the digest its push evidence recorded."""
     by_reference = {artifact.reference: artifact.digest for artifact in artifacts}
     expected = {f"docker://{cell.image}" for cell in image_plan.cells}
     if set(by_reference) != expected:

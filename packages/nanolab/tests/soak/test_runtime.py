@@ -855,7 +855,7 @@ def memory_environment(tmp_path, monkeypatch):
         "Path",
         lambda value: tmp_path / "proc" if value == "/proc" else Path(value),
     )
-    monkeypatch.setattr(module, "_docker_get", lambda *args: {"Architecture": "arm64"})
+    monkeypatch.setattr(module, "docker_get", lambda *args: {"Architecture": "arm64"})
 
     class Handle:
         def __init__(self, spec):
@@ -1159,7 +1159,7 @@ def process_arguments_fixture(tmp_path, monkeypatch, body=b"-XX:TieredStopAtLeve
     )
     monkeypatch.setattr(
         module,
-        "_docker_get",
+        "docker_get",
         lambda *args: {
             "Id": target.container_id,
             "Config": {"Image": target.image_digest},
@@ -1591,7 +1591,7 @@ def diagnostic_environment(tmp_path, monkeypatch, *, baseline=None):
             }
         return {"Architecture": "arm64"}
 
-    monkeypatch.setattr(module, "_docker_get", docker)
+    monkeypatch.setattr(module, "docker_get", docker)
     monkeypatch.setattr(module, "RoleBoundProbe", Probe)
     deployment = replace(
         deployment, discover=lambda: targets, observations=lambda targets: observations
@@ -1983,7 +1983,7 @@ def test_the_first_prerequisite_reservation_precedes_its_ownership_root(tmp_path
 def test_capture_abort_cancels_exact_remote_helper(kind):
     from threading import Event
 
-    from nanolab.tasks.soak.runtime import _capture_owned_diagnostic
+    from nanolab.tasks.soak.runtime import capture_owned_diagnostic
 
     cancelled, remote_stopped = Event(), Event()
     calls = []
@@ -2003,7 +2003,7 @@ def test_capture_abort_cancels_exact_remote_helper(kind):
         KeyboardInterrupt,
         match=r"capture interrupted|soak cancelled during diagnostic",
     ):
-        _capture_owned_diagnostic(
+        capture_owned_diagnostic(
             SimpleNamespace(capture=capture),
             SimpleNamespace(cancel=cancel),
             memory_target("jvm"),
@@ -2557,7 +2557,7 @@ def test_frozen_recipe_runtime_checks_manifest_and_config(
             }
         pytest.fail(path)
 
-    monkeypatch.setattr(module, "_docker_get", docker)
+    monkeypatch.setattr(module, "docker_get", docker)
     deployment = create_local_deployment(value, tmp_path)
     try:
         assert deployment.project.build is False
@@ -2576,7 +2576,7 @@ def test_frozen_recipe_runtime_checks_manifest_and_config(
 
 def test_recipe_runtime_rejects_missing_verified_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "nanolab.tasks.soak.runtime._docker_get",
+        "nanolab.tasks.soak.runtime.docker_get",
         lambda *args: pytest.fail("Docker called before identity gate"),
     )
     value = prepared(tmp_path)

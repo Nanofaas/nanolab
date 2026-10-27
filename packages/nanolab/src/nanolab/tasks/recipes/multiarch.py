@@ -20,11 +20,11 @@ from nanolab.tasks.recipes.workflow import (
     RecipeComponent,
     RecipeDistribution,
     RecipeImage,
-    _object,
-    _string,
-    _verify_recipe_identity,
     execute_recipe,
+    require_object,
+    require_string,
     require_validation_distribution,
+    verify_recipe_identity,
 )
 from nanolab.workspace.recipe import prepare_recipe_run
 
@@ -33,15 +33,15 @@ MULTIARCH_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
 
 def is_multiarch_recipe(recipe: Path) -> bool:
     """Recognize the Buildx contract without performing staging or execution."""
-    profile = _object(yaml.safe_load(recipe.read_text()), "profile")
+    profile = require_object(yaml.safe_load(recipe.read_text()), "profile")
     registry = profile.get("registry")
     return isinstance(registry, dict) and "platforms" in registry
 
 
 def require_multiarch_validation_profile(recipe: Path) -> None:
     """Require the first supported JVM container subset before provisioning."""
-    profile = _object(yaml.safe_load(recipe.read_text()), "profile")
-    registry = _object(profile.get("registry"), "registry")
+    profile = require_object(yaml.safe_load(recipe.read_text()), "profile")
+    registry = require_object(profile.get("registry"), "registry")
     platforms = registry.get("platforms")
     if (
         not isinstance(platforms, list)
@@ -50,7 +50,7 @@ def require_multiarch_validation_profile(recipe: Path) -> None:
         or set(platforms) != MULTIARCH_PLATFORMS
     ):
         raise ValueError("Multiarch recipe requires linux/amd64 and linux/arm64")
-    control = _object(profile.get("controlPlane"), "controlPlane")
+    control = require_object(profile.get("controlPlane"), "controlPlane")
     functions = profile.get("functions")
     if (
         registry.get("repository") != LOCAL_NANOFAAS_REPOSITORY
@@ -61,16 +61,16 @@ def require_multiarch_validation_profile(recipe: Path) -> None:
             ["container-deployment-provider", "build-metadata"],
             ["build-metadata", "container-deployment-provider"],
         )
-        or _object(control.get("build"), "build").get("mode") != "jvm"
+        or require_object(control.get("build"), "build").get("mode") != "jvm"
         or not isinstance(functions, list)
         or len(functions) != 1
     ):
         raise ValueError("Unsupported multiarch JVM validation profile")
-    function = _object(functions[0], "function")
+    function = require_object(functions[0], "function")
     if (
         function.get("name"),
         function.get("sdk"),
-        _object(function.get("build"), "build").get("mode"),
+        require_object(function.get("build"), "build").get("mode"),
     ) != ("word-stats", "java", "jvm"):
         raise ValueError("Unsupported multiarch validation function")
 
@@ -155,14 +155,14 @@ def read_buildx_distribution(
 ) -> MultiarchDistribution:
     """Validate publication identity without requiring or inventing local IDs."""
     try:
-        data = _object(
+        data = require_object(
             json.loads(report.read_bytes(), object_pairs_hook=unique_json_object),
             "report",
         )
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Cannot read multiarch distribution {report}") from error
-    profile = _object(yaml.safe_load(recipe.read_text()), "profile")
-    registry = _object(profile.get("registry"), "registry")
+    profile = require_object(yaml.safe_load(recipe.read_text()), "profile")
+    registry = require_object(profile.get("registry"), "registry")
     selected_platforms = registry.get("platforms")
     if (
         not platforms
@@ -179,16 +179,16 @@ def read_buildx_distribution(
         raise ValueError("Unsupported multiarch distribution schemaVersion")
     expected_sha = hashlib.sha256(recipe.read_bytes()).hexdigest()
     if (
-        _object(data.get("recipe"), "recipe").get("sha256") != expected_sha
+        require_object(data.get("recipe"), "recipe").get("sha256") != expected_sha
         or data.get("tag") != tag
     ):
         raise ValueError("Multiarch recipe hash or tag differs from run")
-    source = _object(data.get("source"), "source")
+    source = require_object(data.get("source"), "source")
     if type(source.get("dirty")) is not bool or any(
         source.get(key) != expected_source.get(key) for key in ("revision", "dirty")
     ):
         raise ValueError("Multiarch source differs from captured inputs")
-    _string(source.get("revision"), "source revision")
+    require_string(source.get("revision"), "source revision")
     modules = data.get("modules")
     if not isinstance(modules, list) or not all(
         isinstance(item, str) for item in modules
@@ -201,14 +201,14 @@ def read_buildx_distribution(
     keys: set[tuple[str, str, str]] = set()
     references: set[str] = set()
     for row in rows:
-        item = _object(row, "component")
+        item = require_object(row, "component")
         key = (
-            _string(item.get("kind"), "kind"),
-            _string(item.get("name"), "name"),
-            _string(item.get("sdk"), "sdk"),
+            require_string(item.get("kind"), "kind"),
+            require_string(item.get("name"), "name"),
+            require_string(item.get("sdk"), "sdk"),
         )
-        image = _object(item.get("image"), "image")
-        reference = _string(image.get("reference"), "image reference")
+        image = require_object(item.get("image"), "image")
+        reference = require_string(image.get("reference"), "image reference")
         if key in keys or reference in references:
             raise ValueError("Duplicate multiarch component or image reference")
         keys.add(key)
@@ -221,7 +221,7 @@ def read_buildx_distribution(
             or set(selected) != set(platforms)
         ):
             raise ValueError("Multiarch image platforms differ from recipe")
-        manifests = _object(image.get("manifests"), "image manifests")
+        manifests = require_object(image.get("manifests"), "image manifests")
         if set(manifests) != set(platforms):
             raise ValueError("Multiarch manifest platforms differ from recipe")
         if (
@@ -251,10 +251,12 @@ def read_buildx_distribution(
                 ),
                 variant=item.get("variant"),
                 optimization=item.get("optimization"),
-                native=_object(item["native"], "native") if "native" in item else None,
+                native=require_object(item["native"], "native")
+                if "native" in item
+                else None,
             )
         )
-    _verify_recipe_identity(recipe, tag, modules, components)
+    verify_recipe_identity(recipe, tag, modules, components)
     return MultiarchDistribution(
         report, expected_sha, tag, source, tuple(modules), tuple(components)
     )

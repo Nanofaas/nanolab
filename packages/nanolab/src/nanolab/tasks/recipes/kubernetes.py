@@ -76,7 +76,7 @@ def verify_runtime_image(
         )
 
 
-def _command(
+def command_stdout(
     executor: CommandTaskExecutor,
     inputs: TaskInputs,
     title: str,
@@ -85,6 +85,7 @@ def _command(
     role: ExecutionRole = "host",
     cwd: Path | None = None,
 ) -> str:
+    """Run one command task and return its standard output."""
     result = (
         CommandTask(
             title=title,
@@ -101,7 +102,7 @@ def _command(
     return result.stdout
 
 
-def _json_command(
+def command_json(
     executor: CommandTaskExecutor,
     inputs: TaskInputs,
     title: str,
@@ -109,7 +110,8 @@ def _json_command(
     *,
     role: ExecutionRole = "host",
 ) -> dict[str, Any]:
-    data = json.loads(_command(executor, inputs, title, argv, role=role))
+    """Run one command task and return its output as a JSON object."""
+    data = json.loads(command_stdout(executor, inputs, title, argv, role=role))
     if not isinstance(data, dict):
         raise ValueError(f"{title} returned no JSON object")
     return data
@@ -129,7 +131,7 @@ def _local_image_config(
         return replace(expected, id=config_digests[expected.id])
     with tempfile.TemporaryDirectory(prefix="nanolab-image-") as directory:
         path = Path(directory) / "image.tar"
-        _command(
+        command_stdout(
             executor,
             inputs,
             f"Resolve built image config {expected.reference}",
@@ -165,7 +167,7 @@ def minikube_target_resource(
 def _node_images(
     executor: CommandTaskExecutor, inputs: TaskInputs, target: MinikubeTarget, node: str
 ) -> list[dict[str, Any]]:
-    data = _json_command(
+    data = command_json(
         executor,
         inputs,
         f"Inspect Minikube images on {node}",
@@ -208,7 +210,7 @@ def minikube_images_resource(
     def release(inputs: TaskInputs, _value: tuple[str, ...]) -> None:
         selected = inputs.resource(target)
         for reference in reversed(acquired):
-            _command(
+            command_stdout(
                 executor,
                 inputs,
                 f"Remove run image {reference}",
@@ -227,7 +229,7 @@ def minikube_images_resource(
         try:
             for reference in references:
                 host = json.loads(
-                    _command(
+                    command_stdout(
                         executor,
                         inputs,
                         f"Inspect built image {reference}",
@@ -254,7 +256,7 @@ def minikube_images_resource(
                         f"Refusing to own existing Minikube image: {reference}"
                     )
                 acquired.append(reference)
-                _command(
+                command_stdout(
                     executor,
                     inputs,
                     f"Load run image {reference}",
@@ -333,14 +335,14 @@ def queue_probe_image_resource(
     def acquire(inputs: TaskInputs) -> str:
         if remote_run is None:
             source = inputs.resource(run).source_dir
-            _command(
+            command_stdout(
                 executor,
                 inputs,
                 "Build queue probe artifact",
                 ("./gradlew", ":services:java:warm-echo:bootJar", "--no-daemon"),
                 cwd=source,
             )
-            _command(
+            command_stdout(
                 executor, inputs, "Build queue probe image", build_argv, cwd=source
             )
         else:
@@ -457,7 +459,7 @@ class RecipeKubernetesImageCheckTask(Task[None]):
         )
 
         def fetch(title: str, *args: str) -> dict[str, Any]:
-            return _json_command(
+            return command_json(
                 self.executor,
                 inputs,
                 title,
@@ -511,7 +513,7 @@ class RecipeKubernetesImageCheckTask(Task[None]):
                         )
                     images = _node_images(self.executor, inputs, selected, node)
                 else:
-                    images = _json_command(
+                    images = command_json(
                         self.executor,
                         inputs,
                         f"Inspect k3s images on {node}",
@@ -539,7 +541,7 @@ class RecipeKubernetesImageCheckTask(Task[None]):
                         raise ValueError(f"Node {node} has no runtime platform")
                     repository = expected.reference.rsplit(":", 1)[0]
                     image = f"{repository}@{expected.digest}"
-                    index = _json_command(
+                    index = command_json(
                         self.executor,
                         inputs,
                         "Inspect published recipe image",
@@ -549,7 +551,7 @@ class RecipeKubernetesImageCheckTask(Task[None]):
                     descriptor = index
                     if "config" not in index:
                         manifest_digest = _select_manifest_digest(index, os, arch)
-                        descriptor = _json_command(
+                        descriptor = command_json(
                             self.executor,
                             inputs,
                             "Inspect published recipe platform manifest",

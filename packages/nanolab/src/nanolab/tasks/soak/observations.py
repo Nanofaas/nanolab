@@ -11,7 +11,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanolab.tasks.soak.collector import _docker_get, collect_procfs
+from nanolab.tasks.soak.collector import collect_procfs, docker_get
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparedSoak
 
@@ -221,7 +221,7 @@ def observe_local_process(target: Target) -> dict[str, Any]:
         }
 
         def owned_container():
-            container = _docker_get(
+            container = docker_get(
                 f"/containers/{target.container_id}/json",
                 "/var/run/docker.sock",
                 5,
@@ -278,7 +278,7 @@ def observe_local_configuration(
     """Query bounded actuator documents; missing bound values stay unavailable."""
     from urllib.request import ProxyHandler, Request, build_opener
 
-    from nanolab.tasks.soak.collector import _NoRedirect, read_bounded
+    from nanolab.tasks.soak.collector import NoRedirect, read_bounded
 
     result: dict[str, Any] = {"unavailable": {}}
     # Build metadata still comes from its module on the application port.
@@ -288,7 +288,7 @@ def observe_local_configuration(
     for name, url in sources.items():
         try:
             request = Request(url, headers={"Accept": "application/json"})
-            opener = build_opener(ProxyHandler({}), _NoRedirect())
+            opener = build_opener(ProxyHandler({}), NoRedirect())
             with opener.open(
                 request, timeout=prepared.config.scrape_timeout_s
             ) as response:

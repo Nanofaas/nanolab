@@ -24,7 +24,7 @@ from nanolab.tasks.recipes.multiarch import (
     read_buildx_distribution,
     unique_json_object,
 )
-from nanolab.tasks.recipes.workflow import _object, recipe_command
+from nanolab.tasks.recipes.workflow import recipe_command, require_object
 from nanolab.tasks.soak.artifacts import (
     ArtifactWriter,
     describe_artifact,
@@ -43,8 +43,8 @@ from nanolab.tasks.soak.build_observation import (
 )
 from nanolab.tasks.soak.build_provenance import (
     BuildProvenanceCollector,
-    _materials,
-    _predicate,
+    provenance_materials,
+    provenance_predicate,
 )
 from nanolab.tasks.soak.builds import ObservedBuild
 from nanolab.tasks.soak.images import BuildRecipe
@@ -90,7 +90,7 @@ def verify_recipe_source(
 
 def verify_recipe_provenance(local: dict, published: dict) -> None:
     """Apply the collector's material and invocation binding to saved predicates."""
-    if _materials(local) != _materials(published):
+    if provenance_materials(local) != provenance_materials(published):
         raise ValueError("Recipe observed base materials differ from registry")
     local_id = local.get("metadata", {}).get("buildInvocationID")
     if local_id is not None and local_id != published.get("metadata", {}).get(
@@ -145,8 +145,8 @@ def observe_soak_recipe(
     token = uuid4().hex
     marker = "NANOLAB_BUILD_OBSERVATION_" + token + ":"
     profile_bytes = run.recipe.read_bytes()
-    profile = _object(yaml.safe_load(profile_bytes), "recipe")
-    platform = _object(profile.get("registry"), "registry")["platforms"][0]
+    profile = require_object(yaml.safe_load(profile_bytes), "recipe")
+    platform = require_object(profile.get("registry"), "registry")["platforms"][0]
     docker = shutil.which("docker")
     if docker is None:
         writer.close()
@@ -345,7 +345,7 @@ def observe_soak_recipe(
         )
         records = []
         for line in (directory / "commands.jsonl").read_text().splitlines():
-            record = _object(
+            record = require_object(
                 json.loads(line, object_pairs_hook=unique_json_object), "observation"
             )
             if (
@@ -371,7 +371,7 @@ def observe_soak_recipe(
         seen_tasks = set()
         for line in publication_text.splitlines():
             if line.startswith(marker):
-                frame = _object(
+                frame = require_object(
                     json.loads(base64.b64decode(line[len(marker) :], validate=True)),
                     "compiler frame",
                 )
@@ -408,11 +408,11 @@ def observe_soak_recipe(
                 raise ValueError(
                     "Recipe publication builder/provenance differs from request"
                 )
-            metadata = _object(
+            metadata = require_object(
                 json.loads(
                     _read_record(
                         directory,
-                        _object(record.get("metadata"), "metadata observation"),
+                        require_object(record.get("metadata"), "metadata observation"),
                         artifact_limit_bytes,
                     ),
                     object_pairs_hook=unique_json_object,
@@ -422,7 +422,7 @@ def observe_soak_recipe(
             if (
                 metadata.get("containerimage.digest") != component.image.digest
                 or metadata.get("image.name") != component.image.reference
-                or _object(
+                or require_object(
                     metadata.get("containerimage.descriptor"), "image descriptor"
                 ).get("digest")
                 != component.image.digest
@@ -435,12 +435,12 @@ def observe_soak_recipe(
                 or build_ref.split("/")[0] != builder
             ):
                 raise ValueError("Recipe builder metadata differs from publication")
-            predicate = _predicate(
+            predicate = provenance_predicate(
                 metadata.get("buildx.build.provenance"),
                 platform,
                 component.image.manifests[platform],
             )
-            bases = _materials(predicate)
+            bases = provenance_materials(predicate)
             jvm = component.sdk == "java"
             publication_record = record
             if not jvm:
@@ -486,7 +486,7 @@ def observe_soak_recipe(
                 budget_root=budget_root,
             )
             capture.marker = marker
-            descriptor = _object(record.get("log"), "command log")
+            descriptor = require_object(record.get("log"), "command log")
             body = _read_record(directory, descriptor, artifact_limit_bytes)
             command_log = writer.write_blob("execution", role + "-build.log", body)
             capture.commands = [

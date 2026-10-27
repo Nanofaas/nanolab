@@ -735,7 +735,7 @@ def _split_response(stdout: str) -> tuple[str, str]:
     return "", stdout
 
 
-def _split_final_response(stdout: str) -> tuple[str, str]:
+def split_final_response(stdout: str) -> tuple[str, str]:
     """Return curl's last HTTP block, skipping informational and redirect blocks."""
     headers, body = _split_response(stdout)
     while body.startswith("HTTP/"):
@@ -760,10 +760,11 @@ class HttpFunctionExpectation:
     decoded_prefix: bytes | None = None
 
 
-def _parse_contract_response(
+def parse_contract_response(
     name: str, stdout: str
 ) -> tuple[int, dict[str, str], dict[str, object]]:
-    response_headers, body = _split_final_response(stdout)
+    """Split a function's HTTP response into status, headers and JSON body."""
+    response_headers, body = split_final_response(stdout)
     lines = response_headers.splitlines()
     try:
         protocol, status, *_ = lines[0].split()
@@ -948,7 +949,7 @@ class HttpFunctionContractTask(CommandTask):
 
         def verify(result: TaskResult) -> None:
             contract: tuple[int, dict[str, str], dict[str, object]] = (
-                _parse_contract_response(name, result.stdout)
+                parse_contract_response(name, result.stdout)
             )
             actual_status, response_headers, response = contract
             _verify_outer_headers(name, actual_status, response_headers, expectation)

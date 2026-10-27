@@ -10,23 +10,23 @@ from nanolab.config.scenario import ScenarioConfig
 # the per-replica target by one step per cooldown, so with production cooldowns a
 # run would need minutes per phase to show a trajectory rather than a single step.
 # The cooldowns themselves are not what this scenario is checking.
-_CONCURRENCY_COOLDOWN_MS = 5000
+CONCURRENCY_COOLDOWN_MS = 5000
 # The ceiling the governor works under: FunctionQueueState clamps the effective
 # limit to the function's `concurrency`, so it has to leave room above
 # maxTargetInFlightPerPod or the trajectory is flat by construction.
-_CONCURRENCY_CEILING = 8
+CONCURRENCY_CEILING = 8
 # The buffer in front of that ceiling, registered on every function a concurrency
 # run creates. It is named rather than repeated because the burst profile's peak
 # is derived from it: the two have to agree or the load stops being calibrated
 # against the queue it is meant to fill.
-_CONCURRENCY_QUEUE_SIZE = 100
+CONCURRENCY_QUEUE_SIZE = 100
 # What every BUDGETED function may hold between them. See `concurrency_budget`
 # for why it is neither the per-function ceiling nor the sum of them.
-_BURST_TOTAL_BUDGET = 12
+BURST_TOTAL_BUDGET = 12
 # The open-loop peak, per function. Measured saturation on the shared cores was around
 # 1,400 requests per second, so this asks for more than the pair can serve: the point of
 # the profile is a queue that grows because demand exceeded capacity.
-_OPEN_LOOP_PEAK_RPS = 1_800
+OPEN_LOOP_PEAK_RPS = 1_800
 # The governor only reacts to a function that gets slower under concurrency, and
 # on an unconstrained multi-core host word-stats-java does not: an early run
 # climbed to the ceiling and stayed there, correctly, because eight parallel
@@ -40,10 +40,10 @@ _OPEN_LOOP_PEAK_RPS = 1_800
 # can use them should settle near four while one that serialises CPU work should
 # still settle near one. The ceiling stays above that, or the governor would be
 # clamped rather than converging.
-_CONCURRENCY_FUNCTION_CPUS = 4
-_CONCURRENCY_FUNCTION_RESOURCES: dict[str, dict[str, float]] = {
-    "requests": {"cpu": _CONCURRENCY_FUNCTION_CPUS / 2, "memoryMiB": 256},
-    "limits": {"cpu": float(_CONCURRENCY_FUNCTION_CPUS), "memoryMiB": 512},
+CONCURRENCY_FUNCTION_CPUS = 4
+CONCURRENCY_FUNCTION_RESOURCES: dict[str, dict[str, float]] = {
+    "requests": {"cpu": CONCURRENCY_FUNCTION_CPUS / 2, "memoryMiB": 256},
+    "limits": {"cpu": float(CONCURRENCY_FUNCTION_CPUS), "memoryMiB": 512},
 }
 
 
@@ -93,7 +93,7 @@ def declared_function_resources(
     }
 
 
-def _concurrency_function_resources(
+def concurrency_function_resources(
     config: ScenarioConfig, function: str
 ) -> dict[str, dict[str, float]]:
     """Return the resource cap one function runs under concurrency control.
@@ -105,15 +105,15 @@ def _concurrency_function_resources(
     reads as a promise that they apply.
 
     It matters more than tidiness because the cap is a CALIBRATION, and a calibration
-    goes stale: see the note on _CONCURRENCY_FUNCTION_CPUS. Making it a per-scenario
+    goes stale: see the note on CONCURRENCY_FUNCTION_CPUS. Making it a per-scenario
     value lets one run be re-tuned without moving the constant under every other run
     and breaking comparability with the campaigns already recorded.
     """
     declared = config.resources.get(function)
     if declared is None:
-        return _CONCURRENCY_FUNCTION_RESOURCES
+        return CONCURRENCY_FUNCTION_RESOURCES
     resolved = {
-        key: dict(value) for key, value in _CONCURRENCY_FUNCTION_RESOURCES.items()
+        key: dict(value) for key, value in CONCURRENCY_FUNCTION_RESOURCES.items()
     }
     for section in ("requests", "limits"):
         quantity = getattr(declared, section, None)
@@ -126,7 +126,7 @@ def _concurrency_function_resources(
     return resolved
 
 
-def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | None:
+def concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | None:
     """Return the scaling config for a run with concurrency control.
 
     Fixed replicas, adaptive per-replica concurrency: `NONE` rather than
@@ -140,7 +140,7 @@ def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | No
         "strategy": "NONE",
         "minReplicas": 1,
         "maxReplicas": 1,
-        "concurrencyControl": _controller_settings(config),
+        "concurrencyControl": controller_settings(config),
     }
 
 
@@ -148,13 +148,13 @@ def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | No
 # time of the functions in the catalogue — around 1ms warm — with room for the
 # queueing that concurrency legitimately buys, so the target is reachable but not
 # free.
-_TARGET_LATENCY_MS = 10
+TARGET_LATENCY_MS = 10
 
 # What a caller is promised, end to end. Larger than the service-time SLO on
 # purpose: the queue is where a concurrency limit puts the wait it saves, so the
 # two numbers cannot be equal without either forbidding queueing altogether or
 # lying about one of them.
-_END_TO_END_P95_BUDGET_MS = 50
+END_TO_END_P95_BUDGET_MS = 50
 
 # What the budget above assumes: the generator's built-in ~20-word inputs, whose
 # uncontended service time is around 1 ms warm. Selecting a heavier corpus with
@@ -168,7 +168,7 @@ _END_TO_END_P95_BUDGET_MS = 50
 # whatever the last run happened to produce. Measured on the DGX Spark described in
 # the nanoFaaS campaign README, medium on two cores gave p95 68.8 ms, which sits
 # under this budget with room while still leaving a doubling detectable.
-_PAYLOAD_P95_BUDGET_MS: dict[str, int] = {"small": 60, "medium": 120, "large": 600}
+PAYLOAD_P95_BUDGET_MS: dict[str, int] = {"small": 60, "medium": 120, "large": 600}
 
 
 def end_to_end_p95_budget_ms(config: ScenarioConfig) -> int:
@@ -178,11 +178,12 @@ def end_to_end_p95_budget_ms(config: ScenarioConfig) -> int:
     per profile rather than held at one number.
     """
     if config.payload_profile is None:
-        return _END_TO_END_P95_BUDGET_MS
-    return _PAYLOAD_P95_BUDGET_MS[config.payload_profile]
+        return END_TO_END_P95_BUDGET_MS
+    return PAYLOAD_P95_BUDGET_MS[config.payload_profile]
 
 
-def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
+def controller_settings(config: ScenarioConfig) -> dict[str, object]:
+    """Return the concurrency controller's settings for the scenario's mode."""
     if config.concurrency_mode == "SOJOURN":
         # Held to the SAME promise the load generator checks. For this mode
         # `targetLatencyMs` is end-to-end rather than service time, so reusing the
@@ -192,8 +193,8 @@ def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
         return {
             "mode": "SOJOURN",
             "minTargetInFlightPerPod": 1,
-            "maxTargetInFlightPerPod": _CONCURRENCY_CEILING,
-            "targetLatencyMs": _END_TO_END_P95_BUDGET_MS,
+            "maxTargetInFlightPerPod": CONCURRENCY_CEILING,
+            "targetLatencyMs": END_TO_END_P95_BUDGET_MS,
         }
     if config.concurrency_mode == "BUDGETED":
         # No per-replica target and no gradient thresholds: this controller is
@@ -201,17 +202,17 @@ def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
         return {
             "mode": "BUDGETED",
             "minTargetInFlightPerPod": 1,
-            "maxTargetInFlightPerPod": _CONCURRENCY_CEILING,
-            "targetLatencyMs": _TARGET_LATENCY_MS,
+            "maxTargetInFlightPerPod": CONCURRENCY_CEILING,
+            "targetLatencyMs": TARGET_LATENCY_MS,
             "weight": 1.0,
         }
     return {
         "mode": "ADAPTIVE_PER_POD",
         "targetInFlightPerPod": 4,
         "minTargetInFlightPerPod": 1,
-        "maxTargetInFlightPerPod": _CONCURRENCY_CEILING,
-        "upscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
-        "downscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
+        "maxTargetInFlightPerPod": CONCURRENCY_CEILING,
+        "upscaleCooldownMs": CONCURRENCY_COOLDOWN_MS,
+        "downscaleCooldownMs": CONCURRENCY_COOLDOWN_MS,
     }
 
 
@@ -312,7 +313,7 @@ def k6_environment(
         # about 1,400 served per second per function on these cores — so the peak
         # genuinely exceeds capacity and the queue has to grow, which is the
         # condition the closed loop could not create.
-        env["K6_PEAK_RPS"] = str(_OPEN_LOOP_PEAK_RPS)
+        env["K6_PEAK_RPS"] = str(OPEN_LOOP_PEAK_RPS)
         env.pop("K6_MAX_P95_MS", None)
     if config.load_profile == "burst":
         # Closed-loop VUs each hold one request, in service or queued, so the peak
@@ -352,10 +353,10 @@ def burst_peak_vus(config: ScenarioConfig) -> int:
     The same number has to be used for every mode or the runs stop being
     comparable, so the tighter constraint sets it for all of them.
     """
-    limit = _CONCURRENCY_CEILING
+    limit = CONCURRENCY_CEILING
     if is_co_tenancy(config):
-        limit = min(limit, _BURST_TOTAL_BUDGET // len(config.functions))
-    return limit + _CONCURRENCY_QUEUE_SIZE - 3
+        limit = min(limit, BURST_TOTAL_BUDGET // len(config.functions))
+    return limit + CONCURRENCY_QUEUE_SIZE - 3
 
 
 def neighbour_name(config: ScenarioConfig) -> str:

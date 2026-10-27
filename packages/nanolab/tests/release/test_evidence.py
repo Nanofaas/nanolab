@@ -73,7 +73,7 @@ def test_authenticated_ghcr_verifier_uses_authfile_without_exposing_token(
         seen.append((reference, ghcr_authfile))
         return digest
 
-    monkeypatch.setattr("nanolab.release.evidence._remote_image_digest", inspect)
+    monkeypatch.setattr("nanolab.release.evidence.remote_image_digest", inspect)
     token = "fixture-ghcr-token-must-not-leak"
     verifiers = release_evidence_verifiers(
         object(), object(), ghcr_authfile="/staged/auth.json"
@@ -157,7 +157,7 @@ def test_authenticated_signature_verifier_checks_both_artifacts_and_cleans_up(
     monkeypatch.setattr(
         "nanolab.release.evidence.stage_cosign_credentials", signing_stage
     )
-    monkeypatch.setattr("nanolab.release.evidence._provider_exec", execute)
+    monkeypatch.setattr("nanolab.release.evidence.provider_exec", execute)
     verifier = release_evidence_verifiers(object(), object(), credentials=credentials)[
         "cosign-attestation"
     ]

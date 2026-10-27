@@ -62,7 +62,8 @@ def _mapping(value: object, label: str) -> dict[str, Any]:
     return value
 
 
-def _decode(body: bytes, limit: int = _LIMIT) -> dict[str, Any]:
+def decode_provenance(body: bytes, limit: int = _LIMIT) -> dict[str, Any]:
+    """Parse bounded provenance JSON, refusing duplicate keys and nonfinite values."""
     if not isinstance(body, bytes) or len(body) > limit:
         raise ValueError("provenance output exceeds byte limit or is not bytes")
 
@@ -99,7 +100,8 @@ def _safe_file(path: Path, root: Path) -> Path:
     return path
 
 
-def _read(path: Path, root: Path, limit: int = _LIMIT) -> bytes:
+def read_bounded_file(path: Path, root: Path, limit: int = _LIMIT) -> bytes:
+    """Read a file under `root`, refusing one larger than `limit` bytes."""
     path = _safe_file(path, root)
     with path.open("rb") as stream:
         body = stream.read(limit + 1)
@@ -168,7 +170,7 @@ def write_observation_request(
     if Path(_option(build_argv, "--metadata-file")).absolute() != metadata:
         raise ValueError("build command metadata path differs from request")
     bake = Path(_option(build_argv, "-f"))
-    if _decode(_read(bake, metadata.parent)) != recipe.bake:
+    if decode_provenance(read_bounded_file(bake, metadata.parent)) != recipe.bake:
         raise ValueError("actual bake file differs from requested recipe")
     request = {
         "schema": "nanolab-soak-build-request-v1",
@@ -204,7 +206,8 @@ def _expected_platform(platform: str) -> str:
     return "linux/arm64" if platform == "linux/arm64/v8" else platform
 
 
-def _predicate(value: object, platform: str, subject: str) -> dict[str, Any]:
+def provenance_predicate(value: object, platform: str, subject: str) -> dict[str, Any]:
+    """Return the SLSA predicate for `platform` and `subject` from provenance."""
     data = _mapping(value, "published provenance")
     if platform in data:
         data = _mapping(data[platform], "platform provenance")
@@ -234,7 +237,8 @@ def _predicate(value: object, platform: str, subject: str) -> dict[str, Any]:
     return data
 
 
-def _materials(predicate: dict[str, Any]) -> dict[str, str]:
+def provenance_materials(predicate: dict[str, Any]) -> dict[str, str]:
+    """Return the Docker base images the build used, pinned by digest, by URI."""
     definition = predicate.get("buildDefinition")
     materials = (
         definition.get("resolvedDependencies")
@@ -317,7 +321,7 @@ class BuildProvenanceCollector:
         if not isinstance(body, bytes) or len(body) > self.max_output_bytes:
             raise ValueError("registry provenance output exceeds byte limit")
         _persist(directory / (field.lower() + ".json"), body)
-        return _decode(body, self.max_output_bytes)
+        return decode_provenance(body, self.max_output_bytes)
 
     def _log(self, item: dict[str, Any], root: Path) -> tuple[Path, bytes]:
         descriptor = _mapping(item.get("log"), "command log")
@@ -478,7 +482,7 @@ class BuildProvenanceCollector:
         root = metadata.parent.resolve()
         request_path = _sidecar(metadata, ".request.json")
         observation_path = _sidecar(metadata, ".observations.json")
-        request = _decode(_read(request_path, root))
+        request = decode_provenance(read_bounded_file(request_path, root))
         expected = {
             "schema": "nanolab-soak-build-request-v1",
             "role": recipe.role,
@@ -494,7 +498,9 @@ class BuildProvenanceCollector:
             request.get(key) != value for key, value in expected.items()
         ) or not request.get("request_id"):
             raise ValueError("build request differs from recipe/workspace")
-        record = _decode(_read(metadata, root, self.max_output_bytes))
+        record = decode_provenance(
+            read_bounded_file(metadata, root, self.max_output_bytes)
+        )
         if "containerimage.digest" not in record:
             record = _mapping(record.get(target), "bake target metadata")
         digest = record.get("containerimage.digest")
@@ -506,7 +512,7 @@ class BuildProvenanceCollector:
             and _mapping(descriptor, "output descriptor").get("digest") != digest
         ):
             raise ValueError("metadata descriptor digest mismatch")
-        observed = _decode(_read(observation_path, root))
+        observed = decode_provenance(read_bounded_file(observation_path, root))
         binding = {
             "schema": "nanolab-soak-build-observations-v1",
             "request_id": request["request_id"],
@@ -555,12 +561,12 @@ class BuildProvenanceCollector:
         if _platform(image) != platform:
             raise ValueError("effective image platform differs from requested platform")
         published = self._inspect(reference, "Provenance", collection)
-        predicate = _predicate(published, recipe.platform, child)
-        bases = _materials(predicate)
+        predicate = provenance_predicate(published, recipe.platform, child)
+        bases = provenance_materials(predicate)
         local = record.get("buildx.build.provenance")
         if local:
-            local_predicate = _predicate(local, recipe.platform, child)
-            if _materials(local_predicate) != bases:
+            local_predicate = provenance_predicate(local, recipe.platform, child)
+            if provenance_materials(local_predicate) != bases:
                 raise ValueError("metadata and published materials disagree")
             local_id = local_predicate.get("metadata", {}).get("buildInvocationID")
             published_id = predicate.get("metadata", {}).get("buildInvocationID")

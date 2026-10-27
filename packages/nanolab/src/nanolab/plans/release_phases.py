@@ -28,7 +28,7 @@ from nanolab.release import attest as release_attest
 from nanolab.release import build as release_build
 from nanolab.release import publish as release_publish
 from nanolab.release.benchmark import (
-    _aggregate_from_payload,
+    aggregate_from_payload,
     performance_profile,
     regression_policy,
     run_sonata_aggregate,
@@ -752,7 +752,7 @@ def build_attestation_phase(
             version=request.version,
             source_commit=identity.source_commit,
             image_digests=all_published(),
-            aggregate=_aggregate_from_payload(
+            aggregate=aggregate_from_payload(
                 json.loads(aggregate_file.read_text(encoding="utf-8"))
             ),
             policy=regression_policy(benchmark_plan),

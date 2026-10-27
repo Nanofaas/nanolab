@@ -42,7 +42,7 @@ import httpx
 from sonata_engine import JournalConfig, Task, TaskInputs, TaskOutcome
 
 from nanolab.tasks.soak.artifacts import ArtifactWriter, describe_artifact, fingerprint
-from nanolab.tasks.soak.collector import _docker_get
+from nanolab.tasks.soak.collector import docker_get
 from nanolab.tasks.soak.composition import compose_frozen_soak_workflow
 from nanolab.tasks.soak.prerequisite_runtime import (
     LivePlatform,
@@ -497,7 +497,7 @@ class PrerequisitePlatformFactory:
                         if controller:
                             path = Path(controller["path"])
                             container = await asyncio.to_thread(
-                                _docker_get,
+                                docker_get,
                                 f"/containers/{target.container_id}/json",
                                 self.docker_socket,
                                 5,

@@ -12,8 +12,8 @@ from nanolab.tasks.experiment_02.platforms import (
     WORKDIR,
     DirectReference,
     NanofaasPlatform,
-    _record_containers,
     leftover_containers,
+    record_containers,
 )
 from nanolab.workspace.paths import discover_tool_root
 
@@ -318,7 +318,7 @@ def test_recorded_containers_leave_out_their_environment(tmp_path):
             return Result(0, json.dumps(inspected))
         return None
 
-    _record_containers(vm(RecordingProvider(handler=handler)), tmp_path)
+    record_containers(vm(RecordingProvider(handler=handler)), tmp_path)
     [recorded] = json.loads((tmp_path / "containers.json").read_text())
     assert recorded["Name"] == "/e02-core-1"
     assert "s3" not in (tmp_path / "containers.json").read_text()

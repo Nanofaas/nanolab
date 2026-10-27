@@ -79,37 +79,41 @@ class RecipeDistribution:
         return matches[0]
 
 
-def _object(value: object, label: str) -> dict[str, Any]:
+def require_object(value: object, label: str) -> dict[str, Any]:
+    """Return `value` if it is a mapping; otherwise refuse the distribution."""
     if not isinstance(value, dict):
         raise ValueError(f"Recipe distribution {label} must be an object")
     return value
 
 
-def _string(value: object, label: str) -> str:
+def require_string(value: object, label: str) -> str:
+    """Return `value` if it is a nonempty string; otherwise refuse it."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"Recipe distribution {label} must be a nonempty string")
     return value
 
 
-def _verify_recipe_identity(
+def verify_recipe_identity(
     recipe: Path,
     tag: str,
     modules: list[str],
     components: Sequence[RecipeComponent | MultiarchComponent],
 ) -> None:
     """Compare the report's build selection to the actual profile inputs."""
-    profile = _object(yaml.safe_load(recipe.read_text(encoding="utf-8")), "profile")
-    control = _object(profile.get("controlPlane"), "profile controlPlane")
+    profile = require_object(
+        yaml.safe_load(recipe.read_text(encoding="utf-8")), "profile"
+    )
+    control = require_object(profile.get("controlPlane"), "profile controlPlane")
     selected_modules = control.get("modules", [])
     if sorted(modules) != sorted(selected_modules) or len(modules) != len(set(modules)):
         raise ValueError("Recipe distribution modules differ from recipe")
     registry = profile.get("registry")
     if registry is None:
-        prefix = f"nanofaas/{_string(profile.get('name'), 'profile name')}"
+        prefix = f"nanofaas/{require_string(profile.get('name'), 'profile name')}"
         image_tag = "local"
     else:
-        prefix = _string(
-            _object(registry, "profile registry").get("repository"), "repository"
+        prefix = require_string(
+            require_object(registry, "profile registry").get("repository"), "repository"
         )
         image_tag = tag
 
@@ -118,23 +122,23 @@ def _verify_recipe_identity(
     def add(kind: str, item: dict[str, Any], name: str, sdk: str) -> None:
         build = item.get("build")
         mode = (
-            _object(build, f"{name} build").get("mode")
+            require_object(build, f"{name} build").get("mode")
             if build is not None
             else "container"
         )
-        container = _object(item.get("container"), f"{name} container")
-        image_name = _string(container.get("image"), f"{name} image")
+        container = require_object(item.get("container"), f"{name} container")
+        image_name = require_string(container.get("image"), f"{name} image")
         expected[(kind, name, sdk)] = (mode, f"{prefix}/{image_name}:{image_tag}")
 
     add("control-plane", control, "control-plane", "java")
     for kind, field in (("function", "functions"), ("service", "services")):
         for item in profile.get(field, []):
-            entry = _object(item, f"profile {field} entry")
+            entry = require_object(item, f"profile {field} entry")
             add(
                 kind,
                 entry,
-                _string(entry.get("name"), "name"),
-                _string(entry.get("sdk"), "sdk"),
+                require_string(entry.get("name"), "name"),
+                require_string(entry.get("sdk"), "sdk"),
             )
     if set(expected) != {(c.kind, c.name, c.sdk) for c in components}:
         raise ValueError("Recipe distribution components differ from recipe")
@@ -145,14 +149,14 @@ def _verify_recipe_identity(
                 f"Recipe distribution {component.name} differs from recipe"
             )
 
-    build = _object(control.get("build"), "profile controlPlane build")
+    build = require_object(control.get("build"), "profile controlPlane build")
     variant = build.get("variant")
-    native = _object(build.get("native", {}), "profile native build")
+    native = require_object(build.get("native", {}), "profile native build")
     if variant is not None or "optimization" in native:
         if build.get("mode") == "native":
             optimization = str(native.get("optimization", "3"))
         else:
-            jvm = _object(control.get("jvm", {}), "profile controlPlane jvm")
+            jvm = require_object(control.get("jvm", {}), "profile controlPlane jvm")
             args = jvm.get("args", [])
             optimization = "c1" if "-XX:TieredStopAtLevel=1" in args else "c2"
     else:
@@ -172,12 +176,12 @@ def read_distribution(
 ) -> RecipeDistribution:
     """Reject stale, partial or incompatible reports before any deployment."""
     try:
-        data = _object(json.loads(report.read_text(encoding="utf-8")), "report")
+        data = require_object(json.loads(report.read_text(encoding="utf-8")), "report")
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Cannot read recipe distribution {report}") from error
     if type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 2:
         raise ValueError("Unsupported recipe distribution schemaVersion")
-    recipe_data = _object(data.get("recipe"), "recipe")
+    recipe_data = require_object(data.get("recipe"), "recipe")
     expected_sha = hashlib.sha256(recipe.read_bytes()).hexdigest()
     if recipe_data.get("sha256") != expected_sha:
         raise ValueError("Recipe distribution hash does not match profile")
@@ -193,28 +197,28 @@ def read_distribution(
     keys: set[tuple[str, str, str]] = set()
     references: set[str] = set()
     for index, row in enumerate(rows):
-        item = _object(row, f"components[{index}]")
-        kind = _string(item.get("kind"), "component kind")
-        name = _string(item.get("name"), "component name")
-        sdk = _string(item.get("sdk"), "component sdk")
+        item = require_object(row, f"components[{index}]")
+        kind = require_string(item.get("kind"), "component kind")
+        name = require_string(item.get("name"), "component name")
+        sdk = require_string(item.get("sdk"), "component sdk")
         key = (kind, name, sdk)
         if key in keys:
             raise ValueError(f"Duplicate recipe component {key}")
         keys.add(key)
-        image = _object(item.get("image"), f"{name} image")
+        image = require_object(item.get("image"), f"{name} image")
         if "platforms" in image:
             raise ValueError("Multi-platform recipe distributions are not supported")
-        reference = _string(image.get("reference"), f"{name} image reference")
+        reference = require_string(image.get("reference"), f"{name} image reference")
         if reference in references:
             raise ValueError(f"Duplicate recipe image {reference}")
         references.add(reference)
-        image_id = _string(image.get("id"), f"{name} image id")
+        image_id = require_string(image.get("id"), f"{name} image id")
         status = "published" if published else "built"
         if image.get("status") != status:
             raise ValueError(f"{name} image status must be {status}")
         digest = image.get("digest")
         if published:
-            digest = _string(digest, f"{name} image digest")
+            digest = require_string(digest, f"{name} image digest")
         elif digest is not None:
             raise ValueError(f"{name} built image cannot have a published digest")
         components.append(
@@ -226,13 +230,15 @@ def read_distribution(
                 image=RecipeImage(reference, image_id, status, digest),
                 variant=item.get("variant"),
                 optimization=item.get("optimization"),
-                native=_object(item["native"], "native") if "native" in item else None,
+                native=require_object(item["native"], "native")
+                if "native" in item
+                else None,
             )
         )
     source = data.get("source")
     if source is not None:
-        source = _object(source, "source")
-    _verify_recipe_identity(recipe, tag, modules, components)
+        source = require_object(source, "source")
+    verify_recipe_identity(recipe, tag, modules, components)
     return RecipeDistribution(
         report=report,
         recipe_sha256=expected_sha,

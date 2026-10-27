@@ -588,7 +588,10 @@ class BuildObservationCapture:
         self, execute: Callable[..., None], observe: Callable[..., bytes]
     ) -> None:
         """Observe the actual builder/materials and persist the completed sidecar."""
-        from nanolab.tasks.soak.build_provenance import _materials, _predicate
+        from nanolab.tasks.soak.build_provenance import (
+            provenance_materials,
+            provenance_predicate,
+        )
 
         record = json.loads(self._read(self.metadata))
         if "containerimage.digest" not in record:
@@ -636,7 +639,9 @@ class BuildObservationCapture:
         if self.recipe.prerequisite_argv is None:
             local = record.get("buildx.build.provenance")
             if local:
-                materials = _materials(_predicate(local, self.recipe.platform, digest))
+                materials = provenance_materials(
+                    provenance_predicate(local, self.recipe.platform, digest)
+                )
             else:
                 image = self.recipe.image
                 repository = (
@@ -657,8 +662,8 @@ class BuildObservationCapture:
                     30,
                 )
                 self._write(self.directory / "stage-materials.json", body)
-                materials = _materials(
-                    _predicate(json.loads(body), self.recipe.platform, digest)
+                materials = provenance_materials(
+                    provenance_predicate(json.loads(body), self.recipe.platform, digest)
                 )
             self.capture_toolchains("build", materials=materials)
             self.require_toolchains(

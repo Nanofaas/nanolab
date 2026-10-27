@@ -23,9 +23,9 @@ from nanolab.tasks.experiment_02.budget import host_service
 from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.platforms import (
     ENTRY_PORT,
-    _record_containers,
-    _start,
     baseline_teardown,
+    record_containers,
+    start_platform,
 )
 from nanolab.tasks.experiment_02.vm import Vm, exec_status
 from nanolab.workspace.paths import bundled_assets_root
@@ -49,7 +49,7 @@ class _Baseline:
 
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers."""
-        _record_containers(vm, evidence)
+        record_containers(vm, evidence)
 
     def teardown(self, vm: Vm) -> None:
         """Stop the platform unit and compose project, then every container."""
@@ -83,7 +83,7 @@ class FunLess(_Baseline):
     ) -> dict[str, float] | None:
         """Bring the compose project up, create module and function, then probe."""
         bearer = f'-H "Authorization: Bearer $({_FUNLESS_READ_GUEST})"'
-        return _start(
+        return start_platform(
             vm,
             images=(),
             commands=[
@@ -154,7 +154,7 @@ class Spin(_Baseline):
         evidence: Path,
     ) -> dict[str, float] | None:
         """Run `spin up` in the platform unit and probe the component."""
-        return _start(
+        return start_platform(
             vm,
             images=(),
             commands=[
@@ -215,7 +215,7 @@ class TinyFaas(_Baseline):
             f' d["threads"] = {protocol.fixed_concurrency};'
             " sys.stdout.write(json.dumps(d))"
         )
-        return _start(
+        return start_platform(
             vm,
             images=(),
             commands=[
@@ -291,7 +291,7 @@ class Serverledge(_Baseline):
             f"api:\\n  port: {ENTRY_PORT}\\ncontainer:\\n  pool:\\n"
             f"    memory: {self.budget.memory_mib}\\n    cpus: {self.budget.cpus:g}\\n"
         )
-        return _start(
+        return start_platform(
             vm,
             images=(ETCD, self.image),
             commands=[
@@ -403,7 +403,7 @@ class Fn(_Baseline):
         register = _FN_REGISTER.replace(
             "TIMEOUT", str(protocol.http_timeout_seconds)
         ).replace(FN_IMAGE, self.image)
-        return _start(
+        return start_platform(
             vm,
             images=(FNSERVER, self.image),
             commands=[

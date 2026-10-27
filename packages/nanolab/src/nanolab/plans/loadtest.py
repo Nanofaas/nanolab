@@ -28,46 +28,46 @@ from nanolab.application.functions import (
     sonata_function,
 )
 from nanolab.application.loadtest_policy import (
-    _BURST_TOTAL_BUDGET as _BURST_TOTAL_BUDGET,
+    BURST_TOTAL_BUDGET as BURST_TOTAL_BUDGET,
 )
 from nanolab.application.loadtest_policy import (
-    _CONCURRENCY_CEILING as _CONCURRENCY_CEILING,
+    CONCURRENCY_CEILING as CONCURRENCY_CEILING,
 )
 from nanolab.application.loadtest_policy import (
-    _CONCURRENCY_COOLDOWN_MS as _CONCURRENCY_COOLDOWN_MS,
+    CONCURRENCY_COOLDOWN_MS as CONCURRENCY_COOLDOWN_MS,
 )
 from nanolab.application.loadtest_policy import (
-    _CONCURRENCY_FUNCTION_CPUS as _CONCURRENCY_FUNCTION_CPUS,
+    CONCURRENCY_FUNCTION_CPUS as CONCURRENCY_FUNCTION_CPUS,
 )
 from nanolab.application.loadtest_policy import (
-    _CONCURRENCY_FUNCTION_RESOURCES as _CONCURRENCY_FUNCTION_RESOURCES,
+    CONCURRENCY_FUNCTION_RESOURCES as CONCURRENCY_FUNCTION_RESOURCES,
 )
 from nanolab.application.loadtest_policy import (
-    _CONCURRENCY_QUEUE_SIZE as _CONCURRENCY_QUEUE_SIZE,
+    CONCURRENCY_QUEUE_SIZE as CONCURRENCY_QUEUE_SIZE,
 )
 from nanolab.application.loadtest_policy import (
-    _END_TO_END_P95_BUDGET_MS as _END_TO_END_P95_BUDGET_MS,
+    END_TO_END_P95_BUDGET_MS as END_TO_END_P95_BUDGET_MS,
 )
 from nanolab.application.loadtest_policy import (
-    _OPEN_LOOP_PEAK_RPS as _OPEN_LOOP_PEAK_RPS,
+    OPEN_LOOP_PEAK_RPS as OPEN_LOOP_PEAK_RPS,
 )
 from nanolab.application.loadtest_policy import (
-    _PAYLOAD_P95_BUDGET_MS as _PAYLOAD_P95_BUDGET_MS,
+    PAYLOAD_P95_BUDGET_MS as PAYLOAD_P95_BUDGET_MS,
 )
 from nanolab.application.loadtest_policy import (
-    _TARGET_LATENCY_MS as _TARGET_LATENCY_MS,
-)
-from nanolab.application.loadtest_policy import (
-    _concurrency_control_setup as _concurrency_control_setup,
-)
-from nanolab.application.loadtest_policy import (
-    _concurrency_function_resources as _concurrency_function_resources,
-)
-from nanolab.application.loadtest_policy import (
-    _controller_settings as _controller_settings,
+    TARGET_LATENCY_MS as TARGET_LATENCY_MS,
 )
 from nanolab.application.loadtest_policy import (
     burst_peak_vus as burst_peak_vus,
+)
+from nanolab.application.loadtest_policy import (
+    concurrency_control_setup as concurrency_control_setup,
+)
+from nanolab.application.loadtest_policy import (
+    concurrency_function_resources as concurrency_function_resources,
+)
+from nanolab.application.loadtest_policy import (
+    controller_settings as controller_settings,
 )
 from nanolab.application.loadtest_policy import (
     drain_checkpoints as drain_checkpoints,
@@ -337,7 +337,7 @@ def _resolve_functions(
                 scaling_config=scaling_config,
                 timeout_ms=30000,
                 concurrency=concurrency,
-                queue_size=_CONCURRENCY_QUEUE_SIZE,
+                queue_size=CONCURRENCY_QUEUE_SIZE,
                 **(
                     {"resources": resources_for(function.name)}
                     if resources_for is not None
@@ -547,7 +547,7 @@ def shared_cpuset(config: ScenarioConfig) -> str:
     """
     if not is_co_tenancy(config):
         return ""
-    return f"0-{_CONCURRENCY_FUNCTION_CPUS - 1}"
+    return f"0-{CONCURRENCY_FUNCTION_CPUS - 1}"
 
 
 def concurrency_budget(config: ScenarioConfig) -> str:
@@ -575,7 +575,7 @@ def concurrency_budget(config: ScenarioConfig) -> str:
     """
     if not is_co_tenancy(config) or config.concurrency_mode != "BUDGETED":
         return ""
-    return str(_BURST_TOTAL_BUDGET)
+    return str(BURST_TOTAL_BUDGET)
 
 
 NATIVE_CONTROL_PLANE_IMAGE = "nanofaas/control-plane:native"
@@ -1083,8 +1083,8 @@ def _build_concurrency_report(
     cores = shared_cpuset(config)
     conditions = [
         f"mode {mode}",
-        f"ceiling {_CONCURRENCY_CEILING}",
-        f"queue {_CONCURRENCY_QUEUE_SIZE}",
+        f"ceiling {CONCURRENCY_CEILING}",
+        f"queue {CONCURRENCY_QUEUE_SIZE}",
     ]
     if budget:
         conditions.append(f"shared budget {budget}")
@@ -1097,7 +1097,7 @@ def _build_concurrency_report(
         title=f"Concurrency governor — {mode}",
         data_dir=run_dir,
         output_dir=run_dir,
-        queue_size=_CONCURRENCY_QUEUE_SIZE,
+        queue_size=CONCURRENCY_QUEUE_SIZE,
         phases=burst_report_phases() if config.load_profile == "burst" else (),
         subtitle=" · ".join(conditions),
     )
@@ -1323,7 +1323,7 @@ def build_loadtest_plan(
     ):
         raise ValueError("recipeProfile cannot be combined with prebuilt images")
     hpa, replica_floor, scaling_config = _autoscaling_setup(config)
-    scaling_config = scaling_config or _concurrency_control_setup(config)
+    scaling_config = scaling_config or concurrency_control_setup(config)
     root = repo_root or Path.cwd()
     functions, functions_prebuilt = _resolve_functions(
         config,
@@ -1331,9 +1331,9 @@ def build_loadtest_plan(
         tool_root,
         scaling_config,
         prebuilt_function_images,
-        concurrency=_CONCURRENCY_CEILING if config.concurrency_control else 4,
+        concurrency=CONCURRENCY_CEILING if config.concurrency_control else 4,
         resources_for=(
-            (lambda name: _concurrency_function_resources(config, name))
+            (lambda name: concurrency_function_resources(config, name))
             if config.concurrency_control
             else function_resources
         ),
@@ -1524,7 +1524,7 @@ def build_loadtest_plan(
                     role="stack",
                     requires=platform_requires,
                     cpuset_cores=(
-                        _CONCURRENCY_FUNCTION_CPUS if shared_cpuset(config) else 0
+                        CONCURRENCY_FUNCTION_CPUS if shared_cpuset(config) else 0
                     ),
                     budget=concurrency_budget(config),
                 )

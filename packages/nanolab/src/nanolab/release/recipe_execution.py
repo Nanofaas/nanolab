@@ -22,7 +22,7 @@ from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.config.environment import ExecutionRole
 from nanolab.images.plan import ImageArchitecture
-from nanolab.release.build import _provider_exec, _require_result
+from nanolab.release.build import provider_exec, require_result
 from nanolab.release.model import digest_path
 from nanolab.release.recipe import ReleaseRecipeGroup, read_release_distribution
 from nanolab.tasks.recipes.multiarch import unique_json_object
@@ -122,7 +122,7 @@ def _fetch_verified(
     facts = json.loads(
         str(
             getattr(
-                _provider_exec(
+                provider_exec(
                     provider, request, ("python3", "-c", _FILE_FACTS, remote)
                 ),
                 "stdout",
@@ -142,7 +142,7 @@ def _fetch_verified(
         after = json.loads(
             str(
                 getattr(
-                    _provider_exec(
+                    provider_exec(
                         provider, request, ("python3", "-c", _FILE_FACTS, remote)
                     ),
                     "stdout",
@@ -165,7 +165,7 @@ def _verify_remote_digest(
     provider: object, request: object, remote: str, digest: str, label: str
 ) -> None:
     actual = str(
-        getattr(_provider_exec(provider, request, ("sha256sum", remote)), "stdout", "")
+        getattr(provider_exec(provider, request, ("sha256sum", remote)), "stdout", "")
     ).split()
     if not actual or "sha256:" + actual[0] != digest:
         raise ValueError(f"Staged release {label} digest differs")
@@ -188,7 +188,7 @@ def verify_release_source(
     source = Path(source_dir)
     remote_inventory = str(source.parent / "source-current.json")
     current_file = inventory_file.with_name("source-current.json")
-    _provider_exec(
+    provider_exec(
         provider,
         request,
         ("python3", "-c", _INVENTORY_SCRIPT, source_dir, remote_inventory),
@@ -353,7 +353,7 @@ def run_release_recipe_steps(
         ("builderInspection", ("docker", "buildx", "inspect", builder_name)),
     ):
         facts[label] = str(
-            getattr(_provider_exec(provider, request, argv), "stdout", "")
+            getattr(provider_exec(provider, request, argv), "stdout", "")
         ).strip()
     aliases = {"amd64": {"x86_64", "amd64"}, "arm64": {"aarch64", "arm64"}}[
         architecture
@@ -376,7 +376,7 @@ def run_release_recipe_steps(
         remote_profile = f"{remote_root}/recipe-inputs/{architecture}/{profile.name}"
         staged_hash = str(
             getattr(
-                _provider_exec(provider, request, ("sha256sum", remote_profile)),
+                provider_exec(provider, request, ("sha256sum", remote_profile)),
                 "stdout",
                 "",
             )
@@ -388,15 +388,15 @@ def run_release_recipe_steps(
         local_output = evidence_dir / group.flavor
         report = local_output / "distribution.json"
         report.unlink(missing_ok=True)
-        _provider_exec(provider, request, ("rm", "-rf", "--", output))
-        _provider_exec(provider, request, ("mkdir", "-p", output))
+        provider_exec(provider, request, ("rm", "-rf", "--", output))
+        provider_exec(provider, request, ("mkdir", "-p", output))
         log = local_output / "gradle.log"
         log.unlink(missing_ok=True)
         # cleanRecipe claims/clears its output; logging must stay outside it.
         log_dir = f"{remote_root}/recipe-output/{architecture}/logs"
         log_path = f"{log_dir}/{group.flavor}.log"
-        _provider_exec(provider, request, ("mkdir", "-p", log_dir))
-        _provider_exec(provider, request, ("rm", "-f", "--", log_path))
+        provider_exec(provider, request, ("mkdir", "-p", log_dir))
+        provider_exec(provider, request, ("rm", "-f", "--", log_path))
         remote_log = shlex.quote(log_path)
         script = (
             f"{{ {shlex.join(command.argv)}; }} > {remote_log} 2>&1; "
@@ -404,7 +404,7 @@ def run_release_recipe_steps(
         )
         try:
             result = executor.run(replace(command, argv=("sh", "-c", script)))
-            _require_result(result, "release recipe assembly")
+            require_result(result, "release recipe assembly")
         except BaseException as error:
             best_effort(
                 error,
@@ -431,7 +431,7 @@ def run_release_recipe_steps(
         components = read_release_distribution(
             report, group=group, source_commit=source_commit
         )
-        inspect = _provider_exec(
+        inspect = provider_exec(
             provider,
             request,
             (
@@ -469,7 +469,7 @@ def run_release_recipe_steps(
     images = [item for item in evidence if item.kind == "local-image-digest"]
     if len(images) != len({item.reference for item in images}):
         raise ValueError("Duplicate release recipe image coverage")
-    inspected = _provider_exec(
+    inspected = provider_exec(
         provider,
         request,
         (

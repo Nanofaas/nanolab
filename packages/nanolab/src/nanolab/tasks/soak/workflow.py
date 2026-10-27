@@ -316,7 +316,7 @@ class SoakLifecycle(Task[LifecycleState]):
         return TaskOutcome(value=self.state)
 
 
-def _publish_run_document(run_dir: Path, name: str, payload: dict[str, Any]) -> Path:
+def publish_run_document(run_dir: Path, name: str, payload: dict[str, Any]) -> Path:
     """Publish beside Sonata's journal without acquiring the nonempty run root."""
     import json
     import os
@@ -357,7 +357,7 @@ def write_terminal_receipt(
         payload["report_path"] = str(report_path)
     if reason is not None:
         payload["reason"] = reason[:4096]
-    return _publish_run_document(run_dir, "terminal.json", payload)
+    return publish_run_document(run_dir, "terminal.json", payload)
 
 
 def write_policy_input(run_dir: Path, scenario: Any) -> Path | None:
@@ -367,7 +367,7 @@ def write_policy_input(run_dir: Path, scenario: Any) -> Path | None:
     receipt = getattr(scenario, "_soak_policy_receipt", None)
     if receipt is None:
         return None
-    return _publish_run_document(
+    return publish_run_document(
         run_dir,
         "policy-input.json",
         {

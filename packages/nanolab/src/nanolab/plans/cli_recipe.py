@@ -22,7 +22,7 @@ from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_ar
 from nanolab.tasks.platform import (
     PlatformFunction,
     PlatformRequest,
-    _resolve_platform_endpoint,
+    resolve_platform_endpoint,
 )
 from nanolab.tasks.recipes.kubernetes import (
     minikube_images_resource,
@@ -162,7 +162,7 @@ def build_recipe_cli_plan(
         helm_values=helm_set_args(values),
         execution_role="host",
     )
-    resources, endpoint = _resolve_platform_endpoint(
+    resources, endpoint = resolve_platform_endpoint(
         request, None, pinned, None, (owned_namespace,), ""
     )
     workflow = Workflow(workflow_id="cli")

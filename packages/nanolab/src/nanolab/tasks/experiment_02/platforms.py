@@ -158,7 +158,8 @@ def baseline_teardown(vm: Vm) -> None:
     _ = exec_status(vm, ("docker", "network", "prune", "-f"))
 
 
-def _record_containers(vm: Vm, evidence: Path) -> None:
+def record_containers(vm: Vm, evidence: Path) -> None:
+    """Record `docker inspect` of every container but the registry, minus its env."""
     evidence.mkdir(parents=True, exist_ok=True)
     names = leftover_containers(vm)
     if names:
@@ -196,7 +197,7 @@ def _ensure_network(vm: Vm) -> None:
         )
 
 
-def _start(
+def start_platform(
     vm: Vm,
     *,
     images: Sequence[str],
@@ -368,7 +369,7 @@ class NanofaasPlatform:
         evidence: Path,
     ) -> dict[str, float] | None:
         """Start the control plane, register the function, wait for a correct PNG."""
-        return _start(
+        return start_platform(
             vm,
             images=(self.control_plane_image, self.function_image),
             commands=self.commands(),
@@ -403,7 +404,7 @@ class NanofaasPlatform:
 
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers and refuse a control plane with other modules."""
-        _record_containers(vm, evidence)
+        record_containers(vm, evidence)
         metadata = comparison_remote_command(
             vm.provider, vm.request, ("curl", "-fsS", f"{_API}/modules/build-metadata")
         )
@@ -469,7 +470,7 @@ class DirectReference:
         evidence: Path,
     ) -> dict[str, float] | None:
         """Start the function container and wait for a correct answer."""
-        return _start(
+        return start_platform(
             vm,
             images=(self.function_image,),
             commands=self.commands(concurrency=protocol.fixed_concurrency),
@@ -501,7 +502,7 @@ class DirectReference:
 
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers; there is no build to check."""
-        _record_containers(vm, evidence)
+        record_containers(vm, evidence)
 
     def teardown(self, vm: Vm) -> None:
         """Remove every container but the registry."""

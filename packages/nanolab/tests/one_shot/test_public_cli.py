@@ -168,12 +168,12 @@ def test_public_cli_load_failure_still_reports_and_preserves_original_error(
 
 
 def test_catalogue_classifies_one_shot_as_multipass_not_local_container(tmp_path):
-    from nanolab.cli.catalogue import _workflow_catalog
+    from nanolab.cli.catalogue import workflow_catalog
 
     (tmp_path / "one-shot.yaml").write_text(
         "workflow: one-shot-experiment\nbackend: container\n"
     )
-    assert _workflow_catalog(tmp_path)["one-shot-experiment"][0] == ("multipass",)
+    assert workflow_catalog(tmp_path)["one-shot-experiment"][0] == ("multipass",)
 
 
 @pytest.mark.parametrize("explicit_defaults", [False, True])

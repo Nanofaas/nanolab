@@ -1114,14 +1114,14 @@ def test_failed_report_publication_still_closes_evidence_and_writes_terminal(
     from nanolab.tasks.heap_analysis import runtime as runtime_module
 
     task, harness, run_dir = build(tmp_path, FakeSession([], evidence(tmp_path)))
-    real = runtime_module._publish_run_document
+    real = runtime_module.publish_run_document
 
     def publish(directory: Path, name: str, payload: Any) -> Path:
         if name == "report.json":
             raise OSError("no space left on device")
         return real(directory, name, payload)
 
-    monkeypatch.setattr(runtime_module, "_publish_run_document", publish)
+    monkeypatch.setattr(runtime_module, "publish_run_document", publish)
     with pytest.raises(OSError, match="no space left"):
         task.run(TaskInputs.empty())
     terminal = json.loads((run_dir / "terminal.json").read_text())

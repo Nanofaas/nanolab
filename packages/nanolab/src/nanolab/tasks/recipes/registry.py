@@ -17,7 +17,7 @@ from nanolab.tasks.recipes.multiarch import (
     sha256_digest,
     unique_json_object,
 )
-from nanolab.tasks.recipes.workflow import _object
+from nanolab.tasks.recipes.workflow import require_object
 
 INDEX_TYPES = {
     "application/vnd.oci.image.index.v1+json",
@@ -41,7 +41,8 @@ class RegistryResponse:
 RegistryFetch = Callable[[str, str, str], RegistryResponse]
 
 
-def _baseline_platform(data: dict[str, object]) -> str:
+def baseline_platform(data: dict[str, object]) -> str:
+    """Return the `os/architecture` of an image a baseline recipe accepts."""
     architecture = data.get("architecture")
     aliases = {"amd64": (None, "", "v1"), "arm64": (None, "", "v8")}
     if (
@@ -131,7 +132,7 @@ def verify_multiarch_registry(
             ):
                 raise ValueError(f"Registry descriptor size mismatch for {filename}")
             try:
-                return _object(
+                return require_object(
                     json.loads(response.body, object_pairs_hook=unique_json_object),
                     filename,
                 )
@@ -149,12 +150,14 @@ def verify_multiarch_registry(
             raise ValueError("Registry manifest platform count differs from recipe")
         configs: dict[str, str] = {}
         for raw_descriptor in descriptors:
-            descriptor = _object(raw_descriptor, "manifest descriptor")
-            annotations = _object(descriptor.get("annotations", {}), "annotations")
+            descriptor = require_object(raw_descriptor, "manifest descriptor")
+            annotations = require_object(
+                descriptor.get("annotations", {}), "annotations"
+            )
             if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
                 raise ValueError("Unexpected attestation manifest")
-            platform_data = _object(descriptor.get("platform"), "platform")
-            platform = _baseline_platform(platform_data)
+            platform_data = require_object(descriptor.get("platform"), "platform")
+            platform = baseline_platform(platform_data)
             digest = sha256_digest(descriptor.get("digest"))
             if (
                 platform not in image.manifests
@@ -177,7 +180,9 @@ def verify_multiarch_registry(
                 or manifest.get("mediaType") not in MANIFEST_TYPES
             ):
                 raise ValueError("Registry executable manifest is invalid")
-            config_descriptor = _object(manifest.get("config"), "config descriptor")
+            config_descriptor = require_object(
+                manifest.get("config"), "config descriptor"
+            )
             config_digest = sha256_digest(config_descriptor.get("digest"))
             if (
                 type(config_descriptor.get("size")) is not int
@@ -191,7 +196,7 @@ def verify_multiarch_registry(
                 f"{slug}-config.json",
                 config_descriptor["size"],
             )
-            if _baseline_platform(config) != platform:
+            if baseline_platform(config) != platform:
                 raise ValueError(
                     "Registry configuration platform differs from manifest"
                 )

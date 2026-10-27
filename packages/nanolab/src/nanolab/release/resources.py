@@ -21,10 +21,10 @@ from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import (
-    _ArchiveProvider,
-    _provider_exec,
-    _provider_transfer_to,
+    ArchiveProvider,
     create_source_archive,
+    provider_exec,
+    provider_transfer_to,
     stage_source_archive,
 )
 from nanolab.release.environment import (
@@ -396,7 +396,7 @@ def build_release_source_resources(
     def remote(request: object, requires: tuple[Resource[Any], ...]) -> Resource[str]:
         def cleanup() -> None:
             remove_source_archive(
-                _ArchiveProvider(provider),
+                ArchiveProvider(provider),
                 request,
                 remote_source_dir=remote_source_dir,
                 remote_archive=remote_archive,
@@ -476,17 +476,17 @@ def release_recipe_inputs_resource(
             profile.write_bytes(group.profile_bytes)
             profiles.append(profile)
         try:
-            _provider_exec(provider, request, ("mkdir", "-p", remote_inputs))
+            provider_exec(provider, request, ("mkdir", "-p", remote_inputs))
             for path in (*profiles, config):
                 destination = f"{remote_inputs}/{path.name}"
-                _provider_transfer_to(
+                provider_transfer_to(
                     provider,
                     request,
                     source=path,
                     destination=destination,
                     action="release recipe input transfer",
                 )
-                result = _provider_exec(provider, request, ("sha256sum", destination))
+                result = provider_exec(provider, request, ("sha256sum", destination))
                 if str(getattr(result, "stdout", "")).split()[0] != digest_path(
                     path
                 ).removeprefix("sha256:"):

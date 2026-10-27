@@ -32,7 +32,7 @@ from nanolab.tasks.cli_artifacts import (
 )
 from nanolab.tasks.cli_function import (
     CliFunctionListTask,
-    _json_stdout,
+    json_stdout,
     parse_cli_list,
     runtime_config_patch_task,
     runtime_config_readback_task,
@@ -42,7 +42,7 @@ from nanolab.tasks.http_function import Endpoint
 from nanolab.tasks.kubectl import k8s_function_resources_absent
 from nanolab.tasks.recipes.kubernetes import (
     RecipeKubernetesImageCheckTask,
-    _json_command,
+    command_json,
 )
 from nanolab.tasks.recipes.validation import RecipeMetadataCheckTask
 from nanolab.tasks.recipes.workflow import RecipeDistribution
@@ -104,7 +104,7 @@ def _runtime_snapshot(task: CommandTask, inputs: TaskInputs) -> dict[str, Any]:
     result = task.run(inputs).value
     if result is None:
         raise RuntimeError("CLI runtime snapshot returned no evidence")
-    return _json_stdout(result)
+    return json_stdout(result)
 
 
 def _required_cases(function: str) -> set[str]:
@@ -176,7 +176,7 @@ def _observations(
         elif title == "Control-plane contract":
             observations[title] = yaml.safe_load(result.stdout)
         elif title in json_titles:
-            payload = _json_stdout(result)
+            payload = json_stdout(result)
             if title == "Control-plane info":
                 metadata = payload.get("metadata")
                 control = report.control_plane()
@@ -291,7 +291,7 @@ class CliParityTask(Task[None]):
         prefix = self._prefix(inputs)
 
         def fetch(kind: str, *args: str) -> dict[str, Any]:
-            return _json_command(
+            return command_json(
                 executor,
                 inputs,
                 f"Read CLI platform {kind}",

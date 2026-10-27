@@ -18,11 +18,14 @@ from nanolab.tasks.recipes.registry import (
     INDEX_TYPES,
     MANIFEST_TYPES,
     RegistryFetch,
-    _baseline_platform,
+    baseline_platform,
 )
-from nanolab.tasks.recipes.workflow import _object
+from nanolab.tasks.recipes.workflow import require_object
 from nanolab.tasks.soak.artifacts import ArtifactWriter
-from nanolab.tasks.soak.build_provenance import _materials, _predicate
+from nanolab.tasks.soak.build_provenance import (
+    provenance_materials,
+    provenance_predicate,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +100,7 @@ def verify_soak_registry(
                 if writer is not None:
                     writer.write_blob(role, name, response.body)
                 try:
-                    return _object(
+                    return require_object(
                         json.loads(response.body, object_pairs_hook=unique_json_object),
                         name,
                     )
@@ -119,12 +122,14 @@ def verify_soak_registry(
             executable = []
             attestations = []
             for raw in descriptors:
-                descriptor = _object(raw, "descriptor")
+                descriptor = require_object(raw, "descriptor")
                 if descriptor.get("mediaType") not in MANIFEST_TYPES:
                     raise ValueError(
                         "Registry manifest descriptor media type is invalid"
                     )
-                annotations = _object(descriptor.get("annotations", {}), "annotations")
+                annotations = require_object(
+                    descriptor.get("annotations", {}), "annotations"
+                )
                 if (
                     annotations.get("vnd.docker.reference.type")
                     == "attestation-manifest"
@@ -136,8 +141,8 @@ def verify_soak_registry(
                 raise ValueError("Registry executable or attestation is ambiguous")
             descriptor = executable[0]
             digest = sha256_digest(descriptor.get("digest"))
-            if _baseline_platform(
-                _object(descriptor.get("platform"), "platform")
+            if baseline_platform(
+                require_object(descriptor.get("platform"), "platform")
             ) != platform or image.manifests != {platform: digest}:
                 raise ValueError("Registry executable platform differs from report")
             manifest = document(
@@ -148,18 +153,20 @@ def verify_soak_registry(
                 or manifest.get("mediaType") not in MANIFEST_TYPES
             ):
                 raise ValueError("Registry executable manifest is invalid")
-            config_descriptor = _object(manifest.get("config"), "config descriptor")
+            config_descriptor = require_object(
+                manifest.get("config"), "config descriptor"
+            )
             config_digest = sha256_digest(config_descriptor.get("digest"))
             config = document(
                 "blobs", config_digest, config_digest, "config.json", config_descriptor
             )
-            if _baseline_platform(config) != platform:
+            if baseline_platform(config) != platform:
                 raise ValueError("Registry configuration platform differs from image")
             attestation_descriptor = attestations[0]
             if (
-                _object(attestation_descriptor.get("annotations"), "annotations").get(
-                    "vnd.docker.reference.digest"
-                )
+                require_object(
+                    attestation_descriptor.get("annotations"), "annotations"
+                ).get("vnd.docker.reference.digest")
                 != digest
             ):
                 raise ValueError("Registry attestation is bound to a different image")
@@ -181,7 +188,7 @@ def verify_soak_registry(
                 raise ValueError(
                     "Registry attestation requires one provenance statement"
                 )
-            layer = _object(layers[0], "statement descriptor")
+            layer = require_object(layers[0], "statement descriptor")
             if layer.get("mediaType") != "application/vnd.in-toto+json":
                 raise ValueError("Registry provenance statement media type is invalid")
             statement_digest = sha256_digest(layer.get("digest"))
@@ -198,15 +205,15 @@ def verify_soak_registry(
                 or not isinstance(statement.get("predicate"), dict)
                 or not isinstance(subjects, list)
                 or len(subjects) != 1
-                or _object(
-                    _object(subjects[0], "provenance subject").get("digest"),
+                or require_object(
+                    require_object(subjects[0], "provenance subject").get("digest"),
                     "provenance subject digest",
                 )
                 != {"sha256": digest.removeprefix("sha256:")}
             ):
                 raise ValueError("Registry provenance statement subject is invalid")
-            predicate = _predicate(statement, platform, digest)
-            _materials(predicate)
+            predicate = provenance_predicate(statement, platform, digest)
+            provenance_materials(predicate)
             if not isinstance(predicate.get("buildConfig"), dict) or not predicate[
                 "buildConfig"
             ].get("llbDefinition"):

@@ -23,8 +23,8 @@ from nanolab.tasks.recipes.multiarch import sha256_digest, unique_json_object
 from nanolab.tasks.recipes.workflow import (
     RecipeComponent,
     RecipeImage,
-    _object,
-    _string,
+    require_object,
+    require_string,
 )
 
 
@@ -161,7 +161,7 @@ def _entries(value: object) -> dict[tuple[str, str], dict[str, Any]]:
         raise ValueError("Release recipe components must be lists")
     entries: dict[tuple[str, str], dict[str, Any]] = {}
     for raw in value:
-        entry = _object(raw, "release component")
+        entry = require_object(raw, "release component")
         name, sdk = entry.get("name"), entry.get("sdk")
         if (
             not isinstance(name, str)
@@ -188,7 +188,7 @@ def _check_profile(
         or profile.get("name") != name
     ):
         raise ValueError("Unsupported release recipe schema or name")
-    registry = _object(profile.get("registry"), "release registry")
+    registry = require_object(profile.get("registry"), "release registry")
     tag = registry.get("tag")
     if (
         set(registry) != {"repository", "tag"}
@@ -197,7 +197,7 @@ def _check_profile(
         or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag) is None
     ):
         raise ValueError("Unsupported release recipe registry/tag")
-    control = _object(profile.get("controlPlane"), "release controlPlane")
+    control = require_object(profile.get("controlPlane"), "release controlPlane")
     expected = _control(flavor, modules)
     declared = control.get("modules")
     if (
@@ -250,7 +250,9 @@ def prepare_release_recipe_groups(
             raw = (profiles_root / f"{name}.yaml").read_bytes()
         except OSError as error:
             raise ValueError(f"Cannot read release recipe profile {name}") from error
-        profile = _object(yaml.load(raw, Loader=_ProfileLoader), "release profile")  # nosec B506 - SafeLoader subclass rejects duplicate keys
+        profile = require_object(
+            yaml.load(raw, Loader=_ProfileLoader), "release profile"
+        )  # nosec B506 - SafeLoader subclass rejects duplicate keys
         _check_profile(profile, name=name, flavor=flavor, cells=cells, modules=modules)
         tag = (
             image_plan.version
@@ -318,7 +320,7 @@ def read_release_distribution(
 ) -> tuple[RecipeComponent, ...]:
     """Require complete assembly identity, leaving archive proof to the caller."""
     try:
-        data = _object(
+        data = require_object(
             json.loads(
                 report.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object
             ),
@@ -333,7 +335,7 @@ def read_release_distribution(
         or data["schemaVersion"] != 2
     ):
         raise ValueError("Unsupported release recipe report schema")
-    identity = _object(data.get("recipe"), "release recipe identity")
+    identity = require_object(data.get("recipe"), "release recipe identity")
     if (
         identity
         != {
@@ -356,7 +358,7 @@ def read_release_distribution(
         raise ValueError("Release recipe report modules differ from frozen inputs")
     source = data["source"]
     if source is not None:
-        source = _object(source, "release source")
+        source = require_object(source, "release source")
         if (
             source_commit is None
             or set(source) != {"revision", "dirty"}
@@ -389,9 +391,9 @@ def read_release_distribution(
     seen: set[tuple[str, str, str]] = set()
     components: list[RecipeComponent] = []
     for raw in rows:
-        row = _object(raw, "release report component")
+        row = require_object(raw, "release report component")
         kind, name, sdk = (
-            _string(row.get(field), field) for field in ("kind", "name", "sdk")
+            require_string(row.get(field), field) for field in ("kind", "name", "sdk")
         )
         key = (kind, name, sdk)
         if key in seen or key not in expected:
@@ -413,7 +415,7 @@ def read_release_distribution(
             ):
                 raise ValueError("Invalid artifact-only release recipe component")
             continue
-        image = _object(row["image"], "release image")
+        image = require_object(row["image"], "release image")
         reference = f"{DEFAULT_REGISTRY}/{item['container']['image']}:{group.tag}"
         if (
             set(image) - {"reference", "status", "id", "digest"}

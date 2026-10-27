@@ -49,10 +49,10 @@ from nanolab.application.vm_provider import (
     vm_request_for_role,
 )
 from nanolab.cli import diagnostics
-from nanolab.cli.catalogue import (
-    _workflow_catalog as _workflow_catalog,
-)
 from nanolab.cli.catalogue import environment_input, scenario_input
+from nanolab.cli.catalogue import (
+    workflow_catalog as workflow_catalog,
+)
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provisioning_context
 from nanolab.cli.soak import (
@@ -1251,7 +1251,7 @@ def install_product_commands(
         table.add_column("Workflow", style="cyan", no_wrap=True)
         table.add_column("Environments", no_wrap=True)
         table.add_column("Scenarios", no_wrap=True)
-        for workflow, (environments, scenarios) in _workflow_catalog(
+        for workflow, (environments, scenarios) in workflow_catalog(
             scenarios_dir
         ).items():
             table.add_row(workflow, ", ".join(environments), "\n".join(scenarios))

@@ -14,14 +14,17 @@ import yaml
 from nanolab.config.soak import SoakConfig
 from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.recipes.registry import fetch_local_registry
-from nanolab.tasks.recipes.workflow import _object
+from nanolab.tasks.recipes.workflow import require_object
 from nanolab.tasks.soak.artifacts import (
     ArtifactWriter,
     describe_artifact,
     enforce_limit,
 )
 from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
-from nanolab.tasks.soak.build_provenance import _materials, _predicate
+from nanolab.tasks.soak.build_provenance import (
+    provenance_materials,
+    provenance_predicate,
+)
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe, freeze_build_receipt
 from nanolab.tasks.soak.recipe_observation import (
     observe_soak_recipe,
@@ -48,10 +51,10 @@ SOAK_RECIPE_ROLES = {
 
 def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) -> None:
     """Reject conflicting build policy before acquiring infrastructure."""
-    data = _object(yaml.safe_load(profile.read_bytes()), "soak profile")
-    registry = _object(data.get("registry"), "soak registry")
-    control = _object(data.get("controlPlane"), "control plane")
-    build = _object(control.get("build"), "control-plane build")
+    data = require_object(yaml.safe_load(profile.read_bytes()), "soak profile")
+    registry = require_object(data.get("registry"), "soak registry")
+    control = require_object(data.get("controlPlane"), "control plane")
+    build = require_object(control.get("build"), "control-plane build")
     modules = control.get("modules")
     if (
         type(data.get("schemaVersion")) is not int
@@ -77,14 +80,14 @@ def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) ->
         raise ValueError("Soak recipe requires Java and JavaScript word-stats")
     selected = {}
     for raw in functions:
-        item = _object(raw, "soak function")
+        item = require_object(raw, "soak function")
         key = (item.get("name"), item.get("sdk"))
         if key in selected:
             raise ValueError("Duplicate soak recipe function")
         selected[key] = item
     if set(selected) != {("word-stats", "java"), ("word-stats", "javascript")}:
         raise ValueError("Soak recipe functions differ from roles")
-    java = _object(selected[("word-stats", "java")].get("build"), "Java build")
+    java = require_object(selected[("word-stats", "java")].get("build"), "Java build")
     if (
         java.get("mode") != "jvm"
         or selected[("word-stats", "javascript")].get("build") is not None
@@ -107,8 +110,8 @@ def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) ->
                 if component is control
                 else {"name", "sdk", "build", "container"}
             )
-            container = _object(component.get("container"), "P24 container")
-            component_build = _object(component.get("build", {}), "P24 build")
+            container = require_object(component.get("container"), "P24 container")
+            component_build = require_object(component.get("build", {}), "P24 build")
             if (
                 set(component) - allowed
                 or set(container) - {"image"}
@@ -253,12 +256,14 @@ def publish_soak_recipe(
             if observation.digest != image.publication_digest:
                 raise ValueError("Recipe observation image differs from registry")
             for statement in image.provenance:
-                predicate = _predicate(statement, platform, image.manifest_digest)
-                if _materials(predicate) != observation.base_images:
+                predicate = provenance_predicate(
+                    statement, platform, image.manifest_digest
+                )
+                if provenance_materials(predicate) != observation.base_images:
                     raise ValueError(
                         "Recipe observed base materials differ from registry"
                     )
-            facts = _object(
+            facts = require_object(
                 json.loads(
                     (
                         run.recipe.parent / "observer" / (role + "-observations.json")
@@ -275,12 +280,12 @@ def publish_soak_recipe(
             )
             for statement in image.provenance:
                 verify_recipe_provenance(
-                    _predicate(
+                    provenance_predicate(
                         metadata["buildx.build.provenance"],
                         platform,
                         image.manifest_digest,
                     ),
-                    _predicate(statement, platform, image.manifest_digest),
+                    provenance_predicate(statement, platform, image.manifest_digest),
                 )
             recipe = BuildRecipe(**facts["recipe"])
             if facts.get("source_fingerprint") != snapshot.fingerprint:

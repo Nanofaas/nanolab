@@ -27,9 +27,10 @@ def _input(value: Path, directory: str) -> Path:
         raise typer.BadParameter(str(error)) from None
 
 
-def _workflow_catalog(
+def workflow_catalog(
     scenarios_dir: Path,
 ) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Map each workflow to the environments and scenarios that run it."""
     workflows: dict[str, set[str]] = {}
     scenarios: dict[str, list[str]] = {}
     for path in scenarios_dir.glob("*.yaml"):
