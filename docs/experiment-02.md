@@ -70,6 +70,15 @@ request carries its own `X-Execution-Id`, the request's ledger id. A first
 Azure run, which shared one id through the container's `EXECUTION_ID`, lost
 half of step-03 and two thirds of step-04 to 429s; that run is not usable.
 
+The runtime's own admission is capped at the protocol's `fixedConcurrency`
+(`NANOFAAS_MAX_CONCURRENT_HANDLERS`), the concurrency nanoFaaS P1 admits. With
+its default of 32 the runtime fell into a contention state inside the
+container, with variable onset and with or without the CPU quota; at a cap of
+2 the first plateau stayed healthy in both diagnostic repetitions (paper
+repository, `notes/evidence.md`, 27 October 2026). The cap is a comparison
+policy, not a fix: the contention's cause is not identified, and the function
+alone still has no queue in front of it.
+
 The native recipes use the host builder. `validateRecipe` rejects them on macOS
 ("a native image needs a Linux host"), exactly like experiment 01's; they are
 validated on Linux, in CI and in prepare on the stack VM.

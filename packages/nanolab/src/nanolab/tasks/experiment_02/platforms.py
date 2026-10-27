@@ -372,13 +372,21 @@ class DirectReference:
     function_image: str
     metrics_url: str | None = None
 
-    def commands(self) -> list[tuple[str, ...]]:
-        """Return the one container to start, publishing the runtime's port."""
+    def commands(self, *, concurrency: int) -> list[tuple[str, ...]]:
+        """Return the one container to start, publishing the runtime's port.
+
+        The runtime admits `concurrency` handlers, the protocol's fixed
+        concurrency that nanoFaaS P1 admits too. Its default of 32 collapses
+        under contention (paper notes/evidence.md, 27 October 2026): this is a
+        comparison policy, not a fix of that contention.
+        """
         return [
             (
                 "docker", "run", "-d", "--name", FUNCTION_CONTAINER,
                 "--network", NETWORK, "-p", f"{ENTRY_PORT}:8080",
-                "-e", "PORT=8080", self.function_image,
+                "-e", "PORT=8080",
+                "-e", f"NANOFAAS_MAX_CONCURRENT_HANDLERS={concurrency}",
+                self.function_image,
             )
         ]  # fmt: skip
 
@@ -394,7 +402,7 @@ class DirectReference:
         return _start(
             vm,
             images=(self.function_image,),
-            commands=self.commands(),
+            commands=self.commands(concurrency=protocol.fixed_concurrency),
             api=f"{_API}/health",
             registration=None,
             target=self.target("127.0.0.1"),

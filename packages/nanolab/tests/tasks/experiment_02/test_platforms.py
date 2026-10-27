@@ -219,3 +219,21 @@ def test_nanofaas_is_sent_the_payload_as_invocation_input(tmp_path):
     assert json.loads(_p1().body(PAYLOAD)) == {"input": {"size": 128, "text": "A"}}
     _provider, _timings, spec = _start(_p0(), tmp_path)
     assert json.loads(spec["invoke"]["body"]) == {"input": {"size": 128, "text": "A"}}
+
+
+def test_direct_reference_admits_the_protocols_fixed_concurrency(tmp_path):
+    # Without a cap the runtime admits 32 handlers and collapses under contention
+    # (notes/evidence.md, 27 October 2026); nanoFaaS P1 admits fixedConcurrency.
+    direct = DirectReference("registry/rust-qr-code:e02")
+    protocol = _protocol().model_copy(update={"fixed_concurrency": 3})
+
+    def handler(argv, _env):
+        if argv[0] == "python3":
+            return Result(0, json.dumps({"started": 1.0, "timeout": "api"}))
+        return None
+
+    provider = RecordingProvider(handler=handler)
+    direct.start(vm(provider), protocol=protocol, payload=PAYLOAD, evidence=tmp_path)
+    [function] = json.loads(provider.files[SPEC])["start"]
+    assert "NANOFAAS_MAX_CONCURRENT_HANDLERS=3" in function
+    assert function[-1] == "registry/rust-qr-code:e02"
