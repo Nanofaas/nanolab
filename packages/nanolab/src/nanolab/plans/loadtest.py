@@ -284,15 +284,10 @@ def _autoscaling_setup(
     return hpa, replica_floor, scaling_config
 
 
-# Deliberately short next to the platform defaults of 30s/60s. The governor moves
-# the per-replica target by one step per cooldown, so with production cooldowns a
-# run would need minutes per phase to show a trajectory rather than a single step.
-# The cooldowns themselves are not what this scenario is checking.
 def _resolve_with_prebuilt_images(
     config: ScenarioConfig,
     repo_root: Path | None,
     tool_root: Path | None,
-    prebuilt_control_plane_image: str | None,
     prebuilt_function_images: Mapping[str, str] | None,
 ) -> tuple[tuple[Any, ...], bool]:
     resolved = tuple(
@@ -305,7 +300,7 @@ def _resolve_with_prebuilt_images(
     # empty and every registration fails. A caller may therefore supply a control-plane
     # image and still let the functions be built and pushed.
     functions_prebuilt = prebuilt_function_images is not None
-    if functions_prebuilt and prebuilt_function_images is not None:
+    if prebuilt_function_images is not None:
         missing = [
             function.key
             for function in resolved
@@ -325,7 +320,6 @@ def _resolve_functions(
     repo_root: Path | None,
     tool_root: Path | None,
     scaling_config: dict[str, object] | None,
-    prebuilt_control_plane_image: str | None,
     prebuilt_function_images: Mapping[str, str] | None,
     concurrency: int = 4,
     resources_for: Callable[[str], dict[str, dict[str, float]]] | None = None,
@@ -333,11 +327,7 @@ def _resolve_functions(
     function_queue_size: int | None = None,
 ) -> tuple[tuple[Any, ...], bool]:
     resolved, functions_prebuilt = _resolve_with_prebuilt_images(
-        config,
-        repo_root,
-        tool_root,
-        prebuilt_control_plane_image,
-        prebuilt_function_images,
+        config, repo_root, tool_root, prebuilt_function_images
     )
     functions = tuple(sonata_function(function) for function in resolved)
     if scaling_config is not None:
@@ -1340,7 +1330,6 @@ def build_loadtest_plan(
         repo_root,
         tool_root,
         scaling_config,
-        prebuilt_control_plane_image,
         prebuilt_function_images,
         concurrency=_CONCURRENCY_CEILING if config.concurrency_control else 4,
         resources_for=(

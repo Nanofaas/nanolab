@@ -202,11 +202,8 @@ def build_release_request(
     recipe_groups = prepare_release_recipe_groups(
         planning_root, image_plan, profiles_root=resources / "recipes"
     )
-    arm_image_plan = build_image_plan(
-        planning_root,
-        version_tag,
-        registry=image_plan.registry,
-        architectures=("arm64",),
+    arm_image_plan = release_arm.build_arm64_image_plan(
+        planning_root, version_tag, registry=image_plan.registry
     )
     arm_recipe_groups = prepare_release_recipe_groups(
         planning_root,

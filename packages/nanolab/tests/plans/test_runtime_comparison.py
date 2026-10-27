@@ -322,7 +322,6 @@ def test_fixed_function_limits_reach_the_registration_shape(
         None,
         None,
         None,
-        None,
         function_concurrency=8,
         function_queue_size=20,
     )

@@ -230,14 +230,6 @@ def finalize_task(**kwargs: Any) -> ReleasePhaseTask:
     )
 
 
-def registry_evidence(artifacts: Iterable[ArtifactEvidence]) -> tuple[Evidence, ...]:
-    """Wrap local registry artifacts as `local-registry-digest` evidence."""
-    return tuple(
-        Evidence("local-registry-digest", artifact.reference, artifact.digest)
-        for artifact in artifacts
-    )
-
-
 def registry_artifacts_from_receipt(
     receipt: Path,
     images: tuple[str, ...],

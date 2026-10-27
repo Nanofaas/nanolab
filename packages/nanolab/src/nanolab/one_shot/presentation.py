@@ -1,27 +1,10 @@
 """Campaign views over Sonata's sink protocol; concrete UI imports stay lazy."""
 
 from contextlib import AbstractContextManager
-from typing import Protocol
 
 from sonata_engine import WorkflowEvent
 from sonata_engine.workflow.event_builders import build_log_event
 from sonata_engine.workflow.events import WorkflowSink
-
-
-class CampaignPresentation(Protocol):
-    """A task sink with a separate channel for structured campaign progress."""
-
-    def emit(self, event: WorkflowEvent) -> None:
-        """Render the original task event."""
-        ...
-
-    def status(self, label: str) -> AbstractContextManager[None]:
-        """Render a Sonata status block."""
-        ...
-
-    def campaign_event(self, row: dict) -> None:
-        """Render a detached campaign row, without writing evidence."""
-        ...
 
 
 class SinkCampaignPresentation:

@@ -6,6 +6,10 @@ from pathlib import Path
 from nanolab.application.functions import resolve_function_definition
 from nanolab.config.scenario import ScenarioConfig
 
+# Deliberately short next to the platform defaults of 30s/60s. The governor moves
+# the per-replica target by one step per cooldown, so with production cooldowns a
+# run would need minutes per phase to show a trajectory rather than a single step.
+# The cooldowns themselves are not what this scenario is checking.
 _CONCURRENCY_COOLDOWN_MS = 5000
 # The ceiling the governor works under: FunctionQueueState clamps the effective
 # limit to the function's `concurrency`, so it has to leave room above
