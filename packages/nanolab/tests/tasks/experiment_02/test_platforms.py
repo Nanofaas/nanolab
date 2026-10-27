@@ -211,3 +211,11 @@ def test_record_refuses_a_control_plane_with_unexpected_modules(tmp_path):
         _p1().record(vm(metadata(["build-metadata"])), tmp_path)
     _p1().record(vm(metadata(sorted(EXPERIMENT_02_MODULES["P1"]))), tmp_path)
     assert json.loads((tmp_path / "build-metadata.json").read_text())["modules"]
+
+
+def test_nanofaas_is_sent_the_payload_as_invocation_input(tmp_path):
+    # The control plane's InvocationRequest: {"input", "metadata", "headers"};
+    # a bare payload is a 400 "Failed to read HTTP message".
+    assert json.loads(_p1().body(PAYLOAD)) == {"input": {"size": 128, "text": "A"}}
+    _provider, _timings, spec = _start(_p0(), tmp_path)
+    assert json.loads(spec["invoke"]["body"]) == {"input": {"size": 128, "text": "A"}}

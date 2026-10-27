@@ -98,6 +98,11 @@ class Platform(Protocol):
         ...
 
 
+def _as_input(payload: bytes) -> bytes:
+    """Return `{"input": payload}`, the body every invocation API here reads."""
+    return json.dumps({"input": json.loads(payload)}, separators=(",", ":")).encode()
+
+
 def leftover_containers(vm: Vm) -> list[str]:
     """Return every container on the VM except the registry."""
     names = comparison_remote_command(
@@ -328,8 +333,8 @@ class NanofaasPlatform:
         )
 
     def body(self, payload: bytes) -> bytes:
-        """Send the control plane the payload itself."""
-        return payload
+        """Wrap the payload as the invocation request's `input`."""
+        return _as_input(payload)
 
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers and refuse a control plane with other modules."""
@@ -414,9 +419,7 @@ class DirectReference:
 
     def body(self, payload: bytes) -> bytes:
         """Wrap the payload as the runtime's invocation `input`."""
-        return json.dumps(
-            {"input": json.loads(payload)}, separators=(",", ":")
-        ).encode()
+        return _as_input(payload)
 
     def record(self, vm: Vm, evidence: Path) -> None:
         """Record the containers; there is no build to check."""
