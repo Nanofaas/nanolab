@@ -24,6 +24,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 
 from nanolab.config.experiment_02 import Budget
+from nanolab.core.deployment import REGISTRY_CONTAINER_NAME
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.experiment_02.refusal import CellRefusedError
 
@@ -38,8 +39,6 @@ _INFRA_CGROUP = "/nanolab.slice/nanolab-infra.slice"
 _SUT_CGROUP = "/nanolab.slice/nanolab-sut.slice"
 # The engine's own cgroups inside the slice, reported apart from the platform.
 ENGINE_CGROUPS = ("docker.service", "containerd.service")
-# The registry `ensure-registry.yml` starts; recreated outside the budget.
-REGISTRY_CONTAINER = "nanofaas-e2e-registry"
 _MIB = 1024 * 1024
 # Processes that belong to the execution backend wherever they run.
 _ENGINE_COMMANDS = frozenset(
@@ -55,6 +54,8 @@ _ENGINE_COMMANDS = frozenset(
 
 # `NANOLAB_SLICE_ROOT` exists for the tests, which run the script against a
 # scratch directory with fake systemctl and docker; on a VM it is empty.
+# It ends by recreating, outside the budget, the registry `ensure-registry.yml`
+# starts.
 SLICE_SETUP_SCRIPT = f"""set -eu
 root="${{NANOLAB_SLICE_ROOT:-}}"
 units="$root/etc/systemd/system"
@@ -85,8 +86,8 @@ with open(path, "w") as stream:
 swapoff -a
 systemctl daemon-reload
 systemctl restart containerd docker
-docker rm -f {REGISTRY_CONTAINER} >/dev/null 2>&1 || true
-docker run -d --restart unless-stopped --name {REGISTRY_CONTAINER} \\
+docker rm -f {REGISTRY_CONTAINER_NAME} >/dev/null 2>&1 || true
+docker run -d --restart unless-stopped --name {REGISTRY_CONTAINER_NAME} \\
   --cgroup-parent={INFRA_SLICE} -p 5000:5000 registry:2 >/dev/null
 """
 

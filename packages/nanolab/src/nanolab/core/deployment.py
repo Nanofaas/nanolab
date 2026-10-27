@@ -9,6 +9,8 @@ from __future__ import annotations
 
 DEFAULT_NAMESPACE = "nanofaas-e2e"
 LOCAL_REGISTRY = "127.0.0.1:5000"
+# The repository nanoFaaS images are built into and pulled from.
+LOCAL_NANOFAAS_REPOSITORY = f"{LOCAL_REGISTRY}/nanofaas"
 
 # Literal, not f"{DEFAULT_NAMESPACE}-registry": live environments already have
 # a container running under this name, and deriving it from the namespace

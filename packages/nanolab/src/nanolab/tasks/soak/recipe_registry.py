@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.tasks.recipes.multiarch import (
     MultiarchDistribution,
     sha256_digest,
@@ -53,7 +54,7 @@ def verify_soak_registry(
     try:
         for component in distribution.components:
             image = component.image
-            prefix = "127.0.0.1:5000/"
+            prefix = f"{LOCAL_REGISTRY}/"
             if (
                 not image.reference.startswith(prefix)
                 or image.platforms != (platform,)

@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from nanolab.config.soak import SoakConfig
+from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.recipes.registry import fetch_local_registry
 from nanolab.tasks.recipes.workflow import _object
 from nanolab.tasks.soak.artifacts import (
@@ -58,7 +59,7 @@ def validate_soak_recipe(profile: Path, config: SoakConfig, *, platform: str) ->
         or config.purpose not in {"smoke", "p24"}
         or platform not in {"linux/amd64", "linux/arm64"}
         or registry.get("platforms") != [platform]
-        or registry.get("repository") != "127.0.0.1:5000/nanofaas"
+        or registry.get("repository") != LOCAL_NANOFAAS_REPOSITORY
         or registry.get("provenance") is not True
         or data.get("services")
         or build.get("mode") != "jvm"

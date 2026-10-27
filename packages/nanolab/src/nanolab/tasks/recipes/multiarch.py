@@ -14,6 +14,7 @@ from sonata_engine import Resource, TaskInputs
 from sonata_tasks.docker import DockerTask
 from sonata_tasks.execution.ports import CommandTaskExecutor
 
+from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.recipes.builder import RecipeBuilder
 from nanolab.tasks.recipes.workflow import (
     RecipeComponent,
@@ -52,7 +53,7 @@ def require_multiarch_validation_profile(recipe: Path) -> None:
     control = _object(profile.get("controlPlane"), "controlPlane")
     functions = profile.get("functions")
     if (
-        registry.get("repository") != "127.0.0.1:5000/nanofaas"
+        registry.get("repository") != LOCAL_NANOFAAS_REPOSITORY
         or registry.get("provenance", False) is not False
         or profile.get("services")
         or control.get("modules")

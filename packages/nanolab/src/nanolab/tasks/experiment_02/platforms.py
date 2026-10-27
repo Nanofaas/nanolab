@@ -32,7 +32,8 @@ from nanolab.comparison.prepare import (
 )
 from nanolab.config.experiment_01 import invocation_body
 from nanolab.config.experiment_02 import Experiment02Protocol
-from nanolab.tasks.experiment_02.budget import PLATFORM_UNIT, REGISTRY_CONTAINER
+from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, REGISTRY_CONTAINER_NAME
+from nanolab.tasks.experiment_02.budget import PLATFORM_UNIT
 from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.refusal import CellRefusedError
 from nanolab.tasks.experiment_02.vm import Vm, exec_status
@@ -45,7 +46,7 @@ FUNCTION_NAME = "qr-code-rust"
 # The stack's only inbound ports the loadgen may reach: the NodePorts that
 # `secure_release_endpoints` opens to the operator and the loadgen alone. Every
 # platform publishes its entry point on them, so no new port is ever exposed.
-ENTRY_PORT = 30080
+ENTRY_PORT = CONTROL_PLANE_NODE_PORT
 MANAGEMENT_PORT = 30081
 READINESS_SCRIPT = bundled_assets_root() / "diagnostics" / "experiment02_readiness.py"
 READINESS_INTERVAL_SECONDS = 0.5
@@ -116,7 +117,7 @@ def leftover_containers(vm: Vm) -> list[str]:
     names = comparison_remote_command(
         vm.provider, vm.request, ("docker", "ps", "-a", "--format", "{{.Names}}")
     ).split()
-    return [name for name in names if name != REGISTRY_CONTAINER]
+    return [name for name in names if name != REGISTRY_CONTAINER_NAME]
 
 
 # A platform may still be removing its own containers, or creating them (Fn

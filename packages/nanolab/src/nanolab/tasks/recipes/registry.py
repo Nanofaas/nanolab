@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.tasks.recipes.multiarch import (
     MultiarchDistribution,
     sha256_digest,
@@ -66,7 +67,7 @@ def fetch_local_registry(
         )
     ):
         raise ValueError("Invalid local registry object")
-    url = f"http://127.0.0.1:5000/v2/{repository}/{kind}/{reference}"
+    url = f"http://{LOCAL_REGISTRY}/v2/{repository}/{kind}/{reference}"
     try:
         with httpx.Client(
             timeout=30, follow_redirects=False, trust_env=False
@@ -95,7 +96,7 @@ def verify_multiarch_registry(
     verified: dict[str, dict[str, str]] = {}
     for component in distribution.components:
         image = component.image
-        prefix = "127.0.0.1:5000/"
+        prefix = f"{LOCAL_REGISTRY}/"
         if not image.reference.startswith(prefix):
             raise ValueError("Multiarch image must use the local registry")
         repository, tag = image.reference[len(prefix) :].rsplit(":", 1)

@@ -22,6 +22,7 @@ from nanolab.comparison.matrix import ComparisonCell, MatrixCell
 from nanolab.comparison.profiles import COMPARISON_SCHEDULER_STRATEGY, declared_options
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.workspace.paths import discover_tool_root
 
@@ -443,7 +444,7 @@ def new_comparison_manifest(
                 "rationale": cell.variant.rationale,
                 "build_env": dict(cell.variant.build_env),
                 "image": (
-                    f"127.0.0.1:5000/nanofaas/control-plane-{cell.variant.key}"
+                    f"{LOCAL_NANOFAAS_REPOSITORY}/control-plane-{cell.variant.key}"
                     f":{identity.tag}"
                 ),
             }

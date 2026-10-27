@@ -15,6 +15,7 @@ from uuid import uuid4
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
 
 from nanolab.config.soak import SoakConfig
+from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
 from nanolab.tasks.soak.build_provenance import BuildProvenanceCollector
@@ -72,7 +73,7 @@ def check_preparation_support(config: SoakConfig, options: PreparationOptions) -
     if options.recipe_profile is not None:
         if (
             not options.recipe_builder
-            or options.registry != "127.0.0.1:5000/nanofaas"
+            or options.registry != LOCAL_NANOFAAS_REPOSITORY
             or options.build_observer is not None
         ):
             raise ValueError("Conflicting recipe preparation options")

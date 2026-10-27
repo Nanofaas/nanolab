@@ -12,6 +12,7 @@ from sonata_tasks.kubectl import PinnedKubeconfigExecutor
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.cli_artifacts import (
     CliArtifactCheckTask,
     cli_artifact_resource,
@@ -142,7 +143,7 @@ def build_recipe_cli_plan(
     )
     values = control_plane_helm_values(
         namespace=namespace,
-        control_plane_image="127.0.0.1:5000/nanofaas/control-plane:deferred",
+        control_plane_image=f"{LOCAL_NANOFAAS_REPOSITORY}/control-plane:deferred",
         image_pull_policy="IfNotPresent",
         admin_runtime_config=True,
         control_plane_resources=config.resources["control-plane"].model_dump(

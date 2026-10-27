@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nanolab.config.soak import SoakConfig
+from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.tasks.recipes.multiarch import read_buildx_distribution
 from nanolab.tasks.recipes.registry import RegistryResponse
 from nanolab.tasks.soak.artifacts import fingerprint
@@ -92,9 +93,9 @@ def verify_soak_recipe_receipt(
         )
         == role
     )
-    repository, tag = component.image.reference.removeprefix("127.0.0.1:5000/").rsplit(
-        ":", 1
-    )
+    repository, tag = component.image.reference.removeprefix(
+        f"{LOCAL_REGISTRY}/"
+    ).rsplit(":", 1)
     raw = root / "builds/registry" / role
     responses = {}
     for name, kind in (
@@ -127,7 +128,10 @@ def verify_soak_recipe_receipt(
         evidence_dir=None,
         fetch=fetch,
     )[role]
-    if build["image_digest"] != f"127.0.0.1:5000/{repository}@{image.manifest_digest}":
+    if (
+        build["image_digest"]
+        != f"{LOCAL_REGISTRY}/{repository}@{image.manifest_digest}"
+    ):
         raise ValueError("Recipe executable digest differs from frozen receipt")
     facts = _decode(read(observer / (role + "-observations.json")))
     request = _decode(read(observer / "publication-request.json"))

@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 
 from nanolab.comparison.prepare import comparison_remote_command
 from nanolab.config.experiment_02 import Budget, Experiment02Protocol
+from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.tasks.experiment_02.budget import host_service
 from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.platforms import (
@@ -260,7 +261,7 @@ class TinyFaas(_Baseline):
 
 
 ETCD = "gcr.io/etcd-development/etcd:v3.5.13"
-SERVERLEDGE_IMAGE = "127.0.0.1:5000/qr-serverledge:e02"
+SERVERLEDGE_IMAGE = f"{LOCAL_REGISTRY}/qr-serverledge:e02"
 
 
 @dataclass(frozen=True)
@@ -361,7 +362,7 @@ FNSERVER = (
     "fnproject/fnserver@sha256:"
     "16dedb58b2f1be5e02d7a851a66041ea97076801cbdb09cdfee0100296a68686"
 )
-FN_IMAGE = "127.0.0.1:5000/qr-fn:e02"
+FN_IMAGE = f"{LOCAL_REGISTRY}/qr-fn:e02"
 # Idempotent: a retried registration finds what an earlier attempt created.
 _FN_REGISTER = f"""
 import json, urllib.request
@@ -489,7 +490,7 @@ _TINYFAAS_UPLOAD = (
 
 def _image(key: str, identity: str) -> str:
     """Return the registry tag of a baseline's function image for one identity."""
-    return f"127.0.0.1:5000/qr-{key}:{identity}"
+    return f"{LOCAL_REGISTRY}/qr-{key}:{identity}"
 
 
 def _install_script(

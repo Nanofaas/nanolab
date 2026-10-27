@@ -13,7 +13,11 @@ from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.core.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.core.deployment import (
+    LOCAL_NANOFAAS_REPOSITORY,
+    LOCAL_REGISTRY,
+    REGISTRY_CONTAINER_NAME,
+)
 from nanolab.tasks.soak.composition import (
     compose_frozen_soak_workflow as compose_frozen_soak_workflow,
 )
@@ -87,7 +91,7 @@ def build_soak_plan(
             preparation.recipe_profile not in {None, recipe_profile}
             or preparation.recipe_builder is not None
             or preparation.registry
-            not in {"localhost:5000/nanofaas", "127.0.0.1:5000/nanofaas"}
+            not in {"localhost:5000/nanofaas", LOCAL_NANOFAAS_REPOSITORY}
             or actual_options.helper_builder != HELPER_BUILDER
             or preparation.build_observer is not None
             or actual_options.prepared is not None
@@ -101,7 +105,7 @@ def build_soak_plan(
                 preparation,
                 recipe_profile=recipe_profile,
                 recipe_builder=name,
-                registry="127.0.0.1:5000/nanofaas",
+                registry=LOCAL_NANOFAAS_REPOSITORY,
             ),
         )
         config_path = run_dir.absolute() / "soak-buildkitd.toml"
@@ -112,7 +116,7 @@ def build_soak_plan(
             check_local_process_support(soak)
             run_dir.mkdir(parents=True, exist_ok=True)
             with config_path.open("x") as stream:
-                stream.write('[registry."127.0.0.1:5000"]\n  http = true\n')
+                stream.write(f'[registry."{LOCAL_REGISTRY}"]\n  http = true\n')
             return
 
         recipe_requires = (

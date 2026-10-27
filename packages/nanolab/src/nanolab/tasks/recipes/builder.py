@@ -19,6 +19,8 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.docker import DockerTask
 from sonata_tasks.execution.ports import CommandTaskExecutor
 
+from nanolab.core.deployment import LOCAL_REGISTRY
+
 BINFMT_INSTALLER_IMAGE = (
     "tonistiigi/binfmt@sha256:"
     "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
@@ -299,7 +301,7 @@ def recipe_builder_resource(
                 "Probe foreign recipe platform",
             )
             config = run_dir / "buildkitd.toml"
-            config.write_text('[registry."127.0.0.1:5000"]\n  http = true\n')
+            config.write_text(f'[registry."{LOCAL_REGISTRY}"]\n  http = true\n')
             builder_pending_cleanup = True
             builder.acquire(inputs)
             (run_dir / "builder.json").write_text(json.dumps(evidence, indent=2) + "\n")

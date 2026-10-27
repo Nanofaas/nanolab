@@ -29,18 +29,17 @@ from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.comparison.manifest import ComparisonManifest
 from nanolab.comparison.profiles import PreparedComparison
+from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.recipes.remote import bundle_recipe_source, remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
-# The control-plane API on the VM. The matrix reuses one cluster for every cell,
-# so a run that was interrupted leaves whatever the interrupted cell had already
-# registered — and the next run dies on its first cell with a 409, having done
-# nothing wrong.
-CONTROL_PLANE_NODE_PORT = 30080
 
-
+# The matrix reuses one cluster for every cell, so a run that was interrupted
+# leaves whatever the interrupted cell had already registered on the
+# control-plane API — and the next run dies on its first cell with a 409,
+# having done nothing wrong.
 def leftover_cleanup_operations(  # NOSONAR (S8495): one operation per function
     function_names: Sequence[str],
     *,
