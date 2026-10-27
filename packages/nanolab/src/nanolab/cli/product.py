@@ -13,7 +13,6 @@ import subprocess
 import tempfile
 from contextlib import ExitStack, nullcontext, suppress
 from datetime import UTC, datetime
-from functools import partial
 from pathlib import Path
 from typing import TypedDict, cast
 from uuid import uuid4
@@ -56,17 +55,17 @@ from nanolab.cli.soak import (
     soak_exit_code,
     soak_metadata_status,
     terminal_status,
-    unique_soak_run_dir,
     validate_soak_selection,
 )
 from nanolab.comparison.profiles import PreparedComparison
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.functions.catalog import require_supported_runtimes
-from nanolab.plans.cli import build_cli_plan
-from nanolab.plans.loadtest import build_loadtest_plan
-from nanolab.plans.offload import build_offload_plan
+from nanolab.plans.dispatch import (
+    LOCAL_PROMETHEUS_URL,
+    build_scenario_workflow,
+    scenario_observers,
+)
 from nanolab.plans.offload_loadtest import (
-    build_offload_loadtest_plan,
     format_offload_summary,
 )
 from nanolab.plans.release import (
@@ -76,12 +75,8 @@ from nanolab.plans.release import (
     release_journal_config,
     release_verifiers,
 )
-from nanolab.plans.runtime_comparison import (
-    build_runtime_comparison_plan,
-    is_runtime_comparison,
-)
+from nanolab.plans.soak import unique_soak_run_dir
 from nanolab.plans.validate import (
-    build_validate_plan,
     recipe_run_tag,
     require_recipe_environment,
 )
@@ -93,7 +88,6 @@ from nanolab.release.environment import (
 from nanolab.release.resources import build_release_resources
 from nanolab.release.tasks import versioned_release_run_dir
 from nanolab.release.versioning import normalize_version
-from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.recipes.multiarch import is_multiarch_recipe
 from nanolab.tasks.recipes.remote import (
@@ -101,20 +95,13 @@ from nanolab.tasks.recipes.remote import (
     cleanup_remote_recipe_run,
     remote_recipe_root,
 )
-from nanolab.tasks.telegram import telegram_observer_from_environment
 from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.paths import ToolPaths, default_tool_paths, discover_tool_root
 from nanolab.workspace.provenance import git_provenance
 from nanolab.workspace.recipe import RecipeRun
 
 _JOURNAL_FILENAME = "sonata.jsonl"
-_LOCAL_PROMETHEUS_URL = "http://127.0.0.1:9090"
 _ENVIRONMENT_PROVIDERS = ("local", "multipass", "external", "azure", "proxmox")
-
-
-def _workflow_observers(scenario_path: Path) -> tuple[WorkflowObserver, ...]:
-    observer = telegram_observer_from_environment(scenario_path.name)
-    return (observer,) if observer is not None else ()
 
 
 def _print_offload_summary(run_dir: Path) -> None:
@@ -137,174 +124,6 @@ class _WorkflowArguments(TypedDict, total=False):
 
 class _ComparisonArguments(TypedDict, total=False):
     prepared_comparison: PreparedComparison
-
-
-def _workflow(
-    scenario: ScenarioConfig,
-    environment: EnvironmentConfig,
-    *,
-    control_plane_url: str | None = None,
-    prometheus_url: str = _LOCAL_PROMETHEUS_URL,
-    run_dir: Path | None = None,
-    dry_run: bool = False,
-    prepared_comparison: PreparedComparison | None = None,
-    scenario_path: Path | None = None,
-):
-    paths = default_tool_paths()
-    if scenario.workflow.startswith("one-shot-"):
-        from nanolab.plans.one_shot_calibration import build_one_shot_calibration_plan
-        from nanolab.plans.one_shot_experiment import build_one_shot_experiment_plan
-        from nanolab.plans.one_shot_qualification import (
-            build_one_shot_qualification_plan,
-        )
-
-        builders = {
-            "one-shot-calibration": build_one_shot_calibration_plan,
-            "one-shot-qualification": build_one_shot_qualification_plan,
-            "one-shot-experiment": build_one_shot_experiment_plan,
-        }
-        return builders[scenario.workflow](
-            scenario,
-            environment,
-            run_dir=run_dir or paths.runs_dir / f"one-shot-{uuid4().hex}",
-            repo_root=paths.nanofaas_root,
-        )
-    if (
-        scenario.workflow in {"validate", "loadtest"}
-        and scenario.recipe_profile is not None
-        and run_dir is None
-    ):
-        run_dir = paths.runs_dir / (
-            "recipe-preview" if dry_run else f"recipe-{uuid4().hex}"
-        )
-    if prepared_comparison is not None and (
-        scenario.workflow != "loadtest" or not is_runtime_comparison(scenario)
-    ):
-        raise ValueError("prepared comparison can only be used by runtime comparison")
-    remote_project_root = (
-        str(prepared_comparison.remote_source)
-        if prepared_comparison is not None
-        else None
-    )
-    if (
-        scenario.workflow == "validate"
-        and scenario.backend in {"k8s", "containerd"}
-        and scenario.recipe_profile is not None
-    ):
-        require_recipe_environment(scenario, environment)
-        if environment.provider == "multipass":
-            if run_dir is None:
-                raise ValueError("recipe validation requires a run directory")
-            remote_project_root = str(
-                remote_recipe_root(
-                    vm_request_for_role(environment, "stack"), recipe_run_tag(run_dir)
-                )
-                / "source"
-            )
-    if remote_project_root is None:
-        bindings, fetcher = build_role_bindings(environment)
-    else:
-        bindings, fetcher = build_role_bindings(
-            environment,
-            repo_root=paths.nanofaas_root,
-            remote_project_root=remote_project_root,
-        )
-    if scenario.workflow == "contract":
-        from nanolab.plans.contract import build_contract_plan
-
-        if scenario_path is None:
-            raise ValueError("contract requires the resolved scenario path")
-        return build_contract_plan(
-            scenario,
-            bindings,
-            repo_root=paths.nanofaas_root,
-            environment=environment,
-            run_dir=run_dir or paths.runs_dir / "contract-preview",
-            scenario_path=scenario_path,
-        )
-    if scenario.workflow == "soak":
-        from nanolab.plans.soak import build_soak_plan
-
-        if scenario.backend == "container" and environment.provider != "local":
-            raise ValueError("soak currently requires a local container environment")
-        return build_soak_plan(
-            scenario,
-            environment,
-            bindings,
-            run_dir=run_dir or unique_soak_run_dir(paths.runs_dir),
-            repo_root=paths.nanofaas_root,
-            tool_root=paths.tool_root,
-        )
-    if scenario.workflow == "heap-analysis":
-        from nanolab.plans.heap_analysis import (
-            build_heap_analysis_plan,
-            unique_heap_analysis_run_dir,
-        )
-
-        if environment.provider != "local":
-            raise ValueError(
-                "heap analysis currently requires a local container environment"
-            )
-        return build_heap_analysis_plan(
-            scenario,
-            environment,
-            bindings,
-            run_dir=run_dir or unique_heap_analysis_run_dir(paths.runs_dir),
-            repo_root=paths.nanofaas_root,
-            tool_root=paths.tool_root,
-        )
-    if scenario.workflow == "validate":
-        return build_validate_plan(
-            scenario,
-            bindings,
-            repo_root=paths.nanofaas_root,
-            tool_root=paths.tool_root,
-            environment=environment,
-            run_dir=run_dir or paths.runs_dir / "recipe-preview",
-        )
-    if scenario.workflow == "offload":
-        return build_offload_plan(scenario, bindings, repo_root=paths.nanofaas_root)
-    if scenario.workflow == "offload-loadtest":
-        return build_offload_loadtest_plan(
-            scenario,
-            environment,
-            bindings,
-            run_dir=run_dir or paths.runs_dir / "latest",
-            repo_root=paths.nanofaas_root,
-            tool_root=paths.tool_root,
-            fetcher=fetcher,
-            dry_run=dry_run,
-        )
-    if scenario.workflow == "cli":
-        return build_cli_plan(
-            scenario,
-            bindings,
-            endpoint=control_plane_url,
-            repo_root=paths.nanofaas_root,
-            environment=environment,
-            run_dir=run_dir,
-        )
-    # The comparison is a load test in every respect the platform cares about, so
-    # it shares the workflow name and the provisioning that goes with it, and only
-    # the plan builder differs.
-    builder = (
-        build_runtime_comparison_plan
-        if is_runtime_comparison(scenario)
-        else build_loadtest_plan
-    )
-    if prepared_comparison is not None:
-        builder = partial(build_runtime_comparison_plan, prepared=prepared_comparison)
-    return builder(
-        scenario,
-        environment,
-        bindings,
-        control_plane_url=control_plane_url or "http://127.0.0.1:8080",
-        prometheus_client=HttpPrometheusClient(prometheus_url),
-        run_dir=run_dir or paths.runs_dir / "latest",
-        fetcher=fetcher,
-        repo_root=paths.nanofaas_root,
-        tool_root=paths.tool_root,
-    )
 
 
 def _teardown_release(
@@ -725,22 +544,24 @@ def _build_run_workflow(
     if prepared_comparison is not None:
         return cast(
             SonataWorkflow,
-            _workflow(
+            build_scenario_workflow(
                 scenario_config,
                 environment_config,
+                paths=default_tool_paths(),
                 control_plane_url=control_plane_url,
-                prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
+                prometheus_url=prometheus_url or LOCAL_PROMETHEUS_URL,
                 run_dir=effective_run_dir,
                 prepared_comparison=prepared_comparison,
             ),
         )
     return cast(
         SonataWorkflow,
-        _workflow(
+        build_scenario_workflow(
             scenario_config,
             environment_config,
+            paths=default_tool_paths(),
             control_plane_url=control_plane_url,
-            prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
+            prometheus_url=prometheus_url or LOCAL_PROMETHEUS_URL,
             run_dir=effective_run_dir,
             **cast(
                 _WorkflowArguments,
@@ -859,7 +680,7 @@ def _execute_workflow(
             )
             sonata_workflow.keep = keep
             selection = Selection(only=only, start=start, until=until)
-            observers = _workflow_observers(scenario)
+            observers = scenario_observers(scenario)
             one_shot_workflow_completed = False
             try:
                 _run_selected_workflow(
@@ -1457,11 +1278,12 @@ def install_product_commands(
             return
         sonata_workflow = cast(
             SonataWorkflow,
-            _workflow(
+            build_scenario_workflow(
                 scenario_config,
                 environment_config,
+                paths=default_tool_paths(),
                 control_plane_url=control_plane_url,
-                prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
+                prometheus_url=prometheus_url or LOCAL_PROMETHEUS_URL,
                 run_dir=run_dir,
                 dry_run=True,
                 **cast(

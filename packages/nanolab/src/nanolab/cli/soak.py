@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
 
 import typer
 
@@ -39,11 +38,6 @@ def validate_soak_selection(
             "soak requires its complete uninterrupted lifetime; resume/partial "
             "selection is unsupported; use soak-evaluate for saved evidence"
         )
-
-
-def unique_soak_run_dir(runs_dir: Path) -> Path:
-    """Return a fresh run directory that no earlier run can collide with."""
-    return runs_dir / ("soak-" + uuid4().hex)
 
 
 def require_unused_run_dir(run_dir: Path) -> None:

@@ -39,6 +39,11 @@ class _RecipeBuilderExecutor(RoleBoundCommandTaskExecutor):
         return super().run(task, dry_run=dry_run)
 
 
+def unique_soak_run_dir(runs_dir: Path) -> Path:
+    """Return a fresh run directory that no earlier run can collide with."""
+    return runs_dir / ("soak-" + uuid4().hex)
+
+
 def build_soak_plan(
     config: ScenarioConfig,
     environment: EnvironmentConfig,

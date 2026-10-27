@@ -189,7 +189,7 @@ def _install_workflow_helpers(
 
     monkeypatch.setattr(tui_app, "load_scenario", load_scenario)
     monkeypatch.setattr(tui_app, "load_environment", load_environment)
-    monkeypatch.setattr(tui_app, "_workflow", build_workflow)
+    monkeypatch.setattr(tui_app, "build_scenario_workflow", build_workflow)
 
 
 def test_tui_exits_from_the_main_menu() -> None:
@@ -515,7 +515,7 @@ def test_run_preview_error_uses_static_view_without_starting_live_dashboard(
     )
     monkeypatch.setattr(
         tui_app,
-        "_workflow",
+        "build_scenario_workflow",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("preview failed")),
     )
     frame = object()
@@ -554,9 +554,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
         workflow=workflow,
         calls=helper_calls,
     )
-    monkeypatch.setattr(
-        tui_app, "_workflow_observers", lambda _scenario_path: observers
-    )
+    monkeypatch.setattr(tui_app, "scenario_observers", lambda _scenario_path: observers)
     controller = RecordingController()
 
     NanofaasTUI(
@@ -839,7 +837,9 @@ def test_kubernetes_provisioned_keep_sets_keep_without_entering_legacy_provision
         provider="multipass",
     )
     workflows = iter([preview, workflow])
-    monkeypatch.setattr(tui_app, "_workflow", lambda *args, **kwargs: next(workflows))
+    monkeypatch.setattr(
+        tui_app, "build_scenario_workflow", lambda *args, **kwargs: next(workflows)
+    )
     provision_calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         tui_app,
@@ -984,7 +984,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
 
     controller = OrderingController()
     monkeypatch.setattr(tui_app, "resolve_loadtest_urls", resolve)
-    monkeypatch.setattr(tui_app, "_workflow", build)
+    monkeypatch.setattr(tui_app, "build_scenario_workflow", build)
     monkeypatch.setattr(tui_app, "provision_environment", provision)
 
     NanofaasTUI(
@@ -1089,7 +1089,9 @@ def test_keep_applies_to_provisioning_and_workflow_cleanup(
         provider="multipass",
     )
     workflows = iter([preview, workflow])
-    monkeypatch.setattr(tui_app, "_workflow", lambda *args, **kwargs: next(workflows))
+    monkeypatch.setattr(
+        tui_app, "build_scenario_workflow", lambda *args, **kwargs: next(workflows)
+    )
     provision_kwargs: list[dict[str, object]] = []
 
     @contextmanager
@@ -1130,7 +1132,9 @@ def test_remote_environment_runs_with_automatic_provisioning(
             provider="multipass" if path == remote_path else "local"
         ),
     )
-    monkeypatch.setattr(tui_app, "_workflow", lambda *args, **kwargs: workflow)
+    monkeypatch.setattr(
+        tui_app, "build_scenario_workflow", lambda *args, **kwargs: workflow
+    )
     provision_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     monkeypatch.setattr(
         tui_app,

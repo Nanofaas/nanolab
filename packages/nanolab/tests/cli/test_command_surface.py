@@ -233,7 +233,7 @@ def test_plan_builds_shared_validate_workflow() -> None:
 @pytest.mark.nanofaas
 def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     monkeypatch.setattr(
-        "nanolab.cli.product._workflow",
+        "nanolab.cli.product.build_scenario_workflow",
         lambda *args, **kwargs: _sonata_workflow(),
     )
 
@@ -249,7 +249,7 @@ def test_run_container_loadtest_requires_k6_before_building_the_workflow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     build = MagicMock(side_effect=AssertionError("workflow must not be built"))
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_scenario_workflow", build)
     monkeypatch.setattr(
         product_module.diagnostics,
         "missing_executables",
@@ -294,7 +294,7 @@ def test_generic_run_rejects_resume_for_non_release_workflows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     build = MagicMock()
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_scenario_workflow", build)
 
     result = CliRunner().invoke(
         app,
@@ -311,7 +311,7 @@ def test_run_requires_an_explicit_url_for_k8s_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     build = MagicMock()
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_scenario_workflow", build)
 
     result = CliRunner().invoke(app, ["run", "cli-contract-k8s.yaml"])
 
@@ -327,7 +327,7 @@ def test_run_container_cli_builds_and_runs_without_an_endpoint(
 ) -> None:
     workflow = MagicMock()
     build = MagicMock(return_value=workflow)
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_scenario_workflow", build)
 
     result = CliRunner().invoke(
         app,
@@ -343,7 +343,7 @@ def test_run_container_cli_requires_local_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     build = MagicMock()
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_scenario_workflow", build)
 
     result = CliRunner().invoke(
         app,
@@ -367,7 +367,7 @@ def test_run_container_cli_rejects_nonlocal_environment(
     # A local environment is rejected generically; using Multipass here proves
     # the container workflow rejects the non-local case on its own terms.
     build = MagicMock()
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_scenario_workflow", build)
 
     result = CliRunner().invoke(
         app,
@@ -389,7 +389,7 @@ def test_run_container_cli_rejects_keep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     build = MagicMock()
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_scenario_workflow", build)
 
     result = CliRunner().invoke(
         app,
@@ -411,7 +411,7 @@ def test_run_passes_custom_control_plane_url_to_cli_plan(
     # so a mock of the Sonata API (keep assignment + run(select=...))
     # stands in without adding any compatibility shim.
     build_cli_plan = MagicMock(return_value=MagicMock())
-    monkeypatch.setattr(product_module, "build_cli_plan", build_cli_plan)
+    monkeypatch.setattr("nanolab.plans.dispatch.build_cli_plan", build_cli_plan)
 
     result = CliRunner().invoke(
         app,
@@ -438,7 +438,7 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     # go through the legacy provision_environment context manager.
     workflow = MagicMock()
     build_cli_plan = MagicMock(return_value=workflow)
-    monkeypatch.setattr(product_module, "build_cli_plan", build_cli_plan)
+    monkeypatch.setattr("nanolab.plans.dispatch.build_cli_plan", build_cli_plan)
 
     def _legacy_provision_must_not_run(*args, **kwargs):
         raise AssertionError("legacy provision_environment must not run for cli/k8s")
@@ -501,7 +501,7 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
 
     monkeypatch.setattr("nanolab.cli.product.provision_environment", provision)
     monkeypatch.setattr(
-        "nanolab.cli.product._workflow",
+        "nanolab.cli.product.build_scenario_workflow",
         lambda *args, **kwargs: (
             actions.append(
                 f"build:{kwargs['control_plane_url']}:{kwargs['prometheus_url']}"
@@ -603,7 +603,7 @@ def test_git_provenance_fingerprints_tracked_and_untracked_content(
 @pytest.mark.nanofaas
 def test_failed_loadtest_writes_failure_metadata(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        "nanolab.cli.product._workflow",
+        "nanolab.cli.product.build_scenario_workflow",
         lambda *args, **kwargs: _sonata_workflow(fails="load exploded"),
     )
     monkeypatch.setattr(
@@ -745,10 +745,12 @@ def test_run_passes_the_requested_selection_to_sonata(
 ) -> None:
     workflow = MagicMock()
     observers = (object(),)
-    monkeypatch.setattr(product_module, "_workflow", MagicMock(return_value=workflow))
+    monkeypatch.setattr(
+        product_module, "build_scenario_workflow", MagicMock(return_value=workflow)
+    )
     monkeypatch.setattr(
         product_module,
-        "_workflow_observers",
+        "scenario_observers",
         lambda _scenario_path: observers,
     )
 
@@ -807,7 +809,7 @@ def test_containerd_recipe_staging_survives_kept_run(
     monkeypatch.setattr(
         product_module, "_run_selected_workflow", lambda *_args, **_kwargs: None
     )
-    monkeypatch.setattr(product_module, "_workflow_observers", lambda _: ())
+    monkeypatch.setattr(product_module, "scenario_observers", lambda _: ())
     monkeypatch.setattr(product_module, "provider_for_environment", lambda *_: object())
     monkeypatch.setattr(product_module, "cleanup_remote_recipe_run", cleanup)
 

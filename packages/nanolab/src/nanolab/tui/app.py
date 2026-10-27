@@ -17,11 +17,11 @@ from nanolab.application.inputs import load_environment, load_scenario
 from nanolab.cli import diagnostics
 from nanolab.cli.product import (
     _validate_cli_container_options,
-    _workflow,
-    _workflow_observers,
 )
 from nanolab.cli.provisioning import provision_environment
-from nanolab.cli.soak import terminal_status, unique_soak_run_dir
+from nanolab.cli.soak import terminal_status
+from nanolab.plans.dispatch import build_scenario_workflow, scenario_observers
+from nanolab.plans.soak import unique_soak_run_dir
 from nanolab.tui.workflow_controller import TuiWorkflowController
 from nanolab.workspace.paths import (
     default_tool_paths,
@@ -557,9 +557,9 @@ class NanofaasTUI:
                     "soak currently requires a local container environment"
                 )
             run_dir = unique_soak_run_dir(default_tool_paths().runs_dir)
-            workflow = _workflow(scenario, environment, run_dir=run_dir)
+            workflow = build_scenario_workflow(scenario, environment, run_dir=run_dir)
             workflow.keep = keep
-            observers = _workflow_observers(scenario_path)
+            observers = scenario_observers(scenario_path)
             result = workflow.run(observers=observers) if observers else workflow.run()
             status = terminal_status(run_dir)
             if status != "PASS":
@@ -582,13 +582,13 @@ class NanofaasTUI:
                     dry_run=False,
                 )
                 workflow.keep = keep
-                observers = _workflow_observers(scenario_path)
+                observers = scenario_observers(scenario_path)
                 return (
                     workflow.run(observers=observers) if observers else workflow.run()
                 )
         workflow = self._build_workflow(scenario, environment, dry_run=False)
         workflow.keep = keep
-        observers = _workflow_observers(scenario_path)
+        observers = scenario_observers(scenario_path)
         return workflow.run(observers=observers) if observers else workflow.run()
 
     @staticmethod
@@ -599,21 +599,21 @@ class NanofaasTUI:
         dry_run: bool,
     ) -> Any:
         if scenario.workflow == "soak":
-            return _workflow(scenario, environment, dry_run=dry_run)
+            return build_scenario_workflow(scenario, environment, dry_run=dry_run)
         if scenario.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment,
                 dry_run=dry_run,
             )
-            return _workflow(
+            return build_scenario_workflow(
                 scenario,
                 environment,
                 control_plane_url=control_plane_url,
                 prometheus_url=prometheus_url,
             )
         if scenario.workflow == "offload-loadtest":
-            return _workflow(scenario, environment, dry_run=dry_run)
-        return _workflow(scenario, environment, dry_run=dry_run)
+            return build_scenario_workflow(scenario, environment, dry_run=dry_run)
+        return build_scenario_workflow(scenario, environment, dry_run=dry_run)
 
     def _plan_rows(self, workflow: Any) -> list[tuple[str, str]]:
         """Return `(task_id, title)` pairs from a compiled Sonata workflow."""

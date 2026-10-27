@@ -163,7 +163,7 @@ def test_missing_policy_is_not_filled_with_permissive_defaults(tmp_path):
 def test_soak_routes_before_comparison_and_plan_has_no_side_effects(
     tmp_path, monkeypatch
 ):
-    from nanolab.cli import product
+    from nanolab.plans import dispatch
 
     calls = []
     module = ModuleType("nanolab.plans.soak")
@@ -172,10 +172,10 @@ def test_soak_routes_before_comparison_and_plan_has_no_side_effects(
     )
     monkeypatch.setitem(sys.modules, "nanolab.plans.soak", module)
     monkeypatch.setattr(
-        product, "build_role_bindings", lambda environment: ("bindings", "fetcher")
+        dispatch, "build_role_bindings", lambda environment: ("bindings", "fetcher")
     )
     monkeypatch.setattr(
-        product,
+        dispatch,
         "default_tool_paths",
         lambda: SimpleNamespace(
             nanofaas_root=tmp_path, tool_root=tmp_path, runs_dir=tmp_path / "runs"
@@ -185,12 +185,17 @@ def test_soak_routes_before_comparison_and_plan_has_no_side_effects(
     def forbidden(*args, **kwargs):
         raise AssertionError("soak must not fall through to a comparison/loadtest")
 
-    monkeypatch.setattr(product, "is_runtime_comparison", forbidden)
+    monkeypatch.setattr(dispatch, "is_runtime_comparison", forbidden)
     scenario, environment = (
         SimpleNamespace(workflow="soak", backend="container"),
         SimpleNamespace(provider="local"),
     )
-    assert product._workflow(scenario, environment, dry_run=True) == "soak-plan"  # pyright: ignore[reportArgumentType]
+    assert (
+        dispatch.build_scenario_workflow(
+            cast(Any, scenario), cast(Any, environment), dry_run=True
+        )
+        == "soak-plan"
+    )
     assert calls[0][0] == (scenario, environment, "bindings")
     assert not (tmp_path / "runs").exists()
 
@@ -208,7 +213,9 @@ def test_tui_forwards_soak_dry_run(monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        app, "_workflow", lambda *args, **kwargs: calls.append(kwargs) or "soak"
+        app,
+        "build_scenario_workflow",
+        lambda *args, **kwargs: calls.append(kwargs) or "soak",
     )
     assert (
         app.NanofaasTUI._build_workflow(
@@ -269,7 +276,7 @@ def test_soak_success_metadata_uses_terminal_status(tmp_path, monkeypatch):
 def test_heap_analysis_routes_before_comparison_and_plan_has_no_side_effects(
     tmp_path, monkeypatch
 ):
-    from nanolab.cli import product
+    from nanolab.plans import dispatch
 
     calls = []
     module = ModuleType("nanolab.plans.heap_analysis")
@@ -279,10 +286,10 @@ def test_heap_analysis_routes_before_comparison_and_plan_has_no_side_effects(
     module.unique_heap_analysis_run_dir = lambda runs_dir: runs_dir / "heap-analysis-x"  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "nanolab.plans.heap_analysis", module)
     monkeypatch.setattr(
-        product, "build_role_bindings", lambda environment: ("bindings", "fetcher")
+        dispatch, "build_role_bindings", lambda environment: ("bindings", "fetcher")
     )
     monkeypatch.setattr(
-        product,
+        dispatch,
         "default_tool_paths",
         lambda: SimpleNamespace(
             nanofaas_root=tmp_path, tool_root=tmp_path, runs_dir=tmp_path / "runs"
@@ -292,13 +299,15 @@ def test_heap_analysis_routes_before_comparison_and_plan_has_no_side_effects(
     def forbidden(*args, **kwargs):
         raise AssertionError("heap-analysis must not fall through to a loadtest")
 
-    monkeypatch.setattr(product, "is_runtime_comparison", forbidden)
+    monkeypatch.setattr(dispatch, "is_runtime_comparison", forbidden)
     scenario, environment = (
         SimpleNamespace(workflow="heap-analysis"),
         SimpleNamespace(provider="local"),
     )
     assert (
-        product._workflow(scenario, environment, dry_run=True)  # pyright: ignore[reportArgumentType]
+        dispatch.build_scenario_workflow(
+            cast(Any, scenario), cast(Any, environment), dry_run=True
+        )
         == "heap-analysis-plan"
     )
     assert calls[0][0] == (scenario, environment, "bindings")
@@ -307,17 +316,17 @@ def test_heap_analysis_routes_before_comparison_and_plan_has_no_side_effects(
 
 @pytest.mark.nanofaas
 def test_heap_analysis_rejects_non_local_environment(monkeypatch):
-    from nanolab.cli import product
+    from nanolab.plans import dispatch
 
     monkeypatch.setattr(
-        product, "build_role_bindings", lambda environment: ("bindings", "fetcher")
+        dispatch, "build_role_bindings", lambda environment: ("bindings", "fetcher")
     )
     scenario, environment = (
         SimpleNamespace(workflow="heap-analysis"),
         SimpleNamespace(provider="azure"),
     )
     with pytest.raises(ValueError, match="requires a local container environment"):
-        product._workflow(scenario, environment)  # pyright: ignore[reportArgumentType]
+        dispatch.build_scenario_workflow(cast(Any, scenario), cast(Any, environment))
 
 
 def test_heap_analysis_default_run_directories_are_unique(tmp_path):
@@ -399,7 +408,7 @@ def test_p24_recipe_saved_evidence_is_not_resumed_or_republished(
     def forbidden(*args, **kwargs):
         raise AssertionError("saved soak evidence reached workflow/build execution")
 
-    monkeypatch.setattr(product, "_workflow", forbidden)
+    monkeypatch.setattr(product, "build_scenario_workflow", forbidden)
     monkeypatch.setattr(
         "nanolab.cli.diagnostics.missing_executables", lambda tools=(): ("k6",)
     )

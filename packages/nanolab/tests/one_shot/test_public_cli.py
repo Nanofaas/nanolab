@@ -7,7 +7,7 @@ import yaml
 from sonata_engine import Workflow
 
 from nanolab.application.inputs import load_scenario
-from nanolab.cli.product import _workflow
+from nanolab.plans.dispatch import build_scenario_workflow
 
 pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
 
@@ -25,10 +25,10 @@ def test_cli_routes_one_shot_to_dedicated_builder_with_run_directory(
     module = "nanolab.plans.one_shot_" + name
     monkeypatch.setattr(module + ".build_one_shot_" + name + "_plan", build)
     monkeypatch.setattr(
-        "nanolab.cli.product.default_tool_paths",
+        "nanolab.plans.dispatch.default_tool_paths",
         lambda: SimpleNamespace(nanofaas_root=tmp_path, runs_dir=tmp_path / "runs"),
     )
-    workflow = _workflow(
+    workflow = build_scenario_workflow(
         cast(Any, SimpleNamespace(workflow="one-shot-" + name)),
         cast(Any, object()),
         run_dir=tmp_path / "run",
@@ -129,7 +129,7 @@ def test_public_cli_load_failure_still_reports_and_preserves_original_error(
     monkeypatch.setattr(
         product, "_build_run_workflow", lambda **kwargs: SimpleNamespace(keep=False)
     )
-    monkeypatch.setattr(product, "_workflow_observers", lambda *args: ())
+    monkeypatch.setattr(product, "scenario_observers", lambda *args: ())
 
     def fail_load(*args, **kwargs):
         raise RuntimeError("load aborted")
@@ -211,12 +211,14 @@ def test_public_one_shot_builder_selects_recipe_images(
         return add(workflow, request, **kwargs)
 
     monkeypatch.setattr(
-        "nanolab.cli.product.default_tool_paths",
+        "nanolab.plans.dispatch.default_tool_paths",
         lambda: SimpleNamespace(nanofaas_root=tmp_path),
     )
     monkeypatch.setattr(common, "add_platform", capture)
     monkeypatch.setattr(common, "recipe_run_resource", capture_recipe)
-    compiled = _workflow(config, environment, run_dir=tmp_path / "run").compile()
+    compiled = build_scenario_workflow(
+        config, environment, run_dir=tmp_path / "run"
+    ).compile()
     assert compiled.tasks and requests
     assert recipes == ["one-shot-jvm.yaml"]
     for request in requests:

@@ -31,7 +31,7 @@ def test_forbidden_options_rejected_before_acquisition(
         pytest.fail("forbidden options reached platform acquisition")
 
     monkeypatch.setattr(product, "_provisioning_context", unexpected)
-    monkeypatch.setattr(product, "_workflow", unexpected)
+    monkeypatch.setattr(product, "build_scenario_workflow", unexpected)
     monkeypatch.setattr(product, "_run_teardown", unexpected)
     result = CliRunner().invoke(app, [command, str(scenario), *options])
     assert result.exit_code == 2, result.output
@@ -115,7 +115,7 @@ def test_contract_skips_control_plane_provisioning_and_finalizes_after_release(
 
     import nanolab.plans.contract as contract
 
-    monkeypatch.setattr(product, "_workflow", build)
+    monkeypatch.setattr(product, "build_scenario_workflow", build)
     monkeypatch.setattr(product, "_provisioning_context", unexpected)
     monkeypatch.setattr(contract, "finalize_contract_run", finalize)
     result = CliRunner().invoke(app, ["run", str(scenario), "--run-dir", str(run_dir)])
@@ -140,7 +140,7 @@ def test_remote_provider_rejected_before_acquisition(tmp_path, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("remote provider reached platform")
 
-    monkeypatch.setattr(product, "_workflow", unexpected)
+    monkeypatch.setattr(product, "build_scenario_workflow", unexpected)
     result = CliRunner().invoke(
         app, ["plan", str(scenario), "--environment", str(environment)]
     )
