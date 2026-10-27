@@ -92,6 +92,20 @@ def test_fn_runs_its_server_and_creates_an_http_trigger(tmp_path):
     assert Fn().target("10.0.0.4").url == "http://10.0.0.4:30080/t/e02/qr"
 
 
+def test_serverledge_and_fn_register_the_installed_image(tmp_path):
+    # install_baselines pushes one tag per identity: the function must name
+    # that tag, not a default no installation pushes.
+    image = "127.0.0.1:5000/qr-{}:0123456789abcdef"
+    serverledge = _spec(
+        Serverledge(budget=BUDGET, image=image.format("serverledge")), tmp_path / "s"
+    )
+    [create] = serverledge["register"]["commands"]
+    assert create[create.index("--custom_image") + 1] == image.format("serverledge")
+    fn = _spec(Fn(image=image.format("fn")), tmp_path / "f")
+    [register] = fn["register"]["commands"]
+    assert f'"image": "{image.format("fn")}"' in register[-1]
+
+
 def test_concurrency_knobs_follow_the_protocol(tmp_path):
     tinyfaas = _spec(TinyFaas(), tmp_path / "t")
     assert '"threads"] = 3' in tinyfaas["register"]["commands"][0][-1]

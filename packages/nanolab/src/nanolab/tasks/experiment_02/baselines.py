@@ -328,7 +328,7 @@ class Serverledge(_Baseline):
                         "--runtime",
                         "custom",
                         "--custom_image",
-                        SERVERLEDGE_IMAGE,
+                        self.image,
                         "--max_concurrency",
                         str(protocol.fixed_concurrency),
                     )
