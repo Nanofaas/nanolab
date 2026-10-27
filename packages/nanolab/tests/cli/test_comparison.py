@@ -483,3 +483,119 @@ def test_experiment_02_refuses_a_kubernetes_scenario(command_case):
     result = invoke("--variants", "nanofaas-p1-jvm")
     assert result.exit_code != 0
     assert events == [] and not root.exists()
+
+
+def test_compare_direct_and_p1_with_two_budgets_can_resume(command_case, monkeypatch):
+    """The whole experiment-02 path with fake VMs: four cells, then a resume."""
+    from nanolab.comparison.experiment_01 import CELL_RESULT
+    from nanolab.comparison.experiment_02 import (
+        EVENTS,
+        SAMPLES,
+        SCHEDULER,
+        SUMMARY,
+    )
+
+    invoke, events, root = _experiment_02_case(command_case, azure=True)
+    scenario = command_case[3]
+    scenario.write_text(
+        scenario.read_text().replace(
+            "  budgets:\n    - {cpus: 2, memoryMiB: 2048}\n",
+            "  budgets:\n    - {cpus: 2, memoryMiB: 2048}\n"
+            "    - {cpus: 1, memoryMiB: 1024}\n",
+        )
+    )
+    assert "cpus: 1, memoryMiB: 1024" in scenario.read_text()
+
+    class Provider:
+        def exec_argv(self, request, argv, **kwargs):
+            if argv[:2] == ("sudo", "sh"):
+                events.append("slices")
+            elif argv[:2] == ("rm", "-rf"):
+                events.append(("cleanup", argv[-1]))
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+        def connection_host(self, request):
+            return "20.0.0.4"
+
+    monkeypatch.setattr(comparison, "provider_for_environment", lambda *a: Provider())
+    machine = {
+        "machineId": "a" * 32,
+        "productUuid": "11111111-2222-3333-4444-555555555555",
+    }
+    target = {
+        "machines": {"stack": machine, "loadgen": machine},
+        "engine": {"dockerId": "docker-1"},
+    }
+    monkeypatch.setattr(
+        comparison, "read_comparison_target", lambda *a, **k: dict(target)
+    )
+    monkeypatch.setattr(comparison, "read_host_facts", lambda *a: {})
+    monkeypatch.setattr(
+        comparison,
+        "require_recorded_publications",
+        lambda **kwargs: events.append("publications-checked"),
+    )
+
+    def image(reference):
+        return SimpleNamespace(image=SimpleNamespace(reference=reference))
+
+    def prepare(**kwargs):
+        events.append(("prepare", tuple(kwargs["profiles"])))
+        distribution = SimpleNamespace(
+            control_plane=lambda: image("registry/control-plane:p1"),
+            function=lambda *names: image("registry/rust-qr-code:e02"),
+        )
+        from nanolab.tasks.recipes.remote import remote_recipe_root
+
+        owned = remote_recipe_root(
+            kwargs["request"], str(kwargs["manifest"].identity["tag"])
+        )
+        return SimpleNamespace(
+            distributions={"nanofaas-p1-jvm": distribution},
+            remote_source=owned / "source",
+        )
+
+    monkeypatch.setattr(comparison, "_run_prepare", prepare)
+
+    def cell(cell, **kwargs):
+        events.append(("cell", cell.key, cell.budget.label))
+        run_dir = kwargs["run_dir"]
+        (run_dir / "metrics").mkdir(parents=True, exist_ok=True)
+        for name in (SUMMARY, EVENTS, SAMPLES, SCHEDULER):
+            (run_dir / name).write_text("{}\n")
+        return "measured"
+
+    monkeypatch.setattr(comparison, "run_cell", cell)
+    monkeypatch.setattr(
+        comparison,
+        "write_experiment_02_report",
+        lambda root, cells, protocol: events.append("report") or root / "r.csv",
+    )
+
+    result = invoke(
+        "--variants", "nanofaas-p1-jvm,direct-reference", "--repetitions", "1"
+    )
+    assert result.exit_code == 0, (result.output, result.exception)
+    cells = sorted(event[1:] for event in events if event[0] == "cell")
+    assert cells == [
+        ("direct-reference", "cpu1-mem1024"),
+        ("direct-reference", "cpu2-mem2048"),
+        ("nanofaas-p1-jvm", "cpu1-mem1024"),
+        ("nanofaas-p1-jvm", "cpu2-mem2048"),
+    ]
+    assert events.count("provision") == events.count("slices") == 1
+    # Only the configuration with a recipe is prepared.
+    assert ("prepare", ("nanofaas-p1-jvm",)) in events
+    receipts = sorted(path.parent.relative_to(root).as_posix()
+                      for path in root.rglob(CELL_RESULT))  # fmt: skip
+    assert len(receipts) == 4
+
+    events.clear()
+    result = invoke(
+        "--variants", "nanofaas-p1-jvm,direct-reference", "--repetitions", "1"
+    )
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "resuming: 4 of 4" in result.output
+    assert not [event for event in events if event[0] == "cell"]
+    assert "provision" not in events and "slices" not in events
+    assert "publications-checked" in events

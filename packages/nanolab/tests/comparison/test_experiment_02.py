@@ -26,7 +26,11 @@ from nanolab.comparison.experiment_02 import (
 from nanolab.comparison.manifest import (
     capture_comparison_inputs,
     new_comparison_manifest,
+    read_comparison_manifest,
+    write_comparison_manifest,
 )
+from nanolab.comparison.matrix import pending
+from nanolab.comparison.profiles import experiment_02_profiles
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
 from nanolab.config.experiment_02 import Budget
 from nanolab.config.scenario import ScenarioConfig
@@ -182,11 +186,14 @@ def _repositories(tmp_path: Path) -> tuple[Path, Path]:
 SELECTED = ("nanofaas-p1-jvm", "direct-reference")
 
 
-def _capture(tmp_path: Path, *, order: list[str] | None = None):
+def _capture(
+    tmp_path: Path, *, order: list[str] | None = None, two_budgets: bool = False
+):
     nanofaas, nanolab = _repositories(tmp_path)
-    scenario = ScenarioConfig.model_validate(
-        yaml.safe_load((SCENARIOS / "experiment-02-pilot.yaml").read_text())
-    )
+    values = yaml.safe_load((SCENARIOS / "experiment-02-pilot.yaml").read_text())
+    if two_budgets:
+        values["experiment02"]["budgets"].append({"cpus": 1, "memoryMiB": 1024})
+    scenario = ScenarioConfig.model_validate(values)
     protocol = scenario.experiment_02
     assert protocol is not None
     cells = build_experiment_02_matrix(
@@ -254,3 +261,47 @@ def test_manifest_accepts_an_experiment_02_identity(tmp_path):
 def test_manifest_rejects_an_order_of_the_wrong_length(tmp_path):
     with pytest.raises(ValueError, match="experiment artifact identity"):
         _capture(tmp_path, order=["nanofaas-p1-jvm cpu2-mem2048 run 1"])
+
+
+def test_manifest_rejects_a_cell_listed_twice(tmp_path):
+    label = "nanofaas-p1-jvm cpu2-mem2048 run 1"
+    with pytest.raises(ValueError, match="experiment artifact identity"):
+        _capture(tmp_path, order=[label, label])
+
+
+def test_manifest_round_trip_with_direct_reference_and_two_budgets(tmp_path):
+    inputs, cells = _capture(tmp_path, two_budgets=True)
+    assert len(cells) == 4
+    manifest = new_comparison_manifest(
+        inputs, cells, variants=[{"key": key} for key in SELECTED]
+    )
+    root = tmp_path / "run"
+    root.mkdir()
+    write_comparison_manifest(root, manifest)
+    restored = read_comparison_manifest(root)
+    assert restored is not None
+    assert restored.order == [cell.label for cell in cells]
+    assert {cell.budget.label for cell in cells} == {"cpu2-mem2048", "cpu1-mem1024"}
+    assert restored.identity == manifest.identity
+
+
+def test_direct_only_still_prepares_the_function_publisher():
+    profiles = experiment_02_profiles(discover_tool_root(), ("direct-reference",))
+    assert list(profiles) == ["nanofaas-p1-jvm"]
+
+
+def test_resume_skips_only_the_receipted_budget(tmp_path):
+    cells = build_experiment_02_matrix(
+        (CONFIGURATIONS_BY_KEY["direct-reference"],),
+        (Budget(cpus=2, memoryMiB=2048), Budget(cpus=1, memoryMiB=1024)),
+        1,
+        seed=1,
+    )
+    done = next(cell for cell in cells if cell.budget.label == "cpu1-mem1024")
+
+    def completed(cell, _root):
+        return cell is done
+
+    assert [cell.budget.label for cell in pending(cells, tmp_path, completed)] == [
+        "cpu2-mem2048"
+    ]

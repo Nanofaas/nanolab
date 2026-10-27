@@ -184,6 +184,8 @@ def _complete_experiment_02(
         or not budgets
         or not isinstance(order, list)
         or len(order) != len(variants) * len(budgets) * repetitions
+        # One cell per (configuration, budget, repetition): no label twice.
+        or len(set(order)) != len(order)
     ):
         raise ValueError("incomplete experiment artifact identity")
 
