@@ -22,12 +22,10 @@ import json
 from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
-from nanolab.tasks.experiment_02.budget import ENGINE_CGROUPS
 from nanolab.workspace.paths import bundled_assets_root
 
 SAMPLER_SCRIPT = (
@@ -35,10 +33,6 @@ SAMPLER_SCRIPT = (
 )
 SAMPLE_INTERVAL_SECONDS = 5.0
 CPU_WINDOW_SECONDS = 30.0
-DEPLOYMENT_MEMORY = "deployment_working_set_bytes"
-DEPLOYMENT_CPU = "deployment_cpu_cores"
-ENGINE_MEMORY = "engine_working_set_bytes"
-ENGINE_CPU = "engine_cpu_cores"
 ROOT: tuple[str, ...] = (".",)
 OBSERVERS: tuple[str, ...] = ("@observers",)
 _COUNTERS = frozenset({"cpuUsageUsec", "oomKill"})
@@ -233,32 +227,3 @@ def container_count(samples: Samples) -> list[tuple[float, int]]:
         )
         for sample in samples
     ]
-
-
-def _points(series: Series) -> list[dict[str, object]]:
-    return [
-        {"timestamp": datetime.fromtimestamp(at, UTC).isoformat(), "value": value}
-        for at, value in series
-    ]
-
-
-def as_snapshot(samples: Samples) -> dict[str, Any]:
-    """Return the series in the shape of a Prometheus snapshot.
-
-    `summarize_phases` reads that shape; giving it the same shape lets
-    experiment 02 reuse experiment 01's per-phase summaries unchanged.
-    """
-    return {
-        "queries": {
-            DEPLOYMENT_MEMORY: {"points": _points(working_set(samples)), "error": None},
-            DEPLOYMENT_CPU: {"points": _points(cpu_cores(samples)), "error": None},
-            ENGINE_MEMORY: {
-                "points": _points(working_set(samples, ENGINE_CGROUPS)),
-                "error": None,
-            },
-            ENGINE_CPU: {
-                "points": _points(cpu_cores(samples, ENGINE_CGROUPS)),
-                "error": None,
-            },
-        }
-    }

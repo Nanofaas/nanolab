@@ -6,18 +6,14 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
 from nanolab.tasks.experiment_02.samples import (
-    ENGINE_CPU,
-    ENGINE_MEMORY,
     OBSERVERS,
     SAMPLER_SCRIPT,
-    as_snapshot,
     container_count,
     cpu_cores,
     cpu_seconds,
@@ -219,18 +215,6 @@ def test_container_count_follows_the_scopes():
         (5.0, {".": _group(), "docker-a.scope": _group(), "docker-b.scope": _group()}),
     )
     assert container_count(samples) == [(0.0, 1), (5.0, 2)]
-
-
-def test_snapshot_carries_deployment_and_engine_series():
-    samples = _samples(
-        (0.0, {".": _group(memory=100), "docker.service": _group(memory=10),
-               "containerd.service": _group(memory=5)}),
-    )  # fmt: skip
-    snapshot = as_snapshot(samples)
-    point = snapshot["queries"][ENGINE_MEMORY]["points"][0]
-    assert point["value"] == 15.0
-    assert datetime.fromisoformat(point["timestamp"]).timestamp() == 0.0
-    assert snapshot["queries"][ENGINE_CPU]["points"] == []
 
 
 def _start_sampler(tmp_path: Path, *extra: str) -> tuple[subprocess.Popen, Path]:

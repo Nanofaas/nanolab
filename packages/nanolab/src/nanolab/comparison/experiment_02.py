@@ -24,8 +24,10 @@ import hashlib
 import json
 import random
 import statistics
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Literal
 
@@ -43,15 +45,16 @@ from nanolab.config.experiment_02 import Budget, Experiment02Protocol
 from nanolab.tasks.experiment_02.budget import ENGINE_CGROUPS
 from nanolab.tasks.experiment_02.samples import (
     CPU_WINDOW_SECONDS,
-    DEPLOYMENT_CPU,
-    DEPLOYMENT_MEMORY,
+    OBSERVERS,
+    ROOT,
     SAMPLE_INTERVAL_SECONDS,
-    as_snapshot,
+    Samples,
     container_count,
     cpu_cores,
     cpu_seconds,
     memory_byte_seconds,
     read_cgroup_samples,
+    window_covered,
     working_set,
 )
 
@@ -213,71 +216,125 @@ def experiment_02_identity(
 # ---------------------------------------------------------------- summaries
 
 
-def _mean_inside(
-    points: Sequence[tuple[float, float]], start: float, end: float
-) -> float | None:
-    inside = [value for at, value in points if start <= at < end]
-    return statistics.fmean(inside) if inside else None
+Points = Sequence[tuple[float, float]]
+_MEMORY = ("memoryCurrent", "inactiveFile")
+_CPU = ("cpuUsageUsec",)
 
 
-def _phase_costs(
-    samples: Sequence[Mapping[str, Any]],
-    row: Mapping[str, Any],
-    *,
-    start: float | None,
-    end: float | None,
-    load: bool,
-) -> dict[str, object]:
-    """Return a phase's engine share, live instances and cost per useful response.
+def _stats(points: Points, start: float, end: float, covered: bool) -> dict[str, Any]:
+    """Return mean, maximum and count inside the window, or why there are none."""
+    inside = [value for at, value in points if start <= at <= end]
+    if not covered:
+        return {"mean": None, "max": None, "samples": len(inside), "coverage": "gap"}
+    if not inside:
+        return {"mean": None, "max": None, "samples": 0, "coverage": "empty"}
+    return {
+        "mean": statistics.fmean(inside),
+        "max": max(inside),
+        "samples": len(inside),
+        "coverage": "complete",
+    }
 
-    The cost covers the phase's own window. A cohort's late responses may land
-    in the next phase, by at most `gracefulStopSeconds`; that overlap is the
-    known limit of reading a step's cost from its window.
+
+def _resources(
+    samples: Samples, cgroups: tuple[str, ...], start: float, end: float
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the working set and CPU rate of `cgroups` in one phase.
+
+    Both need the phase covered by samples; a CPU rate also needs its 30 s
+    look-back inside the phase, as experiment 01 requires.
     """
-    if start is None or end is None:
-        names = [
-            "engineWorkingSetMeanBytes",
-            "engineCpuMeanCores",
-            "containersMean",
-            "containersMax",
-        ]
-        if load:
-            names += [
-                "cpuSeconds",
-                "memoryByteSeconds",
-                "cpuSecondsPerUseful",
-                "memoryByteSecondsPerUseful",
-            ]
-        unknown: dict[str, object] = {}
-        for name in names:
-            unknown[name] = None
-        return unknown
-    counts = [count for at, count in container_count(samples) if start <= at < end]
-    costs: dict[str, object] = {
-        "engineWorkingSetMeanBytes": _mean_inside(
-            working_set(samples, ENGINE_CGROUPS), start, end
-        ),
-        # A rate whose window reaches into the previous phase is left out.
-        "engineCpuMeanCores": _mean_inside(
-            cpu_cores(samples, ENGINE_CGROUPS), start + CPU_WINDOW_SECONDS, end
-        ),
+    memory = _stats(
+        working_set(samples, cgroups),
+        start,
+        end,
+        window_covered(samples, start, end, cgroups=cgroups, fields=_MEMORY),
+    )
+    cores = _stats(
+        cpu_cores(samples, cgroups),
+        start + CPU_WINDOW_SECONDS,
+        end,
+        window_covered(samples, start, end, cgroups=cgroups, fields=_CPU),
+    )
+    return memory, cores
+
+
+def _delta(
+    value: Mapping[str, Any], reference: Mapping[str, Any] | None
+) -> float | None:
+    if reference is None or value["mean"] is None or reference["mean"] is None:
+        return None
+    return float(value["mean"]) - float(reference["mean"])
+
+
+def _containers(samples: Samples, start: float, end: float) -> dict[str, Any]:
+    """Return the live instances in the phase: complete scans only."""
+    if not window_covered(samples, start, end):
+        return {"containersMean": None, "containersMax": None}
+    counts = [count for at, count in container_count(samples) if start <= at <= end]
+    return {
         "containersMean": statistics.fmean(counts) if counts else None,
         "containersMax": max(counts) if counts else None,
     }
-    if load:
-        useful = int(row["withinThreshold"])
-        cpu = cpu_seconds(samples, start, end)
-        memory = memory_byte_seconds(samples, start, end)
-        costs |= {
-            "cpuSeconds": cpu,
-            "memoryByteSeconds": memory,
-            # Undefined, not zero, when nothing useful came back.
-            "cpuSecondsPerUseful": cpu / useful if useful and cpu is not None else None,
-            "memoryByteSecondsPerUseful": (
-                memory / useful if useful and memory is not None else None
-            ),
-        }
-    return costs
+
+
+def _efficiency(
+    samples: Samples, useful: int, start: float, end: float, origin: float
+) -> dict[str, Any]:
+    """Return the deployment's CPU time and memory occupancy per useful response.
+
+    Over the cohort's arrival window and the drain after it, as §4.5 of the
+    paper defines it: the windows of neighbouring steps overlap, so the values
+    are not additive and are not an exclusive attribution to the cohort.
+    """
+    cpu = cpu_seconds(samples, start, end)
+    memory = memory_byte_seconds(samples, start, end)
+    return {
+        "efficiencyStartSeconds": start - origin,
+        "efficiencyEndSeconds": end - origin,
+        "cpuSeconds": cpu,
+        "memoryByteSeconds": memory,
+        # Undefined, not zero, when nothing useful came back.
+        "cpuSecondsPerUseful": cpu / useful if useful and cpu is not None else None,
+        "memoryByteSecondsPerUseful": (
+            memory / useful if useful and memory is not None else None
+        ),
+    }
+
+
+def _scheduler_coverage(
+    configuration: Configuration, path: Path, start: float, end: float
+) -> dict[str, Any]:
+    """Say whether nanoFaaS's exposition was scraped over the whole measurement."""
+    if configuration.platform != "nanofaas":
+        return {"schedulerCoverage": "not_applicable", "schedulerSamples": None}
+    if not path.is_file():
+        return {"schedulerCoverage": "partial", "schedulerSamples": None}
+    times: list[float] = []
+    failed = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            scrape = json.loads(line)
+        except ValueError:
+            failed = True
+            continue
+        times.append(float(scrape["ts"]))
+        failed = failed or scrape.get("status") != "ok"
+    times.sort()
+    first = bisect_right(times, start) - 1
+    last = bisect_left(times, end)
+    covered = (
+        first >= 0
+        and last < len(times)
+        and all(
+            later - earlier <= 2 * SAMPLE_INTERVAL_SECONDS
+            for earlier, later in pairwise(times[first : last + 1])
+        )
+    )
+    return {
+        "schedulerCoverage": "complete" if covered and not failed else "partial",
+        "schedulerSamples": SCHEDULER,
+    }
 
 
 def summarize_experiment_02_cell(
@@ -285,9 +342,12 @@ def summarize_experiment_02_cell(
 ) -> dict[str, object]:
     """Summarise one cell from the attempt its receipt selects.
 
-    Experiment 01's per-phase rows and verdicts, read from the deployment's
-    cgroup, plus what experiment 02 adds: the engine's share, the live
-    instances, and CPU time and memory occupancy per useful response.
+    Experiment 01's per-phase rows and verdicts, from its ledger alone, plus
+    what experiment 02 adds from the cgroup samples: the deployment's working
+    set and CPU, the engine's share, the agents' own cost, the live instances,
+    and CPU time and memory occupancy per useful response. A resource the
+    samples do not cover is unknown with its reason, and the ledger's service
+    values stay usable.
     """
     cell_dir = cell.run_dir(root)
     receipt = json.loads((cell_dir / CELL_RESULT).read_text(encoding="utf-8"))
@@ -311,27 +371,64 @@ def summarize_experiment_02_cell(
         return result
     events, malformed = read_events(selected / EVENTS)
     ledger = build_ledger(events)
-    samples = read_cgroup_samples(selected / SAMPLES)
+    read = read_cgroup_samples(selected / SAMPLES)
+    samples = read.samples
     rows = summarize_phases(
         protocol,
         ledger,
         summary=json.loads((selected / SUMMARY).read_text(encoding="utf-8")),
-        snapshot=as_snapshot(samples.samples),
+        snapshot=None,
         malformed_events=malformed,
-        memory_series=DEPLOYMENT_MEMORY,
-        cpu_series=DEPLOYMENT_CPU,
     )
-    origin = ledger["origin"]
-    for row, phase in zip(rows, protocol.phases(), strict=True):
-        start = None if origin is None else origin / 1000 + phase["startSeconds"]
-        end = None if start is None else start + phase["durationSeconds"]
+    phases = protocol.phases()
+    origin = None if ledger["origin"] is None else ledger["origin"] / 1000
+    idle: dict[str, Any] = {}
+    for row, phase in zip(rows, phases, strict=True):
+        if origin is None:
+            continue
+        start = origin + phase["startSeconds"]
+        end = start + phase["durationSeconds"]
+        memory, cores = _resources(samples, ROOT, start, end)
+        engine_memory, engine_cores = _resources(samples, ENGINE_CGROUPS, start, end)
+        observer_memory, observer_cores = _resources(samples, OBSERVERS, start, end)
+        if phase["name"] == "idle":
+            idle = {"memory": memory, "cpu": cores}
         row.update(
-            _phase_costs(
-                samples.samples, row, start=start, end=end, load=phase["rate"] > 0
+            workingSetBytes=memory,
+            cpuCores=cores,
+            workingSetDeltaFromIdle=_delta(memory, idle.get("memory")),
+            cpuDeltaFromIdle=_delta(cores, idle.get("cpu")),
+            engineWorkingSetMeanBytes=engine_memory["mean"],
+            engineCpuMeanCores=engine_cores["mean"],
+            observersWorkingSetMeanBytes=observer_memory["mean"],
+            observersCpuMeanCores=observer_cores["mean"],
+            coverage={
+                "deployment": memory["coverage"],
+                "engine": engine_memory["coverage"],
+                "observers": observer_memory["coverage"],
+            },
+            **_containers(samples, start, end),
+        )
+        if phase["rate"] > 0:
+            row.update(
+                _efficiency(
+                    samples,
+                    int(row["withinThreshold"]),
+                    start,
+                    end + protocol.drain_seconds,
+                    origin,
+                )
             )
+    if origin is not None:
+        last = phases[-1]
+        result |= _scheduler_coverage(
+            cell.configuration,
+            selected / SCHEDULER,
+            origin,
+            origin + last["startSeconds"] + last["durationSeconds"],
         )
     result["malformedEvents"] = malformed
-    result["malformedSamples"] = samples.malformed
+    result["malformedSamples"] = read.malformed
     result["anomalies"] = ledger["anomalies"]
     result["phases"] = rows
     return result
@@ -358,18 +455,28 @@ _CSV_FIELDS: tuple[str, ...] = (
     "load",
     "sustainability",
     "workingSetMeanBytes",
+    "workingSetMaxBytes",
     "workingSetDeltaFromIdle",
     "cpuMeanCores",
+    "cpuMaxCores",
     "cpuDeltaFromIdle",
+    "deploymentCoverage",
     "engineWorkingSetMeanBytes",
     "engineCpuMeanCores",
+    "observersWorkingSetMeanBytes",
+    "observersCpuMeanCores",
     "containersMean",
     "containersMax",
+    "efficiencyStartSeconds",
+    "efficiencyEndSeconds",
     "cpuSeconds",
     "memoryByteSeconds",
     "cpuSecondsPerUseful",
     "memoryByteSecondsPerUseful",
+    "apiReadySeconds",
+    "registeredSeconds",
     "firstCorrectSeconds",
+    "schedulerCoverage",
 )
 
 
@@ -407,6 +514,8 @@ def write_experiment_02_report(
             phases: list[dict[str, Any]] = summary["phases"] or [{}]
             for phase in phases:
                 row = {key: phase.get(key) for key in _CSV_FIELDS}
+                memory = phase.get("workingSetBytes") or {}
+                cores = phase.get("cpuCores") or {}
                 row.update(
                     configuration=summary["configuration"],
                     budget=summary["budget"],
@@ -414,11 +523,15 @@ def write_experiment_02_report(
                     attempt=summary.get("attempt"),
                     outcome=summary["outcome"],
                     load=(phase.get("load") or {}).get("verdict"),
-                    workingSetMeanBytes=(phase.get("workingSetBytes") or {}).get(
-                        "mean"
-                    ),
-                    cpuMeanCores=(phase.get("cpuCores") or {}).get("mean"),
+                    workingSetMeanBytes=memory.get("mean"),
+                    workingSetMaxBytes=memory.get("max"),
+                    cpuMeanCores=cores.get("mean"),
+                    cpuMaxCores=cores.get("max"),
+                    deploymentCoverage=(phase.get("coverage") or {}).get("deployment"),
+                    apiReadySeconds=readiness.get("apiReadySeconds"),
+                    registeredSeconds=readiness.get("registeredSeconds"),
                     firstCorrectSeconds=readiness.get("firstCorrectSeconds"),
+                    schedulerCoverage=summary.get("schedulerCoverage"),
                 )
                 writer.writerow(row)
     return path

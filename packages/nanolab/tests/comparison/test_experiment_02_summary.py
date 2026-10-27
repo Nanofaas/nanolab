@@ -13,9 +13,10 @@ from nanolab.comparison.experiment_01 import (
 )
 from nanolab.comparison.experiment_02 import (
     CONFIGURATIONS_BY_KEY,
-    EXPERIMENT_02_EVIDENCE,
     SAMPLES,
+    SCHEDULER,
     Experiment02Cell,
+    required_evidence,
     summarize_experiment_02_cell,
     write_experiment_02_report,
 )
@@ -50,7 +51,8 @@ PROTOCOL = Experiment02Protocol.model_validate(
         "orderSeed": 1,
     }
 )
-# Origin at 1000 s: idle [1000, 1010), warmup [1010, 1020), step-01 [1020, 1030).
+# Origin at 1000 s: idle [1000, 1010), warmup [1010, 1020), step-01 [1020, 1030),
+# drain [1030, 1032].
 ORIGIN_MS = 1_000_000
 
 
@@ -75,10 +77,12 @@ def _events(*, correct: bool) -> str:
     return "\n".join(json.dumps(line) for line in lines) + "\n"
 
 
-def _samples() -> str:
-    """Half a core and 1000 bytes in the deployment; 100 bytes in the engine."""
+def _samples(skip: tuple[int, ...] = ()) -> str:
+    """Half a core and 1000 bytes in the deployment; 100 in the engine, 50 agents."""
     lines = []
     for at in range(995, 1040, 5):
+        if at in skip:
+            continue
         usage = int((at - 995) * 500_000)
         group = {
             "memoryCurrent": 1000,
@@ -94,18 +98,35 @@ def _samples() -> str:
             "docker.service": engine,
             "containerd.service": {**engine, "memoryCurrent": 0, "cpuUsageUsec": 0},
             "docker-a.scope": group,
+            "@observers": {**group, "memoryCurrent": 50, "cpuUsageUsec": 0},
         }
         lines.append(json.dumps({"ts": at, "cgroups": cgroups}))
     return "\n".join(lines) + "\n"
 
 
-def _measured_cell(root: Path, *, correct: bool = True) -> Experiment02Cell:
-    cell = Experiment02Cell(CONFIGURATIONS_BY_KEY["nanofaas-p1-jvm"], BUDGET, 1)
+def _scrapes(*, failed_at: int | None = None) -> str:
+    return "".join(
+        json.dumps({"ts": at, "status": "error" if at == failed_at else "ok"}) + "\n"
+        for at in range(995, 1040, 5)
+    )
+
+
+def _measured_cell(
+    root: Path,
+    *,
+    correct: bool = True,
+    skip: tuple[int, ...] = (),
+    key: str = "nanofaas-p1-jvm",
+    scrapes: str | None = None,
+) -> Experiment02Cell:
+    cell = Experiment02Cell(CONFIGURATIONS_BY_KEY[key], BUDGET, 1)
     selected = attempt_dir(cell.run_dir(root), 1)
     (selected / "metrics").mkdir(parents=True)
     (selected / EVENTS).write_text(_events(correct=correct))
     (selected / SUMMARY).write_text(json.dumps({"metrics": {}}))
-    (selected / SAMPLES).write_text(_samples())
+    (selected / SAMPLES).write_text(_samples(skip))
+    if cell.configuration.platform == "nanofaas":
+        (selected / SCHEDULER).write_text(_scrapes() if scrapes is None else scrapes)
     (selected / "readiness.json").write_text(json.dumps({"firstCorrectSeconds": 3.5}))
     write_cell_result(
         cell,
@@ -115,7 +136,7 @@ def _measured_cell(root: Path, *, correct: bool = True) -> Experiment02Cell:
         outcome="measured",
         reason="completed",
         started_at=datetime.now(UTC),
-        required=EXPERIMENT_02_EVIDENCE,
+        required=required_evidence(cell.configuration),
     )
     return cell
 
@@ -124,34 +145,102 @@ def _phase(summary: dict, name: str) -> dict:
     return next(row for row in summary["phases"] if row["phase"] == name)
 
 
-def test_efficiency_divides_by_responses_within_threshold(tmp_path):
+def test_efficiency_includes_drain_and_divides_by_responses_within_threshold(
+    tmp_path,
+):
     cell = _measured_cell(tmp_path)
     summary = summarize_experiment_02_cell(cell, tmp_path, PROTOCOL)
     step = _phase(summary, "step-01")
     assert step["withinThreshold"] == 20
-    assert step["cpuSeconds"] == 5.0
-    assert step["cpuSecondsPerUseful"] == 0.25
-    assert step["memoryByteSecondsPerUseful"] == 500.0
+    # Half a core and 1000 bytes over [20 s, 30 s + 2 s of drain].
+    assert (step["efficiencyStartSeconds"], step["efficiencyEndSeconds"]) == (20, 32)
+    assert step["cpuSeconds"] == 6.0
+    assert step["cpuSecondsPerUseful"] == 0.3
+    assert step["memoryByteSecondsPerUseful"] == 600.0
     assert summary["configuration"] == "nanofaas-p1-jvm"
     assert summary["budget"] == "cpu1-mem1024"
     assert summary["readiness"] == {"firstCorrectSeconds": 3.5}
+
+
+def test_last_efficiency_window_ends_at_calendar_drain_end(tmp_path):
+    summary = summarize_experiment_02_cell(_measured_cell(tmp_path), tmp_path, PROTOCOL)
+    drain = PROTOCOL.phases()[-1]
+    end = drain["startSeconds"] + drain["durationSeconds"]
+    assert _phase(summary, "step-01")["efficiencyEndSeconds"] == end
+    # Windows overlap: the warmup's runs into step-01.
+    assert _phase(summary, "warmup")["efficiencyEndSeconds"] == 22
+
+
+def test_efficiency_is_unknown_when_only_the_drain_has_a_gap(tmp_path):
+    # The step itself ends covered at 1030 s; only its drain, to 1032 s, is not.
+    cell = _measured_cell(tmp_path, skip=(1035,))
+    step = _phase(summarize_experiment_02_cell(cell, tmp_path, PROTOCOL), "step-01")
+    assert step["workingSetBytes"]["coverage"] == "complete"
+    assert step["cpuSeconds"] is None
+    assert step["cpuSecondsPerUseful"] is None
+    assert step["withinThreshold"] == 20
 
 
 def test_efficiency_is_undefined_without_useful_responses(tmp_path):
     cell = _measured_cell(tmp_path, correct=False)
     step = _phase(summarize_experiment_02_cell(cell, tmp_path, PROTOCOL), "step-01")
     assert step["withinThreshold"] == 0
-    assert step["cpuSeconds"] == 5.0
+    assert step["cpuSeconds"] == 6.0
     assert step["cpuSecondsPerUseful"] is None
     assert step["memoryByteSecondsPerUseful"] is None
 
 
-def test_engine_share_is_reported_separately(tmp_path):
+def test_engine_and_agents_are_reported_separately(tmp_path):
     cell = _measured_cell(tmp_path)
     idle = _phase(summarize_experiment_02_cell(cell, tmp_path, PROTOCOL), "idle")
     assert idle["workingSetBytes"]["mean"] == 1000.0
     assert idle["engineWorkingSetMeanBytes"] == 100.0
+    assert idle["observersWorkingSetMeanBytes"] == 50.0
     assert idle["containersMax"] == 1
+    assert idle["coverage"] == {
+        "deployment": "complete",
+        "engine": "complete",
+        "observers": "complete",
+    }
+
+
+def test_gap_invalidates_resource_means_and_maxima(tmp_path):
+    cell = _measured_cell(tmp_path, skip=(1010, 1015))
+    warmup = _phase(summarize_experiment_02_cell(cell, tmp_path, PROTOCOL), "warmup")
+    assert warmup["workingSetBytes"]["mean"] is None
+    assert warmup["workingSetBytes"]["max"] is None
+    assert warmup["workingSetBytes"]["coverage"] == "gap"
+    assert warmup["containersMax"] is None
+    # The ledger is intact, so the service values stand.
+    assert warmup["withinThreshold"] == 10
+
+
+def test_invalid_idle_coverage_makes_resource_deltas_unknown(tmp_path):
+    cell = _measured_cell(tmp_path, skip=(1000, 1005))
+    step = _phase(summarize_experiment_02_cell(cell, tmp_path, PROTOCOL), "step-01")
+    assert step["workingSetBytes"]["mean"] == 1000.0
+    assert step["workingSetDeltaFromIdle"] is None
+
+
+def test_scheduler_gap_is_partial_and_direct_reference_is_not_applicable(tmp_path):
+    complete = summarize_experiment_02_cell(
+        _measured_cell(tmp_path / "a"), tmp_path / "a", PROTOCOL
+    )
+    assert complete["schedulerCoverage"] == "complete"
+    assert complete["schedulerSamples"] == SCHEDULER
+    failed = summarize_experiment_02_cell(
+        _measured_cell(tmp_path / "b", scrapes=_scrapes(failed_at=1015)),
+        tmp_path / "b",
+        PROTOCOL,
+    )
+    assert failed["schedulerCoverage"] == "partial"
+    direct = summarize_experiment_02_cell(
+        _measured_cell(tmp_path / "c", key="direct-reference"), tmp_path / "c", PROTOCOL
+    )
+    assert (direct["schedulerCoverage"], direct["schedulerSamples"]) == (
+        "not_applicable",
+        None,
+    )
 
 
 def test_report_lists_incomplete_cells_without_values(tmp_path):
@@ -168,4 +257,6 @@ def test_report_lists_incomplete_cells_without_values(tmp_path):
     assert incomplete[0]["configuration"] == "direct-reference"
     assert incomplete[0]["cpuSecondsPerUseful"] == ""
     step = next(row for row in rows if row["phase"] == "step-01")
-    assert float(step["cpuSecondsPerUseful"]) == 0.25
+    assert float(step["cpuSecondsPerUseful"]) == 0.3
+    assert step["deploymentCoverage"] == "complete"
+    assert step["schedulerCoverage"] == "complete"
