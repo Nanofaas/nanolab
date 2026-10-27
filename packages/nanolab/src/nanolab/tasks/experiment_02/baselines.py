@@ -233,6 +233,11 @@ class TinyFaas(_Baseline):
                     (
                         "sh",
                         "-c",
+                        # A failed upload may leave handlers tinyFaaS no
+                        # longer tracks: never upload over them.
+                        '[ -z "$(docker ps -aq --filter label=tinyfaas-function=qr)" ]'
+                        " || { echo 'handlers of a failed upload remain' >&2;"
+                        " exit 1; }\n"
                         f"python3 -c '{upload}' {self.root}/upload.json"
                         " | curl -fsS --data-binary @- http://127.0.0.1:8080/upload",
                     )

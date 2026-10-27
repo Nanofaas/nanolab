@@ -1,6 +1,8 @@
 """tinyFaaS, Serverledge and Fn: started in the budget, configured from the protocol."""
 
 import json
+import os
+import subprocess
 
 import yaml
 
@@ -102,3 +104,27 @@ def test_serverledge_pool_matches_the_budget(tmp_path):
     started = " ".join(" ".join(command) for command in spec["start"])
     assert "memory: 1024" in started
     assert "cpus: 1.5" in started
+
+
+def test_tinyfaas_never_uploads_over_a_failed_upload(tmp_path):
+    # A failed upload can leave handlers tinyFaaS no longer tracks; uploading
+    # again would measure them too, so the retry fails instead.
+    [command] = _spec(TinyFaas(), tmp_path)["register"]["commands"]
+    calls = tmp_path / "calls"
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for tool, out in (("docker", "abc123"), ("curl", ""), ("python3", "{}")):
+        (tools / tool).write_text(
+            f'#!/bin/sh\necho {tool} "$@" >> {calls}\necho {out}\n'
+        )
+        (tools / tool).chmod(0o755)
+    done = subprocess.run(
+        command,
+        env={**os.environ, "PATH": f"{tools}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode != 0
+    assert "curl" not in calls.read_text()
+    assert "label=tinyfaas-function=qr" in calls.read_text()
