@@ -4,6 +4,7 @@ from nanolab.devtools.package_report import (
     PackageMetrics,
     calculate_metrics,
     format_metrics_table,
+    top_level_packages,
 )
 
 
@@ -65,3 +66,12 @@ def test_format_metrics_table_includes_header_and_package_rows() -> None:
     assert "incoming" in table
     assert "instability" in table
     assert "nanolab.core" in table
+
+
+def test_the_report_covers_every_top_level_package() -> None:
+    packages = top_level_packages()
+
+    assert {"nanolab.app", "nanolab.core", "nanolab.tasks", "nanolab.release"} <= set(
+        packages
+    )
+    assert "nanolab.assets" not in packages  # data, not a package

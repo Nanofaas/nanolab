@@ -8,23 +8,14 @@ them. Run as a script it prints that table for this repository.
 from __future__ import annotations
 
 import argparse
+import importlib
+import pkgutil
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 import grimp
 
 ROOT_PACKAGE = "nanolab"
-TOP_LEVEL_PACKAGES = (
-    "nanolab.app",
-    "nanolab.cli",
-    "nanolab.config",
-    "nanolab.core",
-    "nanolab.devtools",
-    "nanolab.functions",
-    "nanolab.plans",
-    "nanolab.tui",
-    "nanolab.workspace",
-)
 
 
 @dataclass(frozen=True)
@@ -133,10 +124,24 @@ def _iter_grimp_edges(root_package: str) -> list[tuple[str, str]]:
     return edges
 
 
+def top_level_packages(root_package: str = ROOT_PACKAGE) -> tuple[str, ...]:
+    """Return every package directly under `root_package`, found, not listed.
+
+    A hand-kept list fell behind: it named nine of the seventeen packages, so
+    the report measured half of the product.
+    """
+    root = importlib.import_module(root_package)
+    return tuple(
+        f"{root_package}.{module.name}"
+        for module in sorted(pkgutil.iter_modules(root.__path__), key=lambda m: m.name)
+        if module.ispkg
+    )
+
+
 def build_current_metrics() -> list[PackageMetrics]:
     """Measure this checkout and return one record per top-level package."""
     return calculate_metrics(
-        packages=TOP_LEVEL_PACKAGES,
+        packages=top_level_packages(),
         edges=_iter_grimp_edges(ROOT_PACKAGE),
     )
 

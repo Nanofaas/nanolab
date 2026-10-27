@@ -17,13 +17,17 @@ app = typer.Typer(
 )
 
 
-@app.command("tui")
-def tui() -> None:
-    """Launch the interactive Rich TUI."""
+def _launch_tui() -> None:
     from nanolab.tui.app import NanofaasTUI
 
     setup_ui()
     NanofaasTUI().run()
+
+
+@app.command("tui")
+def tui() -> None:
+    """Launch the interactive Rich TUI."""
+    _launch_tui()
 
 
 install_product_commands(app)
@@ -33,14 +37,11 @@ install_comparison_commands(app)
 
 def main() -> None:
     """Run the CLI, or the TUI when invoked with no arguments at all."""
-    setup_ui()
     install_rich_tracebacks(show_locals=False)
-    # No arguments → launch the interactive Rich TUI
     if len(sys.argv) == 1:
-        from nanolab.tui.app import NanofaasTUI
-
-        NanofaasTUI().run()
+        _launch_tui()
         return
+    setup_ui()
     app()
 
 
