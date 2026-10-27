@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from nanolab.tasks.heap_analysis import mat
 from nanolab.tasks.heap_analysis.mat import (
     _LOCK_PATH,
     REQUIRED_REPORTS,
@@ -56,8 +57,6 @@ for dump, report_id in required:
     name = dump + "-" + report_id.split(":")[-1] + ".zip"
     content = os.urandom(size)
     (reports / name).write_bytes(content)
-    if mode == "unreadable" and report_id == "org.eclipse.mat.api:suspects2":
-        os.chmod(reports / name, 0)
     invocations.append(
         {
             "dump": dump,
@@ -312,22 +311,26 @@ def test_run_manifest_records_the_mat_version_from_the_lock_file(tmp_path):
 
 
 def test_run_degrades_to_non_pass_instead_of_raising_on_an_unreadable_report(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
     # A report can become unreadable between being written and being hashed
     # (a permission race, a truncated write, disk pressure). run() must still
     # publish a manifest rather than let describe_artifact's OSError escape.
-    manifest_path, request = _run_with_fake_docker(tmp_path, mode="unreadable")
-    try:
-        manifest = json.loads(manifest_path.read_text())
-        assert manifest["status"] != "PASS"
-        assert any(
-            "unreadable" in error and "suspects2" in error
-            for error in manifest["errors"]
-        )
-    finally:
-        broken = request.analysis_dir / "reports" / "final-suspects2.zip"
-        broken.chmod(0o644)
+    # Raised directly: file permissions do not stop a test run as root.
+    describe = mat.describe_artifact
+
+    def unreadable(path: Path) -> dict[str, object]:
+        if path.name == "final-suspects2.zip":
+            raise PermissionError(13, "Permission denied", str(path))
+        return describe(path)
+
+    monkeypatch.setattr(mat, "describe_artifact", unreadable)
+    manifest_path, _request = _run_with_fake_docker(tmp_path)
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["status"] != "PASS"
+    assert any(
+        "unreadable" in error and "suspects2" in error for error in manifest["errors"]
+    )
 
 
 def _docker_calls(tmp_path):
