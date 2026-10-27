@@ -56,11 +56,13 @@ class _Baseline:
 
 
 # FunLess seeds a guest token in its core container at every start.
-_FUNLESS_TOKEN = "sudo docker exec e02-core-1 sed -n 's/^Guest=//p' /tmp/funless/tokens"
+_FUNLESS_READ_GUEST = (
+    "sudo docker exec e02-core-1 sed -n 's/^Guest=//p' /tmp/funless/tokens"
+)
 _FUNLESS_HEADERS = (
     "sh",
     "-c",
-    f'printf \'{{"Authorization":"Bearer %s"}}\' "$({_FUNLESS_TOKEN})"',
+    f'printf \'{{"Authorization":"Bearer %s"}}\' "$({_FUNLESS_READ_GUEST})"',
 )
 
 
@@ -79,7 +81,7 @@ class FunLess(_Baseline):
         evidence: Path,
     ) -> dict[str, float] | None:
         """Bring the compose project up, create module and function, then probe."""
-        bearer = f'-H "Authorization: Bearer $({_FUNLESS_TOKEN})"'
+        bearer = f'-H "Authorization: Bearer $({_FUNLESS_READ_GUEST})"'
         return _start(
             vm,
             images=(),
