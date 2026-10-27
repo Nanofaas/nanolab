@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from typing import cast
 
 from tui_toolkit.brand import DEFAULT_BRAND, AppBrand
+from tui_toolkit.console import MAX_CONTENT_COLS, _apply_width
 from tui_toolkit.theme import DEFAULT_THEME, Theme
 
 
@@ -24,7 +25,7 @@ class UIContext:
 
     theme: Theme = DEFAULT_THEME
     brand: AppBrand = DEFAULT_BRAND
-    max_content_cols: int = 140
+    max_content_cols: int = MAX_CONTENT_COLS
     content_width: int | None = None  # populated by init_ui()
 
 
@@ -44,12 +45,7 @@ def init_ui(ctx: UIContext | None = None) -> UIContext:
     resolved = cast(UIContext, replace(base, content_width=width))
     _ctx_shared = resolved
     _ctx_var.set(resolved)
-    try:
-        from tui_toolkit.console import _apply_width
-
-        _apply_width(width)
-    except ImportError:
-        pass
+    _apply_width(width)
     return resolved
 
 

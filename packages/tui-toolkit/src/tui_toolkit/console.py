@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from rich.console import Console
 
-_MAX_CONTENT_COLS = 140
+# The widest content any screen renders, whatever the terminal offers.
+MAX_CONTENT_COLS = 140
 
 console = Console(highlight=False)
 
-_content_width: int = _MAX_CONTENT_COLS
+_content_width: int = MAX_CONTENT_COLS
 
 
 def get_content_width() -> int:
@@ -20,4 +21,4 @@ def _apply_width(width: int) -> None:
     """Set the Rich Console width and the cached helper width."""
     global _content_width
     _content_width = width
-    console._width = width
+    console.width = width
