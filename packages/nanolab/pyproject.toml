@@ -55,6 +55,7 @@ nanolab = [
     "assets/k6/*",
     "assets/diagnostics/*",
     "assets/containerd-rootless/*",
+    "assets/experiment02/*",
     "assets/presets/*.yaml",
     "assets/presets/scenarios/*",
     "assets/presets/recipes/*",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 
@@ -25,6 +26,30 @@ def test_app_package_contains_only_entrypoint_modules() -> None:
 
 def test_workspace_package_exposes_shared_tooling_primitives() -> None:
     from nanolab.workspace.paths import ToolPaths, default_tool_paths  # noqa: F401
+
+
+def test_every_bundled_file_is_declared_package_data() -> None:
+    # setuptools ships a data file only when a package-data glob names it, so a
+    # file in a new asset directory is silently left out of the wheel. The
+    # scripts under assets/ are data too: no package imports them.
+    project = Path(__file__).resolve().parents[1]
+    package_root = project / "src" / "nanolab"
+    pyproject = tomllib.loads((project / "pyproject.toml").read_text())
+    patterns = pyproject["tool"]["setuptools"]["package-data"]["nanolab"]
+    declared = {path for pattern in patterns for path in package_root.glob(pattern)}
+    bundled = {
+        path
+        for path in package_root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and (path.suffix != ".py" or "assets" in path.relative_to(package_root).parts)
+    }
+
+    undeclared = sorted(
+        str(path.relative_to(package_root)) for path in bundled - declared
+    )
+
+    assert undeclared == []
 
 
 def test_one_shot_runtime_assets_and_environment_example_ship_inside_package():
