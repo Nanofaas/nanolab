@@ -260,6 +260,86 @@ def _bad_parameter() -> Iterator[None]:
         raise typer.BadParameter(str(error)) from None
 
 
+def _check_multiarch_run(
+    scenario: ScenarioConfig, environment: EnvironmentConfig, *, owned_cleanup: bool
+) -> None:
+    """Require a multiarch recipe's environment and its automatic cleanup."""
+    if (
+        scenario.workflow != "soak"
+        and scenario.recipe_profile is not None
+        and is_multiarch_recipe(scenario.recipe_profile)
+    ):
+        require_recipe_environment(scenario, environment)
+        if not owned_cleanup:
+            raise ValueError(
+                "Multiarch validation requires automatic owned cleanup; "
+                "--resume, --keep and --teardown are unsupported"
+            )
+
+
+def _check_soak_options(
+    scenario: ScenarioConfig,
+    environment: EnvironmentConfig,
+    *,
+    resume: bool,
+    only: str | None,
+    start: str | None,
+    until: str | None,
+    keep: bool,
+    teardown: bool,
+    external_urls: bool,
+) -> None:
+    """Refuse the options a soak, which owns its lifetime and endpoints, cannot take."""
+    validate_soak_selection(resume=resume, only=only, start=start, until=until)
+    if scenario.backend == "container" and environment.provider != "local":
+        raise ValueError("soak currently requires a local container environment")
+    if scenario.backend == "containerd" and (keep or teardown):
+        raise ValueError(
+            "containerd soak requires automatic owned cleanup; "
+            "--keep and --teardown are unsupported"
+        )
+    if external_urls:
+        raise ValueError(
+            "soak owns its endpoints; external URL overrides are unsupported"
+        )
+
+
+def _check_heap_analysis_run(
+    environment: EnvironmentConfig,
+    *,
+    selection: bool,
+    external_urls: bool,
+    teardown: bool,
+    keep: bool,
+) -> None:
+    """Refuse what a heap-analysis run cannot do, and require its tools."""
+    if selection:
+        raise ValueError(
+            "heap analysis requires its complete uninterrupted "
+            "lifecycle; partial selection or resume is unsupported"
+        )
+    if environment.provider != "local":
+        raise ValueError(
+            "heap analysis currently requires a local container environment"
+        )
+    if external_urls:
+        raise ValueError(
+            "heap analysis owns its endpoints; external URL overrides are unsupported"
+        )
+    if teardown:
+        raise ValueError("heap analysis does not support --teardown")
+    if keep:
+        raise ValueError(
+            "--keep is not supported for heap analysis; MAT "
+            "requires the deployment to be released"
+        )
+    missing = diagnostics.missing_executables(("docker", "k6"))
+    if missing:
+        raise ValueError(
+            "heap analysis requires local executables: " + ", ".join(missing)
+        )
+
+
 def _require_local_loadtest_tools(
     scenario: ScenarioConfig, environment: EnvironmentConfig
 ) -> None:
@@ -814,20 +894,12 @@ def install_product_commands(
     ) -> None:
         scenario_config = load_scenario(scenario)
         environment_config = load_environment(environment)
-        try:
-            if (
-                scenario_config.workflow != "soak"
-                and scenario_config.recipe_profile is not None
-                and is_multiarch_recipe(scenario_config.recipe_profile)
-            ):
-                require_recipe_environment(scenario_config, environment_config)
-                if resume or keep or teardown:
-                    raise ValueError(
-                        "Multiarch validation requires automatic owned cleanup; "
-                        "--resume, --keep and --teardown are unsupported"
-                    )
-        except ValueError as error:
-            raise typer.BadParameter(str(error)) from None
+        with _bad_parameter():
+            _check_multiarch_run(
+                scenario_config,
+                environment_config,
+                owned_cleanup=not (resume or keep or teardown),
+            )
         with _bad_parameter():
             validate_contract_options(
                 scenario_config,
@@ -845,26 +917,18 @@ def install_product_commands(
         release = scenario_config.workflow == "release"
         if scenario_config.workflow == "soak":
             try:
-                validate_soak_selection(
-                    resume=resume, only=only, start=start, until=until
+                _check_soak_options(
+                    scenario_config,
+                    environment_config,
+                    resume=resume,
+                    only=only,
+                    start=start,
+                    until=until,
+                    keep=keep,
+                    teardown=teardown,
+                    external_urls=control_plane_url is not None
+                    or prometheus_url is not None,
                 )
-                if (
-                    scenario_config.backend == "container"
-                    and environment_config.provider != "local"
-                ):
-                    raise ValueError(
-                        "soak currently requires a local container environment"
-                    )
-                if scenario_config.backend == "containerd" and (keep or teardown):
-                    raise ValueError(
-                        "containerd soak requires automatic owned cleanup; "
-                        "--keep and --teardown are unsupported"
-                    )
-                if control_plane_url is not None or prometheus_url is not None:
-                    raise ValueError(
-                        "soak owns its endpoints; external URL overrides are "
-                        "unsupported"
-                    )
                 if teardown:
                     if keep or run_dir is None:
                         raise ValueError(
@@ -898,36 +962,15 @@ def install_product_commands(
             except ValueError as error:
                 raise typer.BadParameter(str(error)) from None
         if scenario_config.workflow == "heap-analysis":
-            try:
-                if resume or only or start or until:
-                    raise ValueError(
-                        "heap analysis requires its complete uninterrupted "
-                        "lifecycle; partial selection or resume is unsupported"
-                    )
-                if environment_config.provider != "local":
-                    raise ValueError(
-                        "heap analysis currently requires a local container environment"
-                    )
-                if control_plane_url is not None or prometheus_url is not None:
-                    raise ValueError(
-                        "heap analysis owns its endpoints; external URL "
-                        "overrides are unsupported"
-                    )
-                if teardown:
-                    raise ValueError("heap analysis does not support --teardown")
-                if keep:
-                    raise ValueError(
-                        "--keep is not supported for heap analysis; MAT "
-                        "requires the deployment to be released"
-                    )
-                missing = diagnostics.missing_executables(("docker", "k6"))
-                if missing:
-                    raise ValueError(
-                        "heap analysis requires local executables: "
-                        + ", ".join(missing)
-                    )
-            except ValueError as error:
-                raise typer.BadParameter(str(error)) from None
+            with _bad_parameter():
+                _check_heap_analysis_run(
+                    environment_config,
+                    selection=bool(resume or only or start or until),
+                    external_urls=control_plane_url is not None
+                    or prometheus_url is not None,
+                    teardown=teardown,
+                    keep=keep,
+                )
         if release and environment is None:
             raise typer.BadParameter("release workflow requires --environment")
         if teardown:
@@ -1145,24 +1188,19 @@ def install_product_commands(
         with _bad_parameter():
             validate_cli_container_options(scenario_config, environment_config)
         if scenario_config.workflow == "soak":
-            try:
-                validate_soak_selection(
-                    resume=False, only=only, start=start, until=until
+            with _bad_parameter():
+                _check_soak_options(
+                    scenario_config,
+                    environment_config,
+                    resume=False,
+                    only=only,
+                    start=start,
+                    until=until,
+                    keep=False,
+                    teardown=False,
+                    external_urls=control_plane_url is not None
+                    or prometheus_url is not None,
                 )
-                if (
-                    scenario_config.backend == "container"
-                    and environment_config.provider != "local"
-                ):
-                    raise ValueError(
-                        "soak currently requires a local container environment"
-                    )
-                if control_plane_url is not None or prometheus_url is not None:
-                    raise ValueError(
-                        "soak owns its endpoints; external URL overrides are "
-                        "unsupported"
-                    )
-            except ValueError as error:
-                raise typer.BadParameter(str(error)) from None
         if scenario_config.workflow == "heap-analysis":
             try:
                 if only or start or until:
