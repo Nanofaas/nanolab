@@ -12,6 +12,7 @@ from nanolab.tasks.experiment_02.platforms import (
     WORKDIR,
     DirectReference,
     NanofaasPlatform,
+    _record_containers,
     leftover_containers,
 )
 from nanolab.workspace.paths import discover_tool_root
@@ -310,3 +311,20 @@ def test_teardown_removes_containers_created_while_it_runs(monkeypatch):
 
     platforms.baseline_teardown(vm(RecordingProvider(handler=handler)))
     assert running == []
+
+
+def test_recorded_containers_leave_out_their_environment(tmp_path):
+    # FunLess's SECRET_KEY_BASE signs its tokens: no environment is evidence.
+    inspected = [{"Name": "/e02-core-1", "Config": {"Env": ["SECRET_KEY_BASE=s3"]}}]
+
+    def handler(argv, _env):
+        if argv[:3] == ("docker", "ps", "-a"):
+            return Result(0, "e02-core-1\n")
+        if argv[:2] == ("docker", "inspect"):
+            return Result(0, json.dumps(inspected))
+        return None
+
+    _record_containers(vm(RecordingProvider(handler=handler)), tmp_path)
+    [recorded] = json.loads((tmp_path / "containers.json").read_text())
+    assert recorded["Name"] == "/e02-core-1"
+    assert "s3" not in (tmp_path / "containers.json").read_text()

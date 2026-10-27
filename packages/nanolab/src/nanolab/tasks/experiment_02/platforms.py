@@ -150,10 +150,16 @@ def _record_containers(vm: Vm, evidence: Path) -> None:
     evidence.mkdir(parents=True, exist_ok=True)
     names = leftover_containers(vm)
     if names:
-        inspected = comparison_remote_command(
-            vm.provider, vm.request, ("docker", "inspect", *names)
+        inspected = json.loads(
+            comparison_remote_command(
+                vm.provider, vm.request, ("docker", "inspect", *names)
+            )
         )
-        (evidence / "containers.json").write_text(inspected)
+        # A container's environment may hold a platform's secret (FunLess's
+        # SECRET_KEY_BASE signs its tokens): it is never evidence.
+        for container in inspected:
+            container.get("Config", {}).pop("Env", None)
+        (evidence / "containers.json").write_text(json.dumps(inspected, indent=2))
 
 
 def _ensure_images(vm: Vm, images: Sequence[str]) -> None:
