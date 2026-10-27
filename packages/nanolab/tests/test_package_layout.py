@@ -42,6 +42,8 @@ def test_every_bundled_file_is_declared_package_data() -> None:
         for path in package_root.rglob("*")
         if path.is_file()
         and "__pycache__" not in path.parts
+        and path.name != "ruff.toml"  # lint settings for the assets, not an asset
+        and not any(part.startswith(".") for part in path.parts)
         and (path.suffix != ".py" or "assets" in path.relative_to(package_root).parts)
     }
 

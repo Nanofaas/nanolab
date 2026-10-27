@@ -1,0 +1,14 @@
+# The scripts here are data the wheel ships. They run on VMs and inside the
+# diagnostic image against the stdlib those carry, so the library conventions
+# (docstrings, pathlib, typing) do not apply. They are still checked for what
+# breaks a script at run time, and left byte for byte as written.
+target-version = "py311"
+# Beside the package's own cache, not inside the shipped tree.
+cache-dir = "../../../.ruff_cache"
+line-length = 88
+
+[lint]
+select = ["E9", "F", "B", "PLE"]
+
+[format]
+exclude = ["*"]

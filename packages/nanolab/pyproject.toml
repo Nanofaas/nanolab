@@ -103,13 +103,11 @@ target-version = "py312"
 line-length = 88
 # ruff's built-in exclude list has `dist` but not `build`, so a setuptools build
 # tree left in the package gets linted as if it were source. The bundled assets
-# are the other exclusion: they are data that ships inside the wheel, and the
-# helper scripts in there run inside the diagnostic image against the stdlib that
-# image carries, so the library conventions -- docstrings on every function,
-# pathlib over the os module -- do not apply to them. basedpyright and bandit
-# exclude the same directory, and scripts/validate-diagnostic-helper.py is what
-# actually checks those files.
-extend-exclude = ["build", "dist", "src/nanolab/assets"]
+# carry their own src/nanolab/assets/ruff.toml: they are data that ships inside
+# the wheel, and the scripts in there run on VMs and inside the diagnostic image
+# against the stdlib there, so only what breaks a script at run time is checked.
+# basedpyright and bandit exclude the directory.
+extend-exclude = ["build", "dist"]
 
 [tool.ruff.lint]
 select = [
