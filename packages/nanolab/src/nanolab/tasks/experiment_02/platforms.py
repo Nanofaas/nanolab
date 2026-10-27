@@ -141,6 +141,9 @@ def baseline_teardown(vm: Vm) -> None:
     _ = exec_status(vm, ("sudo", "systemctl", "stop", PLATFORM_UNIT))
     _ = exec_status(vm, ("sudo", "docker", "compose", "-p", "e02", "down", "-v"))
     _remove_containers(vm)
+    # tinyFaaS creates a network per function; left over, they exhaust the
+    # engine's address pools for the next platform.
+    _ = exec_status(vm, ("docker", "network", "prune", "-f"))
 
 
 def _record_containers(vm: Vm, evidence: Path) -> None:

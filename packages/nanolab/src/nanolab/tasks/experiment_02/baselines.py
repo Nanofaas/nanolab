@@ -193,7 +193,7 @@ class TinyFaas(_Baseline):
     """tinyFaaS eff00d0: its manager on the host, the function in Docker.
 
     The `binary` runtime forks `fn.sh` per request; HTTP on the entry port,
-    CoAP and gRPC off.
+    CoAP and gRPC on their default ports, unused.
     """
 
     root: PurePosixPath = OPT / "tinyfaas"
@@ -220,11 +220,10 @@ class TinyFaas(_Baseline):
             commands=[
                 host_service(
                     ("sh", "-c", f"cd {self.root} && exec ./tinyfaas-linux-amd64"),
-                    env={
-                        "http_PORT": str(ENTRY_PORT),
-                        "coap_PORT": "-1",
-                        "grpc_PORT": "-1",
-                    },
+                    # CoAP and gRPC keep their defaults: rproxy at eff00d0
+                    # exits with fewer than two protocols
+                    # (cmd/rproxy/main.go:22).
+                    env={"http_PORT": str(ENTRY_PORT)},
                 )
             ],
             api="http://127.0.0.1:8080/list",

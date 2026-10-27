@@ -252,7 +252,9 @@ def test_teardown_stops_units_and_compose_projects():
     commands = provider.commands()
     assert ("sudo", "systemctl", "stop", PLATFORM_UNIT) in commands
     assert ("sudo", "docker", "compose", "-p", "e02", "down", "-v") in commands
-    assert commands[-1][:3] == ("docker", "ps", "-a")
+    # tinyFaaS creates a network per function; leftovers exhaust Docker's pools.
+    assert ("docker", "network", "prune", "-f") in commands
+    assert commands[-1] == ("docker", "network", "prune", "-f")
 
 
 def test_teardown_waits_out_containers_a_platform_is_already_removing(monkeypatch):

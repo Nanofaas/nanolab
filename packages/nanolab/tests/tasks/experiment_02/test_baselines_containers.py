@@ -48,8 +48,10 @@ def test_tinyfaas_runs_its_manager_in_the_unit_on_the_entry_port(tmp_path):
     spec = _spec(TinyFaas(), tmp_path)
     [manager] = spec["start"]
     unit = " ".join(manager)
-    for variable in ("http_PORT=30080", "coap_PORT=-1", "grpc_PORT=-1"):
-        assert variable in unit
+    assert "http_PORT=30080" in unit
+    # rproxy at eff00d0 exits with fewer than two protocols
+    # (cmd/rproxy/main.go:22), so CoAP and gRPC keep their defaults.
+    assert "_PORT=-1" not in unit
     _unit(manager)
     target = TinyFaas().target("10.0.0.4")
     assert (target.url, target.extractor) == ("http://10.0.0.4:30080/qr", "json-base64")
