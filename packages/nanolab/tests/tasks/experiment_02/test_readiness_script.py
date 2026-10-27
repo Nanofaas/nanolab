@@ -212,3 +212,33 @@ def test_serverledge_result_needs_its_inner_json_string(tmp_path, platform):
     )
     assert result["attempts"] == 2
     assert "first" in result
+
+
+def test_registration_commands_run_after_the_api_and_are_timed(tmp_path, platform):
+    marker = tmp_path / "registered"
+    platform.routes.update(
+        {("GET", "/health"): [(200, {})], ("POST", "/invoke"): [(200, ENVELOPE)]}
+    )
+    result = _run(
+        tmp_path,
+        platform,
+        register={
+            "commands": [
+                [sys.executable, "-c", "pass"],
+                [sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"],
+            ]
+        },
+    )
+    assert marker.exists()
+    assert result["api"] <= result["registered"] <= result["first"]
+
+
+def test_failed_registration_command_is_retried_until_the_deadline(tmp_path, platform):
+    platform.routes[("GET", "/health")] = [(200, {})]
+    result = _run(
+        tmp_path,
+        platform,
+        timeoutSeconds=0.5,
+        register={"commands": [[sys.executable, "-c", "raise SystemExit(1)"]]},
+    )
+    assert result["timeout"] == "registered"

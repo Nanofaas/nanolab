@@ -282,7 +282,9 @@ def run_cell(
         if timings is None:
             timed_out = True
         else:
-            outside = processes_outside(_run(stack, process_listing_argv()))
+            outside = processes_outside(
+                _run(stack, process_listing_argv()), platform.host_commands
+            )
             if outside:
                 (diagnostics / "processes-outside.txt").write_text(
                     "\n".join(outside) + "\n"

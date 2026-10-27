@@ -31,7 +31,7 @@ from nanolab.comparison.prepare import (
 )
 from nanolab.config.experiment_01 import invocation_body
 from nanolab.config.experiment_02 import Experiment02Protocol
-from nanolab.tasks.experiment_02.budget import REGISTRY_CONTAINER
+from nanolab.tasks.experiment_02.budget import PLATFORM_UNIT, REGISTRY_CONTAINER
 from nanolab.tasks.experiment_02.generator import K6Target
 from nanolab.tasks.experiment_02.vm import Vm, exec_status
 from nanolab.workspace.paths import bundled_assets_root
@@ -65,6 +65,11 @@ class Platform(Protocol):
     @property
     def metrics_url(self) -> str | None:
         """Return where the sampler scrapes the platform's metrics, if anywhere."""
+        ...
+
+    @property
+    def host_commands(self) -> tuple[str, ...]:
+        """Return the `comm` of the platform's processes that run outside Docker."""
         ...
 
     def start(
@@ -113,6 +118,13 @@ def _remove_containers(vm: Vm) -> None:
         _ = comparison_remote_command(
             vm.provider, vm.request, ("docker", "rm", "-f", *names)
         )
+
+
+def baseline_teardown(vm: Vm) -> None:
+    """Stop a baseline's host unit and compose project, then every container."""
+    _ = exec_status(vm, ("sudo", "systemctl", "stop", PLATFORM_UNIT))
+    _ = exec_status(vm, ("sudo", "docker", "compose", "-p", "e02", "down", "-v"))
+    _remove_containers(vm)
 
 
 def _record_containers(vm: Vm, evidence: Path) -> None:
@@ -251,6 +263,7 @@ class NanofaasPlatform:
     timeout_ms: int
     runtime: Literal["jvm", "native"] | None = None
     metrics_url: str | None = f"http://127.0.0.1:{MANAGEMENT_PORT}/actuator/prometheus"
+    host_commands: tuple[str, ...] = ()
 
     def registration(self) -> dict[str, object]:
         """Return the function registration this composition receives."""
@@ -371,6 +384,7 @@ class DirectReference:
 
     function_image: str
     metrics_url: str | None = None
+    host_commands: tuple[str, ...] = ()
 
     def commands(self, *, concurrency: int) -> list[tuple[str, ...]]:
         """Return the one container to start, publishing the runtime's port.

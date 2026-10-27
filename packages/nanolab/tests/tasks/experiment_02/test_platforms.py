@@ -237,3 +237,15 @@ def test_direct_reference_admits_the_protocols_fixed_concurrency(tmp_path):
     [function] = json.loads(provider.files[SPEC])["start"]
     assert "NANOFAAS_MAX_CONCURRENT_HANDLERS=3" in function
     assert function[-1] == "registry/rust-qr-code:e02"
+
+
+def test_teardown_stops_units_and_compose_projects():
+    from nanolab.tasks.experiment_02.budget import PLATFORM_UNIT
+    from nanolab.tasks.experiment_02.platforms import baseline_teardown
+
+    provider = RecordingProvider()
+    baseline_teardown(vm(provider))
+    commands = provider.commands()
+    assert ("sudo", "systemctl", "stop", PLATFORM_UNIT) in commands
+    assert ("sudo", "docker", "compose", "-p", "e02", "down", "-v") in commands
+    assert commands[-1][:3] == ("docker", "ps", "-a")

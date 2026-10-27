@@ -19,7 +19,9 @@ deadline does:
 1. `api` answers 2xx;
 2. the function is registered: a 201 to the registration or, after any other
    answer or none, a 200 from `check`. A registration that outlived its client
-   still registers, and a retry would only get a 409;
+   still registers, and a retry would only get a 409. A platform registered
+   by its own tools gives `{"commands": [[argv...], ...]}` instead, each of
+   which must succeed once, in order;
 3. an invocation answers with a correct PNG, judged as the generator judges
    it. An HTTP 200 carrying an error or the wrong image is not readiness, and
    the loop goes on to the deadline.
@@ -179,7 +181,23 @@ def main(argv: list[str] | None = None) -> int:
 
     register = spec.get("register")
 
+    pending = list(register.get("commands", [])) if register else []
+
+    def run_commands() -> bool:
+        # Each command must succeed once; a failure is retried, the rest wait.
+        while pending:
+            done = subprocess.run(
+                pending[0], capture_output=True, text=True, check=False
+            )
+            if done.returncode:
+                note(done.returncode, done.stderr.encode(), "command failed")
+                return False
+            pending.pop(0)
+        return True
+
     def registered() -> bool:
+        if "commands" in register:
+            return run_commands()
         status, body, _headers, error = call(
             register["url"],
             method="POST",

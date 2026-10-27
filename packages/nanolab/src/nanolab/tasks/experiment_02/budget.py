@@ -20,6 +20,7 @@ unbudgeted deployment.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 
 from nanolab.config.experiment_02 import Budget
@@ -144,6 +145,27 @@ def parse_budget(text: str) -> Budget:
     return Budget(cpus=int(quota) / int(period), memoryMiB=memory_bytes // _MIB)
 
 
+PLATFORM_UNIT = "nanolab-e02-platform"
+
+
+def host_service(
+    argv: Sequence[str], *, env: Mapping[str, str] | None = None
+) -> tuple[str, ...]:
+    """Return the command that runs a platform's host process inside the budget.
+
+    One transient unit in the measured slice; stopping it stops every process
+    the platform started outside Docker.
+    """
+    variables = [
+        part for key, value in (env or {}).items() for part in ("-E", f"{key}={value}")
+    ]
+    return (
+        "sudo", "systemd-run", "--quiet", "--collect", "--unit", PLATFORM_UNIT,
+        "--slice", SUT_SLICE, "--property=KillMode=control-group",
+        *variables, "--", *argv,
+    )  # fmt: skip
+
+
 def process_listing_argv() -> tuple[str, ...]:
     """Return the command that prints `pid comm cgroup` for every process."""
     script = (
@@ -155,10 +177,11 @@ def process_listing_argv() -> tuple[str, ...]:
     return ("sh", "-c", script)
 
 
-def processes_outside(listing: str) -> list[str]:
-    """Return the engine and container processes that escaped the budget.
+def processes_outside(listing: str, host_commands: Sequence[str] = ()) -> list[str]:
+    """Return the engine, container and platform processes that escaped the budget.
 
-    The engine's processes, and any process in a Docker scope, must be in the
+    The engine's processes, any process in a Docker scope and the platform's
+    own host processes (`host_commands`, as `comm` shows them) must be in the
     measured slice. The only exception is the infrastructure slice, which holds
     the registry by design.
     """
@@ -168,7 +191,11 @@ def processes_outside(listing: str) -> list[str]:
         if len(parts) != 3:
             continue
         _pid, command, cgroup = parts
-        engine = command in _ENGINE_COMMANDS or "/docker-" in cgroup
+        engine = (
+            command in _ENGINE_COMMANDS
+            or command in host_commands
+            or "/docker-" in cgroup
+        )
         if not engine or cgroup.startswith((_SUT_CGROUP, _INFRA_CGROUP)):
             continue
         outside.append(line.strip())

@@ -124,3 +124,27 @@ def test_processes_outside_the_slice_are_reported():
         "101 containerd-shim /system.slice/containerd.service",
         "105 qr-code /system.slice/docker-ef.scope",
     ]
+
+
+def test_platform_unit_runs_in_the_sut_slice():
+    from nanolab.tasks.experiment_02.budget import PLATFORM_UNIT, host_service
+
+    argv = host_service(("spin", "up"), env={"A": "1"})
+    assert argv[:2] == ("sudo", "systemd-run")
+    assert argv[argv.index("--slice") + 1] == "nanolab-sut.slice"
+    assert argv[argv.index("--unit") + 1] == PLATFORM_UNIT
+    assert "--property=KillMode=control-group" in argv
+    assert argv[argv.index("-E") : argv.index("-E") + 2] == ("-E", "A=1")
+    assert argv[-3:] == ("--", "spin", "up")
+
+
+def test_processes_outside_checks_declared_host_commands():
+    listing = (
+        "301 spin /system.slice/run-x.service\n"
+        "302 spin /nanolab.slice/nanolab-sut.slice/nanolab-e02-platform.service\n"
+        "303 bash /user.slice/session-1.scope\n"
+    )
+    assert processes_outside(listing, host_commands=("spin",)) == [
+        "301 spin /system.slice/run-x.service"
+    ]
+    assert processes_outside(listing) == []

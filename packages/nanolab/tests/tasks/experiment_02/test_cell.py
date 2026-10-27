@@ -62,6 +62,7 @@ class FakePlatform:
     ready: bool = True
     failure: Exception | None = None
     metrics_url: str | None = METRICS
+    host_commands: tuple[str, ...] = ()
     calls: list[str] = field(default_factory=list)
 
     def start(self, vm: Vm, *, protocol, payload, evidence):
