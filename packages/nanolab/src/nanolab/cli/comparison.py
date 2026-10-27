@@ -113,7 +113,7 @@ from nanolab.tasks.experiment_02.baselines import (
     Serverledge,
     Spin,
     TinyFaas,
-    install_baselines,
+    ensure_baselines,
 )
 from nanolab.tasks.experiment_02.budget import slice_setup_operation
 from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS, run_cell
@@ -601,6 +601,9 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
                     "to measure a baseline"
                 )
             workloads_root = Path(location)
+        workloads = (
+            None if workloads_root is None else capture_workloads(workloads_root)
+        )
         experiment = experiment_02_identity(
             protocol,
             cells,
@@ -608,9 +611,7 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             script=script,
             selected=selected,
             seed=protocol.order_seed,
-            workloads=None
-            if workloads_root is None
-            else capture_workloads(workloads_root),
+            workloads=workloads,
         )
         root = (run_dir or paths.runs_dir / "experiment-02").resolve()
         manifest = read_comparison_manifest(root)
@@ -732,7 +733,7 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
         stack = Vm(provider, request)
         loadgen = Vm(provider, requests["loadgen"])
         installed: dict[str, dict[str, str]] = {}
-        if workloads_root is not None:
+        if workloads_root is not None and workloads is not None:
             # Outside the run's owned staging, which a finished run removes: a
             # resume verifies these artifacts instead of rebuilding them.
             workload_dir = PurePosixPath(vm_remote_home(request)) / f"nanolab-e02-{tag}"
@@ -744,16 +745,14 @@ def _compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
                 png_sha256=protocol.png_sha256,
                 record=root / "prepare" / "workloads.json",
             )
-            installed = install_baselines(
-                stack, baselines, source=workload_dir / WORKLOAD, artifacts=artifacts
+            installed = ensure_baselines(
+                stack,
+                baselines,
+                source=workload_dir / WORKLOAD,
+                artifacts=artifacts,
+                workload_tree=workloads["tree"],
+                record=root / "prepare" / "baselines.json",
             )
-            record = root / "prepare" / "baselines.json"
-            if record.is_file() and json.loads(record.read_text()) != installed:
-                raise RuntimeError(
-                    f"the baselines' installation changed since {record}; "
-                    "start a new run directory"
-                )
-            record.write_text(json.dumps(installed, indent=2) + "\n")
         # The address the loadgen reaches the stack at, through the ports
         # `secure_release_endpoints` opened to it.
         host = str(provider.connection_host(request))  # type: ignore[attr-defined]

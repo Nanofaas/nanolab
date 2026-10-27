@@ -588,25 +588,45 @@ def _observe(stack: Vm, key: str, root: PurePosixPath) -> str:
     return exec_status(stack, ("sh", "-c", "; ".join(probes))).stdout
 
 
+def baseline_identity(
+    key: str, *, artifacts: Mapping[str, str], workload_tree: str
+) -> str:
+    """Return the identity of one baseline's installation.
+
+    It hashes everything the installation is made of: what the baseline pins,
+    its install script (the FunLess compose file included), the workload tree
+    the wrapper files are copied from, and the built artifacts' sha256.
+    """
+    script = _install_script(
+        key, PurePosixPath("SOURCE"), PurePosixPath("ROOT"), "IDENTITY"
+    )
+    return hashlib.sha256(
+        json.dumps(
+            [key, _PINS[key], script, workload_tree, dict(artifacts)], sort_keys=True
+        ).encode()
+    ).hexdigest()[:16]
+
+
 def install_baselines(
     stack: Vm,
     keys: Sequence[str],
     *,
     source: PurePosixPath,
     artifacts: Mapping[str, str],
+    workload_tree: str,
 ) -> dict[str, dict[str, str]]:
     """Install each selected baseline once per identity, beside any other.
 
-    The identity hashes what the baseline pins and the wrappers' sha256. Each
-    identity has its own directory and image tag, so another run on the same
-    VM never changes what this one installed. The marker is written only after
-    the whole script succeeded. Everything happens before any cell.
+    Each identity (`baseline_identity`) has its own directory and image tag,
+    so another run on the same VM never changes what this one installed. The
+    marker is written only after the whole script succeeded. Everything
+    happens before any cell.
     """
     installed: dict[str, dict[str, str]] = {}
     for key in keys:
-        identity = hashlib.sha256(
-            json.dumps([key, _PINS[key], dict(artifacts)], sort_keys=True).encode()
-        ).hexdigest()[:16]
+        identity = baseline_identity(
+            key, artifacts=artifacts, workload_tree=workload_tree
+        )
         root = OPT / key / identity
         marker = root / ".installed"
         if exec_status(stack, ("test", "-f", str(marker))).return_code:
@@ -630,4 +650,42 @@ def install_baselines(
             "image": _image(key, identity) if key in ("serverledge", "fn") else "",
             "observed": _observe(stack, key, root),
         }
+    return installed
+
+
+def ensure_baselines(
+    stack: Vm,
+    keys: Sequence[str],
+    *,
+    source: PurePosixPath,
+    artifacts: Mapping[str, str],
+    workload_tree: str,
+    record: Path,
+) -> dict[str, dict[str, str]]:
+    """Install the baselines for a run; on a resume, require the ones recorded.
+
+    `record` keeps what the run's first installation observed. A resume whose
+    inputs make another identity is refused before anything is installed, one
+    whose installation no longer holds what was observed after.
+    """
+    recorded = json.loads(record.read_text()) if record.is_file() else None
+    changed = (
+        f"the baselines' installation changed since {record}; start a new run directory"
+    )
+    if recorded is not None:
+        identities = {
+            key: baseline_identity(
+                key, artifacts=artifacts, workload_tree=workload_tree
+            )
+            for key in keys
+        }
+        if identities != {key: entry["identity"] for key, entry in recorded.items()}:
+            raise RuntimeError(changed)
+    installed = install_baselines(
+        stack, keys, source=source, artifacts=artifacts, workload_tree=workload_tree
+    )
+    if recorded is not None and recorded != installed:
+        raise RuntimeError(changed)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps(installed, indent=2) + "\n")
     return installed

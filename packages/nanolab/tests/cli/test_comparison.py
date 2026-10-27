@@ -619,6 +619,7 @@ def _workloads_repository(tmp_path):
 
 
 def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_path):
+    from nanolab.tasks.experiment_02 import baselines
     from nanolab.tasks.experiment_02.baselines import Spin
 
     invoke, events, _root = _experiment_02_case(command_case, azure=True)
@@ -667,13 +668,22 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
         ),
     )
     observed = {"version": "spin 4.2.5"}
+    identity = {"spin": "id"}
     monkeypatch.setattr(
-        comparison,
+        baselines, "baseline_identity", lambda key, **kwargs: identity[key]
+    )
+    monkeypatch.setattr(
+        baselines,
         "install_baselines",
         lambda stack, keys, **kwargs: (
             events.append(("install", tuple(keys)))
             or {
-                key: {"root": f"/opt/nanolab-e02/{key}/id", "image": "", **observed}
+                key: {
+                    "identity": identity[key],
+                    "root": f"/opt/nanolab-e02/{key}/id",
+                    "image": "",
+                    **observed,
+                }
                 for key in keys
             }
         ),
@@ -716,3 +726,10 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
     observed["version"] = "spin 4.3.0"
     result = invoke(*arguments, "--fresh")
     assert result.exit_code != 0 and "changed" in str(result.exception)
+    # Inputs that make another identity stop it before anything is installed.
+    observed["version"] = "spin 4.2.5"
+    identity["spin"] = "other"
+    events.clear()
+    result = invoke(*arguments, "--fresh")
+    assert result.exit_code != 0 and "changed" in str(result.exception)
+    assert not [event for event in events if event[0] == "install"]

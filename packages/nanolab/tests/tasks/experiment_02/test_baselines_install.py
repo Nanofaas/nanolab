@@ -8,13 +8,19 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from nanolab.tasks.experiment_02 import baselines
-from nanolab.tasks.experiment_02.baselines import FNSERVER, install_baselines
+from nanolab.tasks.experiment_02.baselines import (
+    FNSERVER,
+    baseline_identity,
+    ensure_baselines,
+    install_baselines,
+)
 from nanolab.tasks.experiment_02.workload import ARTIFACTS, ensure_workloads
 
 from .fakes import RecordingProvider, Result, vm
 
 SOURCE = PurePosixPath("/home/azureuser/e02/workloads/qr-code")
 ARTIFACT_SHA = {key: f"{index}" * 64 for index, key in enumerate(ARTIFACTS)}
+TREE = "9" * 40
 
 
 def _scripts(provider: RecordingProvider) -> str:
@@ -35,7 +41,11 @@ def _installer() -> RecordingProvider:
 def test_install_verifies_spin_checksum_and_image_digests():
     provider = _installer()
     install_baselines(
-        vm(provider), ("spin", "funless", "fn"), source=SOURCE, artifacts=ARTIFACT_SHA
+        vm(provider),
+        ("spin", "funless", "fn"),
+        source=SOURCE,
+        artifacts=ARTIFACT_SHA,
+        workload_tree=TREE,
     )
     scripts = _scripts(provider)
     assert "checksums-v4.2.5.txt" in scripts and "sha256sum -c" in scripts
@@ -47,11 +57,11 @@ def test_install_verifies_spin_checksum_and_image_digests():
 def test_install_is_idempotent_per_identity():
     provider = _installer()
     first = install_baselines(
-        vm(provider), ("fn",), source=SOURCE, artifacts=ARTIFACT_SHA
+        vm(provider), ("fn",), source=SOURCE, artifacts=ARTIFACT_SHA, workload_tree=TREE
     )
     count = len(provider.commands())
     again = install_baselines(
-        vm(provider), ("fn",), source=SOURCE, artifacts=ARTIFACT_SHA
+        vm(provider), ("fn",), source=SOURCE, artifacts=ARTIFACT_SHA, workload_tree=TREE
     )
     assert again["fn"]["root"] == first["fn"]["root"]
     assert all(argv[:2] != ("sudo", "sh") for argv in provider.commands()[count:])
@@ -61,6 +71,7 @@ def test_install_is_idempotent_per_identity():
         ("fn",),
         source=SOURCE,
         artifacts={**ARTIFACT_SHA, "qr-fn": "f" * 64},
+        workload_tree=TREE,
     )
     assert changed["fn"]["root"] != first["fn"]["root"]
     assert changed["fn"]["image"] != first["fn"]["image"]
@@ -77,9 +88,74 @@ def test_install_records_what_it_observed():
 
     provider = RecordingProvider(handler=handler)
     installed = install_baselines(
-        vm(provider), ("fn",), source=SOURCE, artifacts=ARTIFACT_SHA
+        vm(provider), ("fn",), source=SOURCE, artifacts=ARTIFACT_SHA, workload_tree=TREE
     )
     assert "fnserver@sha256:16dedb58" in str(installed["fn"]["observed"])
+
+
+def test_identity_covers_the_install_script_and_the_wrappers(tmp_path, monkeypatch):
+    def identity(key: str = "funless", tree: str = TREE) -> str:
+        return baseline_identity(key, artifacts=ARTIFACT_SHA, workload_tree=tree)
+
+    first = identity()
+    assert identity() == first
+    # spin.toml, fn.sh and the Dockerfiles are in the workload tree.
+    assert identity(tree="8" * 40) != first
+    # The FunLess compose file is part of the install script.
+    assets = tmp_path / "assets"
+    (assets / "experiment02").mkdir(parents=True)
+    (assets / "experiment02" / "funless-compose.yaml").write_text("services: {}\n")
+    monkeypatch.setattr(baselines, "bundled_assets_root", lambda: assets)
+    assert identity() != first
+    # So is every command, here the Go toolchain Serverledge builds with.
+    before = identity("serverledge")
+    monkeypatch.setattr(baselines, "GOLANG", "golang:1.25")
+    assert identity("serverledge") != before
+
+
+def _ensure(provider: RecordingProvider, record: Path, **changes):
+    arguments = {"artifacts": ARTIFACT_SHA, "workload_tree": TREE, **changes}
+    return ensure_baselines(
+        vm(provider), ("fn",), source=SOURCE, record=record, **arguments
+    )
+
+
+def test_a_resume_reuses_the_recorded_installation(tmp_path):
+    provider = _installer()
+    record = tmp_path / "prepare" / "baselines.json"
+    first = _ensure(provider, record)
+    assert json.loads(record.read_text()) == first
+    count = len(provider.commands())
+    assert _ensure(provider, record) == first
+    assert all(argv[:2] != ("sudo", "sh") for argv in provider.commands()[count:])
+
+
+def test_a_resume_with_other_inputs_is_refused_before_installing(tmp_path):
+    provider = _installer()
+    record = tmp_path / "baselines.json"
+    _ = _ensure(provider, record)
+    count = len(provider.commands())
+    with pytest.raises(RuntimeError, match="installation changed"):
+        _ensure(provider, record, workload_tree="8" * 40)
+    assert provider.commands()[count:] == []
+
+
+def test_a_resume_whose_installation_drifted_is_refused(tmp_path):
+    digest = ["fnproject/fnserver@sha256:16dedb58\n"]
+
+    def handler(argv, _env):
+        if argv[:2] == ("sh", "-c") and "RepoDigests" in argv[-1]:
+            return Result(0, digest[0])
+        if argv[:2] == ("sudo", "touch"):
+            provider.files[argv[2]] = b""
+        return None
+
+    provider = RecordingProvider(handler=handler)
+    record = tmp_path / "baselines.json"
+    _ = _ensure(provider, record)
+    digest[0] = "fnproject/fnserver@sha256:0000\n"
+    with pytest.raises(RuntimeError, match="installation changed"):
+        _ensure(provider, record)
 
 
 def _run_script(tmp_path: Path, monkeypatch, key: str, fail: str) -> tuple[int, str]:
@@ -129,7 +205,11 @@ def test_a_failed_install_writes_no_marker():
     provider = RecordingProvider(handler=handler)
     with pytest.raises(RuntimeError):
         install_baselines(
-            vm(provider), ("spin",), source=SOURCE, artifacts=ARTIFACT_SHA
+            vm(provider),
+            ("spin",),
+            source=SOURCE,
+            artifacts=ARTIFACT_SHA,
+            workload_tree=TREE,
         )
     assert not any(argv[:2] == ("sudo", "touch") for argv in provider.commands())
 
