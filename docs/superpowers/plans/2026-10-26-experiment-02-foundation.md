@@ -74,24 +74,31 @@
 def test_budget_label():
     assert Budget(cpus=1.5, memoryMiB=1024).label == "cpu1.5-mem1024"
 
+
 def test_reference_budget_must_belong_to_the_grid():
     with pytest.raises(ValidationError, match="referenceBudget"):
-        protocol(budgets=[{"cpus": 2, "memoryMiB": 2048}],
-                 referenceBudget={"cpus": 1, "memoryMiB": 1024})
+        protocol(
+            budgets=[{"cpus": 2, "memoryMiB": 2048}],
+            referenceBudget={"cpus": 1, "memoryMiB": 1024},
+        )
+
 
 def test_duplicate_budgets_are_rejected():
     with pytest.raises(ValidationError, match="unique"):
         protocol(budgets=[{"cpus": 2, "memoryMiB": 2048}] * 2)
 
+
 def test_frozen_protocol_requires_png_hash():
     with pytest.raises(ValidationError, match="pngSha256"):
         protocol(status="frozen", generator=GENERATOR, pngSha256=None)
+
 
 def test_experiment_02_is_a_container_loadtest_of_qr_code_alone():
     with pytest.raises(ValidationError, match="container loadtest"):
         scenario(backend="k8s")
     with pytest.raises(ValidationError, match="experiment02 block"):
         scenario(experiment02=None)
+
 
 def test_pilot_preset_loads():
     config = load_preset("experiment-02-pilot.yaml")
@@ -158,6 +165,7 @@ def test_matrix_runs_every_pair_once_per_repetition():
         pairs = {(c.key, c.budget.label) for c in cells if c.repetition == rep}
         assert len(pairs) == 4
 
+
 def test_matrix_order_is_reproducible_and_reshuffled_per_repetition():
     a = build_experiment_02_matrix(CONFIGS, BUDGETS, 2, seed=7)
     assert a == build_experiment_02_matrix(CONFIGS, BUDGETS, 2, seed=7)
@@ -165,28 +173,45 @@ def test_matrix_order_is_reproducible_and_reshuffled_per_repetition():
     second = [c.label.rsplit(" run", 1)[0] for c in a if c.repetition == 2]
     assert first != second
 
+
 def test_cell_directory_and_label(tmp_path):
     cell = Experiment02Cell(CONFIGURATIONS_BY_KEY["nanofaas-p1-jvm"], BUDGET_2_2048, 1)
-    assert cell.run_dir(tmp_path) == tmp_path / "nanofaas-p1-jvm" / "cpu2-mem2048" / "run-1"
+    assert (
+        cell.run_dir(tmp_path)
+        == tmp_path / "nanofaas-p1-jvm" / "cpu2-mem2048" / "run-1"
+    )
     assert cell.label == "nanofaas-p1-jvm cpu2-mem2048 run 1"
 
-def test_receipt_round_trip_with_cgroup_samples(tmp_path): ...
+
+def test_receipt_round_trip_with_cgroup_samples(tmp_path):
+    ...
     # parametrizza diretto (tre file) e nanoFaaS (quattro file), required coerente;
     # read_cell_result restituisce la ricevuta; modificando i campioni -> ValueError
-def test_scheduler_evidence_is_required_only_for_nanofaas(tmp_path): ...
+
+
+def test_scheduler_evidence_is_required_only_for_nanofaas(tmp_path):
+    ...
     # senza SCHEDULER: measured rifiutato per P1; diretto valido e senza
     # SCHEDULER in notProduced, perché non applicabile
 
+
 def test_manifest_accepts_an_experiment_02_identity(): ...
 def test_manifest_rejects_an_order_of_the_wrong_length(): ...
-def test_manifest_round_trip_with_direct_reference_and_two_budgets(tmp_path): ...
+def test_manifest_round_trip_with_direct_reference_and_two_budgets(tmp_path):
+    ...
     # P1 + diretto, due budget, una ripetizione: quattro celle; nessuna recipe
     # per il diretto; new/write/read_comparison_manifest conserva tutta l'identità
-def test_direct_only_manifest_requires_the_shared_function_publisher(): ...
+
+
+def test_direct_only_manifest_requires_the_shared_function_publisher():
+    ...
     # variants=[direct-reference], profiles=[nanofaas-p1-jvm]; rimuovere il
     # produttore deve fallire, senza aggiungerlo alle celle misurate
+
+
 def test_manifest_rejects_duplicate_configuration_budget_repetition(): ...
-def test_resume_skips_only_the_receipted_budget(tmp_path): ...
+def test_resume_skips_only_the_receipted_budget(tmp_path):
+    ...
     # stessa configurazione, due budget: una ricevuta salta soltanto quella cella
 ```
 
@@ -226,11 +251,15 @@ def test_profiles_put_the_function_publisher_first(tool_root):
     keys = experiment_02_profiles(tool_root, ("nanofaas-p0-native", "direct-reference"))
     assert list(keys) == ["nanofaas-p1-jvm", "nanofaas-p0-native"]
 
+
 def test_p0_has_neither_provider_nor_queue(tool_root):
     options = experiment_02_options(
         tool_root / "recipes/experiment-02-p0-jvm.yaml",
-        CONFIGURATIONS_BY_KEY["nanofaas-p0-jvm"], shares=False)
+        CONFIGURATIONS_BY_KEY["nanofaas-p0-jvm"],
+        shares=False,
+    )
     assert options["modules"] == ["build-metadata"]
+
 
 def test_options_reject_a_recipe_with_the_wrong_modules(tmp_path): ...
 def test_contract_for_an_experiment_02_identity_is_the_experiment_02_contract(): ...
@@ -277,15 +306,27 @@ Lo script di `slice_setup_operation` è idempotente e fa, nell'ordine:
 ```python
 def test_apply_budget_argv():
     assert apply_budget_argv(Budget(cpus=1.5, memoryMiB=1024)) == (
-        "sudo", "systemctl", "set-property", "--runtime", "nanolab-sut.slice",
-        "CPUQuota=150%", "MemoryMax=1024M", "MemorySwapMax=0")
+        "sudo",
+        "systemctl",
+        "set-property",
+        "--runtime",
+        "nanolab-sut.slice",
+        "CPUQuota=150%",
+        "MemoryMax=1024M",
+        "MemorySwapMax=0",
+    )
+
 
 def test_parse_budget_reads_back_the_cgroup():
-    assert parse_budget("150000 100000\n1073741824\n0\n") == Budget(cpus=1.5, memoryMiB=1024)
+    assert parse_budget("150000 100000\n1073741824\n0\n") == Budget(
+        cpus=1.5, memoryMiB=1024
+    )
+
 
 def test_parse_budget_refuses_an_unbounded_slice():
     with pytest.raises(ValueError, match="unbounded"):
         parse_budget("max 100000\n1073741824\n0\n")
+
 
 def test_slice_setup_moves_the_engine_into_the_budget_and_the_registry_out():
     script = slice_setup_operation().argv[-1]
@@ -293,15 +334,22 @@ def test_slice_setup_moves_the_engine_into_the_budget_and_the_registry_out():
     assert '"cgroup-parent": "nanolab-sut.slice"' in script
     assert "--cgroup-parent=nanolab-infra.slice" in script
 
-def test_observers_have_a_separate_slice_from_the_registry(): ...
+
+def test_observers_have_a_separate_slice_from_the_registry():
+    ...
     # OBSERVER_CGROUP è fuori da SUT_CGROUP; registry nel parent infra,
     # campionatore e raccolta scheduler soltanto nello slice observers
 
+
 def test_processes_outside_the_slice_are_reported():
-    listing = ("101 containerd-shim /system.slice/containerd.service\n"
-               "102 dockerd /nanolab.slice/nanolab-sut.slice/docker.service\n"
-               "103 registry /nanolab.slice/nanolab-infra.slice/docker-ab.scope\n")
-    assert processes_outside(listing) == ["101 containerd-shim /system.slice/containerd.service"]
+    listing = (
+        "101 containerd-shim /system.slice/containerd.service\n"
+        "102 dockerd /nanolab.slice/nanolab-sut.slice/docker.service\n"
+        "103 registry /nanolab.slice/nanolab-infra.slice/docker-ab.scope\n"
+    )
+    assert processes_outside(listing) == [
+        "101 containerd-shim /system.slice/containerd.service"
+    ]
 ```
 
 - [ ] **Step 2-4:** test che falliscono, implementazione, test che passano.
@@ -338,40 +386,72 @@ Per nanoFaaS lo stesso processo raccoglie ogni 5 s l'esposizione Prometheus comp
 def test_sampler_reads_a_cgroup_tree_once(tmp_path):
     root = fake_cgroup(tmp_path, memory_current=1000, inactive_file=200, usage_usec=5)
     out = tmp_path / "s.jsonl"
-    observer = fake_cgroup(tmp_path / "observer", memory_current=100,
-                           inactive_file=20, usage_usec=1)
-    subprocess.run([sys.executable, "-I", SCRIPT, "--root", str(root),
-                    "--observer-root", str(observer), "--interval", "5",
-                    "--once", "--out", str(out)], check=True)
+    observer = fake_cgroup(
+        tmp_path / "observer", memory_current=100, inactive_file=20, usage_usec=1
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            SCRIPT,
+            "--root",
+            str(root),
+            "--observer-root",
+            str(observer),
+            "--interval",
+            "5",
+            "--once",
+            "--out",
+            str(out),
+        ],
+        check=True,
+    )
     line = json.loads(out.read_text())
     assert line["cgroups"]["."]["memoryCurrent"] == 1000
 
-def test_working_set_subtracts_inactive_file(): ...      # 1000 - 200 == 800
+
+def test_working_set_subtracts_inactive_file(): ...  # 1000 - 200 == 800
 def test_cpu_cores_over_a_thirty_second_window():
-    samples = series_at(list(range(0, 31, 5)),
-                        usage_usec=[t * 500_000 for t in range(0, 31, 5)])
+    samples = series_at(
+        list(range(0, 31, 5)), usage_usec=[t * 500_000 for t in range(0, 31, 5)]
+    )
     assert cpu_cores(samples)[-1] == (30.0, 0.5)
+
+
 def test_cpu_seconds_and_memory_byte_seconds_over_a_window(): ...
 def test_gap_makes_the_window_unknown_not_zero():
-    samples = series_at([0, 5, 30], usage_usec=[0, 1, 2])   # buco di 25 s
+    samples = series_at([0, 5, 30], usage_usec=[0, 1, 2])  # buco di 25 s
     assert cpu_seconds(samples, 0, 30) is None
+
+
 def test_truncated_last_line_is_counted_not_parsed(): ...
 def test_oom_kill_count(): ...
-def test_oom_count_uses_attempt_delta_not_previous_cell_total(): ...
+def test_oom_count_uses_attempt_delta_not_previous_cell_total():
+    ...
     # contatore 3 -> 3: 0 OOM; 3 -> 4: 1; estremi mancanti/reset: None
-def test_gap_invalidates_a_cpu_rate_window(): ...
+
+
+def test_gap_invalidates_a_cpu_rate_window():
+    ...
     # un buco 5 -> 30 s impedisce di emettere il valore CPU a t=30
+
+
 def test_missing_boundary_or_counter_reset_makes_integral_unknown(): ...
-def test_observer_cost_excludes_registry_and_deployment(): ...
+def test_observer_cost_excludes_registry_and_deployment():
+    ...
     # memoria deployment=1000, observer=100, registry=500: observer=100,
     # deployment=1000; nessuna somma con la radice infra
+
+
 def test_scheduler_scrape_preserves_raw_labels_and_histogram_buckets(): ...
 def test_scheduler_http_error_keeps_cgroup_sampling_alive(): ...
 def test_direct_reference_creates_no_scheduler_file_or_http_requests(): ...
 def test_scheduler_options_must_be_supplied_together(): ...
 def test_sigterm_flushes_a_final_sample_and_closes_open_files(): ...
 def test_container_count_follows_the_scopes():
-    samples = series_with_children([["docker-a.scope"], ["docker-a.scope", "docker-b.scope"]])
+    samples = series_with_children(
+        [["docker-a.scope"], ["docker-a.scope", "docker-b.scope"]]
+    )
     assert [n for _, n in container_count(samples)] == [1, 2]
 ```
 
@@ -406,27 +486,41 @@ La CLI experiment-02 passa e registra nell'identità lo stesso file `assets/k6/e
 - [ ] **Step 1: Scrivi i test**
 
 ```python
-def test_generator_environment_serializes_protocol_target_and_body(): ...
+def test_generator_environment_serializes_protocol_target_and_body():
+    ...
     # E01_PROTOCOL ed E01_PAYLOAD più EXPERIMENT_TARGET; nessun secondo formato
-def test_shared_generator_preserves_experiment_01_defaults(): ...
+
+
+def test_shared_generator_preserves_experiment_01_defaults():
+    ...
     # senza EXPERIMENT_TARGET: stessi scenari, URL/body/header, timeout,
     # gracefulStop, estrattore e ledger; conserva gli assert della suite esistente
+
+
 def test_target_selection_does_not_change_calendar_or_send_cohorts(): ...
-def test_verified_transfer_rejects_upload_failure_or_hash_mismatch(): ...
+def test_verified_transfer_rejects_upload_failure_or_hash_mismatch():
+    ...
     # stessa funzione usata da stage_comparison e dal generatore; errore prima di k6
+
+
 def test_run_generator_fetches_events_even_when_k6_fails(tmp_path):
     provider = RecordingVmProvider(exit_codes={"k6": 99})
     loadgen = Vm(provider, LOADGEN_REQUEST)
     assert run_generator(loadgen, ...) == 99
     assert ("transfer_from", "/remote/k6-events.jsonl") in provider.calls
 
+
 @pytest.mark.skipif(shutil.which("k6") is None, reason="k6 not installed")
 def test_script_judges_each_extractor(fake_server):
     # server locale: busta nanoFaaS valida, JSON base64 valido, PNG grezzo valido,
     # PNG corrotto; calendario di 1 s per endpoint
     events = run_script(fake_server, ...)
-    assert ok_by_endpoint(events) == {"envelope": True, "json": True, "raw": True,
-                                      "corrupt": False}
+    assert ok_by_endpoint(events) == {
+        "envelope": True,
+        "json": True,
+        "raw": True,
+        "corrupt": False,
+    }
 ```
 
 Questo test esegue solo lo script k6 contro un server finto: non è una prova della piattaforma.
@@ -470,13 +564,18 @@ Comandi:
 - [ ] **Step 1: Scrivi i test** (con `Vm` e `RecordingVmProvider`)
 
 ```python
-def test_p1_runs_the_docker_provider_and_registers_a_deployment_function(): ...
+def test_p1_runs_the_docker_provider_and_registers_a_deployment_function():
+    ...
     # argv con il socket Docker e container-local; JSON con DEPLOYMENT,
     # queueSize 200, maxRetries 0
+
+
 def test_p0_registers_an_external_endpoint_without_the_docker_socket(): ...
 def test_direct_reference_wraps_the_payload_as_runtime_input():
     body = DirectReference("img").body(b'{"text":"A","size":128}')
     assert json.loads(body) == {"input": {"text": "A", "size": 128}}
+
+
 def test_teardown_removes_every_container_but_the_registry(): ...
 def test_record_refuses_a_control_plane_with_unexpected_modules(tmp_path): ...
 def test_metrics_url_is_present_only_for_nanofaas(): ...
@@ -515,32 +614,48 @@ In `compare`: accetta `experiment-02` con backend `container` su Azure con i ruo
 - [ ] **Step 1: Scrivi i test** (`Vm`, `RecordingVmProvider` e piattaforma finta)
 
 ```python
-def test_cell_measures_in_order(tmp_path): ...            # sequenza dei comandi 1-10
+def test_cell_measures_in_order(tmp_path): ...  # sequenza dei comandi 1-10
 def test_readiness_timeout_is_startup_failed_with_diagnostics(tmp_path): ...
 def test_oom_kill_during_load_is_oom(tmp_path): ...
-def test_oom_before_readiness_is_oom(tmp_path): ...
+def test_oom_before_readiness_is_oom(tmp_path):
+    ...
     # readiness scaduta + incremento oom_kill: oom, con diagnostiche e ricevuta
-def test_engine_oom_during_restart_is_oom(tmp_path): ...
+
+
+def test_engine_oom_during_restart_is_oom(tmp_path):
+    ...
     # Docker non risponde, ma memory.events via SSH prova l'OOM: oom
+
+
 def test_oom_with_generator_error_is_oom(tmp_path): ...
 def test_unknown_oom_evidence_stops_without_a_measured_receipt(tmp_path): ...
 def test_budget_mismatch_stops_before_deploy(tmp_path): ...
 def test_process_outside_the_slice_stops_before_load(tmp_path): ...
 def test_leftover_containers_are_removed_before_deploy(tmp_path): ...
 def test_teardown_runs_even_when_k6_fails(tmp_path): ...
-def test_next_cell_can_start_after_readiness_timeout(tmp_path): ...
+def test_next_cell_can_start_after_readiness_timeout(tmp_path):
+    ...
     # due tentativi consecutivi: sampler fermato, file recuperati e unità
     # liberata prima del secondo start; nessuna scrittura nel vecchio tentativo
-def test_sampler_stop_and_fetch_run_after_each_failure(tmp_path): ...
+
+
+def test_sampler_stop_and_fetch_run_after_each_failure(tmp_path):
+    ...
     # parametrizzare timeout, errore deploy, processo esterno, k6 e interruzione
-def test_cleanup_errors_preserve_the_original_exception(tmp_path): ...
+
+
+def test_cleanup_errors_preserve_the_original_exception(tmp_path):
+    ...
     # fetch_from fallisce: stop e teardown avvengono comunque; errore iniziale preservato
+
+
 def test_cleanup_failure_records_oom_but_stops_the_matrix(tmp_path): ...
 def test_nonzero_k6_without_oom_never_produces_measured(tmp_path): ...
 def test_experiment_02_stack_has_docker_and_registry_but_no_k3s(): ...
 def test_target_without_kubernetes_records_the_docker_engine(): ...
 def test_compare_rejects_experiment_02_on_kubernetes_or_without_loadgen(): ...
-def test_compare_direct_and_p1_with_two_budgets_can_resume(tmp_path): ...
+def test_compare_direct_and_p1_with_two_budgets_can_resume(tmp_path):
+    ...
     # CLI con VM finte: capture/new/write/read manifest, prepare condiviso,
     # quattro celle, ricevute e resume; nessun accesso a direct-reference.recipe
 ```
@@ -576,27 +691,41 @@ Per nanoFaaS valuta `schedulerCoverage` sulla finestra idle-carico-drain, usando
 - [ ] **Step 1: Scrivi i test**
 
 ```python
-def test_service_verdicts_are_reused_without_a_resource_snapshot(tmp_path): ...
+def test_service_verdicts_are_reused_without_a_resource_snapshot(tmp_path):
+    ...
     # ledger identico: stessi valori di servizio di summarize_phases(snapshot=None);
     # workingSetBytes/cpuCores e delta provengono soltanto dai campioni cgroup
+
+
 def test_efficiency_divides_by_responses_within_threshold(tmp_path): ...
-def test_efficiency_includes_drain_and_cross_boundary_responses(tmp_path): ...
+def test_efficiency_includes_drain_and_cross_boundary_responses(tmp_path):
+    ...
     # fase [0,10], drain=5, CPU=2 core e memoria=100 byte su [0,15];
     # due risposte utili della coorte, una a t=11: CPU/useful=15 s,
     # memoria/useful=750 byte*s; estremi salvati 0 e 15
+
+
 def test_last_efficiency_window_ends_at_calendar_drain_end(tmp_path): ...
 def test_efficiency_is_unknown_when_only_the_drain_has_a_gap(tmp_path): ...
 def test_efficiency_is_undefined_without_useful_responses(tmp_path):
     assert phase(summary, "step-01")["cpuSecondsPerUseful"] is None
+
+
 def test_engine_share_is_reported_separately(tmp_path): ...
 def test_observer_cost_is_reported_separately_in_json_and_csv(tmp_path): ...
-def test_gap_invalidates_resource_means_and_maxima(tmp_path): ...
+def test_gap_invalidates_resource_means_and_maxima(tmp_path):
+    ...
     # campioni t=0,5,30: mean/max/counts ignoti, motivo di copertura presente;
     # il ledger integro mantiene withinThreshold e i verdetti di servizio
+
+
 def test_invalid_idle_coverage_makes_resource_deltas_unknown(tmp_path): ...
-def test_scheduler_gap_is_partial_and_direct_reference_is_not_applicable(tmp_path): ...
+def test_scheduler_gap_is_partial_and_direct_reference_is_not_applicable(tmp_path):
+    ...
     # diretto senza file SCHEDULER: not_applicable e percorso None;
     # nanoFaaS con errore/lacuna: partial, mai not_applicable
+
+
 def test_failed_cells_have_diagnostics_but_no_performance_values(tmp_path): ...
 def test_report_lists_incomplete_cells_without_values(tmp_path): ...
 ```
