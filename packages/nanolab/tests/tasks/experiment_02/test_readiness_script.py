@@ -7,6 +7,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import zlib
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -256,3 +257,19 @@ def test_secret_headers_come_from_a_command_and_stay_out_of_the_output(
     [headers] = [h for m, p, h in platform.seen if (m, p) == ("POST", "/invoke")]
     assert headers["Authorization"] == "Bearer s3cret"
     assert "s3cret" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("stage", ["register", "headers"])
+def test_a_hung_command_ends_at_the_readiness_deadline(tmp_path, platform, stage):
+    # A platform that accepts the connection and never answers.
+    platform.routes[("GET", "/health")] = [(200, {})]
+    hang = [sys.executable, "-c", "import time; time.sleep(30)"]
+    overrides = (
+        {"register": {"commands": [hang]}}
+        if stage == "register"
+        else {"register": None, "invoke": {"headersCommand": hang}}
+    )
+    began = time.monotonic()
+    result = _run(tmp_path, platform, timeoutSeconds=0.5, **overrides)
+    assert time.monotonic() - began < 10
+    assert result["timeout"] in ("registered", "first")

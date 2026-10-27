@@ -183,6 +183,19 @@ def main(argv: list[str] | None = None) -> int:
             200 <= status < 300 or bool(spec.get("apiAnyStatus"))
         )
 
+    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        # A command hung on a platform that never answers ends at the deadline.
+        try:
+            return subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=max(1.0, remaining()),
+            )
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(command, 124, "", "timed out")
+
     register = spec.get("register")
 
     pending = list(register.get("commands", [])) if register else []
@@ -190,9 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     def run_commands() -> bool:
         # Each command must succeed once; a failure is retried, the rest wait.
         while pending:
-            done = subprocess.run(
-                pending[0], capture_output=True, text=True, check=False
-            )
+            done = run(pending[0])
             if done.returncode:
                 note(done.returncode, done.stderr.encode(), "command failed")
                 return False
@@ -225,9 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         nonlocal attempts
         attempts += 1
         if invoke.get("headersCommand") and not secret:
-            done = subprocess.run(
-                invoke["headersCommand"], capture_output=True, text=True, check=False
-            )
+            done = run(invoke["headersCommand"])
             if done.returncode:
                 note(done.returncode, b"", "headers command failed")
                 return False
