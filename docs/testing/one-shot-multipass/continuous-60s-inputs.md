@@ -171,9 +171,13 @@ The same files can be computed from a finished run or archive, without VMs, into
 a new directory:
 
 ```bash
-uv run --frozen --all-packages --all-groups python scripts/one-shot-forecast-errors.py \
-  /path/to/run-or-archive --output /path/to/new-forecast-errors
+uv run --frozen --all-packages --all-groups python -c \
+  'import sys; from pathlib import Path; from nanolab.tasks.one_shot.forecast_errors import record_forecast_errors; Path(sys.argv[2]).mkdir(parents=True); record_forecast_errors(Path(sys.argv[1]), Path(sys.argv[2]))' \
+  /path/to/run-or-archive /path/to/new-forecast-errors
 ```
+
+(This record used `scripts/one-shot-forecast-errors.py`, a wrapper of the same
+call, removed from the tree after 82a1d54.)
 
 On the archived ORACLE minute run of 14 October 2026 this finds a plan for all
 1,350 cells. `errorVsOracle` is zero throughout, and the error stays within two
@@ -279,6 +283,9 @@ and [WAL ENOSPC handling](https://github.com/grafana/loki/blob/v3.7.8/pkg/ingest
 
 A saved real-container smoke workflow reuses `backend_resource`, Sonata and the
 existing supervisor with no VMs, functions or k6 traffic:
+
+The script was removed from the tree after 82a1d54;
+`git checkout 82a1d54 -- scripts/one-shot-logging-smoke.py` restores it.
 
 ```bash
 uv run --frozen --all-packages --all-groups python scripts/one-shot-logging-smoke.py \
