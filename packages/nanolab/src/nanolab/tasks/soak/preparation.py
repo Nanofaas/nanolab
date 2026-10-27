@@ -9,7 +9,6 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Event
-from typing import Any
 from uuid import uuid4
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
@@ -19,11 +18,16 @@ from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
 from nanolab.tasks.soak.build_provenance import BuildProvenanceCollector
-from nanolab.tasks.soak.builds import BuildImagesTask
+from nanolab.tasks.soak.builds import BuildImagesTask, ObservedBuild
+from nanolab.tasks.soak.diagnostics import DiagnosticAdapter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe, plan_images
+from nanolab.tasks.soak.prerequisites import ProfileRunner
 from nanolab.tasks.soak.recipe import publish_soak_recipe, validate_soak_recipe
 from nanolab.tasks.soak.sources import SourceSnapshot, capture_source_snapshot
 from nanolab.tasks.soak.workload import allocate_vus, constant_arrival_options
+
+# Observes one build: the recipe, its output and log directories.
+BuildObserver = Callable[[BuildRecipe, Path, Path], ObservedBuild]
 
 
 @dataclass(frozen=True)
@@ -37,10 +41,10 @@ class PreparationOptions:
     source_limit_bytes: int = 1024 * 1024 * 1024
     build_artifact_limit_bytes: int = 256 * 1024 * 1024
     generator_command: tuple[str, ...] = ("k6",)
-    build_observer: Any = None
-    prerequisite_runner: Any = None
+    build_observer: BuildObserver | None = None
+    prerequisite_runner: ProfileRunner | None = None
     prerequisite_provider_available: bool = False
-    diagnostic_adapter: Any = None
+    diagnostic_adapter: DiagnosticAdapter | None = None
     # Provider wiring exists; this does NOT assert attachment or target capabilities.
     diagnostic_provider_available: bool = False
     payloads: dict[str, list[dict[str, object]]] | None = None
@@ -211,7 +215,7 @@ def prepare_soak(
     repo_root: Path,
     tool_root: Path,
     options: PreparationOptions | None = None,
-    build_observer: Any = None,
+    build_observer: BuildObserver | None = None,
     cancelled: Event | None = None,
 ) -> PreparedSoak:
     """Execute preparation only when called by the deferred Sonata runtime task.

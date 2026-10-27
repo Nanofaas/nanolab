@@ -169,6 +169,16 @@ class DiagnosticOutcome:
     full_gc_event: str | None
 
 
+class DiagnosticAdapter(Protocol):
+    """What a soak run asks of a runtime's diagnostic adapter."""
+
+    def capture(
+        self, target: Target, checkpoint: str, output_dir: Path, timeout_s: float
+    ) -> Path:
+        """Capture one operation into a new owned directory; return its receipt."""
+        ...
+
+
 class DiagnosticExecutor(Protocol):
     """Provisioned executor; all calls must return within their given budget.
 

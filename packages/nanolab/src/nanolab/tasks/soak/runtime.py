@@ -44,7 +44,11 @@ from nanolab.tasks.soak.diagnostic_helper import (
     LocalDockerDiagnosticProvisioner,
     is_helper_log_dir,
 )
-from nanolab.tasks.soak.diagnostics import DiagnosticBudget, supported_operations
+from nanolab.tasks.soak.diagnostics import (
+    DiagnosticAdapter,
+    DiagnosticBudget,
+    supported_operations,
+)
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
 from nanolab.tasks.soak.helper_build import HELPER_BUILDER
 from nanolab.tasks.soak.models import Target
@@ -96,6 +100,7 @@ if TYPE_CHECKING:
         ContainerdDeployment,
         PreparedContainerdSoak,
     )
+    from nanolab.tasks.soak.prerequisites import ProfileRunner
 
 
 @dataclass(frozen=True)
@@ -1489,10 +1494,10 @@ def create_soak_lifecycle(
     deployment: RuntimeDeployment | ContainerdDeployment,
     run_dir: Path,
     observations: Callable[[tuple[Target, ...]], dict[str, Any]] | None = None,
-    prerequisite_runner: Any = None,
+    prerequisite_runner: ProfileRunner | None = None,
     prerequisite_inputs: dict[str, object] | None = None,
     prerequisite_supervision: dict[str, Any] | None = None,
-    diagnostic_adapter: Any = None,
+    diagnostic_adapter: DiagnosticAdapter | None = None,
     generator_command: tuple[str, ...] = ("k6",),
     transport: Any = None,
     clock: Any = None,
@@ -1747,6 +1752,8 @@ def create_soak_lifecycle(
         inputs = prerequisite_inputs or {}
         writer.write_json("prerequisite-inputs.json", inputs)
         if prerequisite_supervision is not None:
+            if prerequisite_runner is None:
+                raise RuntimeError("supervised prerequisites need a runner")
             import asyncio
 
             from nanolab.tasks.soak.artifacts import ArtifactWriter

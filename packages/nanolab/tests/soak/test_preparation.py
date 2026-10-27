@@ -2,6 +2,7 @@
 
 import sys
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -112,7 +113,7 @@ def test_single_source_and_observer_injection(
         )
         for role in config.roles
     )
-    observer = object()
+    observer: Any = object()
 
     def capture(*args, **kwargs):
         seen.append("snapshot")
@@ -165,7 +166,7 @@ def test_unknown_payload_stops_before_source_snapshot(tmp_path, monkeypatch):
             repo_root=tmp_path,
             tool_root=tmp_path,
             options=options(),
-            build_observer=object(),
+            build_observer=cast(Any, object()),
         )
     assert not (tmp_path / "run").exists()
 
