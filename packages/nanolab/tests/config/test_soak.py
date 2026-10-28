@@ -494,6 +494,15 @@ def test_soak_does_not_silently_accept_legacy_workload_knobs(scenario_data, key,
         ScenarioConfig.model_validate(scenario_data)
 
 
+def test_soak_names_a_legacy_knob_as_the_scenario_spells_it(scenario_data):
+    scenario_data["concurrencyControl"] = True
+    with pytest.raises(
+        ValidationError,
+        match="soak does not consume legacy workload options: concurrencyControl",
+    ):
+        ScenarioConfig.model_validate(scenario_data)
+
+
 def test_soak_block_cannot_be_ignored_by_a_legacy_workflow(scenario_data):
     scenario_data["workflow"] = "loadtest"
     with pytest.raises(ValidationError, match="validation error for ScenarioConfig"):

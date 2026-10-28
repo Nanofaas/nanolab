@@ -63,6 +63,29 @@ def test_contract_rejects_unused_options(change) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            {"asyncLoad": True},
+            "contract does not consume these scenario options: asyncLoad",
+        ),
+        ({"build": "buildpack"}, "contract requires build: docker"),
+    ],
+)
+def test_contract_names_what_it_refuses(change, message) -> None:
+    with pytest.raises(ValidationError, match=message):
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "contract",
+                "backend": "container",
+                "functions": ["word-stats"],
+                "contract": {},
+                **change,
+            }
+        )
+
+
 def test_contract_settings_rejected_elsewhere() -> None:
     with pytest.raises(ValidationError, match="contract"):
         ScenarioConfig.model_validate(

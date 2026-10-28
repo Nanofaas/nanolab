@@ -67,6 +67,18 @@ def test_one_shot_rejects_duplicate_nodes_unknown_options_and_other_providers() 
         ScenarioConfig.model_validate(data)
 
 
+def test_an_unconsumed_option_is_named_as_the_scenario_spells_it():
+    data = scenario("one-shot-calibration")
+    data["concurrencyControl"] = True
+    data["autoscaling"] = True
+    with pytest.raises(
+        ValidationError,
+        match="one-shot does not consume these scenario options: "
+        "autoscaling, concurrencyControl",
+    ):
+        ScenarioConfig.model_validate(data)
+
+
 def test_optimizer_pool_must_fit_at_least_one_replica_per_function():
     data = scenario("one-shot-calibration")
     data["oneShot"]["functions"]["one-shot-workload-rust"]["memoryMiB"] = 1024

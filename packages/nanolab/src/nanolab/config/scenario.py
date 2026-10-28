@@ -342,6 +342,11 @@ class ScenarioConfig(BaseModel):
     def _unconsumed(self, consumed: frozenset[str]) -> set[str]:
         return self.model_fields_set - consumed
 
+    @classmethod
+    def _option_list(cls, names: set[str]) -> str:
+        """Name options the way a scenario file spells them: `oneShot`."""
+        return ", ".join(sorted(cls.model_fields[name].alias or name for name in names))
+
     def _undeclared_resources(self) -> set[str]:
         return set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}
 
@@ -398,8 +403,12 @@ class ScenarioConfig(BaseModel):
                 "overrides; select images through recipeProfile and the runtime "
                 "distribution"
             )
-        if self._unconsumed(_ONE_SHOT_OPTIONS):
-            raise ValueError("one-shot does not consume these scenario options")
+        unexpected = self._unconsumed(_ONE_SHOT_OPTIONS)
+        if unexpected:
+            raise ValueError(
+                "one-shot does not consume these scenario options: "
+                + self._option_list(unexpected)
+            )
         if set(self.functions) != set(self.one_shot.functions):
             raise ValueError("oneShot functions must match the scenario")
         if self.workflow != "one-shot-calibration" and self.one_shot.profile is None:
@@ -415,8 +424,14 @@ class ScenarioConfig(BaseModel):
             raise ValueError(
                 "contract requires container backend and contract settings"
             )
-        if self._unconsumed(_CONTRACT_OPTIONS) or self.build != "docker":
-            raise ValueError("contract does not consume these scenario options")
+        unexpected = self._unconsumed(_CONTRACT_OPTIONS)
+        if unexpected:
+            raise ValueError(
+                "contract does not consume these scenario options: "
+                + self._option_list(unexpected)
+            )
+        if self.build != "docker":
+            raise ValueError("contract requires build: docker")
 
     def _validate_cli_runtime_and_recipe(self) -> None:
         if self.cli_runtime != "jvm" and self.workflow != "cli":
@@ -481,7 +496,7 @@ class ScenarioConfig(BaseModel):
         if unexpected:
             raise ValueError(
                 "soak does not consume legacy workload options: "
-                + ", ".join(sorted(unexpected))
+                + self._option_list(unexpected)
             )
         self.soak.validate_functions(self.functions)
         for name in self.soak.roles:
@@ -520,7 +535,7 @@ class ScenarioConfig(BaseModel):
         if unexpected:
             raise ValueError(
                 "heap-analysis does not consume legacy workload options: "
-                + ", ".join(sorted(unexpected))
+                + self._option_list(unexpected)
             )
         if self._undeclared_resources():
             raise ValueError(
