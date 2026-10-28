@@ -234,3 +234,13 @@ def test_slow_body_preserves_received_prefix():
             sock.recv(4096)
         assert snapshot(base)["violations"]
         assert request(base, "/_nanolab/body/1")[1] == b'{"x":'
+
+
+def test_capture_servers_keep_registrations_and_bodies_independent():
+    with capture() as first, capture() as second:
+        register(first, "shared")
+        register(second, "shared")
+        assert request(first, "/v1/executions/shared:complete", {"answer": 1})[0] == 200
+        assert len(snapshot(first)["records"]) == 1
+        assert snapshot(second)["records"] == []
+        assert request(second, "/_nanolab/body/1")[0] == 404
