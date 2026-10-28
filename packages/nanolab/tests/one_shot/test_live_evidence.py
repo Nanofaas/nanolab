@@ -393,3 +393,29 @@ def test_direct_sdk_proofs_use_frozen_request_target_and_still_require_release(
         )
     assert calls == ([] if wrong_target else ["http://sdk-2/runtime/executions/id"])
     assert (tmp_path / "physical.jsonl").exists() is (not wrong_target)
+
+
+@pytest.mark.parametrize("reason", ["cancelled", "expired"])
+def test_stopped_collection_never_opens_network_or_writes_evidence(
+    tmp_path, monkeypatch, reason
+):
+    from threading import Event
+
+    stop = Event()
+    if reason == "cancelled":
+        stop.set()
+
+    def unexpected_client(**kwargs):
+        pytest.fail("a stopped collection must not contact any runtime")
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.httpx.Client", unexpected_client
+    )
+    assert collect_runtime_evidence(
+        SimpleNamespace(run_dir=tmp_path),
+        None,
+        [],
+        stop=stop,
+        deadline=0 if reason == "expired" else None,
+    ) == ([], set())
+    assert list(tmp_path.iterdir()) == []

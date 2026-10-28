@@ -9,6 +9,7 @@ import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from importlib.metadata import version
 from importlib.resources import files
 from pathlib import Path
@@ -939,6 +940,140 @@ def evidence_collector_resource(run, generator) -> Resource[LiveEvidenceCollecto
     )
 
 
+def _runtime_candidates(run, inputs, node_id, node, functions, cancelled):
+    """Discover strict inventories or fixed replicas, retaining collection errors."""
+    settings = getattr(run, "settings", None)
+    candidates = []
+    if settings is not None and settings.strict_memory and len(settings.functions) > 1:
+        try:
+            candidates = runtime_inventory(
+                node, functions=list(functions), inputs=inputs
+            )
+        except Exception as error:
+            append_observation(
+                run.run_dir / "collection-errors.jsonl",
+                {"node": node_id, "error": str(error)},
+            )
+    else:
+        fixed = getattr(run, "runtime_replica_counts", {}).get(node_id)
+        for name, function in functions.items():
+            count = function.max_replicas if fixed is None else fixed.get(name, 0)
+            for replica in range(1, count + 1):
+                if cancelled():
+                    break
+                try:
+                    url, container = runtime_endpoint(
+                        node, name, inputs=inputs, replica=replica
+                    )
+                    candidates.append((name, replica, url, container))
+                except Exception as error:
+                    append_observation(
+                        run.run_dir / "collection-errors.jsonl",
+                        {
+                            "node": node_id,
+                            "function": name,
+                            "replica": replica,
+                            "error": str(error),
+                        },
+                    )
+    return candidates
+
+
+def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout):
+    """Read identity-checked physical proof, retrying one failed transport read."""
+    proofs = []
+    if cancelled():
+        return False, proofs
+    if not row.get("terminalExecutionId", row.get("executionId")):
+        return True, proofs
+    targets = getattr(run, "sdk_request_targets", {})
+    target = targets.get(row["originalId"])
+    candidates = runtimes
+    if target is not None:
+        node_id, name, target_url = target
+        if (
+            row.get("sdk") is not True
+            or row.get("url") != target_url
+            or row["function"] != name
+        ):
+            append_observation(
+                run.run_dir / "collection-errors.jsonl",
+                {
+                    "originalId": row["originalId"],
+                    "error": "direct SDK target differs from frozen schedule",
+                },
+            )
+            return True, proofs
+        candidates = [
+            runtime
+            for runtime in runtimes
+            if runtime == (node_id, name, target_url.removesuffix("/invoke"))
+        ]
+    attempted = not any(name == row["function"] for _, name, _ in candidates)
+    for node_id, name, url in candidates:
+        if cancelled():
+            break
+        if name != row["function"]:
+            continue
+        attempted = True
+        read_attempt = 1
+        try:
+            proof_url = (
+                url
+                + "/runtime/executions/"
+                + row.get("terminalExecutionId", row.get("executionId"))
+            )
+            try:
+                response = http.get(
+                    proof_url,
+                    timeout=read_timeout(),
+                )
+            except (httpx.TransportError, OSError) as error:
+                append_observation(
+                    run.run_dir / "collection-errors.jsonl",
+                    {
+                        "originalId": row["originalId"],
+                        "node": node_id,
+                        "readAttempt": read_attempt,
+                        "error": str(error),
+                    },
+                )
+                if cancelled():
+                    return True, proofs
+                read_attempt = 2
+                try:
+                    response = http.get(proof_url, timeout=read_timeout())
+                except OSError as error:
+                    raise httpx.ReadError(str(error)) from error
+            if response.status_code == 404:
+                continue
+            response.raise_for_status()
+            if not validate_proof(
+                response.json(),
+                row.get("terminalExecutionId", row.get("executionId")),
+            ):
+                raise ValueError("SDK proof identity/attempt mismatch")
+            proofs.append(
+                {
+                    **row,
+                    **response.json(),
+                    "destination": node_id,
+                    "runtimeUrl": url,
+                }
+            )
+        except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            append_observation(
+                run.run_dir / "collection-errors.jsonl",
+                {
+                    "originalId": row["originalId"],
+                    "node": node_id,
+                    "readAttempt": read_attempt,
+                    "error": str(error),
+                },
+            )
+    return attempted, proofs
+
+
 def collect_runtime_evidence(
     run,
     inputs,
@@ -989,46 +1124,9 @@ def collect_runtime_evidence(
             functions = getattr(run.topology, "node_function_settings", {}).get(
                 node_id, run.topology.function_settings
             )
-            settings = getattr(run, "settings", None)
-            candidates = []
-            if (
-                settings is not None
-                and settings.strict_memory
-                and len(settings.functions) > 1
-            ):
-                try:
-                    candidates = runtime_inventory(
-                        node, functions=list(functions), inputs=inputs
-                    )
-                except Exception as error:
-                    append_observation(
-                        run.run_dir / "collection-errors.jsonl",
-                        {"node": node_id, "error": str(error)},
-                    )
-            else:
-                fixed = getattr(run, "runtime_replica_counts", {}).get(node_id)
-                for name, function in functions.items():
-                    count = (
-                        function.max_replicas if fixed is None else fixed.get(name, 0)
-                    )
-                    for replica in range(1, count + 1):
-                        if cancelled():
-                            break
-                        try:
-                            url, container = runtime_endpoint(
-                                node, name, inputs=inputs, replica=replica
-                            )
-                            candidates.append((name, replica, url, container))
-                        except Exception as error:
-                            append_observation(
-                                run.run_dir / "collection-errors.jsonl",
-                                {
-                                    "node": node_id,
-                                    "function": name,
-                                    "replica": replica,
-                                    "error": str(error),
-                                },
-                            )
+            candidates = _runtime_candidates(
+                run, inputs, node_id, node, functions, cancelled
+            )
             for name, replica, url, container in candidates:
                 if cancelled():
                     break
@@ -1082,98 +1180,14 @@ def collect_runtime_evidence(
                         },
                     )
 
-        def lookup(row):
-            proofs = []
-            if cancelled():
-                return False, proofs
-            if not row.get("terminalExecutionId", row.get("executionId")):
-                return True, proofs
-            targets = getattr(run, "sdk_request_targets", {})
-            target = targets.get(row["originalId"])
-            candidates = runtimes
-            if target is not None:
-                node_id, name, target_url = target
-                if (
-                    row.get("sdk") is not True
-                    or row.get("url") != target_url
-                    or row["function"] != name
-                ):
-                    append_observation(
-                        run.run_dir / "collection-errors.jsonl",
-                        {
-                            "originalId": row["originalId"],
-                            "error": "direct SDK target differs from frozen schedule",
-                        },
-                    )
-                    return True, proofs
-                candidates = [
-                    runtime
-                    for runtime in runtimes
-                    if runtime == (node_id, name, target_url.removesuffix("/invoke"))
-                ]
-            attempted = not any(name == row["function"] for _, name, _ in candidates)
-            for node_id, name, url in candidates:
-                if cancelled():
-                    break
-                if name != row["function"]:
-                    continue
-                attempted = True
-                read_attempt = 1
-                try:
-                    proof_url = (
-                        url
-                        + "/runtime/executions/"
-                        + row.get("terminalExecutionId", row.get("executionId"))
-                    )
-                    try:
-                        response = http.get(
-                            proof_url,
-                            timeout=read_timeout(),
-                        )
-                    except (httpx.TransportError, OSError) as error:
-                        append_observation(
-                            run.run_dir / "collection-errors.jsonl",
-                            {
-                                "originalId": row["originalId"],
-                                "node": node_id,
-                                "readAttempt": read_attempt,
-                                "error": str(error),
-                            },
-                        )
-                        if cancelled():
-                            return True, proofs
-                        read_attempt = 2
-                        try:
-                            response = http.get(proof_url, timeout=read_timeout())
-                        except OSError as error:
-                            raise httpx.ReadError(str(error)) from error
-                    if response.status_code == 404:
-                        continue
-                    response.raise_for_status()
-                    if not validate_proof(
-                        response.json(),
-                        row.get("terminalExecutionId", row.get("executionId")),
-                    ):
-                        raise ValueError("SDK proof identity/attempt mismatch")
-                    proofs.append(
-                        {
-                            **row,
-                            **response.json(),
-                            "destination": node_id,
-                            "runtimeUrl": url,
-                        }
-                    )
-                except (httpx.HTTPError, ValueError, RuntimeError) as error:
-                    append_observation(
-                        run.run_dir / "collection-errors.jsonl",
-                        {
-                            "originalId": row["originalId"],
-                            "node": node_id,
-                            "readAttempt": read_attempt,
-                            "error": str(error),
-                        },
-                    )
-            return attempted, proofs
+        lookup = partial(
+            _lookup_runtime_proofs,
+            run=run,
+            http=http,
+            runtimes=runtimes,
+            cancelled=cancelled,
+            read_timeout=read_timeout,
+        )
 
         with ThreadPoolExecutor(max_workers=16) as executor:
             for offset in range(0, len(rows), 16):
