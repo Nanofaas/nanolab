@@ -992,7 +992,10 @@ def test_archive_failure_survives_unwritable_failure_receipts(
         if (
             failed
             and path.parent == raw
-            and path.name in {"status.json.tmp", "status.json", "result.json"}
+            and (
+                path.name in {"status.json", "result.json"}
+                or path.name.startswith(".status-")
+            )
         ):
             raise OSError("raw failure receipt unavailable")
         return write(path, text, *args, **kwargs)
@@ -1315,7 +1318,13 @@ def test_signal_during_receipt_write_persists_changed_snapshot(
             writing
             and supervisor.finishing
             and not delivered
-            and path == raw / blocked_at
+            and path.parent == raw
+            and (
+                path.name == blocked_at
+                or (
+                    blocked_at == "status.json.tmp" and path.name.startswith(".status-")
+                )
+            )
             and (supervisor.state["archiveVerified"] if stage == "archive" else True)
         ):
             delivered.append(signum)

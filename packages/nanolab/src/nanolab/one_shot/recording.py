@@ -1,11 +1,13 @@
 """Persist campaign evidence without rendering or operational decisions."""
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 
 class CampaignRecorder:
-    """Write the existing campaign artifact formats; callers serialize access."""
+    """Write campaign artifacts; callers serialize append-only event streams."""
 
     def __init__(self, output: Path):
         """Use an already owned output directory."""
@@ -23,9 +25,16 @@ class CampaignRecorder:
 
     def write_status(self, snapshot: dict) -> None:
         """Replace the current status atomically."""
-        temporary = self.output / "status.json.tmp"
-        temporary.write_text(json.dumps(snapshot, indent=2) + "\n")
-        temporary.replace(self.output / "status.json")
+        descriptor, name = tempfile.mkstemp(
+            prefix=".status-", suffix=".json.tmp", dir=self.output
+        )
+        os.close(descriptor)
+        temporary = Path(name)
+        try:
+            temporary.write_text(json.dumps(snapshot, indent=2) + "\n")
+            temporary.replace(self.output / "status.json")
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def write_result(self, snapshot: dict) -> None:
         """Write a terminal receipt independently of status persistence."""

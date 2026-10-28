@@ -48,3 +48,32 @@ def test_recording_propagates_storage_errors(tmp_path, monkeypatch, method):
     monkeypatch.setattr(Path, "open", broken)
     with pytest.raises(OSError, match="full storage"):
         getattr(CampaignRecorder(tmp_path), method)({"state": "running"})
+
+
+def test_concurrent_status_writes_publish_complete_json_without_shared_temporary(
+    tmp_path, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from nanolab.one_shot.recording import CampaignRecorder
+
+    writers_ready = Barrier(2)
+    replace = Path.replace
+
+    def overlap_before_publish(path, target):
+        if Path(target) == tmp_path / "status.json":
+            writers_ready.wait(timeout=5)
+        return replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", overlap_before_publish)
+    snapshots = [{"state": "running", "writer": n, "body": "x" * 2048} for n in (1, 2)]
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [
+            workers.submit(CampaignRecorder(tmp_path).write_status, row)
+            for row in snapshots
+        ]
+        for future in futures:
+            future.result(timeout=10)
+    assert json.loads((tmp_path / "status.json").read_text()) in snapshots
+    assert {path.name for path in tmp_path.iterdir()} == {"status.json"}
