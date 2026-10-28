@@ -9,16 +9,11 @@ MAX_CONTENT_COLS = 140
 
 console = Console(highlight=False)
 
-_content_width: int = MAX_CONTENT_COLS
-
 
 def get_content_width() -> int:
-    """Active content width (after _apply_width) or the bare cap."""
-    return _content_width
+    """Return the active UI context's resolved width or its uninitialized cap."""
+    # The context configures this Console; defer its import until initialization ends.
+    from tui_toolkit.context import get_ui
 
-
-def _apply_width(width: int) -> None:
-    """Set the Rich Console width and the cached helper width."""
-    global _content_width
-    _content_width = width
-    console.width = width
+    ui = get_ui()
+    return ui.content_width if ui.content_width is not None else ui.max_content_cols

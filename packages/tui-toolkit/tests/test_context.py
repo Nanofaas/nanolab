@@ -67,3 +67,12 @@ def test_init_ui_returns_resolved_context_with_width_populated():
     assert isinstance(ui, UIContext)
     assert ui.content_width is not None
     assert ui.content_width > 0
+
+
+def test_content_width_follows_temporary_ui_context():
+    from tui_toolkit.console import get_content_width
+
+    initial = get_content_width()
+    with bind_ui(UIContext(content_width=73)):
+        assert get_content_width() == 73
+    assert get_content_width() == initial
