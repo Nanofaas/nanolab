@@ -161,7 +161,8 @@ def test_transfers_use_the_configured_key_and_never_a_workspace(tmp_path, monkey
 @pytest.mark.parametrize("transport", ["ssh", "scp"])
 def test_retry_only_pre_authentication_connection_resets(monkeypatch, transport):
     calls = []
-    monkeypatch.setattr(time, "sleep", lambda _: None)
+    delays = []
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def run(argv, **kwargs):
         calls.append(argv)
@@ -178,6 +179,7 @@ def test_retry_only_pre_authentication_connection_resets(monkeypatch, transport)
     result = ExistingAzureVmProvider._execute([transport, "target"])
     assert result.return_code == 0
     assert len(calls) == 2
+    assert delays == [5]
 
 
 @pytest.mark.parametrize(
@@ -193,7 +195,8 @@ def test_connection_retries_are_bounded_and_exclude_remote_failures(
     monkeypatch, transport, stderr, expected_calls
 ):
     calls = []
-    monkeypatch.setattr(time, "sleep", lambda _: None)
+    delays = []
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def run(argv, **kwargs):
         calls.append(argv)
@@ -202,3 +205,4 @@ def test_connection_retries_are_bounded_and_exclude_remote_failures(
     monkeypatch.setattr(subprocess, "run", run)
     assert ExistingAzureVmProvider._execute([transport, "target"]).return_code == 255
     assert len(calls) == expected_calls
+    assert delays == ([5, 10] if expected_calls == 3 else [])

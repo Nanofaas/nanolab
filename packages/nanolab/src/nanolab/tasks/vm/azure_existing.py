@@ -109,7 +109,7 @@ class ExistingAzureVmProvider(AzureVmProvider):
             ):
                 break
             if attempt < 2:
-                time.sleep(1)
+                time.sleep(5 * (attempt + 1))
         if result is None:
             # Raise outside the handler: even __context__ must not retain SSH
             # transport arguments containing the generator credentials.
