@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 import yaml
 
-from nanolab.cli.provisioning import provision_environment
+from nanolab.application.provisioning import provision_environment
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 

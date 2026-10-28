@@ -62,7 +62,7 @@ def _after_load(run_dir: Path) -> Outcome:
 
 
 def _run(tmp_path: Path, behaviours):
-    from nanolab.cli.comparison import _run_experiment_02_cell
+    from nanolab.application.experiment_02 import run_experiment_02_cell
 
     calls: list[Path] = []
     checks: list[str] = []
@@ -72,7 +72,7 @@ def _run(tmp_path: Path, behaviours):
         calls.append(run_dir)
         return behaviour(run_dir)
 
-    outcome = _run_experiment_02_cell(
+    outcome = run_experiment_02_cell(
         CELL,
         root=tmp_path,
         identity=IDENTITY,

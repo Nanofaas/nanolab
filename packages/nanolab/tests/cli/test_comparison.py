@@ -10,6 +10,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from nanolab.application import experiment_02
 from nanolab.cli import comparison, product
 from nanolab.comparison.manifest import write_comparison_manifest
 from nanolab.comparison.profiles import PreparedComparison, declared_options
@@ -32,6 +33,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
     paths = ToolPaths.from_roots(nanofaas_checkout, discover_tool_root())
     monkeypatch.setattr(product, "default_tool_paths", lambda: paths)
     monkeypatch.setattr(comparison, "default_tool_paths", lambda: paths)
+    monkeypatch.setattr(experiment_02, "default_tool_paths", lambda: paths)
 
     @contextmanager
     def provision(*args):
@@ -44,6 +46,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
         yield
 
     monkeypatch.setattr(comparison, "provisioning_context", provision)
+    monkeypatch.setattr(experiment_02, "provisioning_context", provision)
 
     class Provider:
         def exec_argv(self, request, argv, **kwargs):
@@ -518,7 +521,9 @@ def test_compare_direct_and_p1_with_two_budgets_can_resume(command_case, monkeyp
         def connection_host(self, request):
             return "20.0.0.4"
 
-    monkeypatch.setattr(comparison, "provider_for_environment", lambda *a: Provider())
+    monkeypatch.setattr(
+        experiment_02, "provider_for_environment", lambda *a: Provider()
+    )
     machine = {
         "machineId": "a" * 32,
         "productUuid": "11111111-2222-3333-4444-555555555555",
@@ -528,11 +533,11 @@ def test_compare_direct_and_p1_with_two_budgets_can_resume(command_case, monkeyp
         "engine": {"dockerId": "docker-1"},
     }
     monkeypatch.setattr(
-        comparison, "read_comparison_target", lambda *a, **k: dict(target)
+        experiment_02, "read_comparison_target", lambda *a, **k: dict(target)
     )
-    monkeypatch.setattr(comparison, "read_host_facts", lambda *a: {})
+    monkeypatch.setattr(experiment_02, "read_host_facts", lambda *a: {})
     monkeypatch.setattr(
-        comparison,
+        experiment_02,
         "require_recorded_publications",
         lambda **kwargs: events.append("publications-checked"),
     )
@@ -566,9 +571,9 @@ def test_compare_direct_and_p1_with_two_budgets_can_resume(command_case, monkeyp
             (run_dir / name).write_text("{}\n")
         return "measured"
 
-    monkeypatch.setattr(comparison, "run_cell", cell)
+    monkeypatch.setattr(experiment_02, "run_cell", cell)
     monkeypatch.setattr(
-        comparison,
+        experiment_02,
         "write_experiment_02_report",
         lambda root, cells, protocol: events.append("report") or root / "r.csv",
     )
@@ -636,14 +641,18 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
         "machineId": "a" * 32,
         "productUuid": "11111111-2222-3333-4444-555555555555",
     }
-    monkeypatch.setattr(comparison, "provider_for_environment", lambda *a: Provider())
     monkeypatch.setattr(
-        comparison,
+        experiment_02, "provider_for_environment", lambda *a: Provider()
+    )
+    monkeypatch.setattr(
+        experiment_02,
         "read_comparison_target",
         lambda *a, **k: {"machines": {"stack": machine}, "engine": {"dockerId": "d"}},
     )
-    monkeypatch.setattr(comparison, "read_host_facts", lambda *a: {})
-    monkeypatch.setattr(comparison, "require_recorded_publications", lambda **k: None)
+    monkeypatch.setattr(experiment_02, "read_host_facts", lambda *a: {})
+    monkeypatch.setattr(
+        experiment_02, "require_recorded_publications", lambda **k: None
+    )
     image = SimpleNamespace(image=SimpleNamespace(reference="registry/qr:e02"))
 
     def prepare(**kwargs):
@@ -662,7 +671,7 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
 
     monkeypatch.setattr(comparison, "_run_prepare", prepare)
     monkeypatch.setattr(
-        comparison,
+        experiment_02,
         "ensure_workloads",
         lambda stack, **kwargs: (
             events.append(("workloads", kwargs["record"].name)) or {"qr-spin": "a" * 64}
@@ -702,9 +711,11 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
             (kwargs["run_dir"] / name).write_text("{}\n")
         return "measured"
 
-    monkeypatch.setattr(comparison, "run_cell", cell)
+    monkeypatch.setattr(experiment_02, "run_cell", cell)
     monkeypatch.setattr(
-        comparison, "write_experiment_02_report", lambda root, cells, p: root / "r.csv"
+        experiment_02,
+        "write_experiment_02_report",
+        lambda root, cells, p: root / "r.csv",
     )
     arguments = ("--variants", "spin,direct-reference", "--repetitions", "1")
     result = invoke(*arguments)

@@ -94,12 +94,14 @@ def test_relative_prerequisite_paths_resolve_from_scenario_not_operator_director
 def test_public_cli_does_not_provision_legacy_stack_before_one_shot_preflight(
     monkeypatch,
 ):
-    from nanolab.cli.provisioning import provisioning_context
+    from nanolab.application.provisioning import provisioning_context
 
     def forbidden(*args, **kwargs):
         pytest.fail("one-shot must acquire only its run-owned topology after preflight")
 
-    monkeypatch.setattr("nanolab.cli.provisioning.provision_environment", forbidden)
+    monkeypatch.setattr(
+        "nanolab.application.provisioning.provision_environment", forbidden
+    )
     context = provisioning_context(
         cast(Any, SimpleNamespace(workflow="one-shot-experiment", backend="container")),
         cast(Any, SimpleNamespace(provider="multipass")),

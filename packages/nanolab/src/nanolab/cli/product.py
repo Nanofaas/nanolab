@@ -39,6 +39,7 @@ from nanolab.application.execution import (
     resolve_loadtest_urls,
 )
 from nanolab.application.inputs import load_environment, load_scenario
+from nanolab.application.provisioning import provisioning_context
 from nanolab.application.run_options import (
     require_cli_endpoint,
     validate_cli_container_options,
@@ -54,7 +55,6 @@ from nanolab.cli.catalogue import (
     workflow_catalog as workflow_catalog,
 )
 from nanolab.cli.progress import ConsoleProgressSink
-from nanolab.cli.provisioning import provisioning_context
 from nanolab.cli.soak import (
     install_soak_commands,
     require_unused_run_dir,

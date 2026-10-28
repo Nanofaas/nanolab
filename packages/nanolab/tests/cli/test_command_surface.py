@@ -269,7 +269,9 @@ def test_generic_release_run_requires_an_environment_and_never_provisions(
 ) -> None:
     provision = MagicMock(side_effect=AssertionError("must not provision"))
     build = MagicMock(side_effect=AssertionError("must not build workflow"))
-    monkeypatch.setattr("nanolab.cli.provisioning.provision_environment", provision)
+    monkeypatch.setattr(
+        "nanolab.application.provisioning.provision_environment", provision
+    )
     monkeypatch.setattr(product_module, "build_release_workflow", build)
 
     result = CliRunner().invoke(
@@ -445,7 +447,7 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
         raise AssertionError("legacy provision_environment must not run for cli/k8s")
 
     monkeypatch.setattr(
-        "nanolab.cli.provisioning.provision_environment",
+        "nanolab.application.provisioning.provision_environment",
         _legacy_provision_must_not_run,
     )
 
@@ -501,7 +503,9 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
         finally:
             actions.append("cleanup")
 
-    monkeypatch.setattr("nanolab.cli.provisioning.provision_environment", provision)
+    monkeypatch.setattr(
+        "nanolab.application.provisioning.provision_environment", provision
+    )
     monkeypatch.setattr(
         "nanolab.cli.product.build_scenario_workflow",
         lambda *args, **kwargs: (

@@ -14,9 +14,9 @@ from tui_toolkit.console import console as default_console
 
 from nanolab.application.execution import resolve_loadtest_urls
 from nanolab.application.inputs import load_environment, load_scenario
+from nanolab.application.provisioning import provision_environment
 from nanolab.application.run_options import validate_cli_container_options
 from nanolab.cli import diagnostics
-from nanolab.cli.provisioning import provision_environment
 from nanolab.cli.soak import terminal_status
 from nanolab.plans.dispatch import build_scenario_workflow, scenario_observers
 from nanolab.plans.soak import unique_soak_run_dir
