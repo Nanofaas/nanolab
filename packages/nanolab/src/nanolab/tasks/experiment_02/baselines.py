@@ -451,8 +451,12 @@ TINYFAAS_COMMIT = "eff00d060f6f6e96bf8f35475a0e9a8e6e42de32"
 SERVERLEDGE_COMMIT = "45419f50675aa7c8cc3813f626e17f6c28c8a641"
 # ponytail: tags, not digests; install records the digest each one resolved to.
 GOLANG = "golang:1.24"
+# By digest, unlike the build image above: the platform runs it, and a tag
+# re-resolved by another identity on the same VM would change this one's
+# database. The digest is postgres:16's index on 28 October 2026.
 _FUNLESS_IMAGES = (
-    "postgres:16",
+    "postgres:16@sha256:"
+    "1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c",
     "ghcr.io/funlessdev/core@sha256:"
     "c75155af88585663d687b478ef0e69e46668e26c3b05d0cab59bc3583fa65954",
     "ghcr.io/funlessdev/worker@sha256:"

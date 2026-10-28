@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 import pytest
+import yaml
 
 from nanolab.tasks.experiment_02 import baselines
 from nanolab.tasks.experiment_02.baselines import (
@@ -15,6 +16,7 @@ from nanolab.tasks.experiment_02.baselines import (
     install_baselines,
 )
 from nanolab.tasks.experiment_02.workload import ARTIFACTS, ensure_workloads
+from nanolab.workspace.paths import bundled_assets_root
 
 from .fakes import RecordingProvider, Result, vm
 
@@ -118,6 +120,16 @@ def _ensure(provider: RecordingProvider, record: Path, **changes):
     return ensure_baselines(
         vm(provider), ("fn",), source=SOURCE, record=record, **arguments
     )
+
+
+def test_funless_runs_only_the_images_it_pulls_and_records_them_by_digest():
+    compose = yaml.safe_load(
+        (bundled_assets_root() / "experiment02" / "funless-compose.yaml").read_text()
+    )
+    images = {service["image"] for service in compose["services"].values()}
+
+    assert images == set(baselines._PULLED["funless"])
+    assert all("@sha256:" in image for image in images)
 
 
 def test_a_resume_reuses_the_recorded_installation(tmp_path):

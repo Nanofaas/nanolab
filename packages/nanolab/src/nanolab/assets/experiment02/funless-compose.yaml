@@ -4,10 +4,10 @@
 # on the entry port; everything here runs in Docker, so inside the budget.
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     environment: [POSTGRES_PASSWORD=postgres, POSTGRES_USER=postgres, POSTGRES_HOST_AUTH_METHOD=trust]
   init-postgres:
-    image: postgres:16
+    image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     environment: [POSTGRES_PASSWORD=postgres, POSTGRES_USER=postgres]
     command: >
       sh -c "while ! pg_isready -h postgres -U postgres; do sleep 1; done;
