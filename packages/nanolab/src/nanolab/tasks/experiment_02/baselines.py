@@ -1,7 +1,7 @@
 """The baseline platforms of experiment 02 on the stack VM.
 
 Each runs the paper's one qr-code implementation through its own wrapper
-(`nanofaas-paper/functions/qr-code`), installed once per run under `OPT`, and
+(`nanofaas-paper/functions/qr-code`), installed under `OPT/<key>/<identity>`, and
 starts inside the budget: containers through Docker's `cgroup-parent`, host
 processes in the platform unit (`budget.host_service`). Versions, contracts
 and quirks are the portability check's of 27 October 2026
@@ -71,7 +71,7 @@ _FUNLESS_HEADERS = (
 class FunLess(_Baseline):
     """FunLess 0.9.0: core, worker and Postgres in compose; the module is Wasm."""
 
-    root: PurePosixPath = OPT / "funless"
+    root: PurePosixPath
 
     def start(
         self,
@@ -142,7 +142,7 @@ class FunLess(_Baseline):
 class Spin(_Baseline):
     """Spin 4.2.5 serving the qr-code component; one host process."""
 
-    root: PurePosixPath = OPT / "spin"
+    root: PurePosixPath
     host_commands: tuple[str, ...] = ("spin",)
 
     def start(
@@ -197,7 +197,7 @@ class TinyFaas(_Baseline):
     CoAP and gRPC on their default ports, unused.
     """
 
-    root: PurePosixPath = OPT / "tinyfaas"
+    root: PurePosixPath
     # `comm` keeps 15 characters of a process name.
     host_commands: tuple[str, ...] = ("tinyfaas-linux-", "rproxy-linux-am")
 
@@ -261,7 +261,6 @@ class TinyFaas(_Baseline):
 
 
 ETCD = "gcr.io/etcd-development/etcd:v3.5.13"
-SERVERLEDGE_IMAGE = f"{LOCAL_REGISTRY}/qr-serverledge:e02"
 
 
 @dataclass(frozen=True)
@@ -273,8 +272,8 @@ class Serverledge(_Baseline):
     """
 
     budget: Budget
-    root: PurePosixPath = OPT / "serverledge"
-    image: str = SERVERLEDGE_IMAGE
+    root: PurePosixPath
+    image: str
     host_commands: tuple[str, ...] = ("serverledge",)
 
     def start(
@@ -362,8 +361,8 @@ FNSERVER = (
     "fnproject/fnserver@sha256:"
     "16dedb58b2f1be5e02d7a851a66041ea97076801cbdb09cdfee0100296a68686"
 )
-FN_IMAGE = f"{LOCAL_REGISTRY}/qr-fn:e02"
 # Idempotent: a retried registration finds what an earlier attempt created.
+# IMAGE and TIMEOUT are placeholders, filled when the platform starts.
 _FN_REGISTER = f"""
 import json, urllib.request
 api = "{_LOCAL}/v2"
@@ -377,7 +376,7 @@ def ensure(kind, query, body):
     return found[0]["id"] if found else call(f"/{{kind}}", body)["id"]
 app = ensure("apps", "name=e02", {{"name": "e02"}})
 fn = ensure("fns", f"app_id={{app}}&name=qr", {{"name": "qr", "app_id": app,
-    "image": "{FN_IMAGE}", "memory": 256, "timeout": TIMEOUT}})
+    "image": "IMAGE", "memory": 256, "timeout": TIMEOUT}})
 ensure("triggers", f"app_id={{app}}&name=qr", {{"name": "qr", "app_id": app,
     "fn_id": fn, "type": "http", "source": "/qr"}})
 """
@@ -387,8 +386,8 @@ ensure("triggers", f"app_id={{app}}&name=qr", {{"name": "qr", "app_id": app,
 class Fn(_Baseline):
     """Fn 0.3.770 in single-server mode, starting function containers itself."""
 
-    root: PurePosixPath = OPT / "fn"
-    image: str = FN_IMAGE
+    root: PurePosixPath
+    image: str
 
     def start(
         self,
@@ -402,7 +401,7 @@ class Fn(_Baseline):
         iofs = self.root / "iofs"
         register = _FN_REGISTER.replace(
             "TIMEOUT", str(protocol.http_timeout_seconds)
-        ).replace(FN_IMAGE, self.image)
+        ).replace("IMAGE", self.image)
         return start_platform(
             vm,
             images=(FNSERVER, self.image),

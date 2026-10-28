@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+from pathlib import PurePosixPath
 
 import yaml
 
@@ -18,6 +19,8 @@ from .fakes import RecordingProvider, Result, vm
 PAYLOAD = b'{"size":128,"text":"A"}'
 PROBE = {"started": 1.0, "api": 2.0, "registered": 3.0, "first": 4.0, "attempts": 1}
 BUDGET = Budget(cpus=2, memoryMiB=2048)
+ROOT = PurePosixPath("/opt/nanolab-e02/baseline/0123456789abcdef")
+IMAGE = "127.0.0.1:5000/qr-baseline:0123456789abcdef"
 
 
 def _protocol(concurrency: int = 3):
@@ -47,7 +50,7 @@ def _unit(command: list[str]) -> list[str]:
 
 
 def test_tinyfaas_runs_its_manager_in_the_unit_on_the_entry_port(tmp_path):
-    spec = _spec(TinyFaas(), tmp_path)
+    spec = _spec(TinyFaas(root=ROOT), tmp_path)
     [manager] = spec["start"]
     unit = " ".join(manager)
     assert "http_PORT=30080" in unit
@@ -55,31 +58,31 @@ def test_tinyfaas_runs_its_manager_in_the_unit_on_the_entry_port(tmp_path):
     # (cmd/rproxy/main.go:22), so CoAP and gRPC keep their defaults.
     assert "_PORT=-1" not in unit
     _unit(manager)
-    target = TinyFaas().target("10.0.0.4")
+    target = TinyFaas(root=ROOT).target("10.0.0.4")
     assert (target.url, target.extractor) == ("http://10.0.0.4:30080/qr", "json-base64")
-    assert TinyFaas().host_commands
+    assert TinyFaas(root=ROOT).host_commands
 
 
 def test_serverledge_registers_a_custom_image_with_etcd_in_the_budget(tmp_path):
-    spec = _spec(Serverledge(budget=BUDGET), tmp_path)
+    spec = _spec(Serverledge(budget=BUDGET, root=ROOT, image=IMAGE), tmp_path)
     started = " ".join(" ".join(command) for command in spec["start"])
     assert "etcd:v3.5.13" in started
     assert "serverledge-conf.yaml" in started
     [create] = spec["register"]["commands"]
     assert "--runtime custom" in " ".join(create)
-    target = Serverledge(budget=BUDGET).target("10.0.0.4")
+    target = Serverledge(budget=BUDGET, root=ROOT, image=IMAGE).target("10.0.0.4")
     assert (target.url, target.extractor, target.field) == (
         "http://10.0.0.4:30080/invoke/qr",
         "json-string-base64",
         "Result",
     )
-    assert json.loads(Serverledge(budget=BUDGET).body(PAYLOAD)) == {
-        "Params": json.loads(PAYLOAD)
-    }
+    assert json.loads(
+        Serverledge(budget=BUDGET, root=ROOT, image=IMAGE).body(PAYLOAD)
+    ) == {"Params": json.loads(PAYLOAD)}
 
 
 def test_fn_runs_its_server_and_creates_an_http_trigger(tmp_path):
-    spec = _spec(Fn(), tmp_path)
+    spec = _spec(Fn(root=ROOT, image=IMAGE), tmp_path)
     [server] = spec["start"]
     assert (
         "30080:8080" in server and "/var/run/docker.sock:/var/run/docker.sock" in server
@@ -89,7 +92,10 @@ def test_fn_runs_its_server_and_creates_an_http_trigger(tmp_path):
     assert 'ensure("triggers"' in register[-1]
     assert '"type": "http", "source": "/qr"' in register[-1]
     compile(register[-1], "fn-register", "exec")  # the generated script parses
-    assert Fn().target("10.0.0.4").url == "http://10.0.0.4:30080/t/e02/qr"
+    assert (
+        Fn(root=ROOT, image=IMAGE).target("10.0.0.4").url
+        == "http://10.0.0.4:30080/t/e02/qr"
+    )
 
 
 def test_serverledge_and_fn_register_the_installed_image(tmp_path):
@@ -97,24 +103,30 @@ def test_serverledge_and_fn_register_the_installed_image(tmp_path):
     # that tag, not a default no installation pushes.
     image = "127.0.0.1:5000/qr-{}:0123456789abcdef"
     serverledge = _spec(
-        Serverledge(budget=BUDGET, image=image.format("serverledge")), tmp_path / "s"
+        Serverledge(budget=BUDGET, root=ROOT, image=image.format("serverledge")),
+        tmp_path / "s",
     )
     [create] = serverledge["register"]["commands"]
     assert create[create.index("--custom_image") + 1] == image.format("serverledge")
-    fn = _spec(Fn(image=image.format("fn")), tmp_path / "f")
+    fn = _spec(Fn(root=ROOT, image=image.format("fn")), tmp_path / "f")
     [register] = fn["register"]["commands"]
     assert f'"image": "{image.format("fn")}"' in register[-1]
 
 
 def test_concurrency_knobs_follow_the_protocol(tmp_path):
-    tinyfaas = _spec(TinyFaas(), tmp_path / "t")
+    tinyfaas = _spec(TinyFaas(root=ROOT), tmp_path / "t")
     assert '"threads"] = 3' in tinyfaas["register"]["commands"][0][-1]
-    serverledge = _spec(Serverledge(budget=BUDGET), tmp_path / "s")
+    serverledge = _spec(
+        Serverledge(budget=BUDGET, root=ROOT, image=IMAGE), tmp_path / "s"
+    )
     assert serverledge["register"]["commands"][0][-2:] == ["--max_concurrency", "3"]
 
 
 def test_serverledge_pool_matches_the_budget(tmp_path):
-    spec = _spec(Serverledge(budget=Budget(cpus=1.5, memoryMiB=1024)), tmp_path)
+    spec = _spec(
+        Serverledge(budget=Budget(cpus=1.5, memoryMiB=1024), root=ROOT, image=IMAGE),
+        tmp_path,
+    )
     started = " ".join(" ".join(command) for command in spec["start"])
     assert "memory: 1024" in started
     assert "cpus: 1.5" in started
@@ -123,7 +135,7 @@ def test_serverledge_pool_matches_the_budget(tmp_path):
 def test_tinyfaas_never_uploads_over_a_failed_upload(tmp_path):
     # A failed upload can leave handlers tinyFaaS no longer tracks; uploading
     # again would measure them too, so the retry fails instead.
-    [command] = _spec(TinyFaas(), tmp_path)["register"]["commands"]
+    [command] = _spec(TinyFaas(root=ROOT), tmp_path)["register"]["commands"]
     calls = tmp_path / "calls"
     tools = tmp_path / "bin"
     tools.mkdir()
