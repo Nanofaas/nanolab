@@ -13,6 +13,8 @@
 **/.grimp_cache/
 dist/
 build/
+# Operator workspace (NANOLAB_WORKSPACE, default: the current directory). Run
+# from the repository root or from packages/nanolab, it lands in one of these.
 packages/nanolab/runs/
 /runs/
 /profiles/
@@ -20,6 +22,9 @@ packages/nanolab/runs/
 packages/nanolab/profiles/azure.toml
 packages/nanolab/profiles/proxmox.toml
 packages/nanolab/environments/azure*.yaml
+# Credentials from the pre-workspace layout. scenarios-v2 is gone from git, but
+# git leaves an ignored file on disk; dropping this line would surface it to
+# `git add -A`.
 packages/nanolab/scenarios-v2/release-config.yaml
 .nanofaas-source/
 .wheel-smoke/
