@@ -21,64 +21,10 @@ from nanolab.tasks.one_shot.artifacts import (
 from nanolab.tasks.one_shot.trace import TraceArtifact, request_schedule
 
 
-def _run_capacity_trial(
-    topology,
-    settings,
-    inputs,
-    value,
-    *,
-    replicas: dict,
-    rates: dict,
-    repetition: int,
-    run_dir: Path,
-    clock,
-    telemetry_enabled: bool | None = None,
-    preload_lead_seconds: float | None = None,
-    warmup_seconds: int = 30,
-    measurement_seconds: int = 60,
-) -> list[dict]:
-    """Retain every request, reject missing proof, and compensate owned processes."""
-    # Imports are local because the public experiment module uses calibration's
-    # checksum oracle; this task reuses its existing lifecycle rather than a CLI.
-    from nanolab.tasks.one_shot.calibration import measure_invocation
-    from nanolab.tasks.one_shot.experiment import (
-        LiveEvidenceCollector,
-        classify_result,
-        collect_runtime_evidence,
-        generator_resource,
-        generator_rows,
-        physical_attempts,
-    )
-    from nanolab.tasks.one_shot.preflight import runtime_endpoint
-
-    if any(
-        type(duration) is not int or duration <= 0
-        for duration in (warmup_seconds, measurement_seconds)
-    ):
-        raise ValueError(
-            "capacity warmup and measurement durations must be positive integers"
-        )
-    window_seconds = warmup_seconds + measurement_seconds
-    if preload_lead_seconds is not None and (
-        not math.isfinite(preload_lead_seconds) or preload_lead_seconds < 2
-    ):
-        raise ValueError("capacity pre-load lead must be finite and >=2 seconds")
-    run_dir.mkdir(parents=True, exist_ok=False)
+def _capacity_vectors(topology, settings, functions, replicas, rates, window_seconds):
+    """Validate per-node memory and arrival grids before acquiring runtimes."""
     from nanolab.config.one_shot import resolve_node_functions
-    from nanolab.tasks.one_shot.preflight import (
-        collect_container_cgroup,
-        validate_strict_cgroup,
-    )
 
-    functions = list(topology.function_settings)
-    legacy = all(type(count) is int for count in replicas.values())
-    if legacy:
-        if len(functions) != 1:
-            raise ValueError("scalar capacity input has ambiguous function scope")
-        replicas = {node: {functions[0]: count} for node, count in replicas.items()}
-        rates = {node: {functions[0]: rate} for node, rate in rates.items()}
-    if not replicas or set(replicas) != set(rates):
-        raise ValueError("capacity node scope mismatch")
     aliases = getattr(topology, "function_aliases", {})
     node_settings, counts, effective = {}, {}, {}
     for node, vector in replicas.items():
@@ -126,6 +72,69 @@ def _run_capacity_trial(
             > node_config.memory_capacity_mib
         ):
             raise ValueError("capacity replica vector exceeds memory pool")
+    return node_settings, counts, effective
+
+
+def _run_capacity_trial(
+    topology,
+    settings,
+    inputs,
+    value,
+    *,
+    replicas: dict,
+    rates: dict,
+    repetition: int,
+    run_dir: Path,
+    clock,
+    telemetry_enabled: bool | None = None,
+    preload_lead_seconds: float | None = None,
+    warmup_seconds: int = 30,
+    measurement_seconds: int = 60,
+) -> list[dict]:
+    """Retain every request, reject missing proof, and compensate owned processes."""
+    # Imports are local because the public experiment module uses calibration's
+    # checksum oracle; this task reuses its existing lifecycle rather than a CLI.
+    from nanolab.tasks.one_shot.calibration import measure_invocation
+    from nanolab.tasks.one_shot.experiment import (
+        LiveEvidenceCollector,
+        classify_result,
+        collect_runtime_evidence,
+        generator_resource,
+        generator_rows,
+        physical_attempts,
+    )
+    from nanolab.tasks.one_shot.preflight import runtime_endpoint
+
+    if any(
+        type(duration) is not int or duration <= 0
+        for duration in (warmup_seconds, measurement_seconds)
+    ):
+        raise ValueError(
+            "capacity warmup and measurement durations must be positive integers"
+        )
+    window_seconds = warmup_seconds + measurement_seconds
+    if preload_lead_seconds is not None and (
+        not math.isfinite(preload_lead_seconds) or preload_lead_seconds < 2
+    ):
+        raise ValueError("capacity pre-load lead must be finite and >=2 seconds")
+    run_dir.mkdir(parents=True, exist_ok=False)
+    from nanolab.tasks.one_shot.preflight import (
+        collect_container_cgroup,
+        validate_strict_cgroup,
+    )
+
+    functions = list(topology.function_settings)
+    legacy = all(type(count) is int for count in replicas.values())
+    if legacy:
+        if len(functions) != 1:
+            raise ValueError("scalar capacity input has ambiguous function scope")
+        replicas = {node: {functions[0]: count} for node, count in replicas.items()}
+        rates = {node: {functions[0]: rate} for node, rate in rates.items()}
+    if not replicas or set(replicas) != set(rates):
+        raise ValueError("capacity node scope mismatch")
+    node_settings, counts, effective = _capacity_vectors(
+        topology, settings, functions, replicas, rates, window_seconds
+    )
     runtime_urls = {}
     with httpx.Client(trust_env=False) as http:
         for node_id, vector in counts.items():

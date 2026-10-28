@@ -812,3 +812,24 @@ def test_scientific_multi_calibration_publishes_joint_trials_and_cost(
     )
     assert calibrated.concurrent_capacities == records
     assert calibrated.capacities is None
+
+
+@pytest.mark.parametrize("lead", [-1, 1.99, float("nan"), float("inf")])
+def test_capacity_preload_rejects_invalid_lead_before_creating_output(tmp_path, lead):
+    from nanolab.tasks.one_shot.capacity import run_capacity_trial
+
+    directory = tmp_path / "bad-lead"
+    with pytest.raises(ValueError, match="pre-load lead"):
+        run_capacity_trial(
+            None,
+            None,
+            None,
+            None,
+            replicas={},
+            rates={},
+            repetition=0,
+            run_dir=directory,
+            clock=None,
+            preload_lead_seconds=lead,
+        )
+    assert not directory.exists()
