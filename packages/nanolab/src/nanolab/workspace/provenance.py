@@ -25,8 +25,9 @@ def git_commit(repo_root: Path) -> str | None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=120,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
 
@@ -48,6 +49,7 @@ def git_provenance(repo_root: Path) -> dict[str, object]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=120,
         )
         diff = subprocess.run(
             ("git", "diff", "--binary", "HEAD"),
@@ -55,6 +57,7 @@ def git_provenance(repo_root: Path) -> dict[str, object]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=120,
         )
         untracked = subprocess.run(
             ("git", "ls-files", "--others", "--exclude-standard", "-z"),
@@ -62,8 +65,9 @@ def git_provenance(repo_root: Path) -> dict[str, object]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=120,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return {
             "git_commit": commit,
             "git_dirty": None,
@@ -83,7 +87,7 @@ def git_provenance(repo_root: Path) -> dict[str, object]:
         digest.update(relative_path.encode("utf-8"))
         try:
             digest.update((repo_root / relative_path).read_bytes())
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             digest.update(b"\0unavailable")
     return {
         "git_commit": commit,

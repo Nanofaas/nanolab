@@ -166,6 +166,7 @@ def backend_resource(
                 "label=com.docker.compose.project=" + project,
             ],
             text=True,
+            timeout=30,
         ).strip()
         volumes = subprocess.check_output(
             [
@@ -177,6 +178,7 @@ def backend_resource(
                 "label=com.docker.compose.project=" + project,
             ],
             text=True,
+            timeout=30,
         ).strip()
         if result.returncode or remaining or (volumes and not raw_export_failed):
             raise RuntimeError("owned logging backend cleanup unconfirmed")

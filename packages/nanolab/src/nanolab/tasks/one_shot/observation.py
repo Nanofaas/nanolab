@@ -192,6 +192,7 @@ def source_file_names(root: Path) -> list[str]:
             "-z",
         ],
         text=True,
+        timeout=120,
     ).split("\0")
     return sorted({name for name in names if name and (root / name).is_file()})
 

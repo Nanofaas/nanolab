@@ -359,7 +359,11 @@ class FreezeManifestTask(Task[CampaignManifest]):
                 **experiment.model_dump(by_alias=True),
                 "warmupSeconds": warmup_seconds,
                 "version": subprocess.run(
-                    ("k6", "version"), check=True, capture_output=True, text=True
+                    ("k6", "version"),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 ).stdout.strip(),
                 "retry": False,
                 "location": "operator-host",

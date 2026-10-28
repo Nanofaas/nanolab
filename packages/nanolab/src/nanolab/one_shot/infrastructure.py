@@ -146,6 +146,7 @@ def external_vm_cpus() -> int:
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,
     )
     info = json.loads(result.stdout)
     if info.get("errors"):

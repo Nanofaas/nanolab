@@ -13,5 +13,5 @@ def git_output(root: Path, *args: str) -> bytes:
     cannot run; its stderr goes with the error, not to the terminal.
     """
     return subprocess.run(
-        ("git", *args), cwd=root, check=True, capture_output=True
+        ("git", *args), cwd=root, check=True, capture_output=True, timeout=120
     ).stdout

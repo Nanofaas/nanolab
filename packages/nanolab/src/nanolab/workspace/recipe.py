@@ -90,6 +90,7 @@ def prepare_recipe_run(
         ),
         check=True,
         capture_output=True,
+        timeout=600,
     )
     git_output(result.source_dir, "checkout", "-q", "--detach", revision)
     if patch:
@@ -99,6 +100,7 @@ def prepare_recipe_run(
             input=patch,
             check=True,
             capture_output=True,
+            timeout=600,
         )
     _verify_staged_inputs(source, result.source_dir)
     if (

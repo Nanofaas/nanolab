@@ -75,7 +75,9 @@ def build_workloads(
         archive = Path(scratch) / "qr-code.tar"
         archive.write_bytes(
             subprocess.check_output(
-                ("git", "archive", "--format=tar", "HEAD", WORKLOAD), cwd=workloads
+                ("git", "archive", "--format=tar", "HEAD", WORKLOAD),
+                cwd=workloads,
+                timeout=600,
             )
         )
         request = Path(scratch) / "payload.json"

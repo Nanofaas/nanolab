@@ -535,3 +535,29 @@ def test_source_transfer_empty_checksum_reports_integrity_failure(tmp_path):
             remote_archive="/srv/release/source.tar",
             remote_source_dir="/srv/release/source",
         )
+
+
+def test_extract_commit_tree_normalizes_timeout_and_removes_archive(
+    tmp_path, monkeypatch
+):
+    from nanolab.release import build
+
+    archives = []
+
+    def hung_archive(argv, **kwargs):
+        archives.append(
+            Path(
+                next(
+                    arg.removeprefix("--output=")
+                    for arg in argv
+                    if arg.startswith("--output=")
+                )
+            )
+        )
+        assert 0 < kwargs.get("timeout", 0) <= 600
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(build.subprocess, "run", hung_archive)
+    with pytest.raises(ValueError, match="could not extract release source"):
+        build.extract_commit_tree(tmp_path, "a" * 40, tmp_path / "tree")
+    assert archives and all(not archive.exists() for archive in archives)

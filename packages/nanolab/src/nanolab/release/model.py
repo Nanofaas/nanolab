@@ -196,6 +196,7 @@ def git_state(repo_root: Path) -> GitState:
         check=True,
         capture_output=True,
         text=True,
+        timeout=120,
     ).stdout.strip()
     status = subprocess.run(
         ("git", "status", "--porcelain=v1"),
@@ -203,6 +204,7 @@ def git_state(repo_root: Path) -> GitState:
         check=True,
         capture_output=True,
         text=True,
+        timeout=120,
     ).stdout
     return GitState(commit=commit, clean=not status.strip())
 

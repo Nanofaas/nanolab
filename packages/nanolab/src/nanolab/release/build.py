@@ -429,16 +429,18 @@ def extract_commit_tree(
             cwd=Path(repo_root),
             check=True,
             capture_output=True,
+            timeout=600,
         )
         subprocess.run(
             (sys.executable, "-c", _EXTRACT_ARCHIVE_SCRIPT, str(archive), str(output)),
             check=True,
             capture_output=True,
+            timeout=600,
         )
         if archive_destination is not None:
             archive_destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(archive, archive_destination)
-    except (subprocess.CalledProcessError, tarfile.TarError, OSError) as error:
+    except (subprocess.SubprocessError, tarfile.TarError, OSError) as error:
         # The CLI turns ValueError from the preflight into a clean BadParameter;
         # git and tarfile raise neither, so normalize here rather than leaking a
         # traceback out of an offline preflight. mkdir/mkstemp are inside the
@@ -481,6 +483,7 @@ def create_source_archive(
             ("git", "archive", "--format=tar", f"--output={temporary}", guarded_commit),
             cwd=root,
             check=True,
+            timeout=600,
         )
         after = git_state(root)
         if after != before:

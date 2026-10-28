@@ -87,7 +87,7 @@ SOURCE_PROBE = """
 import hashlib, json, os, subprocess
 from pathlib import Path
 def git(*args):
-    return subprocess.check_output(('git', *args))
+    return subprocess.check_output(('git', *args), timeout=120)
 paths = set(git('ls-files', '-z').split(b'\\0'))
 paths.update(git('ls-tree', '-r', '--name-only', '-z', 'HEAD').split(b'\\0'))
 files = {}
@@ -111,7 +111,9 @@ print(json.dumps({'revision': git('rev-parse', 'HEAD').decode().strip(),
 def captured_source_state(source: Path) -> dict[str, object]:
     """Inspect every tracked input in a captured source checkout."""
     return json.loads(
-        subprocess.check_output(("python3", "-c", SOURCE_PROBE), cwd=source)
+        subprocess.check_output(
+            ("python3", "-c", SOURCE_PROBE), cwd=source, timeout=600
+        )
     )
 
 

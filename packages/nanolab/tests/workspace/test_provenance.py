@@ -72,3 +72,21 @@ def test_the_fingerprint_survives_as_an_image_tag(tmp_path: Path) -> None:
 
     assert fingerprint is not None
     assert all(character.isalnum() for character in fingerprint)
+
+
+def test_hung_git_reports_unknown_provenance(tmp_path, monkeypatch):
+    import subprocess
+
+    from nanolab.workspace import provenance
+
+    def hung_git(argv, **kwargs):
+        assert 0 < kwargs.get("timeout", 0) <= 120
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(provenance.subprocess, "run", hung_git)
+    assert provenance.git_provenance(tmp_path) == {
+        "git_commit": None,
+        "git_dirty": None,
+        "git_diff_sha256": None,
+        "git_status": [],
+    }
