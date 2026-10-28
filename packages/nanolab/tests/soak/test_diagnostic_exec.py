@@ -312,3 +312,75 @@ def test_detached_descendants_are_reaped_and_unrelated_process_is_preserved(
                     pass
                 finally:
                     os.close(descriptor)
+
+
+@pytest.mark.parametrize("case", ["chunks", "unsafe", "over-budget", "after-result"])
+def test_helper_frames_preserve_stream_limits_without_process_supervision(
+    tmp_path, monkeypatch, case
+):
+    """Characterize the FIFO parser; Linux child ownership is tested separately."""
+    import base64
+    from types import SimpleNamespace
+
+    from nanolab.tasks.soak import diagnostic_exec
+
+    executor, target, capture, _ = provision(tmp_path, SUCCESS)
+    output = capture / "framed"
+    output.mkdir()
+
+    def artifact(name, body):
+        return {
+            "kind": "artifact",
+            "name": name,
+            "data_base64": base64.b64encode(body).decode(),
+        }
+
+    result = {"kind": "result", "target": asdict(target)}
+    frames = {
+        "chunks": [
+            artifact("sample.txt", b"abc"),
+            artifact("sample.txt", b"def"),
+            result,
+        ],
+        "unsafe": [artifact("../escaped", b"x"), result],
+        "over-budget": [artifact("sample.txt", b"1234567"), result],
+        "after-result": [result, artifact("sample.txt", b"x")],
+    }[case]
+
+    class FrameOwner:
+        def __init__(self, argv, **kwargs):
+            self.config = json.loads(Path(argv[-1]).read_text())
+
+        def run(self):
+            with Path(self.config["stdout"]).open("wb", buffering=0) as stream:
+                for frame in frames:
+                    stream.write(json.dumps(frame).encode() + b"\n")
+            return SimpleNamespace(
+                reaped=True,
+                ended_s=1,
+                timed_out=False,
+                cancelled=False,
+                quota_exceeded=False,
+                forced_stop=False,
+                errors=(),
+                returncode=0,
+            )
+
+        def stop(self, timeout_s):
+            pass
+
+    monkeypatch.setattr(diagnostic_exec, "OwnedCommandRunner", FrameOwner)
+    if case == "chunks":
+        value = executor._exchange({"kind": "inspect"}, 2, output=output, max_bytes=6)
+        assert value["_local_descendants_reaped"] is True
+        assert (output / "sample.txt").read_bytes() == b"abcdef"
+    else:
+        error, match = {
+            "unsafe": (ValueError, "unsafe diagnostic artifact name"),
+            "over-budget": (OSError, "diagnostic artifact byte budget"),
+            "after-result": (ValueError, "output after completion"),
+        }[case]
+        with pytest.raises(error, match=match):
+            executor._exchange({"kind": "inspect"}, 2, output=output, max_bytes=6)
+        assert list(output.iterdir()) == []
+    assert not (capture / "escaped").exists()

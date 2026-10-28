@@ -26,6 +26,7 @@ import sys
 import time
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
@@ -110,6 +111,54 @@ class HelperProvisioning:
     receipt: Path
     receipt_sha256: str
     command: tuple[str, ...]
+
+
+@dataclass
+class _ArtifactFrames:
+    """Decode bounded helper artifacts into files owned by the exchange stack."""
+
+    output: Path | None
+    max_bytes: int
+    result: dict[str, Any] | None = None
+    artifact_bytes: int = 0
+    files: dict[str, Any] = dataclass_field(default_factory=dict)
+
+    def accept(self, body: bytes, stack: ExitStack) -> None:
+        value = json.loads(body)
+        if not isinstance(value, dict) or self.result is not None:
+            raise ValueError("invalid helper frame or output after completion")
+        if value.get("kind") == "result":
+            self.result = value
+            return
+        if value.get("kind") != "artifact" or self.output is None:
+            raise ValueError("unsupported helper artifact frame")
+        name = value.get("name")
+        if not isinstance(name, str) or _NAME.fullmatch(name) is None:
+            raise ValueError("unsafe diagnostic artifact name")
+        encoded = value.get("data_base64")
+        if not isinstance(encoded, str):
+            raise ValueError("invalid diagnostic artifact encoding")
+        chunk = base64.b64decode(encoded, validate=True)
+        if self.artifact_bytes + len(chunk) > self.max_bytes:
+            raise OSError("diagnostic artifact byte budget exhausted")
+        if name not in self.files:
+            if len(self.files) >= 32:
+                raise OSError("diagnostic artifact count budget exhausted")
+            descriptor = os.open(
+                self.output / name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            self.files[name] = stack.enter_context(
+                os.fdopen(descriptor, "wb", buffering=0)
+            )
+        remaining = memoryview(chunk)
+        while remaining:
+            written = self.files[name].write(remaining)
+            if not written:
+                raise OSError("diagnostic artifact write made no progress")
+            self.artifact_bytes += written
+            remaining = remaining[written:]
 
 
 class ProvisionedDiagnosticExecutor:
@@ -256,6 +305,66 @@ class ProvisionedDiagnosticExecutor:
             receipt.get("private_control") is True,
         )
 
+    def _raise_remote_failure(
+        self,
+        message: dict[str, Any],
+        result: dict[str, Any],
+        output: Path | None,
+        max_bytes: int,
+        artifact_bytes: int,
+    ) -> None:
+        """Preserve bounded, identity-checked failure evidence before aborting."""
+        # Persist only an identity-checked, bounded failure summary.
+        # Raising here still enters the Docker owner's cancellation
+        # path; a failed remote operation never becomes a success.
+        if (
+            result.get("target") != asdict(self._target)
+            or message.get("target") != asdict(self._target)
+            or (
+                "request_id" in result
+                and result["request_id"] != message.get("request_id")
+            )
+        ):
+            raise ValueError("diagnostic failure result identity changed")
+        remote_error = result.get("error")
+        detail = (
+            remote_error[:2048]
+            if isinstance(remote_error, str)
+            else "remote operation reported failure without a text error"
+        )
+        failure = {
+            "schema": "nanolab-soak-diagnostic-failure-v1",
+            "kind": "remote_failure",
+            "target": asdict(self._target),
+            "request_id": message.get("request_id"),
+            "operation": message.get("operation"),
+            "error": detail,
+            "error_truncated": isinstance(remote_error, str)
+            and len(remote_error) > 2048,
+            "_local_descendants_reaped": True,
+        }
+        for field in ("completed", "remote_finished", "descendants_reaped"):
+            if type(result.get(field)) is bool:
+                failure[field] = result[field]
+        code = result.get("exit_code")
+        if type(code) is int and -(2**31) <= code < 2**31:
+            failure["exit_code"] = code
+        error = RuntimeError(f"remote diagnostic failed: {detail}")
+        try:
+            body = (json.dumps(failure, allow_nan=False) + "\n").encode()
+            if output is None or len(body) > min(16384, max_bytes - artifact_bytes):
+                raise OSError("failure evidence exceeds remaining output budget")
+            descriptor = os.open(
+                output / "remote-failure.json",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(body)
+        except (OSError, ValueError, TypeError) as evidence_error:
+            error.add_note(f"remote failure evidence not saved: {evidence_error}")
+        raise error
+
     def _exchange(
         self,
         message: dict[str, Any],
@@ -270,50 +379,10 @@ class ProvisionedDiagnosticExecutor:
         payload = (json.dumps(message, allow_nan=False) + "\n").encode()
         if len(payload) > 65536:
             raise ValueError("helper request exceeds its size budget")
-        result: dict[str, Any] | None = None
+        frames = _ArtifactFrames(output, max_bytes)
         wire_bytes = 0
-        artifact_bytes = 0
-        files: dict[str, Any] = {}
         pending = bytearray()
         stderr = bytearray()
-
-        def frame(body: bytes, stack: ExitStack) -> None:
-            nonlocal result, artifact_bytes
-            value = json.loads(body)
-            if not isinstance(value, dict) or result is not None:
-                raise ValueError("invalid helper frame or output after completion")
-            if value.get("kind") == "result":
-                result = value
-                return
-            if value.get("kind") != "artifact" or output is None:
-                raise ValueError("unsupported helper artifact frame")
-            name = value.get("name")
-            if not isinstance(name, str) or _NAME.fullmatch(name) is None:
-                raise ValueError("unsafe diagnostic artifact name")
-            encoded = value.get("data_base64")
-            if not isinstance(encoded, str):
-                raise ValueError("invalid diagnostic artifact encoding")
-            chunk = base64.b64decode(encoded, validate=True)
-            if artifact_bytes + len(chunk) > max_bytes:
-                raise OSError("diagnostic artifact byte budget exhausted")
-            if name not in files:
-                if len(files) >= 32:
-                    raise OSError("diagnostic artifact count budget exhausted")
-                descriptor = os.open(
-                    output / name,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                    0o600,
-                )
-                files[name] = stack.enter_context(
-                    os.fdopen(descriptor, "wb", buffering=0)
-                )
-            remaining = memoryview(chunk)
-            while remaining:
-                written = files[name].write(remaining)
-                if not written:
-                    raise OSError("diagnostic artifact write made no progress")
-                artifact_bytes += written
-                remaining = remaining[written:]
 
         with ExitStack() as stack:
             # Check before starting a supervisor, and pin again in the bridge
@@ -415,7 +484,7 @@ class ProvisionedDiagnosticExecutor:
                                 raise OSError(
                                     "diagnostic helper frame budget exhausted"
                                 )
-                            frame(bytes(line), stack)
+                            frames.accept(bytes(line), stack)
                         if len(pending) > _FRAME_LIMIT:
                             raise OSError("diagnostic helper frame budget exhausted")
                 if pending:
@@ -444,6 +513,7 @@ class ProvisionedDiagnosticExecutor:
                         f"diagnostic helper exited {owned.returncode}: "
                         f"{stderr.decode('utf-8', 'replace')[:1024]}"
                     )
+                result = frames.result
                 if result is None:
                     raise ValueError("diagnostic helper completion frame missing")
                 result["_local_descendants_reaped"] = True
@@ -455,62 +525,9 @@ class ProvisionedDiagnosticExecutor:
                         and result["exit_code"] != 0
                     )
                 ):
-                    # Persist only an identity-checked, bounded failure summary.
-                    # Raising here still enters the Docker owner's cancellation
-                    # path; a failed remote operation never becomes a success.
-                    if (
-                        result.get("target") != asdict(self._target)
-                        or message.get("target") != asdict(self._target)
-                        or (
-                            "request_id" in result
-                            and result["request_id"] != message.get("request_id")
-                        )
-                    ):
-                        raise ValueError("diagnostic failure result identity changed")
-                    remote_error = result.get("error")
-                    detail = (
-                        remote_error[:2048]
-                        if isinstance(remote_error, str)
-                        else "remote operation reported failure without a text error"
+                    self._raise_remote_failure(
+                        message, result, output, max_bytes, frames.artifact_bytes
                     )
-                    failure = {
-                        "schema": "nanolab-soak-diagnostic-failure-v1",
-                        "kind": "remote_failure",
-                        "target": asdict(self._target),
-                        "request_id": message.get("request_id"),
-                        "operation": message.get("operation"),
-                        "error": detail,
-                        "error_truncated": isinstance(remote_error, str)
-                        and len(remote_error) > 2048,
-                        "_local_descendants_reaped": True,
-                    }
-                    for field in ("completed", "remote_finished", "descendants_reaped"):
-                        if type(result.get(field)) is bool:
-                            failure[field] = result[field]
-                    code = result.get("exit_code")
-                    if type(code) is int and -(2**31) <= code < 2**31:
-                        failure["exit_code"] = code
-                    error = RuntimeError(f"remote diagnostic failed: {detail}")
-                    try:
-                        body = (json.dumps(failure, allow_nan=False) + "\n").encode()
-                        if output is None or len(body) > min(
-                            16384, max_bytes - artifact_bytes
-                        ):
-                            raise OSError(
-                                "failure evidence exceeds remaining output budget"
-                            )
-                        descriptor = os.open(
-                            output / "remote-failure.json",
-                            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                            0o600,
-                        )
-                        with os.fdopen(descriptor, "wb") as stream:
-                            stream.write(body)
-                    except (OSError, ValueError, TypeError) as evidence_error:
-                        error.add_note(
-                            f"remote failure evidence not saved: {evidence_error}"
-                        )
-                    raise error
                 return result
             except BaseException as error:
                 primary_error = error
