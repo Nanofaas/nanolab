@@ -308,3 +308,16 @@ def test_partial_nested_identity_cannot_resume(captured, section):
         value["identity"]["roles"]["stack"] = {"name": "experiment"}
     with pytest.raises(ValueError, match="identity"):
         ComparisonManifest.model_validate(value)
+
+
+def test_git_timeout_is_reported_as_an_identity_refusal(captured, monkeypatch):
+    from nanolab.comparison import manifest
+
+    kwargs, _ = captured
+
+    def hung_git(*args):
+        raise subprocess.TimeoutExpired(("git", "status"), 120)
+
+    monkeypatch.setattr(manifest, "git_output", hung_git)
+    with pytest.raises(ValueError, match="Cannot establish Git identity"):
+        capture_comparison_inputs(**kwargs)

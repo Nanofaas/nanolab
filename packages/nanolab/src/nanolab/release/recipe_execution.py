@@ -174,10 +174,16 @@ def _verify_remote_digest(
 def capture_release_inventory(source_tree: Path, destination: Path) -> Path:
     """Freeze every archive entry, including tracked files inside build directories."""
     destination.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        (sys.executable, "-c", _INVENTORY_SCRIPT, str(source_tree), str(destination)),
-        check=True,
-    )
+    partial = destination.with_suffix(destination.suffix + ".partial")
+    try:
+        subprocess.run(
+            (sys.executable, "-c", _INVENTORY_SCRIPT, str(source_tree), str(partial)),
+            check=True,
+            timeout=600,
+        )
+        partial.replace(destination)
+    finally:
+        partial.unlink(missing_ok=True)
     return destination
 
 

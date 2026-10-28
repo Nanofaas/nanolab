@@ -31,6 +31,7 @@ from nanolab.one_shot.infrastructure import (
     build_one_shot_resources,
 )
 from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_graph
+from nanolab.one_shot.vm_resources import require_resource_overhead
 from nanolab.tasks.components.bootstrap import plan_vm_provision_base
 from nanolab.tasks.one_shot.images import archive_image_ids
 from nanolab.tasks.one_shot.logging import backend_resource, collector_resource
@@ -409,7 +410,6 @@ def add_one_shot_platforms(
     settings = config.one_shot
     if settings is None:
         raise ValueError("one-shot configuration missing")
-    from nanolab.one_shot.vm_resources import require_resource_overhead
 
     if not observer_bootstrap:
         require_resource_overhead(settings)
@@ -497,23 +497,30 @@ def add_one_shot_platforms(
                     ),
                     check=True,
                     capture_output=True,
+                    timeout=30,
                 )
                 .stdout.decode()
                 .strip()
             )
             if observed != component.image.id:
                 raise ValueError("local image changed since runtime build")
-        subprocess.run(
-            (
-                "docker",
-                "save",
-                "--output",
-                str(path),
-                *(component.image.reference for component in built.components),
-            ),
-            check=True,
-            capture_output=True,
-        )
+        partial = path.with_suffix(".tar.partial")
+        try:
+            subprocess.run(
+                (
+                    "docker",
+                    "save",
+                    "--output",
+                    str(partial),
+                    *(component.image.reference for component in built.components),
+                ),
+                check=True,
+                capture_output=True,
+                timeout=1800,
+            )
+            partial.replace(path)
+        finally:
+            partial.unlink(missing_ok=True)
         (run_dir / "runtime-distribution.json").write_bytes(built.report.read_bytes())
         return path
 

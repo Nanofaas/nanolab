@@ -288,7 +288,12 @@ def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
     assert observed[0].argv[-1] == "10.0.0.9,"
 
 
-def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fault", [None, "inspect-timeout", "save-timeout"])
+def test_image_archive_keeps_all_named_images_for_oci_import(
+    tmp_path, monkeypatch, fault
+):
+    import subprocess
+    from pathlib import Path
     from types import SimpleNamespace
 
     from sonata_engine import TaskInputs
@@ -342,6 +347,13 @@ def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypat
 
     def execute(argv, **kwargs):
         calls.append(argv)
+        assert kwargs.get("timeout", 0) > 0
+        if argv[:2] == ("docker", "save"):
+            Path(argv[argv.index("--output") + 1]).write_bytes(b"saved-images")
+            if fault == "save-timeout":
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        elif fault == "inspect-timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         reference = argv[-1]
         return SimpleNamespace(
             stdout=(images[0].id if reference == "cp:tag" else images[1].id).encode()
@@ -350,7 +362,14 @@ def test_image_archive_keeps_all_named_images_for_oci_import(tmp_path, monkeypat
     monkeypatch.setattr("nanolab.plans.one_shot_common.subprocess.run", execute)
     original = archive.requires[0]
     inputs = TaskInputs._for_resources({original: built}, {original})
-    archive.acquire(inputs)
+    if fault:
+        with pytest.raises(subprocess.TimeoutExpired):
+            archive.acquire(inputs)
+        assert not (tmp_path / "images.tar").exists()
+        assert not (tmp_path / "images.tar.partial").exists()
+        assert not (tmp_path / "runtime-distribution.json").exists()
+        return
+    assert archive.acquire(inputs).read_bytes() == b"saved-images"
     saved = next(argv for argv in calls if argv[:2] == ("docker", "save"))
     assert saved[-2:] == ("cp:tag", "fn:tag")
 
@@ -561,7 +580,7 @@ def test_runtime_lookup_uses_function_label_scoped_to_owned_vm(tmp_path, monkeyp
         return {"NetworkSettings": {"Ports": {"8080/tcp": [{"HostPort": "18080"}]}}}
 
     monkeypatch.setattr(
-        "nanolab.tasks.managed_containers.inspect_managed_container", inspect
+        "nanolab.tasks.one_shot.preflight.inspect_managed_container", inspect
     )
     inputs = TaskInputs._for_resources(
         {

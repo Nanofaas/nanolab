@@ -1640,3 +1640,18 @@ def test_stale_arm_smoke_cannot_publish(tmp_path):
         case["workflow"].run(select=Selection(only="publish-architecture-images"))
     assert case["counts"]["publish"] == 1
     assert not case["publication"].receipt.exists()
+
+
+def test_inventory_timeout_does_not_publish_partial_evidence(tmp_path, monkeypatch):
+    destination = tmp_path / "inventory.json"
+
+    def hung_inventory(argv, **kwargs):
+        assert 0 < kwargs.get("timeout", 0) <= 600
+        Path(argv[-1]).write_text("partial")
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(execution.subprocess, "run", hung_inventory)
+    with pytest.raises(subprocess.TimeoutExpired):
+        execution.capture_release_inventory(tmp_path, destination)
+    assert not destination.exists()
+    assert not destination.with_suffix(".json.partial").exists()

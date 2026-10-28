@@ -240,7 +240,7 @@ def _hash(value: object) -> str:
 def _git(root: Path, *args: str) -> bytes:
     try:
         return git_output(root, *args)
-    except (OSError, subprocess.CalledProcessError) as error:
+    except (OSError, subprocess.SubprocessError) as error:
         raise ValueError(f"Cannot establish Git identity: {root}") from error
 
 
