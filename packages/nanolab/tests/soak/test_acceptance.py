@@ -1343,3 +1343,18 @@ def test_admission_reconciliation_allows_only_the_unticked_edges():
     assert not admission_is_consistent(
         admitted=59, success=60, offered=60, rate=1.0, uncounted_s=0.0
     )
+
+
+@pytest.mark.parametrize("manifest", [None, "{", "{}", '{"schema":"unknown"}'])
+def test_invalid_acceptance_manifest_is_inconclusive_without_output(tmp_path, manifest):
+    from nanolab.tasks.soak.acceptance import evaluate_acceptance
+
+    source = tmp_path / "acceptance-manifest.json"
+    if manifest is not None:
+        source.write_text(manifest)
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    results = evaluate_acceptance(tmp_path, None, ())
+    assert len(results) == 1
+    assert results[0].criterion_id == "run-coverage"
+    assert results[0].status == "INCONCLUSIVE"
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

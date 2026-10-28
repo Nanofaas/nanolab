@@ -650,50 +650,30 @@ def required_sample_count(duration_s: float, sample_interval_s: float) -> int:
     return max(2, math.floor(duration_s / sample_interval_s))
 
 
-def evaluate_acceptance(
-    root: Path,
-    projection: dict[str, Any] | None,
-    numerical: tuple[CriterionResult, ...],
-    attribution_path: Path | None = None,
-    *,
-    connection: sqlite3.Connection | None = None,
-) -> tuple[CriterionResult, ...]:
-    """Return receipt gates and explicitly resolved growth-review criteria.
+class _AcceptanceEvaluation:
+    """Keep one offline evaluation's receipt and frozen-policy state together."""
 
-    Missing or malformed evidence produces INCONCLUSIVE. Independent observed
-    correctness failures and restart events survive other missing evidence.
-    No network, runtime command, or modification of source receipts is performed.
-    """
-    results: list[CriterionResult] = []
-    try:
-        manifest = _json(_path(root, "acceptance-manifest.json"))
-        _require(manifest.get("schema") == SCHEMA, "unsupported acceptance schema")
-        _require(
-            isinstance(manifest.get("run_id"), str) and bool(manifest["run_id"]),
-            "run identity missing",
-        )
-        _require(
-            isinstance(manifest.get("policy_sha256"), str)
-            and len(manifest["policy_sha256"]) == 64,
-            "frozen policy hash missing",
-        )
-    except (OSError, ValueError, TypeError, KeyError) as error:
-        return (
-            CriterionResult(
-                "run-coverage",
-                "INCONCLUSIVE",
-                str(error)[:2048],
-                ("acceptance-manifest.json",),
-            ),
-        )
+    def __init__(
+        self,
+        root: Path,
+        projection: dict[str, Any] | None,
+        numerical: tuple[CriterionResult, ...],
+        attribution_path: Path | None,
+        connection: sqlite3.Connection | None,
+    ) -> None:
+        self.root = root
+        self.projection = projection
+        self.numerical = numerical
+        self.attribution_path = attribution_path
+        self.connection = connection
 
-    def gate(name: str, check: Any) -> None:
+    def _gate(self, name: str, check: Any) -> None:
         try:
             result = check()
             if isinstance(result, CriterionResult):
-                results.append(replace(result, criterion_id=name))
+                self.results.append(replace(result, criterion_id=name))
             else:
-                results.append(
+                self.results.append(
                     CriterionResult(
                         name, "PASS", str(result), ("acceptance-manifest.json",)
                     )
@@ -707,7 +687,7 @@ def evaluate_acceptance(
             OverflowError,
             sqlite3.Error,
         ) as error:
-            results.append(
+            self.results.append(
                 CriterionResult(
                     name,
                     "INCONCLUSIVE",
@@ -716,13 +696,9 @@ def evaluate_acceptance(
                 )
             )
 
-    config: SoakConfig | None = None
-    normalized: dict[str, Any] = {}
-    targets: dict[str, dict[str, Any]] = {}
-
-    def receipt(name: str) -> dict[str, Any]:
-        limit = config.artifact_limit_bytes if config else _LIMIT
-        document = _json(_reference(root, manifest[name], limit))
+    def _receipt(self, name: str) -> dict[str, Any]:
+        limit = self.config.artifact_limit_bytes if self.config else _LIMIT
+        document = _json(_reference(self.root, self.manifest[name], limit))
         if name == "preflight":
             _require(
                 document.get("schema") == SCHEMA
@@ -741,56 +717,59 @@ def evaluate_acceptance(
                 "unsupported native producer schema/kind",
             )
         else:
-            _bound(document, manifest)
+            _bound(document, self.manifest)
         return document
 
-    def policy() -> str:
-        nonlocal config, normalized, targets
-        raw = _json(_reference(root, manifest["config"], _LIMIT))
-        config = SoakConfig.model_validate(raw)
-        normalized = config.model_dump(mode="json")
+    def _policy(self) -> str:
+        raw = _json(_reference(self.root, self.manifest["config"], _LIMIT))
+        self.config = SoakConfig.model_validate(raw)
+        self.normalized = self.config.model_dump(mode="json")
         _require(
-            fingerprint(normalized) == manifest["policy_sha256"],
+            fingerprint(self.normalized) == self.manifest["policy_sha256"],
             "frozen policy hash mismatch",
         )
-        _require(projection is not None, "numerical projection unavailable")
+        _require(self.projection is not None, "numerical projection unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert projection is not None  # nosec B101 - validated invariant/type narrowing
+        assert self.projection is not None  # nosec B101 - validated invariant/type narrowing
         _require(
-            projection["purpose"] == config.purpose
-            and projection["sample_interval_s"] == config.sample_interval_s
-            and projection["max_observation_gap_s"] == config.max_observation_gap_s,
+            self.projection["purpose"] == self.config.purpose
+            and self.projection["sample_interval_s"] == self.config.sample_interval_s
+            and self.projection["max_observation_gap_s"]
+            == self.config.max_observation_gap_s,
             "numerical projection changes frozen policy",
         )
         _require(
             [
                 Criterion.model_validate(c).model_dump(mode="json")
-                for c in projection["criteria"]
+                for c in self.projection["criteria"]
             ]
-            == normalized["criteria"],
+            == self.normalized["criteria"],
             "numerical criteria differ from frozen policy",
         )
         _require(
-            not ({c.id for c in config.criteria} & GATE_IDS),
+            not ({c.id for c in self.config.criteria} & GATE_IDS),
             "criterion ID collides with acceptance gate",
         )
-        targets = {target["role"]: target for target in projection["targets"]}
-        _require(set(targets) == set(config.roles), "projection omits configured roles")
-        for role, target in targets.items():
+        self.targets = {target["role"]: target for target in self.projection["targets"]}
+        _require(
+            set(self.targets) == set(self.config.roles),
+            "projection omits configured roles",
+        )
+        for role, target in self.targets.items():
             _require(
-                target["runtime"] == config.roles[role].runtime,
+                target["runtime"] == self.config.roles[role].runtime,
                 "target runtime differs from policy",
             )
         return "complete SoakConfig and numerical projection match frozen fingerprint"
 
-    gate("frozen-policy", policy)
-
-    def provenance() -> str:
-        _require(config is not None and targets, "frozen source policy unavailable")
+    def _provenance(self) -> str:
+        _require(
+            self.config is not None and self.targets, "frozen source policy unavailable"
+        )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
         snapshot_path = _reference(
-            root, manifest["source"], config.artifact_limit_bytes
+            self.root, self.manifest["source"], self.config.artifact_limit_bytes
         )
         snapshot = _json(snapshot_path)
         _require(
@@ -800,7 +779,7 @@ def evaluate_acceptance(
             "unsupported source snapshot",
         )
         tree = Path(snapshot["root"])
-        tree.relative_to(root.absolute())
+        tree.relative_to(self.root.absolute())
         _require(not tree.is_symlink(), "symlink source tree unsupported")
         source_manifest = _path(snapshot_path.parent, "source-manifest.jsonl")
         entries = []
@@ -819,29 +798,39 @@ def evaluate_acceptance(
         )
         verify_snapshot(source)
         _require(
-            set(manifest["builds"]) == set(config.roles) == set(manifest["recipes"]),
+            set(self.manifest["builds"])
+            == set(self.config.roles)
+            == set(self.manifest["recipes"]),
             "source/build/recipe role coverage differs",
         )
-        observed = receipt("preflight")["observations"]
+        observed = self._receipt("preflight")["observations"]
         _require(
             observed.get("snapshot_fingerprint") == source.fingerprint,
             "preflight source snapshot differs",
         )
-        if manifest.get("backend") == "containerd":
+        if self.manifest.get("backend") == "containerd":
             return verify_containerd_builds(
-                root, manifest, config, targets, source, observed
+                self.root, self.manifest, self.config, self.targets, source, observed
             )
-        for role, spec in config.images.items():
+        for role, spec in self.config.images.items():
             build = _json(
-                _reference(root, manifest["builds"][role], config.artifact_limit_bytes)
+                _reference(
+                    self.root,
+                    self.manifest["builds"][role],
+                    self.config.artifact_limit_bytes,
+                )
             )
             recipe = _json(
-                _reference(root, manifest["recipes"][role], config.artifact_limit_bytes)
+                _reference(
+                    self.root,
+                    self.manifest["recipes"][role],
+                    self.config.artifact_limit_bytes,
+                )
             )
             _require(
                 build.get("schema") == SCHEMA
                 and build.get("role") == role
-                and build.get("image_digest") == targets[role]["image_digest"]
+                and build.get("image_digest") == self.targets[role]["image_digest"]
                 and build.get("source_fingerprint") == source.fingerprint
                 and build.get("platform") == spec.platform,
                 "build identity/source/platform differs",
@@ -880,7 +869,7 @@ def evaluate_acceptance(
                     verify_soak_recipe_receipt,
                 )
 
-                verify_soak_recipe_receipt(root, config, source, build)
+                verify_soak_recipe_receipt(self.root, self.config, source, build)
             else:
                 rendered = recipe["bake"]["target"]
                 _require(
@@ -947,7 +936,7 @@ def evaluate_acceptance(
             )
             assert isinstance(logs, list)  # nosec B101 - validated invariant/type narrowing
             for ref in logs:
-                _reference(root, ref, config.artifact_limit_bytes)
+                _reference(self.root, ref, self.config.artifact_limit_bytes)
             actual = observed["build_receipts"][role]
             _require(
                 all(actual.get(k) == v for k, v in build.items() if k != "schema"),
@@ -958,49 +947,51 @@ def evaluate_acceptance(
             "toolchains, bases and logs verified"
         )
 
-    gate("source-artifact-provenance", provenance)
-
-    def continuity() -> CriterionResult | str:
-        _require(type(manifest.get("aborted")) is bool, "abort state unavailable")
-        restarts = manifest.get("restarts")
+    def _continuity(self) -> CriterionResult | str:
+        _require(type(self.manifest.get("aborted")) is bool, "abort state unavailable")
+        restarts = self.manifest.get("restarts")
         _require(isinstance(restarts, list), "restart evidence unavailable")
         if restarts or (
-            targets
-            and manifest.get("final_targets") is not None
-            and manifest["final_targets"] != list(targets.values())
+            self.targets
+            and self.manifest.get("final_targets") is not None
+            and self.manifest["final_targets"] != list(self.targets.values())
         ):
             return CriterionResult(
                 "", "FAIL", "observed process restart or final identity change", ()
             )
         _require(
-            manifest.get("final_targets") == list(targets.values()) and bool(targets),
+            self.manifest.get("final_targets") == list(self.targets.values())
+            and bool(self.targets),
             "final process identities unavailable",
         )
         _require(
-            config is not None and projection is not None, "frozen protocol unavailable"
+            self.config is not None and self.projection is not None,
+            "frozen protocol unavailable",
         )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        assert projection is not None  # nosec B101 - validated invariant/type narrowing
-        phases = normalize_phase_windows(manifest["phases"])
-        manifest["phases"] = phases
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        assert self.projection is not None  # nosec B101 - validated invariant/type narrowing
+        phases = normalize_phase_windows(self.manifest["phases"])
+        self.manifest["phases"] = phases
         previous = None
         # The natural phases run for their declared duration; the checkpoint in
         # between runs for as long as its captures take, which the diagnostic
         # timeout bounds. Holding it to a sample interval instead would make the
         # gate pass or fail on how long a capture happened to take.
-        natural_slack = config.cancellation_timeout_s + config.max_observation_gap_s
+        natural_slack = (
+            self.config.cancellation_timeout_s + self.config.max_observation_gap_s
+        )
         for phase, duration, slack in (
-            ("warmup", config.phases.warmup_s, natural_slack),
-            ("baseline_drain", config.phases.baseline_drain_s, natural_slack),
-            ("baseline", config.phases.baseline_window_s, natural_slack),
+            ("warmup", self.config.phases.warmup_s, natural_slack),
+            ("baseline_drain", self.config.phases.baseline_drain_s, natural_slack),
+            ("baseline", self.config.phases.baseline_window_s, natural_slack),
             (
                 "baseline_diagnostics",
                 0,
-                config.diagnostics.timeout_s,
+                self.config.diagnostics.timeout_s,
             ),
-            ("steady", config.phases.steady_s, natural_slack),
-            ("drain", config.phases.drain_s, natural_slack),
+            ("steady", self.config.phases.steady_s, natural_slack),
+            ("drain", self.config.phases.drain_s, natural_slack),
         ):
             start, end = phases[phase]["start_s"], phases[phase]["end_s"]
             _require(
@@ -1012,7 +1003,7 @@ def evaluate_acceptance(
                     or phases_are_contiguous(
                         start=start,
                         previous=previous,
-                        sample_interval_s=config.sample_interval_s,
+                        sample_interval_s=self.config.sample_interval_s,
                     )
                 ),
                 "phase timing differs from frozen schedule",
@@ -1020,7 +1011,7 @@ def evaluate_acceptance(
             previous = end
         _require(
             {p: phases[p] for p in ("baseline", "steady", "drain")}
-            == projection["windows"],
+            == self.projection["windows"],
             "projection natural windows differ from actual phases",
         )
         for key in (
@@ -1030,53 +1021,56 @@ def evaluate_acceptance(
             "observation_ended_s",
             "traffic_stopped_s",
         ):
-            _require(_finite(manifest.get(key)), "missing finite timing: " + key)
+            _require(_finite(self.manifest.get(key)), "missing finite timing: " + key)
         # Each of these is its own clock read, so they are compared in order
         # with a one-interval tolerance rather than exactly: a strict or exact
         # comparison between two reads of the same instant cannot hold, and
         # one sampling interval is still too small to hide a lost observation.
-        slack = config.sample_interval_s
+        slack = self.config.sample_interval_s
         _require(
             # The image set is frozen once the builds that produced it finish.
-            manifest["builds_finished_s"] <= manifest["frozen_at_s"] + slack
-            and manifest["frozen_at_s"] <= phases["warmup"]["start_s"] + slack
-            and manifest["observation_started_s"] <= phases["warmup"]["start_s"] + slack
-            and manifest["observation_ended_s"] >= phases["drain"]["end_s"] - slack
-            and abs(manifest["traffic_stopped_s"] - phases["steady"]["end_s"]) <= slack
-            and manifest.get("natural_drain") is True,
+            self.manifest["builds_finished_s"] <= self.manifest["frozen_at_s"] + slack
+            and self.manifest["frozen_at_s"] <= phases["warmup"]["start_s"] + slack
+            and self.manifest["observation_started_s"]
+            <= phases["warmup"]["start_s"] + slack
+            and self.manifest["observation_ended_s"] >= phases["drain"]["end_s"] - slack
+            and abs(self.manifest["traffic_stopped_s"] - phases["steady"]["end_s"])
+            <= slack
+            and self.manifest.get("natural_drain") is True,
             "freeze/build/observer/natural-drain timing invalid",
         )
-        _require(manifest.get("completed") is True, "protocol did not complete")
+        _require(self.manifest.get("completed") is True, "protocol did not complete")
         return "continuous frozen schedule and final process identities verified"
 
-    gate("run-continuity", continuity)
-
-    def effective() -> str:
-        _require(config is not None and targets, "frozen policy/targets unavailable")
-        # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        item = receipt("preflight")
+    def _effective(self) -> str:
         _require(
-            item.get("targets") == list(targets.values()),
+            self.config is not None and self.targets,
+            "frozen policy/targets unavailable",
+        )
+        # Narrowed by the _require above; the check itself is not the assert.
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        item = self._receipt("preflight")
+        _require(
+            item.get("targets") == list(self.targets.values()),
             "preflight process identity mismatch",
         )
         _require(
-            item.get("configuration_fingerprint") == manifest["policy_sha256"]
-            and item.get("configuration") == normalized,
+            item.get("configuration_fingerprint") == self.manifest["policy_sha256"]
+            and item.get("configuration") == self.normalized,
             "preflight configuration differs from frozen policy",
         )
         _require(
-            _finite(manifest.get("preflight_started_s"))
-            and _finite(manifest.get("preflight_ended_s"))
-            and manifest["frozen_at_s"]
-            <= manifest["preflight_started_s"]
-            <= manifest["preflight_ended_s"]
-            <= manifest["phases"]["warmup"]["start_s"],
+            _finite(self.manifest.get("preflight_started_s"))
+            and _finite(self.manifest.get("preflight_ended_s"))
+            and self.manifest["frozen_at_s"]
+            <= self.manifest["preflight_started_s"]
+            <= self.manifest["preflight_ended_s"]
+            <= self.manifest["phases"]["warmup"]["start_s"],
             "preflight did not precede warmup",
         )
         checks = preflight(
-            config,
-            tuple(Target(**t) for t in targets.values()),
+            self.config,
+            tuple(Target(**t) for t in self.targets.values()),
             item["observations"],
             _OfflineSink(),
         )
@@ -1089,15 +1083,16 @@ def evaluate_acceptance(
             "capabilities and generator verified"
         )
 
-    gate("effective-preflight", effective)
-
-    def correctness() -> CriterionResult | str:
+    def _correctness(self) -> CriterionResult | str:
         _require(
-            config is not None and targets, "frozen correctness inputs unavailable"
+            self.config is not None and self.targets,
+            "frozen correctness inputs unavailable",
         )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        _item, functions, summary = _workload_evidence(root, manifest, config, targets)
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        _item, functions, summary = _workload_evidence(
+            self.root, self.manifest, self.config, self.targets
+        )
         # The known frozen generator counts success only after HTTP/body checks.
         # Independently require the raw named check observations, never infer an
         # actual wrong result from an undifferentiated transport error count.
@@ -1117,7 +1112,7 @@ def evaluate_acceptance(
                 "",
                 "FAIL",
                 "observed HTTP/success-output correctness check failure",
-                (manifest["workload"]["path"],),
+                (self.manifest["workload"]["path"],),
             )
         successes = sum(row["success"] for row in functions.values())
         _require(
@@ -1126,30 +1121,32 @@ def evaluate_acceptance(
         )
         return "saved expected-output checks cover every successful response"
 
-    gate("workload-correctness", correctness)
-
-    def workload() -> str:
-        _require(config is not None, "workload policy unavailable")
+    def _workload(self) -> str:
+        _require(self.config is not None, "workload policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        item, functions, _summary = _workload_evidence(root, manifest, config, targets)
-        steady = manifest["phases"]["steady"]
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        item, functions, _summary = _workload_evidence(
+            self.root, self.manifest, self.config, self.targets
+        )
+        steady = self.manifest["phases"]["steady"]
         # The generator records its own start/end; the lifecycle records the
         # phase boundaries. They bracket the same interval but are separate
         # clock reads, so they agree to within a sampling interval, not exactly.
         # The declared duration stays an exact match.
-        slack = config.sample_interval_s
+        slack = self.config.sample_interval_s
         _require(
             _finite(item.get("started_s"))
             and _finite(item.get("generator_end_s"))
             and abs(item["started_s"] - steady["start_s"]) <= slack
             and abs(item["generator_end_s"] - steady["end_s"]) <= slack
-            and item.get("duration_s") == config.phases.steady_s,
+            and item.get("duration_s") == self.config.phases.steady_s,
             "workload does not cover actual steady interval",
         )
-        _released_workload(root, manifest, config, item)
-        admission, uncounted = _admitted(root, manifest, config, targets)
-        for name, rate in config.workload.rates.items():
+        _released_workload(self.root, self.manifest, self.config, item)
+        admission, uncounted = _admitted(
+            self.root, self.manifest, self.config, self.targets
+        )
+        for name, rate in self.config.workload.rates.items():
             row = functions[name]
             _require(
                 row["success"] + row["error"] == row["offered"]
@@ -1169,7 +1166,7 @@ def evaluate_acceptance(
             _require(
                 row["dropped"] == 0, "generator dropped iterations invalidate workload"
             )
-            demand = rate * config.phases.steady_s
+            demand = rate * self.config.phases.steady_s
             _require(
                 _finite(demand)
                 and abs(row["offered"] + row["dropped"] - demand) <= 1.0 + 1e-9,
@@ -1177,7 +1174,7 @@ def evaluate_acceptance(
                 "beyond one arrival boundary",
             )
             _require(
-                row["error"] / row["offered"] <= config.workload.max_error_ratio,
+                row["error"] / row["offered"] <= self.config.workload.max_error_ratio,
                 "workload error ratio exceeds policy",
             )
         return (
@@ -1185,25 +1182,25 @@ def evaluate_acceptance(
             "admission verified; retries describe clients only"
         )
 
-    gate("workload-accounting", workload)
-
-    def prerequisites() -> CriterionResult | str:
-        _require(config is not None and targets, "prerequisite policy unavailable")
+    def _prerequisites(self) -> CriterionResult | str:
+        _require(
+            self.config is not None and self.targets, "prerequisite policy unavailable"
+        )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        item = receipt("prerequisites")
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        item = self._receipt("prerequisites")
         if item.get("kind") == "prerequisite-exemption":
             _require(
-                exemption_is_allowed(item, config),
+                exemption_is_allowed(item, self.config),
                 "prerequisite exemption is allowed only by explicit smoke policy",
             )
             return "smoke explicitly requires no prerequisite profiles"
         expected = normalize_prerequisite_inputs(
             _json(
                 _reference(
-                    root,
-                    manifest["prerequisite_inputs"],
-                    config.artifact_limit_bytes,
+                    self.root,
+                    self.manifest["prerequisite_inputs"],
+                    self.config.artifact_limit_bytes,
                 )
             )
         )
@@ -1213,33 +1210,33 @@ def evaluate_acceptance(
         )
         _require(
             expected.get("images")
-            == {r: t["image_digest"] for r, t in targets.items()},
+            == {r: t["image_digest"] for r, t in self.targets.items()},
             "prerequisite application image identity mismatch",
         )
-        coverage = frozenset(config.prerequisites.required_coverage)
+        coverage = frozenset(self.config.prerequisites.required_coverage)
         _require(
             set(expected["relevant_config"]) == coverage,
             "prerequisite configuration coverage differs",
         )
         for name in coverage:
             relevant = expected["relevant_config"][name]
-            for key in config.prerequisites.relevant_config_keys[name]:
+            for key in self.config.prerequisites.relevant_config_keys[name]:
                 _require(
-                    relevant.get(key) == select_relevant_config(normalized, key),
+                    relevant.get(key) == select_relevant_config(self.normalized, key),
                     "prerequisite relevant configuration differs: " + key,
                 )
         for key in ("payload", "script"):
-            _reference(root, expected[key], config.artifact_limit_bytes)
+            _reference(self.root, expected[key], self.config.artifact_limit_bytes)
         for profile in item["profiles"]:
-            _reference(root, profile["evidence"], config.artifact_limit_bytes)
+            _reference(self.root, profile["evidence"], self.config.artifact_limit_bytes)
             _require(
                 _finite(profile.get("ended_s"))
-                and profile["ended_s"] <= manifest["phases"]["warmup"]["start_s"],
+                and profile["ended_s"] <= self.manifest["phases"]["warmup"]["start_s"],
                 "prerequisite profile did not finish before measured warmup",
             )
         if not coverage:
             _require(
-                config.purpose == "smoke"
+                self.config.purpose == "smoke"
                 and item.get("coverage") == []
                 and item.get("profiles") == [],
                 "empty prerequisite coverage is allowed only by explicit smoke policy",
@@ -1247,21 +1244,21 @@ def evaluate_acceptance(
             return "smoke explicitly requires no prerequisite profiles"
         return validate_receipt(item, fingerprint(expected), coverage)
 
-    gate("prerequisite-coverage", prerequisites)
-
-    def diagnostics() -> str:
-        _require(config is not None and targets, "diagnostic policy unavailable")
+    def _diagnostics(self) -> str:
+        _require(
+            self.config is not None and self.targets, "diagnostic policy unavailable"
+        )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        entries = receipt("diagnostics")["entries"]
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        entries = self._receipt("diagnostics")["entries"]
         # Coverage is per checkpoint. The same reading declared at both is how a
         # difference is measured, so the pair is no longer the unit and one
         # capture per declared triple is what the length check still means.
         expected = {
             (role, phase, op)
             for phase, declared in (
-                ("baseline", config.diagnostics.baseline_operations),
-                ("drain", config.diagnostics.operations),
+                ("baseline", self.config.diagnostics.baseline_operations),
+                ("drain", self.config.diagnostics.operations),
             )
             for role, ops in declared.items()
             for op in ops
@@ -1282,49 +1279,49 @@ def evaluate_acceptance(
                 "invalid diagnostic checkpoint phase",
             )
             item = _diagnostic(
-                root,
+                self.root,
                 entry["receipt"],
-                config,
-                targets[entry["role"]],
+                self.config,
+                self.targets[entry["role"]],
                 entry["operation"],
                 entry["phase"],
-                manifest["phases"][entry["phase"]]["end_s"],
+                self.manifest["phases"][entry["phase"]]["end_s"],
             )
             if entry["operation"] == "heap_dump":
                 dumps += 1
                 dump_bytes += sum(a["size_bytes"] for a in item["artifacts"])
         _require(
-            dumps <= config.diagnostics.max_dumps
-            and dump_bytes <= config.diagnostics.max_dump_bytes,
+            dumps <= self.config.diagnostics.max_dumps
+            and dump_bytes <= self.config.diagnostics.max_dump_bytes,
             "diagnostic dump budget exceeded",
         )
         return (
             "runtime-specific final diagnostic operations completed after natural drain"
         )
 
-    gate("diagnostic-coverage", diagnostics)
-
-    def observations() -> str:
+    def _observations(self) -> str:
         _require(
-            config is not None and connection is not None and projection is not None,
+            self.config is not None
+            and self.connection is not None
+            and self.projection is not None,
             "indexed observations unavailable",
         )
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        assert connection is not None  # nosec B101 - validated invariant/type narrowing
-        assert projection is not None  # nosec B101 - validated invariant/type narrowing
-        for role, role_policy in config.roles.items():
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        assert self.connection is not None  # nosec B101 - validated invariant/type narrowing
+        assert self.projection is not None  # nosec B101 - validated invariant/type narrowing
+        for role, role_policy in self.config.roles.items():
             for metric in role_policy.required_metrics:
-                labels = connection.execute(
+                labels = self.connection.execute(
                     "SELECT DISTINCT labels FROM samples WHERE role=? AND metric=?",
                     (role, metric),
                 ).fetchall()
                 _require(bool(labels), f"required metric absent: {role}/{metric}")
                 for (label,) in labels:
-                    for phase, window in projection["windows"].items():
+                    for phase, window in self.projection["windows"].items():
                         low, high = window["start_s"], window["end_s"]
                         previous, count, units = low, 0, set()
-                        for stamp, available, unit in connection.execute(
+                        for stamp, available, unit in self.connection.execute(
                             "SELECT scheduled, available, unit FROM samples "
                             "WHERE role=? AND metric=? AND labels=? "
                             "AND phase=? AND scheduled BETWEEN ? AND ? "
@@ -1333,7 +1330,8 @@ def evaluate_acceptance(
                         ):
                             _require(
                                 available == 1
-                                and stamp - previous <= config.max_observation_gap_s,
+                                and stamp - previous
+                                <= self.config.max_observation_gap_s,
                                 "required observation unavailable/gapped: "
                                 f"{role}/{metric}/{phase}",
                             )
@@ -1342,22 +1340,20 @@ def evaluate_acceptance(
                         _require(
                             count
                             >= required_sample_count(
-                                high - low, config.sample_interval_s
+                                high - low, self.config.sample_interval_s
                             )
-                            and high - previous <= config.max_observation_gap_s
+                            and high - previous <= self.config.max_observation_gap_s
                             and len(units) == 1
                             and bool(next(iter(units))),
                             f"incomplete required series: {role}/{metric}/{phase}",
                         )
         return "every required role/metric/label series covers every natural phase"
 
-    gate("required-observations", observations)
-
-    def artifacts() -> str:
-        _require(config is not None, "artifact policy unavailable")
+    def _artifacts(self) -> str:
+        _require(self.config is not None, "artifact policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        item = receipt("artifacts")
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        item = self._receipt("artifacts")
         _require(
             item.get("complete") is True and item.get("budget_exhausted") is False,
             "artifact persistence incomplete or exhausted",
@@ -1369,13 +1365,15 @@ def evaluate_acceptance(
         )
         seen, total = set(), 0
         for ref in entries:
-            path, size = _inventory_reference(root, ref, config.artifact_limit_bytes)
+            path, size = _inventory_reference(
+                self.root, ref, self.config.artifact_limit_bytes
+            )
             _require(path not in seen, "duplicate artifact inventory entry")
             seen.add(path)
             total += size
-        required = {root / "samples.jsonl", root / "evaluation-input.json"}
+        required = {self.root / "samples.jsonl", self.root / "evaluation-input.json"}
         required.update(
-            root / manifest[name]["path"]
+            self.root / self.manifest[name]["path"]
             for name in (
                 "config",
                 "preflight",
@@ -1385,7 +1383,7 @@ def evaluate_acceptance(
             )
         )
         required.update(
-            root / manifest[name]["path"]
+            self.root / self.manifest[name]["path"]
             for name in (
                 "source",
                 "workload_inputs",
@@ -1394,11 +1392,14 @@ def evaluate_acceptance(
             )
         )
         required.update(
-            _reference(root, ref, config.artifact_limit_bytes)
-            for ref in (*manifest["builds"].values(), *manifest["recipes"].values())
+            _reference(self.root, ref, self.config.artifact_limit_bytes)
+            for ref in (
+                *self.manifest["builds"].values(),
+                *self.manifest["recipes"].values(),
+            )
         )
         workload_root = _reference(
-            root, manifest["workload"], config.artifact_limit_bytes
+            self.root, self.manifest["workload"], self.config.artifact_limit_bytes
         ).parent
         required.update(
             workload_root / name
@@ -1412,41 +1413,43 @@ def evaluate_acceptance(
             )
         )
         _require(required.issubset(seen), "inventory omits required evidence")
-        _require(total <= config.artifact_limit_bytes, "total artifact budget exceeded")
+        _require(
+            total <= self.config.artifact_limit_bytes, "total artifact budget exceeded"
+        )
         # The inventory sum only bounds what the inventory knows about.
         # Measure the tree so a file written past it cannot hide.
         _require(
-            measure_tree(root) <= config.artifact_limit_bytes,
+            measure_tree(self.root) <= self.config.artifact_limit_bytes,
             "measured artifact tree exceeds the total budget",
         )
         return "required artifact byte counts and checksums verified"
 
-    gate("artifact-integrity", artifacts)
-
-    resolutions: list[CriterionResult] = []
-
-    def attribution() -> str:
-        _require(config is not None, "attribution policy unavailable")
+    def _attribution(self) -> str:
+        _require(self.config is not None, "attribution policy unavailable")
         # Narrowed by the _require above; the check itself is not the assert.
-        assert config is not None  # nosec B101 - validated invariant/type narrowing
-        pending = {c.id: c for c in config.criteria if c.operation == "growth_review"}
+        assert self.config is not None  # nosec B101 - validated invariant/type narrowing
+        pending = {
+            c.id: c for c in self.config.criteria if c.operation == "growth_review"
+        }
         triggered = {
             r.criterion_id
-            for r in numerical
+            for r in self.numerical
             if r.criterion_id in pending
             and r.status == "INCONCLUSIVE"
             and r.reason.startswith("growth exceeds review threshold")
         }
-        if attribution_path is None:
+        if self.attribution_path is None:
             _require(
                 not triggered,
                 "suspicious residual requires bound ownership "
                 "and equal-work attribution",
             )
             return "no unresolved numerical growth attribution requested"
-        _require(not attribution_path.is_symlink(), "symlink attribution unsupported")
-        document = _json(attribution_path)
-        _bound(document, manifest)
+        _require(
+            not self.attribution_path.is_symlink(), "symlink attribution unsupported"
+        )
+        document = _json(self.attribution_path)
+        _bound(document, self.manifest)
         entries = document["entries"]
         _require(
             isinstance(entries, list) and len(entries) <= 1000,
@@ -1462,23 +1465,23 @@ def evaluate_acceptance(
             )
             seen.add(name)
             criterion = pending[name]
-            result = validate_attribution(record, root)
+            result = validate_attribution(record, self.root)
             _require(result.status == "PASS", result.reason)
             policy_ref = record["policy_artifact"]
             _require(
-                policy_ref["path"] == manifest["config"]["path"]
-                and policy_ref["sha256"] == manifest["config"]["sha256"],
+                policy_ref["path"] == self.manifest["config"]["path"]
+                and policy_ref["sha256"] == self.manifest["config"]["sha256"],
                 "attribution policy differs from frozen policy",
             )
             _require(
-                record["owner"] in config.retention_s
+                record["owner"] in self.config.retention_s
                 and record["expected_lifetime_s"]
-                <= config.retention_s[record["owner"]],
+                <= self.config.retention_s[record["owner"]],
                 "attribution owner/lifetime lacks frozen retention policy",
             )
             budgets = [
                 c.threshold
-                for c in config.criteria
+                for c in self.config.criteria
                 if c.role == criterion.role
                 and c.metric == criterion.metric
                 and c.label_selector == criterion.label_selector
@@ -1490,14 +1493,16 @@ def evaluate_acceptance(
                 "attributed population lacks a matching frozen maximum budget",
             )
             work = _json(
-                _reference(root, entry["equal_work"], config.artifact_limit_bytes)
+                _reference(
+                    self.root, entry["equal_work"], self.config.artifact_limit_bytes
+                )
             )
-            _bound(work, manifest)
+            _bound(work, self.manifest)
             _require(
                 work.get("criterion_id") == name
                 and work.get("metric") == criterion.metric
                 and work.get("unit") == criterion.unit
-                and work.get("target") == targets[criterion.role],
+                and work.get("target") == self.targets[criterion.role],
                 "equal-work population/process binding mismatch",
             )
             windows = work["windows"]
@@ -1520,14 +1525,16 @@ def evaluate_acceptance(
                     and 0 < window["admitted"] <= window["offered"],
                     "equal-work counts unavailable",
                 )
-                scoped = {**manifest, "workload": window["workload"]}
-                traffic, counters, _ = _workload_evidence(root, scoped, config, targets)
-                _released_workload(root, scoped, config, traffic)
+                scoped = {**self.manifest, "workload": window["workload"]}
+                traffic, counters, _ = _workload_evidence(
+                    self.root, scoped, self.config, self.targets
+                )
+                _released_workload(self.root, scoped, self.config, traffic)
                 _require(
                     _finite(traffic.get("started_s"))
                     and _finite(traffic.get("generator_end_s"))
                     and low <= traffic["started_s"] < traffic["generator_end_s"] <= high
-                    and traffic.get("duration_s") == config.phases.steady_s,
+                    and traffic.get("duration_s") == self.config.phases.steady_s,
                     "equal-work traffic timing differs from checkpoint window",
                 )
                 scoped["phases"] = {
@@ -1537,7 +1544,11 @@ def evaluate_acceptance(
                     }
                 }
                 server, server_uncounted = _admitted(
-                    root, scoped, config, targets, window["admission_samples"]
+                    self.root,
+                    scoped,
+                    self.config,
+                    self.targets,
+                    window["admission_samples"],
                 )
                 _require(
                     sum(c["offered"] for c in counters.values()) == window["offered"]
@@ -1551,21 +1562,21 @@ def evaluate_acceptance(
                             admitted=server[function],
                             success=counts["success"],
                             offered=counts["offered"],
-                            rate=config.workload.rates[function],
+                            rate=self.config.workload.rates[function],
                             uncounted_s=server_uncounted[function],
                         )
                         and counts["error"] / counts["offered"]
-                        <= config.workload.max_error_ratio,
+                        <= self.config.workload.max_error_ratio,
                         "equal-work workload invalid",
                     )
                 signatures.append(
                     {n: (c["offered"], server[n]) for n, c in counters.items()}
                 )
                 checkpoint = _diagnostic(
-                    root,
+                    self.root,
                     window["post_gc"],
-                    config,
-                    targets[criterion.role],
+                    self.config,
+                    self.targets[criterion.role],
                     "gc",
                     # The diagnostic protocol's own checkpoint is its final one.
                     "drain",
@@ -1577,15 +1588,17 @@ def evaluate_acceptance(
                     "post-GC checkpoint precedes equal-work traffic stop",
                 )
                 observation_path = _reference(
-                    root, window["observation"], config.artifact_limit_bytes
+                    self.root, window["observation"], self.config.artifact_limit_bytes
                 )
                 checkpoint_path = _reference(
-                    root, window["post_gc"], config.artifact_limit_bytes
+                    self.root, window["post_gc"], self.config.artifact_limit_bytes
                 )
                 _require(
                     any(
                         _reference(
-                            checkpoint_path.parent, ref, config.artifact_limit_bytes
+                            checkpoint_path.parent,
+                            ref,
+                            self.config.artifact_limit_bytes,
                         )
                         == observation_path
                         for ref in checkpoint["artifacts"]
@@ -1593,12 +1606,16 @@ def evaluate_acceptance(
                     "post-GC sample is not a captured diagnostic artifact",
                 )
                 sample = _json(
-                    _reference(root, window["observation"], config.artifact_limit_bytes)
+                    _reference(
+                        self.root,
+                        window["observation"],
+                        self.config.artifact_limit_bytes,
+                    )
                 )
                 _require(
                     sample.get("schema") == SCHEMA
                     and sample.get("phase") == "diagnostic"
-                    and sample.get("target") == targets[criterion.role]
+                    and sample.get("target") == self.targets[criterion.role]
                     and sample.get("metric") == criterion.metric
                     and sample.get("unit") == criterion.unit
                     and dict(sample.get("labels", [])) == criterion.label_selector
@@ -1631,7 +1648,7 @@ def evaluate_acceptance(
                 "post-GC growth or retained population exceeds frozen policy",
             )
             if name in triggered:
-                resolutions.append(
+                self.resolutions.append(
                     CriterionResult(
                         name,
                         "PASS",
@@ -1646,21 +1663,99 @@ def evaluate_acceptance(
             "checkpoints bound to frozen policy"
         )
 
-    gate("attribution-policy-binding", attribution)
-    if results[-1].status == "PASS":
-        results.extend(resolutions)
-    aborted = manifest.get("aborted") is True
-    complete = all(r.status == "PASS" for r in results)
-    results.append(
-        CriterionResult(
-            "run-coverage",
-            "ABORTED" if aborted else "PASS" if complete else "INCONCLUSIVE",
-            "external interruption"
-            if aborted
-            else "full-run receipt gates verified"
-            if complete
-            else "one or more required run acceptance gates remain unsatisfied",
-            ("acceptance-manifest.json",),
+    def evaluate(self) -> tuple[CriterionResult, ...]:
+        """Return receipt gates and explicitly resolved growth-review criteria.
+
+        Missing or malformed evidence produces INCONCLUSIVE. Independent observed
+        correctness failures and restart events survive other missing evidence.
+        No network, runtime command, or modification of source receipts is performed.
+        """
+        self.results: list[CriterionResult] = []
+        try:
+            self.manifest = _json(_path(self.root, "acceptance-manifest.json"))
+            _require(
+                self.manifest.get("schema") == SCHEMA, "unsupported acceptance schema"
+            )
+            _require(
+                isinstance(self.manifest.get("run_id"), str)
+                and bool(self.manifest["run_id"]),
+                "run identity missing",
+            )
+            _require(
+                isinstance(self.manifest.get("policy_sha256"), str)
+                and len(self.manifest["policy_sha256"]) == 64,
+                "frozen policy hash missing",
+            )
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            return (
+                CriterionResult(
+                    "run-coverage",
+                    "INCONCLUSIVE",
+                    str(error)[:2048],
+                    ("acceptance-manifest.json",),
+                ),
+            )
+
+        self.config: SoakConfig | None = None
+        self.normalized: dict[str, Any] = {}
+        self.targets: dict[str, dict[str, Any]] = {}
+
+        self._gate("frozen-policy", self._policy)
+
+        self._gate("source-artifact-provenance", self._provenance)
+
+        self._gate("run-continuity", self._continuity)
+
+        self._gate("effective-preflight", self._effective)
+
+        self._gate("workload-correctness", self._correctness)
+
+        self._gate("workload-accounting", self._workload)
+
+        self._gate("prerequisite-coverage", self._prerequisites)
+
+        self._gate("diagnostic-coverage", self._diagnostics)
+
+        self._gate("required-observations", self._observations)
+
+        self._gate("artifact-integrity", self._artifacts)
+
+        self.resolutions: list[CriterionResult] = []
+
+        self._gate("attribution-policy-binding", self._attribution)
+        if self.results[-1].status == "PASS":
+            self.results.extend(self.resolutions)
+        aborted = self.manifest.get("aborted") is True
+        complete = all(r.status == "PASS" for r in self.results)
+        self.results.append(
+            CriterionResult(
+                "run-coverage",
+                "ABORTED" if aborted else "PASS" if complete else "INCONCLUSIVE",
+                "external interruption"
+                if aborted
+                else "full-run receipt gates verified"
+                if complete
+                else "one or more required run acceptance gates remain unsatisfied",
+                ("acceptance-manifest.json",),
+            )
         )
-    )
-    return tuple(results)
+        return tuple(self.results)
+
+
+def evaluate_acceptance(
+    root: Path,
+    projection: dict[str, Any] | None,
+    numerical: tuple[CriterionResult, ...],
+    attribution_path: Path | None = None,
+    *,
+    connection: sqlite3.Connection | None = None,
+) -> tuple[CriterionResult, ...]:
+    """Return receipt gates and explicitly resolved growth-review criteria.
+
+    Missing or malformed evidence produces INCONCLUSIVE. Independent observed
+    correctness failures and restart events survive other missing evidence.
+    No network, runtime command, or modification of source receipts is performed.
+    """
+    return _AcceptanceEvaluation(
+        root, projection, numerical, attribution_path, connection
+    ).evaluate()
