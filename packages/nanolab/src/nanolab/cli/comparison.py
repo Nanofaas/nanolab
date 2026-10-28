@@ -107,7 +107,9 @@ from nanolab.workspace.paths import bundled_assets_root, default_tool_paths
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
 EXPERIMENT_01_DEFAULT_VARIANTS = tuple(EXPERIMENT_01_VARIANTS_BY_KEY)
-EXPERIMENT_02_DEFAULT_CONFIGURATIONS = tuple(CONFIGURATIONS_BY_KEY)
+EXPERIMENT_02_DEFAULT_CONFIGURATIONS = tuple(
+    key for key in CONFIGURATIONS_BY_KEY if key != "faasd"
+)
 # Experiment 02 runs experiment 01's calendar, so it runs experiment 01's script.
 EXPERIMENT_02_SCRIPT_NAME = "experiment-01.js"
 

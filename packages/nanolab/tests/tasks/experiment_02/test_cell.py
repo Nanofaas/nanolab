@@ -15,6 +15,7 @@ from nanolab.comparison.experiment_02 import (
     CONFIGURATIONS_BY_KEY,
     SAMPLES,
     SCHEDULER,
+    Configuration,
     Experiment02Cell,
 )
 from nanolab.config.experiment_02 import Budget
@@ -442,3 +443,23 @@ def test_container_evidence_tolerates_containers_vanishing(tmp_path):
 
     killed = _container_evidence(vm(RecordingProvider(handler=handler)), tmp_path)
     assert killed == ["a"]
+
+
+def test_faasd_cell_uses_only_containerd_for_runtime_and_evidence(tmp_path):
+    stack = _stack()
+    cell = Experiment02Cell(Configuration("faasd", "faasd", "baseline"), BUDGET, 1)
+    outcome = run_cell(
+        cell,
+        stack=vm(stack),
+        loadgen=vm(_loadgen()),
+        platform=FakePlatform(metrics_url=None),
+        protocol=_protocol(),
+        payload=b'{"size":1024,"text":"A"}',
+        script=SCRIPT,
+        run_dir=tmp_path,
+        remote_root=REMOTE,
+        host="faasd.internal",
+    )
+    assert outcome == "measured"
+    assert not any("docker" in " ".join(argv) for argv in stack.commands())
+    assert ("sudo", "systemctl", "restart", "containerd") in stack.commands()

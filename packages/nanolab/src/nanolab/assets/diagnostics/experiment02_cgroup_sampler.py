@@ -78,9 +78,11 @@ def sample_cgroup(directory: Path) -> dict[str, int | None]:
 
 
 def sample(root: Path, observers: Path | None = None) -> dict[str, object]:
-    """Return one sample of the root, its children two levels down, the agents."""
+    """Return one sample of the root, its children three levels down, the agents."""
     groups: dict[str, object] = {".": sample_cgroup(root)}
-    for directory in sorted((*root.glob("*/"), *root.glob("*/*/"))):
+    for directory in sorted(
+        (*root.glob("*/"), *root.glob("*/*/"), *root.glob("*/*/*/"))
+    ):
         if (directory / "cgroup.procs").exists():
             groups[directory.relative_to(root).as_posix()] = sample_cgroup(directory)
     if observers is not None:

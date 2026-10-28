@@ -13,8 +13,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
+from nanolab.core.execution import ExecutionRole
+
 ProviderName = Literal["local", "multipass", "external", "azure", "proxmox"]
-ExecutionRole = Literal["host", "stack", "loadgen", "cloud", "arm-builder"]
 
 
 class RoleTarget(BaseModel):
@@ -144,6 +145,10 @@ class EnvironmentConfig(BaseModel):
         stack. With no host entry either, the returned `RoleTarget` carries the
         model defaults.
         """
+        if role == "faasd":
+            if role not in self.roles:
+                raise ValueError("faasd requires a dedicated role target")
+            return self.roles[role]
         if role == "host":
             return self.roles.get("host", RoleTarget())
         if role == "stack":

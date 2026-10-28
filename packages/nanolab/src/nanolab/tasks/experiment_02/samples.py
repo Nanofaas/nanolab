@@ -221,8 +221,15 @@ def container_count(samples: Samples) -> list[tuple[float, int]]:
             sum(
                 1
                 for name in sample["cgroups"]
-                if name.rsplit("/", 1)[-1].startswith("docker-")
-                and name.endswith(".scope")
+                if (
+                    name.rsplit("/", 1)[-1].startswith("docker-")
+                    and name.endswith(".scope")
+                )
+                or (
+                    len(name.split("/")) == 3
+                    and name.split("/")[0] == "containerd.service"
+                    and name.split("/")[1] in {"openfaas", "openfaas-fn"}
+                )
             ),
         )
         for sample in samples

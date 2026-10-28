@@ -17,3 +17,22 @@ Azure read-only inventory: 24 matching resources, zero nanofaas VMs, five unatta
 Plan 3 implementation approved by the author in chat.
 
 Pending: author approval for explicit Azure deletions; plan 3 VM proposal; plan 4 implementation approval; later frozen campaign approval. Fn trigger errors, tinyFaaS process names and disk growth require Azure evidence. No campaign or paper result produced.
+
+## Plan 3 implementation
+
+Branch: experiment-02/faasd, based on minor-fix commit 2c2a815.
+Role/provisioning, native installation, image transfer, cell lifecycle, metrics and resume fingerprints implemented. Final focused run: 195 passed. Pre-commit, types, import contracts and security checks passed including new staged files.
+
+Fresh reviewer findings: native container counts, CNI cleanup and runtime identity coverage. All reproduced with failing tests and corrected. An additional failing shell test demonstrated masked ctr inventory errors; command substitution now propagates them.
+
+Ruling: use faasd's official CNI-aware API deletion before stopping services, then refuse subsequent cells if cleanup/API/CNI state remains. Do not implement CNI DEL by hand or delete task metadata prematurely. This preserves valid measurement boundaries and diagnostic state if recovery requires operator intervention.
+Ruling: keep faasd explicit rather than silently adding a third VM to the ten existing default configurations.
+Ruling: native engine-only metrics use containerd.service/daemon, not its parent containing platform tasks. Full deployment remains the parent SUT slice.
+
+Manual Azure Spot probe: private mount/cgroup namespaces successfully contain services, shims and openfaas/openfaas-fn tasks under 2 CPU / 2 GiB / no swap. This is not a QR correctness result. VM deallocation verified.
+
+All 24 historical Azure resource IDs were deleted after explicit author approval; the separate Spot VM resources were retained. One VNet delete required a successful retry.
+
+Full Linux pure tests passed before final review corrections (5070 passed, 37 skipped); local macOS is unsupported for Linux pidfd cases. Combined verification is still being completed with real pinned-source contracts. Test-container corrections: install Node/system Python/util-linux, bind temporary files outside the limited Docker disk, and copy the real NanoLab Git history rather than using a source-only directory. No fake nanoFaaS checkout used.
+
+Full QR smoke approved in chat: two new Spot VMs plus reactivation of the existing faasd Spot VM, bounded two-hour allocation and explicit price ceilings; all three must be deallocated afterward. Campaign remains unapproved.

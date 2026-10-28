@@ -132,3 +132,24 @@ def test_proxmox_loadgen_has_distinct_default_name(monkeypatch) -> None:
     assert (
         vm_request_for_role(environment, "loadgen").name == "nanofaas-proxmox-loadgen"
     )
+
+
+def test_azure_faasd_role_matches_stack_hardware_without_public_ports():
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "azure",
+            "roles": {"stack": {}, "loadgen": {}, "faasd": {}},
+            "azure": {
+                "resource_group": "nanofaas-rg",
+                "location": "westeurope",
+                "vm_size": "Standard_D8s_v5",
+                "image_urn": "test:ubuntu:server:pinned-version",
+            },
+        }
+    )
+    stack = vm_request_for_role(environment, "stack", loadtest=True)
+    faasd = vm_request_for_role(environment, "faasd", loadtest=True)
+    assert faasd.name == "nanofaas-azure-faasd"
+    assert faasd.azure_vm_size == stack.azure_vm_size
+    assert faasd.azure_image_urn == stack.azure_image_urn
+    assert faasd.azure_open_ports is None

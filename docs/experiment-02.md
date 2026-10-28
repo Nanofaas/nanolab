@@ -294,7 +294,7 @@ export NANOFAAS_ROOT=/path/to/nanofaas   # a revision with Nanofaas/nanofaas#256
   --run-dir /path/runs/experiment-02-pilot
 ```
 
-Without `--variants` all ten configurations run, which needs
+Without `--variants` the ten stack configurations run, which needs
 `NANOLAB_WORKLOADS_ROOT` (the `functions/` directory of the paper repository); the native ones compile on
 the stack VM, which is sized for that. The environment must be Azure with
 exactly the `stack` and `loadgen` roles. As with every `compare`, the VMs are
@@ -322,3 +322,34 @@ left with `az resource list -g <group> --query "[?starts_with(name,'<name>')].id
 Not established locally: systemd and Docker accepting the slice setup, the
 sampler on a real cgroup, the readiness script against the real runtimes, the
 native builds, and any measurement.
+
+## faasd on a dedicated containerd VM
+
+Select `--variants faasd` explicitly and declare exactly `stack`, `loadgen`, and
+`faasd` Azure roles. The default remains the ten stack configurations so an
+existing invocation does not acquire an additional VM. The faasd role shares
+the stack's pinned image and SKU, uses a distinct VM name, and requires an
+operator source CIDR. The function image is built on stack from the same
+recorded shared workload and imported through skopeo into faasd's persistent
+local registry. Function registration pulls from that registry.
+
+The dedicated VM installs faasd 0.19.7, containerd 1.7.27 and CNI 0.9.1 from
+verified releases. The native budget uses private cgroup and mount namespaces:
+containerd's namespace root is its delegated service cgroup inside
+`nanolab-sut.slice`, and the daemon moves into a child before enabling CPU and
+memory controllers. Its service containers and function namespace remain
+descendants of the same enforced budget. The engine-only series reads the
+`containerd.service/daemon` child, excluding its sibling function/service
+cgroups. Required faasd services, including its registry, remain inside the
+full-deployment budget. Credentials are read on the VM into memory only.
+
+Native containment was verified on an Azure Spot VM on 28 October 2026 at
+2 CPU, 2 GiB and no swap, including both containerd namespaces. That was a
+manual containment probe, not a QR correctness smoke or a campaign result.
+The CLI integration still requires a fresh full Azure smoke with the shared
+QR image and resume checks before experimental use.
+
+The current provider configuration does not select Spot priority. When Spot
+is requested, create the explicitly approved Spot VMs first and let the
+Azure provider reuse those named machines; do not silently create on-demand
+substitutes. Follow the operator approval policy for all VM lifecycle actions.

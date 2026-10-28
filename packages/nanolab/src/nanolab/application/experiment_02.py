@@ -77,6 +77,8 @@ from nanolab.tasks.experiment_02.baselines import (
 )
 from nanolab.tasks.experiment_02.budget import slice_setup_operation
 from nanolab.tasks.experiment_02.cell import CLEANUP_ERRORS, run_cell
+from nanolab.tasks.experiment_02.faasd import Faasd
+from nanolab.tasks.experiment_02.faasd_preparation import ensure_faasd
 from nanolab.tasks.experiment_02.platforms import (
     DirectReference,
     NanofaasPlatform,
@@ -212,6 +214,7 @@ def experiment_02_platform(
                 budget=cell.budget, root=root, image=image
             ),
             "fn": lambda: Fn(root=root, image=image),
+            "faasd": lambda: Faasd(root=root, image=image),
         }
         return baselines[key]()
     if configuration.platform == "direct" or configuration.profile is None:
@@ -227,6 +230,31 @@ def experiment_02_platform(
         timeout_ms=protocol.http_timeout_seconds * 1000,
         runtime=configuration.runtime,
     )
+
+
+def require_experiment_02_environment(
+    environment: EnvironmentConfig,
+    selected: tuple[str, ...],
+) -> None:
+    """Require distinct Azure targets and the roles the selected platforms use."""
+    roles = {"stack", "loadgen"} | ({"faasd"} if "faasd" in selected else set())
+    if environment.provider != "azure" or set(environment.roles) != roles:
+        raise ValueError(
+            f"experiment-02 requires Azure roles: {', '.join(sorted(roles))}"
+        )
+    if "faasd" not in selected:
+        return
+    names = [vm_request_for_role(environment, role).name for role in environment.roles]
+    if len({str(name).casefold() for name in names}) != len(names):
+        raise ValueError("faasd, stack and loadgen require distinct VM names")
+    hosts = [target.host for target in environment.roles.values() if target.host]
+    if len(set(hosts)) != len(hosts):
+        raise ValueError("faasd requires distinct VM hosts")
+    azure = environment.azure
+    if azure is None or not azure.operator_source_cidr:
+        raise ValueError("faasd requires an Azure operator source CIDR")
+    if not azure.image_urn or azure.image_urn.endswith(":latest"):
+        raise ValueError("faasd requires a pinned Azure image version")
 
 
 def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
@@ -254,13 +282,7 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
     protocol = scenario_config.experiment_02
     if protocol is None:
         raise ValueError("experiment-02 requires its experiment02 block")
-    if environment_config.provider != "azure" or set(environment_config.roles) != {
-        "stack",
-        "loadgen",
-    }:
-        raise ValueError(
-            "experiment-02 runs on Azure with exactly the stack and loadgen roles"
-        )
+    require_experiment_02_environment(environment_config, selected)
     if (
         scenario_config.control_plane_image
         or scenario_config.function_images
@@ -370,7 +392,7 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
     provider = provider_for_environment(environment_config, paths.nanofaas_root)
     requests = {
         role: vm_request_for_role(environment_config, role, loadtest=True)
-        for role in ("stack", "loadgen")
+        for role in environment_config.roles
     }
     request = requests["stack"]
     provisioning = (
@@ -444,12 +466,24 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             )
             installed = ensure_baselines(
                 stack,
-                baselines,
+                tuple(key for key in baselines if key != "faasd"),
                 source=workload_dir / WORKLOAD,
                 artifacts=artifacts,
                 workload_tree=workloads["tree"],
                 record=root / "prepare" / "baselines.json",
             )
+            if "faasd" in selected:
+                native_request = requests["faasd"]
+                installed["faasd"] = ensure_faasd(
+                    stack,
+                    Vm(provider, native_request),
+                    source=workload_dir / WORKLOAD,
+                    artifact_sha256=artifacts["qr-stdio"],
+                    workload_tree=workloads["tree"],
+                    remote_root=PurePosixPath(vm_remote_home(native_request))
+                    / f"nanolab-e02-{tag}",
+                    record=root / "prepare" / "faasd.json",
+                )
         # The address the loadgen reaches the stack at, through the ports
         # `secure_release_endpoints` opened to it.
         host = str(provider.connection_host(request))  # type: ignore[attr-defined]
@@ -476,17 +510,23 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             ) -> Outcome:
                 return run_cell(
                     cell,
-                    stack=stack,
+                    stack=Vm(provider, requests["faasd"])
+                    if cell.key == "faasd"
+                    else stack,
                     loadgen=loadgen,
                     platform=platform,
                     protocol=protocol,
                     payload=payload,
                     script=script,
                     run_dir=attempt_run_dir,
-                    remote_root=owned
+                    remote_root=remote_recipe_root(requests["faasd"], tag)
                     / "cells"
-                    / attempt_run_dir.relative_to(root).as_posix(),
-                    host=host,
+                    / attempt_run_dir.relative_to(root).as_posix()
+                    if cell.key == "faasd"
+                    else owned / "cells" / attempt_run_dir.relative_to(root).as_posix(),
+                    host=str(provider.connection_host(requests["faasd"]))
+                    if cell.key == "faasd"
+                    else host,  # type: ignore[attr-defined]
                 )
 
             _ = run_experiment_02_cell(

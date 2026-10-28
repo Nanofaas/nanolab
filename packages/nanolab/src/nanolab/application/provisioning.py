@@ -243,6 +243,11 @@ def _role_requests_and_operations(
             )
         )
 
+    if scenario.load_profile == "experiment-02" and "faasd" in environment.roles:
+        # The faasd installer owns its containerd-only bootstrap; the stack
+        # playbook would install Docker on this dedicated machine.
+        triples.append(("faasd", _request(environment, "faasd", loadtest=True), ()))
+
     return triples
 
 
@@ -305,7 +310,6 @@ def provision_environment(
                 ProvisionedRole(role=role, request=request, operations=operations)
             )
 
-        stack_request = next(entry.request for entry in roles if entry.role == "stack")
         loadgen_request = next(
             (entry.request for entry in roles if entry.role == "loadgen"), None
         )
@@ -316,13 +320,13 @@ def provision_environment(
             # `azure is not None` is guaranteed by EnvironmentConfig's validation for
             # this provider; saying it here is what lets the checker follow.
             if (
-                role == "stack"
+                role in {"stack", "faasd"}
                 and environment.provider == "azure"
                 and environment.azure is not None
                 and environment.azure.operator_source_cidr
             ):
                 secure_release_endpoints(
-                    environment, provider, stack_request, loadgen_request
+                    environment, provider, request, loadgen_request
                 )
 
         with provision_roles(

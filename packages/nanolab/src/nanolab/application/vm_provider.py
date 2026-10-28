@@ -20,6 +20,7 @@ from nanolab.tasks.vm.models import VmRequest
 
 _DEFAULT_NAMES = {
     ("azure", "stack"): "nanofaas-azure",
+    ("azure", "faasd"): "nanofaas-azure-faasd",
     ("azure", "loadgen"): "nanofaas-azure-loadgen",
     ("azure", "arm-builder"): "nanofaas-azure-arm",
     ("proxmox", "stack"): "nanofaas-proxmox",

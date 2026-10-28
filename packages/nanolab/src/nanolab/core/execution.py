@@ -2,4 +2,4 @@
 
 from typing import Literal
 
-ExecutionRole = Literal["host", "stack", "loadgen", "cloud", "arm-builder"]
+ExecutionRole = Literal["host", "stack", "loadgen", "cloud", "arm-builder", "faasd"]

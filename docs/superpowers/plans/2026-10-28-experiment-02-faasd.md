@@ -1,6 +1,6 @@
 # Experiment 02 — plan 3: faasd
 
-Status: proposed; author approval required before implementation and Azure creation.
+Status: implementation approved by the author in chat on 28 October 2026. Native containment probe completed on an approved Spot VM, now deallocated. Full three-role Spot smoke separately approved; implementation remains pending that integration acceptance.
 Base: experiment-02/completion-minors, derived from review commit 7da834b.
 Authority: nanofaas-paper/notes/experiment-02-platform-comparison-prompt.md.
 

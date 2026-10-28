@@ -108,6 +108,7 @@ EXPERIMENT_02_CONFIGURATIONS: tuple[Configuration, ...] = (
     Configuration("tinyfaas", "tinyFaaS eff00d0", "baseline"),
     Configuration("serverledge", "Serverledge 45419f5", "baseline"),
     Configuration("fn", "Fn 0.3.770", "baseline"),
+    Configuration("faasd", "faasd CE 0.19.7 (containerd)", "baseline", "P1"),
 )  # fmt: skip
 CONFIGURATIONS_BY_KEY = {
     configuration.key: configuration for configuration in EXPERIMENT_02_CONFIGURATIONS
@@ -408,7 +409,10 @@ def summarize_experiment_02_cell(
         start = origin + phase["startSeconds"]
         end = start + phase["durationSeconds"]
         memory, cores = _resources(samples, ROOT, start, end)
-        engine_memory, engine_cores = _resources(samples, ENGINE_CGROUPS, start, end)
+        engine_groups = (
+            ("containerd.service/daemon",) if cell.key == "faasd" else ENGINE_CGROUPS
+        )
+        engine_memory, engine_cores = _resources(samples, engine_groups, start, end)
         observer_memory, observer_cores = _resources(samples, OBSERVERS, start, end)
         if phase["name"] == "idle":
             idle = {"memory": memory, "cpu": cores}

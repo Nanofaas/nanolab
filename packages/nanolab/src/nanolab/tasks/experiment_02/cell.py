@@ -57,6 +57,7 @@ from nanolab.tasks.experiment_02.budget import (
     read_budget_argv,
     restart_engine_argv,
 )
+from nanolab.tasks.experiment_02.faasd import teardown_argv as faasd_teardown_argv
 from nanolab.tasks.experiment_02.generator import generator_environment, run_generator
 from nanolab.tasks.experiment_02.platforms import (
     ContainersRemainError,
@@ -185,7 +186,12 @@ def _start_sampler(
 
 def _apply_budget(stack: Vm, cell: Experiment02Cell, run_dir: Path) -> None:
     _ = _run(stack, apply_budget_argv(cell.budget))
-    _ = _run(stack, restart_engine_argv())
+    restart = (
+        ("sudo", "systemctl", "restart", "containerd")
+        if cell.configuration.key == "faasd"
+        else restart_engine_argv()
+    )
+    _ = _run(stack, restart)
     observed = parse_budget(_run(stack, read_budget_argv()))
     _write_json(
         run_dir / "budget.json",
@@ -280,7 +286,18 @@ def run_cell(
     run_dir.mkdir(parents=True, exist_ok=True)
     diagnostics = run_dir / DIAGNOSTICS
     diagnostics.mkdir(exist_ok=True)
-    _require_clean(stack)
+    native = cell.configuration.key == "faasd"
+    if native:
+        _ = _run(stack, faasd_teardown_argv())
+        for namespace in ("openfaas", "openfaas-fn"):
+            if _run(
+                stack, ("sudo", "ctr", "-n", namespace, "tasks", "list", "-q")
+            ).strip():
+                raise CellRefusedError(f"containerd tasks remain in {namespace}")
+        if _sampler_running(stack):
+            raise CellRefusedError("an earlier cell's sampler still runs")
+    else:
+        _require_clean(stack)
     before = _cgroup_state(stack)
     _write_json(diagnostics / "cgroup-before.json", before)
     remote_samples = remote_root / "cgroup-samples.jsonl"
@@ -342,7 +359,14 @@ def run_cell(
     after = attempt("cgroup-after", lambda: _cgroup_state(stack))
     if isinstance(after, dict):
         _write_json(diagnostics / "cgroup-after.json", after)
-    killed = attempt("containers", lambda: _container_evidence(stack, diagnostics))
+
+    def containers() -> list[str]:
+        if native:
+            platform.record(stack, diagnostics)
+            return []  # OOM classification uses the enclosing cgroup counter.
+        return _container_evidence(stack, diagnostics)
+
+    killed = attempt("containers", containers)
     _ = attempt("stop-sampler", lambda: _stop_sampler(stack))
     _ = attempt(
         "fetch-samples",

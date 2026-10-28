@@ -331,3 +331,31 @@ def test_scheduler_options_must_be_supplied_together(tmp_path):
     )  # fmt: skip
     assert done.returncode == 2
     assert b"go together" in done.stderr
+
+
+def test_native_tasks_are_sampled_and_counted_without_counting_parent_groups(tmp_path):
+    root = tmp_path / "sut"
+    _fake_cgroup(root, memory=1000, inactive=0, usage=10)
+    _fake_cgroup(root / "containerd.service/daemon", memory=100, inactive=0, usage=1)
+    for relative in (
+        "containerd.service/openfaas/gateway",
+        "containerd.service/openfaas-fn/qr",
+    ):
+        _fake_cgroup(root / relative, memory=200, inactive=0, usage=2)
+    out = tmp_path / "samples.jsonl"
+    subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            str(SAMPLER_SCRIPT),
+            "--root",
+            str(root),
+            "--once",
+            "--out",
+            str(out),
+        ),
+        check=True,
+    )
+    samples = read_cgroup_samples(out).samples
+    assert "containerd.service/openfaas-fn/qr" in samples[0]["cgroups"]
+    assert container_count(samples)[0][1] == 2

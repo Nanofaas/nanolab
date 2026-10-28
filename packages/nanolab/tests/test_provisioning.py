@@ -667,3 +667,31 @@ def test_experiment_02_stack_has_docker_and_registry_but_no_k3s(
     assert "configure-k3s-registry.yml" not in playbooks
     assert playbooks[:2] == ["provision-base.yml", "ensure-registry.yml"]
     assert playbooks[-1] == "install-k6.yml"
+
+
+def test_experiment_02_provisions_a_separate_faasd_role_without_docker(tmp_path):
+    orchestrator = RecordingOrchestrator()
+    scenario = ScenarioConfig.model_validate(
+        yaml.safe_load(
+            (
+                discover_tool_root() / "scenarios" / "experiment-02-pilot.yaml"
+            ).read_text()
+        )
+    )
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "azure",
+            "roles": {role: {"name": role} for role in ("stack", "loadgen", "faasd")},
+            "azure": {"resource_group": "test-rg", "location": "westeurope"},
+        }
+    )
+    with provision_environment(
+        scenario,
+        environment,
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+        keep=True,
+    ):
+        pass
+    assert ("ensure", ("azure", "faasd")) in orchestrator.events
+    assert not any("faasd.internal," in argv for argv in _commands(orchestrator))

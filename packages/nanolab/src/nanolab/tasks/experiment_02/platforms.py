@@ -211,6 +211,7 @@ def start_platform(
     evidence: Path,
     api_any_status: bool = False,
     headers_command: Sequence[str] | None = None,
+    docker_network: bool = True,
 ) -> dict[str, float] | None:
     """Pull and prepare, then start and time the platform in one VM-side run.
 
@@ -219,7 +220,8 @@ def start_platform(
     not hold, such as a token; the VM-side probe runs it itself.
     """
     _ensure_images(vm, images)
-    _ensure_network(vm)
+    if docker_network:
+        _ensure_network(vm)
     evidence.mkdir(parents=True, exist_ok=True)
     spec = {
         "start": [list(command) for command in commands],
