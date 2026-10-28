@@ -2609,3 +2609,28 @@ def test_recipe_quoted_launcher_argfiles_are_observed(tmp_path, monkeypatch, bod
         item["path"] for item in actual["runtime_argument_evidence"]["argfiles"]
     ] == ["/app/jvm.options", "/app/launch.args"]
     assert "unavailable" not in actual["runtime_argument_evidence"]
+
+
+def test_lifecycle_rejects_oversized_frozen_script_before_discovery(
+    tmp_path, monkeypatch
+):
+    import nanolab.tasks.soak.runtime as module
+
+    value = prepared(tmp_path)
+    assets = tmp_path / "assets"
+    (assets / "k6").mkdir(parents=True)
+    (assets / "k6/soak-workload.js").write_bytes(b"x" * (128 * 1024 + 1))
+    monkeypatch.setattr(module, "bundled_assets_root", lambda: assets)
+
+    def unexpected_discovery():
+        pytest.fail("script budget must be checked before deployment discovery")
+
+    deployment = fake_deployment(
+        api_endpoint="http://localhost:8080", discover=unexpected_discovery
+    )
+    try:
+        with pytest.raises(ValueError, match="frozen artifact budget"):
+            create_soak_lifecycle(value, deployment=deployment, run_dir=tmp_path)
+        assert not (value.evidence_dir / "frozen-workload.js").exists()
+    finally:
+        value.writer.close()

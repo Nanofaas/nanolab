@@ -1488,6 +1488,184 @@ def _metric_unit(declared: Mapping[tuple[str, str], str], role: str, name: str) 
     )
 
 
+def _freeze_lifecycle_workload(prepared, deployment) -> None:
+    """Freeze bounded workload inputs before deployment discovery or sampling."""
+    config, root, writer = prepared.config, prepared.evidence_dir, prepared.writer
+    writer.write_json(
+        "frozen-workload-inputs.json",
+        {
+            "base_url": deployment.api_endpoint.rstrip("/"),
+            "function_rates": config.workload.rates,
+            "payloads": prepared.payloads,
+            "image_digests": prepared.images,
+            "config": config.model_dump(mode="json"),
+            "vus": config.workload.preallocated_vus,
+            "max_vus": config.workload.max_vus,
+        },
+    )
+    script_path = bundled_assets_root() / "k6/soak-workload.js"
+    with script_path.open("rb") as source:
+        script = source.read(128 * 1024 + 1)
+    if len(script) > 128 * 1024 or len(script) >= config.artifact_limit_bytes:
+        raise ValueError("workload script exceeds its frozen artifact budget")
+    with (root / "frozen-workload.js").open("xb") as output:
+        output.write(script)
+
+
+class _TimedObserver:
+    """Record the observation interval around a phase-labelled sampler."""
+
+    def __init__(self, observer: Observer, clock: Any) -> None:
+        self.observer = observer
+        self.clock = clock
+        self.started_s: float | None = None
+        self.ended_s: float | None = None
+
+    def start(self, phase):
+        """Start sampling and retain its observed start time."""
+        self.started_s = self.clock.monotonic()
+        self.observer.start(phase)
+
+    def set_phase(self, phase):
+        """Label subsequent observations with their measured phase."""
+        self.observer.set_phase(phase)
+
+    def label_diagnostic(self):
+        """Label the samples a capture perturbs, when the observer is live.
+
+        Through `set_phase` so a caller that owns phase transitions still
+        does. A run whose observer already died still gets its diagnostics:
+        this label changes how those ticks are judged, never whether the
+        capture runs.
+        """
+        with suppress(RuntimeError):
+            self.set_phase("diagnostic")
+
+    def stop(self, timeout_s):
+        """Retain the end time only after the observer has stopped."""
+        self.observer.stop(timeout_s)
+        self.ended_s = self.clock.monotonic()
+
+
+def _evaluate_lifecycle(
+    prepared,
+    state: LifecycleState,
+    targets,
+    final_targets,
+    binding,
+    observed_start,
+    observed_end,
+):
+    """Publish immutable evaluation inputs and return numerical acceptance results."""
+    config, root, writer = prepared.config, prepared.evidence_dir, prepared.writer
+    windows = {
+        name.replace("-", "_"): {"start_s": start, "end_s": end}
+        for name, (start, end) in state.windows.items()
+    }
+    writer.write_json(
+        "evaluation-input.json",
+        {
+            "schema": "nanolab-soak-v1",
+            "scope": "numerical-projection",
+            "purpose": config.purpose,
+            "criteria": [c.model_dump(mode="json") for c in config.criteria],
+            "targets": [asdict(target) for target in targets],
+            "windows": {
+                name: windows[name]
+                for name in ("baseline", "steady", "drain")
+                if name in windows
+            },
+            # The observer has one "baseline" label for the settling drain
+            # and the measurement window that follows it, so a sample can
+            # carry that label outside the narrower criterion window above.
+            # Criteria keep using "windows"; only sample placement uses these.
+            "phase_extents": {
+                name: {
+                    "start_s": windows[first]["start_s"],
+                    "end_s": windows[name]["end_s"],
+                }
+                for name, first in (
+                    ("baseline", "baseline_drain"),
+                    ("steady", "steady"),
+                    ("drain", "drain"),
+                )
+                if name in windows and first in windows
+            },
+            "sample_interval_s": config.sample_interval_s,
+            "max_observation_gap_s": config.max_observation_gap_s,
+            "perturbations": [],
+        },
+    )
+    manifest = {
+        **binding,
+        "completed": state.primary_error is None and "drain" in windows,
+        "aborted": state.aborted,
+        "phases": windows,
+        "frozen_at_s": prepared.frozen_at_s,
+        "builds_finished_s": prepared.builds_finished_s,
+        "observation_started_s": observed_start,
+        "observation_ended_s": observed_end,
+        "preflight_started_s": windows.get("preflight", {}).get("start_s"),
+        "preflight_ended_s": windows.get("preflight", {}).get("end_s"),
+        "traffic_stopped_s": windows.get("steady", {}).get("end_s"),
+        "final_targets": [asdict(target) for target in final_targets],
+        "restarts": [],
+        "natural_drain": True,
+        "builds": {
+            recipe.role: _reference(root, root / f"builds/build-{index}.json")
+            for index, recipe in enumerate(prepared.recipes)
+        },
+        "recipes": {
+            recipe.role: _reference(root, root / f"recipe-{index}.json")
+            for index, recipe in enumerate(prepared.recipes)
+        },
+    }
+    for key, name in {
+        "config": "config.json",
+        "source": "source/snapshot.json",
+        "remote_source": "remote-source.json",
+        "preflight": "preflight.json",
+        "prerequisites": "prerequisites.json",
+        "prerequisite_inputs": "prerequisite-inputs.json",
+        "diagnostics": "diagnostics.json",
+    }.items():
+        if (root / name).is_file():
+            manifest[key] = _reference(root, root / name)
+    receipt = state.workload_receipts.get("steady")
+    if receipt is not None:
+        manifest["workload"] = _reference(root, receipt)
+        manifest["workload_inputs"] = _reference(
+            root, root / "frozen-workload-inputs.json"
+        )
+        manifest["workload_script"] = _reference(root, root / "frozen-workload.js")
+        workload = _read_json(receipt)
+        manifest["traffic_stopped_s"] = workload.get("generator_end_s")
+    # The switch step's own receipt, referenced the same way and for the same
+    # reason: a passing soak has to carry the count, the window it happened
+    # over, the pause and the platform's own cross-check out of the run.
+    switch = state.switch_receipt
+    if switch is not None:
+        manifest["scheduler_switch"] = _reference(root, switch)
+    # The inventory that has to fit one record: see `_inventory_entries` for
+    # what is listed per file, grouped as a tree, or left to a sealed
+    # manifest, and why.
+    entries = _inventory_entries(root)
+    inventory = writer.write_json(
+        "artifacts.json",
+        {
+            **binding,
+            "complete": state.primary_error is None,
+            "budget_exhausted": sum(item["size_bytes"] for item in entries)
+            > config.artifact_limit_bytes,
+            "entries": entries,
+        },
+    )
+    manifest["artifacts"] = _reference(root, inventory)
+    writer.write_json("acceptance-manifest.json", manifest)
+    results = evaluate_run(root)
+    return results, {"status": combine_results(results, state.aborted)}
+
+
 def create_soak_lifecycle(
     prepared: PreparedSoak | PreparedContainerdSoak,
     *,
@@ -1509,25 +1687,7 @@ def create_soak_lifecycle(
 ) -> TerminalSoakLifecycle:
     """Bind real probes and producer receipts after the deployment was acquired."""
     config, root, writer = prepared.config, prepared.evidence_dir, prepared.writer
-    writer.write_json(
-        "frozen-workload-inputs.json",
-        {
-            "base_url": deployment.api_endpoint.rstrip("/"),
-            "function_rates": config.workload.rates,
-            "payloads": prepared.payloads,
-            "image_digests": prepared.images,
-            "config": config.model_dump(mode="json"),
-            "vus": config.workload.preallocated_vus,
-            "max_vus": config.workload.max_vus,
-        },
-    )
-    script_path = bundled_assets_root() / "k6/soak-workload.js"
-    with script_path.open("rb") as source:
-        script = source.read(128 * 1024 + 1)
-    if len(script) > 128 * 1024 or len(script) >= config.artifact_limit_bytes:
-        raise ValueError("workload script exceeds its frozen artifact budget")
-    with (root / "frozen-workload.js").open("xb") as output:
-        output.write(script)
+    _freeze_lifecycle_workload(prepared, deployment)
     clock = clock or SystemClock()
     targets = deployment.discover()
     cancelled = cancelled if cancelled is not None else Event()
@@ -1638,36 +1798,9 @@ def create_soak_lifecycle(
     results: tuple = ()
     diagnostic_entries: list[dict] = []
     final_targets: tuple[Target, ...] = ()
-    observed_start: float | None = None
-    observed_end: float | None = None
     natural_drain_completed = False
 
-    class TimedObserver:
-        def start(self, phase):
-            nonlocal observed_start
-            observed_start = clock.monotonic()
-            observer.start(phase)
-
-        def set_phase(self, phase):
-            observer.set_phase(phase)
-
-        def label_diagnostic(self):
-            """Label the samples a capture perturbs, when the observer is live.
-
-            Through `set_phase` so a caller that owns phase transitions still
-            does. A run whose observer already died still gets its diagnostics:
-            this label changes how those ticks are judged, never whether the
-            capture runs.
-            """
-            with suppress(RuntimeError):
-                self.set_phase("diagnostic")
-
-        def stop(self, timeout_s):
-            nonlocal observed_end
-            observer.stop(timeout_s)
-            observed_end = clock.monotonic()
-
-    timed_observer = TimedObserver()
+    timed_observer = _TimedObserver(observer, clock)
 
     def check():
         actual = (observations or deployment.observations)(targets)
@@ -1982,112 +2115,16 @@ def create_soak_lifecycle(
 
     def evaluate(state: LifecycleState):
         nonlocal results
-        windows = {
-            name.replace("-", "_"): {"start_s": start, "end_s": end}
-            for name, (start, end) in state.windows.items()
-        }
-        writer.write_json(
-            "evaluation-input.json",
-            {
-                "schema": "nanolab-soak-v1",
-                "scope": "numerical-projection",
-                "purpose": config.purpose,
-                "criteria": [c.model_dump(mode="json") for c in config.criteria],
-                "targets": [asdict(target) for target in targets],
-                "windows": {
-                    name: windows[name]
-                    for name in ("baseline", "steady", "drain")
-                    if name in windows
-                },
-                # The observer has one "baseline" label for the settling drain
-                # and the measurement window that follows it, so a sample can
-                # carry that label outside the narrower criterion window above.
-                # Criteria keep using "windows"; only sample placement uses these.
-                "phase_extents": {
-                    name: {
-                        "start_s": windows[first]["start_s"],
-                        "end_s": windows[name]["end_s"],
-                    }
-                    for name, first in (
-                        ("baseline", "baseline_drain"),
-                        ("steady", "steady"),
-                        ("drain", "drain"),
-                    )
-                    if name in windows and first in windows
-                },
-                "sample_interval_s": config.sample_interval_s,
-                "max_observation_gap_s": config.max_observation_gap_s,
-                "perturbations": [],
-            },
+        results, status = _evaluate_lifecycle(
+            prepared,
+            state,
+            targets,
+            final_targets,
+            binding,
+            timed_observer.started_s,
+            timed_observer.ended_s,
         )
-        manifest = {
-            **binding,
-            "completed": state.primary_error is None and "drain" in windows,
-            "aborted": state.aborted,
-            "phases": windows,
-            "frozen_at_s": prepared.frozen_at_s,
-            "builds_finished_s": prepared.builds_finished_s,
-            "observation_started_s": observed_start,
-            "observation_ended_s": observed_end,
-            "preflight_started_s": windows.get("preflight", {}).get("start_s"),
-            "preflight_ended_s": windows.get("preflight", {}).get("end_s"),
-            "traffic_stopped_s": windows.get("steady", {}).get("end_s"),
-            "final_targets": [asdict(target) for target in final_targets],
-            "restarts": [],
-            "natural_drain": True,
-            "builds": {
-                recipe.role: _reference(root, root / f"builds/build-{index}.json")
-                for index, recipe in enumerate(prepared.recipes)
-            },
-            "recipes": {
-                recipe.role: _reference(root, root / f"recipe-{index}.json")
-                for index, recipe in enumerate(prepared.recipes)
-            },
-        }
-        for key, name in {
-            "config": "config.json",
-            "source": "source/snapshot.json",
-            "remote_source": "remote-source.json",
-            "preflight": "preflight.json",
-            "prerequisites": "prerequisites.json",
-            "prerequisite_inputs": "prerequisite-inputs.json",
-            "diagnostics": "diagnostics.json",
-        }.items():
-            if (root / name).is_file():
-                manifest[key] = _reference(root, root / name)
-        receipt = state.workload_receipts.get("steady")
-        if receipt is not None:
-            manifest["workload"] = _reference(root, receipt)
-            manifest["workload_inputs"] = _reference(
-                root, root / "frozen-workload-inputs.json"
-            )
-            manifest["workload_script"] = _reference(root, root / "frozen-workload.js")
-            workload = _read_json(receipt)
-            manifest["traffic_stopped_s"] = workload.get("generator_end_s")
-        # The switch step's own receipt, referenced the same way and for the same
-        # reason: a passing soak has to carry the count, the window it happened
-        # over, the pause and the platform's own cross-check out of the run.
-        switch = state.switch_receipt
-        if switch is not None:
-            manifest["scheduler_switch"] = _reference(root, switch)
-        # The inventory that has to fit one record: see `_inventory_entries` for
-        # what is listed per file, grouped as a tree, or left to a sealed
-        # manifest, and why.
-        entries = _inventory_entries(root)
-        inventory = writer.write_json(
-            "artifacts.json",
-            {
-                **binding,
-                "complete": state.primary_error is None,
-                "budget_exhausted": sum(item["size_bytes"] for item in entries)
-                > config.artifact_limit_bytes,
-                "entries": entries,
-            },
-        )
-        manifest["artifacts"] = _reference(root, inventory)
-        writer.write_json("acceptance-manifest.json", manifest)
-        results = evaluate_run(root)
-        return {"status": combine_results(results, state.aborted)}
+        return status
 
     def report(state):
         return write_report(root, results, state.aborted)
