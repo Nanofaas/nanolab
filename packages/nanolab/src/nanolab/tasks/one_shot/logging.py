@@ -412,6 +412,94 @@ def collection_evidence(metrics: str) -> dict:
     }
 
 
+def _export_collector(
+    *, node, name, run_dir, logs, session, final_metrics, archive_issue
+):
+    """Export logs and bounded status without owning collector teardown."""
+    directory = run_dir / "logging" / node.config.id
+    directory.mkdir(parents=True, exist_ok=True)
+    status = {
+        "status": "complete",
+        "exportStatus": "complete",
+        "nodeId": node.config.id,
+        "issues": [],
+        "truncated": False,
+        "collection": collection_evidence(final_metrics),
+        "stateArchive": "verified" if archive_issue is None else "failed",
+    }
+    if status["collection"]["status"] != "drained":
+        status["issues"].append(
+            "collection delivery is " + status["collection"]["status"]
+        )
+    if archive_issue:
+        status["issues"].append("recoverable state archive failed: " + archive_issue)
+    write_error = None
+    try:
+        (directory / "collector-metrics.txt").write_text(final_metrics)
+        stats = node.command(
+            ("docker", "stats", "--no-stream", "--format={{json .}}", name)
+        )
+        (directory / "collector-stats.json").write_text(stats.stdout)
+        observed = node.command(("docker", "logs", name))
+        (directory / "collector.log").write_text(observed.stdout + observed.stderr)
+    except OSError as error:
+        write_error = write_error or error
+        status["issues"].append(str(error))
+    except Exception as error:
+        status["issues"].append(str(error))
+    try:
+        if session is None or logs.endpoint is None:
+            raise RuntimeError(
+                "collector identity or endpoint unavailable during export"
+            )
+        params = {
+            "query": '{job="nanofaas",node='
+            + json.dumps(node.config.id)
+            + "} | json | runId="
+            + json.dumps(run_dir.name),
+            "start": str(session.started_ns),
+            "end": str(time.time_ns()),
+            "limit": str(logs.export_limit),
+        }
+        with httpx.Client(trust_env=False) as http:
+            response = http.get(query_url(logs.endpoint), params=params, timeout=10)
+            response.raise_for_status()
+            result = response.json()
+        (directory / "loki-query.json").write_text(json.dumps(result, indent=2) + "\n")
+        count = sum(len(stream["values"]) for stream in result["data"]["result"])
+        status["truncated"] = count >= logs.export_limit
+        if status["truncated"]:
+            status["issues"].append("Loki export limit reached; query is partial")
+            status["exportStatus"] = "partial"
+        if count < status["collection"].get("delivered", 0):
+            status["issues"].append(
+                "query contains fewer records than collector delivery counter"
+            )
+            status["exportStatus"] = "partial"
+    except OSError as error:
+        write_error = write_error or error
+        status["issues"].append(str(error))
+    except Exception as error:
+        status["issues"].append(str(error))
+        status["exportStatus"] = "partial"
+    if status["issues"]:
+        status["status"] = "partial"
+    (directory / "status.json").write_text(json.dumps(status, indent=2) + "\n")
+    (directory / "sha256.json").write_text(
+        json.dumps(
+            {
+                p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in directory.iterdir()
+                if p.is_file() and p.name != "sha256.json"
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    if write_error is not None:
+        raise RuntimeError("collector export write failed") from write_error
+
+
 def collector_resource(
     node: NodeResource,
     logs: OneShotLogs,
@@ -477,94 +565,6 @@ def collector_resource(
         node.command(("rm", "-f", remote))
         node.command(("rmdir", private))
 
-    def export():
-        directory = run_dir / "logging" / node.config.id
-        directory.mkdir(parents=True, exist_ok=True)
-        status = {
-            "status": "complete",
-            "exportStatus": "complete",
-            "nodeId": node.config.id,
-            "issues": [],
-            "truncated": False,
-            "collection": collection_evidence(final_metrics),
-            "stateArchive": "verified" if archive_issue is None else "failed",
-        }
-        if status["collection"]["status"] != "drained":
-            status["issues"].append(
-                "collection delivery is " + status["collection"]["status"]
-            )
-        if archive_issue:
-            status["issues"].append(
-                "recoverable state archive failed: " + archive_issue
-            )
-        write_error = None
-        try:
-            (directory / "collector-metrics.txt").write_text(final_metrics)
-            stats = node.command(
-                ("docker", "stats", "--no-stream", "--format={{json .}}", name)
-            )
-            (directory / "collector-stats.json").write_text(stats.stdout)
-            observed = node.command(("docker", "logs", name))
-            (directory / "collector.log").write_text(observed.stdout + observed.stderr)
-        except OSError as error:
-            write_error = write_error or error
-            status["issues"].append(str(error))
-        except Exception as error:
-            status["issues"].append(str(error))
-        try:
-            if session is None or logs.endpoint is None:
-                raise RuntimeError(
-                    "collector identity or endpoint unavailable during export"
-                )
-            params = {
-                "query": '{job="nanofaas",node='
-                + json.dumps(node.config.id)
-                + "} | json | runId="
-                + json.dumps(run_dir.name),
-                "start": str(session.started_ns),
-                "end": str(time.time_ns()),
-                "limit": str(logs.export_limit),
-            }
-            with httpx.Client(trust_env=False) as http:
-                response = http.get(query_url(logs.endpoint), params=params, timeout=10)
-                response.raise_for_status()
-                result = response.json()
-            (directory / "loki-query.json").write_text(
-                json.dumps(result, indent=2) + "\n"
-            )
-            count = sum(len(stream["values"]) for stream in result["data"]["result"])
-            status["truncated"] = count >= logs.export_limit
-            if status["truncated"]:
-                status["issues"].append("Loki export limit reached; query is partial")
-                status["exportStatus"] = "partial"
-            if count < status["collection"].get("delivered", 0):
-                status["issues"].append(
-                    "query contains fewer records than collector delivery counter"
-                )
-                status["exportStatus"] = "partial"
-        except OSError as error:
-            write_error = write_error or error
-            status["issues"].append(str(error))
-        except Exception as error:
-            status["issues"].append(str(error))
-            status["exportStatus"] = "partial"
-        if status["issues"]:
-            status["status"] = "partial"
-        (directory / "status.json").write_text(json.dumps(status, indent=2) + "\n")
-        (directory / "sha256.json").write_text(
-            json.dumps(
-                {
-                    p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-                    for p in directory.iterdir()
-                    if p.is_file() and p.name != "sha256.json"
-                },
-                indent=2,
-            )
-            + "\n"
-        )
-        if write_error is not None:
-            raise RuntimeError("collector export write failed") from write_error
-
     def release(_inputs, _value=None):
         nonlocal created, final_metrics, archive_issue
         if not created:
@@ -603,7 +603,15 @@ def collector_resource(
             )
         export_error = None
         try:
-            export()
+            _export_collector(
+                node=node,
+                name=name,
+                run_dir=run_dir,
+                logs=logs,
+                session=session,
+                final_metrics=final_metrics,
+                archive_issue=archive_issue,
+            )
         except Exception as error:
             export_error = error
             logging.getLogger(__name__).warning(

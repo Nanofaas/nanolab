@@ -566,3 +566,29 @@ def test_collector_export_disk_failure_is_operational_after_cleanup(
         resource.release(inputs, value)
     assert any(argv[:3] == ("docker", "rm", "-f") for argv in commands)
     assert any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
+
+
+def test_malformed_successful_log_query_keeps_partial_status_and_archives_state(
+    tmp_path, monkeypatch
+):
+    import json
+
+    import httpx
+
+    resource, inputs, _commands = fake_collector(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.logging.httpx.Client.get",
+        lambda *args, **kwargs: httpx.Response(
+            200,
+            request=httpx.Request("GET", "http://loki.test"),
+            json={"data": {"result": [{}]}},
+        ),
+    )
+    value = resource.acquire(inputs)
+    resource.release(inputs, value)
+    directory = tmp_path / "run/logging/edge-0"
+    status = json.loads((directory / "status.json").read_text())
+    assert status["exportStatus"] == status["status"] == "partial"
+    assert any("values" in issue for issue in status["issues"])
+    assert (directory / "collector-state.tar.gz").read_bytes() == b"recoverable-state"
+    assert "status.json" in json.loads((directory / "sha256.json").read_text())
