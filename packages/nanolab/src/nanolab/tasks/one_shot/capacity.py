@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from nanolab.config.one_shot import resolve_node_functions
+from nanolab.one_shot.vm_resources import VmTelemetrySession, capacity_telemetry_enabled
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
     canonical_bytes,
@@ -23,8 +25,6 @@ from nanolab.tasks.one_shot.trace import TraceArtifact, request_schedule
 
 def _capacity_vectors(topology, settings, functions, replicas, rates, window_seconds):
     """Validate per-node memory and arrival grids before acquiring runtimes."""
-    from nanolab.config.one_shot import resolve_node_functions
-
     aliases = getattr(topology, "function_aliases", {})
     node_settings, counts, effective = {}, {}, {}
     for node, vector in replicas.items():
@@ -230,10 +230,6 @@ def _run_capacity_trial(
                     )
                     if warm["state"] != "complete":
                         raise ValueError("capacity replica warmup failed")
-    from nanolab.one_shot.vm_resources import (
-        VmTelemetrySession,
-        capacity_telemetry_enabled,
-    )
 
     use_telemetry = (
         capacity_telemetry_enabled(settings)

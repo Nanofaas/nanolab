@@ -9,9 +9,12 @@ import shlex
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from sonata_engine import TaskInputs
 from sonata_tasks.execution.ports import CommandTaskExecutor
+from sonata_tasks.http import endpoint_argv
+from sonata_tasks.tasks.models import CommandTaskSpec
 from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.comparison.manifest import ComparisonManifest
@@ -403,10 +406,6 @@ def record_comparison_management(
     *, endpoint: Any, executor: Any, inputs: Any, run_dir: Path
 ) -> str:
     """Retain and return a direct scrape of the control plane's management port."""
-    from urllib.parse import urlsplit, urlunsplit
-
-    from sonata_tasks.http import endpoint_argv
-    from sonata_tasks.tasks.models import CommandTaskSpec
 
     def command(url: str) -> tuple[str, ...]:
         parsed = urlsplit(url)
@@ -443,8 +442,6 @@ def verify_comparison_cell_registry(
     run_dir: Path,
 ) -> None:
     """Check report tags immediately before load and retain all command responses."""
-    from sonata_tasks.tasks.models import CommandTaskSpec
-
     responses = []
 
     def command(argv: tuple[str, ...]) -> str:

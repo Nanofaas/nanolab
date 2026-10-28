@@ -1,5 +1,13 @@
 """Shared node resource interfaces for the one-shot Sonata tasks."""
 
+import json
+import time
+from importlib.resources import as_file, files
+
+import httpx
+from sonata_engine import TaskInputs
+from sonata_tasks.compensation import compensated_resource
+
 from nanolab.one_shot.infrastructure import (
     NodeExecutor,
     NodeResource,
@@ -17,14 +25,6 @@ __all__ = [
 
 def node_probe_resource(node: NodeResource):
     """Own a persistent clock/network probe until the last topology consumer."""
-    import json
-    import time
-    from importlib.resources import as_file, files
-
-    import httpx
-    from sonata_engine import TaskInputs
-    from sonata_tasks.compensation import compensated_resource
-
     pid: int | None = None
 
     def stop(_inputs: TaskInputs, _url: str | None = None) -> None:

@@ -46,6 +46,7 @@ from nanolab.tasks.cli import (
     CliWorkflowRequest,
     build_cli_workflow,
 )
+from nanolab.tasks.cli_artifacts import cli_modes
 from nanolab.tasks.components.bootstrap import (
     plan_k3s_install,
     plan_repo_sync_to_vm,
@@ -468,7 +469,6 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     if config.workflow != "cli":
         raise ValueError("CLI plan requires a cli scenario")
     root = repo_root or Path.cwd()
-    from nanolab.tasks.cli_artifacts import cli_modes
 
     cli_modes(config.cli_runtime)
     if config.recipe_profile is not None:

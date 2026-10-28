@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_engine.journal import JournalConfig
@@ -50,7 +50,11 @@ from nanolab.tasks.soak.diagnostics import (
     supported_operations,
 )
 from nanolab.tasks.soak.evaluate import combine_results, evaluate_run
-from nanolab.tasks.soak.helper_build import HELPER_BUILDER
+from nanolab.tasks.soak.helper_build import (
+    HELPER_BUILDER,
+    HelperImageRequest,
+    build_helper_image,
+)
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.observations import (
     _duration_seconds as _duration_seconds,
@@ -71,17 +75,29 @@ from nanolab.tasks.soak.observations import (
     retention_from_info as retention_from_info,
 )
 from nanolab.tasks.soak.observer import Observer, SystemClock
+from nanolab.tasks.soak.owned_functions import FunctionOwnership
 from nanolab.tasks.soak.preflight import preflight
 from nanolab.tasks.soak.preparation import (
     PreparationOptions,
     PreparedSoak,
     prepare_soak,
 )
+from nanolab.tasks.soak.prerequisite_runtime import (
+    make_live_runner,
+    required_body_budget,
+)
+from nanolab.tasks.soak.prerequisites import (
+    _inputs,
+    _required_populations,
+    select_relevant_config,
+)
+from nanolab.tasks.soak.processes import run_owned_command
 from nanolab.tasks.soak.report import write_report
 from nanolab.tasks.soak.scheduler_switch import (
     SchedulerSwitchDriver,
     receipt_document,
 )
+from nanolab.tasks.soak.teardown import cleanup_timeout_s
 from nanolab.tasks.soak.workflow import (
     LifecycleHooks,
     LifecycleState,
@@ -93,6 +109,7 @@ from nanolab.tasks.soak.workflow import (
     write_policy_input,
     write_terminal_receipt,
 )
+from nanolab.tasks.soak.workload import allocate_vus, constant_arrival_options
 from nanolab.workspace.paths import bundled_assets_root
 
 if TYPE_CHECKING:
@@ -309,12 +326,6 @@ def _freeze_prerequisite_inputs(prepared) -> dict[str, Any]:
     lifetime is acquired, which is why the refusal names what is missing rather
     than leaving eight profiles to fail one platform at a time.
     """
-    from nanolab.tasks.soak.prerequisites import (
-        _inputs,
-        _required_populations,
-        select_relevant_config,
-    )
-
     config = prepared.config
     coverage = frozenset(config.prerequisites.required_coverage)
     underivable = coverage - _DERIVED_PREREQUISITE_COVERAGE
@@ -408,11 +419,6 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
         freeze_effective_config,
         make_prerequisite_platform_factory,
     )
-    from nanolab.tasks.soak.prerequisite_runtime import (
-        make_live_runner,
-        required_body_budget,
-    )
-    from nanolab.tasks.soak.prerequisites import _inputs
 
     _check_prerequisite_resources(prepared.config, options)
     frozen = (
@@ -728,8 +734,6 @@ def _with_built_helper(
     A scenario that still pins `helper_images`, or an injected
     `memory_helper_image`, is honoured as-is and skips the build.
     """
-    from nanolab.tasks.soak.helper_build import HelperImageRequest, build_helper_image
-
     policy = config.diagnostics
     # Every role that asks for any reading at any checkpoint. Reading only the
     # final map left a baseline-only role without a helper digest, and a policy
@@ -1106,8 +1110,6 @@ def create_local_deployment(
     avoids managed containers escaping Compose ownership or sharing a bridge.
     Each service gets Docker-enforced limits and loopback-only metrics ports.
     """
-    import os
-
     config = prepared.config
     diagnostic_inputs = _diagnostic_resource_inputs(
         prepared, allow_target_stop=allow_diagnostic_target_stop_on_cancel
@@ -2274,7 +2276,6 @@ class RunSingleVersionSoak(Task):
     def run(self, inputs: TaskInputs) -> TaskOutcome:
         """Prepare once, run the owned platform, and persist every terminal exit."""
         from nanolab.tasks.soak.composition import compose_frozen_soak_workflow
-        from nanolab.tasks.soak.teardown import cleanup_timeout_s
 
         if self._entered:
             raise RuntimeError("single-version soak cannot resume or restart")
@@ -2437,11 +2438,6 @@ def inspect_generator(
     prepared: PreparedSoak, base_url: str, command: tuple[str, ...]
 ) -> dict[str, Any]:
     """Ask k6 for execution requirements without starting workload traffic."""
-    import os
-
-    from nanolab.tasks.soak.processes import run_owned_command
-    from nanolab.tasks.soak.workload import allocate_vus, constant_arrival_options
-
     config = prepared.config
     allocation = allocate_vus(
         config.workload.rates, config.workload.preallocated_vus, config.workload.max_vus
@@ -2521,8 +2517,6 @@ def inspect_generator(
 
 def capture_function_owner(name, api_endpoint, control_plane_image, project_name, cwd):
     """Bind function ownership to the running CP container and catalog lifetime."""
-    from nanolab.tasks.soak.owned_functions import FunctionOwnership
-
     container = docker_get(
         f"/containers/{quote(project_name + '-control-plane-1', safe='')}/json",
         "/var/run/docker.sock",
@@ -2543,8 +2537,6 @@ def capture_function_owner(name, api_endpoint, control_plane_image, project_name
 
 def verify_function_owner(owner) -> None:
     """Reject a replaced/restarted CP before interpreting any function HTTP status."""
-    from urllib.parse import urlsplit
-
     container = docker_get(
         f"/containers/{owner.control_plane_container_id}/json",
         "/var/run/docker.sock",

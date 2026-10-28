@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier, Lock
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
@@ -17,6 +18,7 @@ from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from nanolab.config.one_shot import (
     OneShotConfig,
     ProtocolSettings,
+    operational_limit,
     resolve_node_functions,
 )
 from nanolab.one_shot.client import NanoFaasOneShotClient
@@ -297,8 +299,6 @@ def scrape_metrics(
     http: httpx.Client, endpoint: str, *, timeout: float = 5
 ) -> dict[str, float]:
     """Read complete wall-time timer counters separately from parallel CPU timers."""
-    from urllib.parse import urlsplit
-
     address = urlsplit(endpoint)
     response = http.get(
         f"http://{address.hostname}:9090/actuator/prometheus", timeout=timeout
@@ -325,7 +325,6 @@ def prepare_parallel_epoch(
         raise ValueError(
             "logical preparation needs a monotonic activation deadline and monitor"
         )
-    from nanolab.config.one_shot import operational_limit
 
     before = {}
     before_errors = {}

@@ -5,6 +5,7 @@ from pathlib import Path
 from sonata_engine import Steps, Workflow
 
 from nanolab.config import EnvironmentConfig, ScenarioConfig
+from nanolab.one_shot.profiles import CalibrationProfiles, synchronized_timing_trace
 from nanolab.plans.one_shot_common import add_one_shot_platforms
 from nanolab.tasks.one_shot.clock import clock_health_resource
 from nanolab.tasks.one_shot.preflight import CollectTopologyTask
@@ -27,7 +28,6 @@ def build_one_shot_qualification_plan(
             "qualification requires explicit period candidates and timing matrix"
         )
     profile = read_profile(config.one_shot)
-    from nanolab.one_shot.profiles import CalibrationProfiles, synchronized_timing_trace
 
     if (
         isinstance(profile, CalibrationProfiles)

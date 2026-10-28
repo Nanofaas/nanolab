@@ -15,6 +15,7 @@ from sonata_tasks.vm.ssh import find_ssh_private_key_path, ssh_command
 from nanolab.core.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
 from nanolab.tasks.components.context import ScenarioExecutionContext
 from nanolab.tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.infra.ansible import bundled_ansible_root
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.tasks.vm.sync import repo_rsync_command
 
@@ -75,7 +76,6 @@ def _ansible_operation(
     discover_private_key: bool = True,
 ) -> RemoteCommandOperation:
     # Playbooks are bundled with the library.
-    from nanolab.tasks.infra.ansible import bundled_ansible_root
 
     ansible_root = bundled_ansible_root()
     private_key = (

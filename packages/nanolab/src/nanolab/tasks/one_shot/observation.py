@@ -15,12 +15,14 @@ from uuid import uuid4
 import httpx
 from pydantic import JsonValue
 from sonata_engine import Task, TaskOutcome
+from sonata_engine.workflow.context import active_sink
 
 from nanolab.config.one_shot import OperationalLimits, operational_limit
 from nanolab.one_shot.capacity import comparison_replica_vectors
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import CalibrationProfile, CampaignManifest
 from nanolab.one_shot.profiles import CalibrationProfiles
+from nanolab.one_shot.recording import CampaignRecorder
 from nanolab.one_shot.report import render_report
 from nanolab.one_shot.returned_errors import summarize_responses
 from nanolab.one_shot.supervision import (
@@ -163,10 +165,6 @@ def save(path, value):
 
 def event(directory, stage, **values):
     """Persist a stage once and route it through the current campaign if present."""
-    from sonata_engine.workflow.context import active_sink
-
-    from nanolab.one_shot.recording import CampaignRecorder
-
     row = {"atUtc": datetime.now(UTC).isoformat(), "stage": stage, **values}
     sink = active_sink()
     if (

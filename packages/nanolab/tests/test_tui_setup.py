@@ -4,7 +4,6 @@ from tui_toolkit import AppBrand, Theme
 from tui_toolkit.context import get_ui
 
 import nanolab.app.main as main_module
-import nanolab.tui.app as tui_app
 from nanolab.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME, setup_ui
 
 EXPECTED_ASCII_LOGO = """\
@@ -40,7 +39,7 @@ def test_tui_command_sets_up_ui_before_running(monkeypatch) -> None:
     events: list[str] = []
     monkeypatch.setattr(main_module, "setup_ui", lambda: events.append("setup"))
     monkeypatch.setattr(
-        tui_app,
+        main_module,
         "NanofaasTUI",
         lambda: SimpleNamespace(run=lambda: events.append("run")),
     )
@@ -55,7 +54,7 @@ def test_default_main_sets_up_ui_before_running_tui(monkeypatch) -> None:
     monkeypatch.setattr(main_module, "setup_ui", lambda: events.append("setup"))
     monkeypatch.setattr(main_module.sys, "argv", ["nanolab"])
     monkeypatch.setattr(
-        tui_app,
+        main_module,
         "NanofaasTUI",
         lambda: SimpleNamespace(run=lambda: events.append("run")),
     )

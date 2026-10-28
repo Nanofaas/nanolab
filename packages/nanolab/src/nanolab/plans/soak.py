@@ -22,6 +22,8 @@ from nanolab.tasks.soak.composition import (
     compose_frozen_soak_workflow as compose_frozen_soak_workflow,
 )
 from nanolab.tasks.soak.helper_build import HELPER_BUILDER
+from nanolab.tasks.soak.runtime import RunSingleVersionSoak, RuntimeOptions
+from nanolab.tasks.soak.teardown import build_teardown_workflow
 
 SOAK_BUILDKIT_IMAGE = (
     "moby/buildkit@sha256:"
@@ -70,7 +72,6 @@ def build_soak_plan(
         )
     if environment.provider != "local":
         raise ValueError("soak currently requires a local environment")
-    from nanolab.tasks.soak.runtime import RunSingleVersionSoak, RuntimeOptions
 
     workflow = Workflow(workflow_id="soak")
     recipe_profile = getattr(config, "recipe_profile", None)
@@ -188,8 +189,6 @@ def teardown_soak_run(
     tool_root: Path,
 ) -> Workflow:
     """Compile validated replay of this run's retained ownership records."""
-    from nanolab.tasks.soak.teardown import build_teardown_workflow
-
     return build_teardown_workflow(
         config,
         environment,

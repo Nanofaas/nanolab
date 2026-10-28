@@ -301,7 +301,7 @@ def test_batched_inventory_verifies_labels_identity_and_replica_uniqueness(monke
     engine.object["NetworkSettings"] = {"Ports": {"8080/tcp": [{"HostPort": "1234"}]}}
     node = cast(Any, SimpleNamespace(request=SimpleNamespace(name="owned"), vm="vm"))
     monkeypatch.setattr(
-        "nanolab.one_shot.infrastructure.NodeExecutor", lambda _: engine
+        "nanolab.tasks.one_shot.preflight.NodeExecutor", lambda _: engine
     )
     inputs = cast(
         TaskInputs, SimpleNamespace(resource=lambda _: SimpleNamespace(host="10.1.2.3"))

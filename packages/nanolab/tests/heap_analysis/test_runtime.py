@@ -906,8 +906,7 @@ def test_local_wiring_declares_the_diagnostic_provider_before_preparing(
     `check_preparation_support` always raises "diagnostic adapter
     unavailable" for every real heap-analysis run.
     """
-    import nanolab.tasks.soak.preparation as preparation_module
-    import nanolab.tasks.soak.runtime as soak_runtime_module
+    import nanolab.tasks.heap_analysis.runtime as heap_runtime
     from nanolab.tasks.soak.images import BuildReceipt
     from nanolab.tasks.soak.sources import SourceSnapshot
 
@@ -974,9 +973,9 @@ def test_local_wiring_declares_the_diagnostic_provider_before_preparing(
             frozen_at_s=0.0,
         )
 
-    monkeypatch.setattr(preparation_module, "prepare_soak", fake_prepare_soak)
+    monkeypatch.setattr(heap_runtime, "prepare_soak", fake_prepare_soak)
     monkeypatch.setattr(
-        soak_runtime_module,
+        heap_runtime,
         "create_local_deployment",
         lambda *args, **kwargs: FakeDeployment(None),
     )

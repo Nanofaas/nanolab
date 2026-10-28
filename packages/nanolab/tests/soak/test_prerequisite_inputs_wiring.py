@@ -44,7 +44,7 @@ def test_public_builder_declares_builtin_prerequisites_without_caller_options(
         tasks.append(task)
         return task
 
-    monkeypatch.setattr(runtime, "RunSingleVersionSoak", record)
+    monkeypatch.setattr("nanolab.plans.soak.RunSingleVersionSoak", record)
     build_soak_plan(
         cast(
             ScenarioConfig,

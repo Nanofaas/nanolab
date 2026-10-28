@@ -19,6 +19,7 @@ from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
 from nanolab.tasks.soak.build_provenance import BuildProvenanceCollector
 from nanolab.tasks.soak.builds import BuildImagesTask, ObservedBuild
+from nanolab.tasks.soak.collector import docker_get
 from nanolab.tasks.soak.diagnostics import DiagnosticAdapter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe, plan_images
 from nanolab.tasks.soak.prerequisites import ProfileRunner
@@ -129,8 +130,6 @@ def check_preparation_support(config: SoakConfig, options: PreparationOptions) -
 
 def check_local_process_support(config: SoakConfig) -> None:
     """Check the default host-UID collector before allocating a source/build tree."""
-    from nanolab.tasks.soak.collector import docker_get
-
     if any(role.runtime not in {"jvm", "node"} for role in config.roles.values()):
         raise ValueError(
             "native executable identity requires an explicit observer before build"

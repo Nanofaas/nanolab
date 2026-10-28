@@ -430,7 +430,8 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
 
     actions = []
     monkeypatch.setattr(
-        "nanolab.one_shot.vm_resources.capacity_telemetry_enabled", lambda _: True
+        "nanolab.tasks.one_shot.qualification_load.capacity_telemetry_enabled",
+        lambda _: True,
     )
 
     class Sampler:

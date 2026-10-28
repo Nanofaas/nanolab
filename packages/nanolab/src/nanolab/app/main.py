@@ -10,6 +10,7 @@ from rich.traceback import install as install_rich_tracebacks
 from nanolab.cli.comparison import register as install_comparison_commands
 from nanolab.cli.product import install_product_commands
 from nanolab.cli.release import install_release_commands
+from nanolab.tui.app import NanofaasTUI
 from nanolab.tui.setup import setup_ui
 
 app = typer.Typer(
@@ -18,7 +19,6 @@ app = typer.Typer(
 
 
 def _launch_tui() -> None:
-    from nanolab.tui.app import NanofaasTUI
 
     setup_ui()
     NanofaasTUI().run()

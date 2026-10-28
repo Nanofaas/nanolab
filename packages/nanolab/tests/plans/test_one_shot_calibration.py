@@ -135,7 +135,7 @@ def test_multi_function_calibration_qualifies_trace_mixes_before_publication(
     settings, _records = inputs()
     gate_calls = []
     monkeypatch.setattr(
-        "nanolab.one_shot.vm_resources.require_resource_overhead",
+        "nanolab.plans.one_shot_common.require_resource_overhead",
         lambda settings: gate_calls.append(settings),
     )
     monkeypatch.setattr("nanolab.one_shot.infrastructure.external_vm_cpus", lambda: 0)

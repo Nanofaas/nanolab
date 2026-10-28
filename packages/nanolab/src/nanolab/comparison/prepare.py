@@ -16,6 +16,7 @@ them, and a build made on an arm64 laptop is not the artefact under measurement.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import subprocess
@@ -24,15 +25,22 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from sonata_engine import Workflow
+from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_tasks.vm.logged import run_remote_logged
 from sonata_tasks.vm.ports import VmCommandProvider
 
-from nanolab.comparison.manifest import ComparisonManifest
+from nanolab.comparison.manifest import ComparisonManifest, write_comparison_manifest
 from nanolab.comparison.profiles import PreparedComparison
 from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.recipes.remote import bundle_recipe_source, remote_recipe_root
+from nanolab.tasks.recipes.workflow import (
+    RecipeDistribution,
+    read_distribution,
+    recipe_command,
+)
 from nanolab.tasks.vm.models import VmRequest
+from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
 
@@ -262,22 +270,10 @@ def prepare_comparison(
     request: VmRequest,
 ) -> PreparedComparison:
     """Publish missing recipes in order and commit only verified receipts."""
-    import contextlib
-
-    from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
-    from sonata_tasks.vm.logged import run_remote_logged
-
     from nanolab.comparison.evidence import (
         require_recorded_publications,
         verify_comparison_publication,
     )
-    from nanolab.comparison.manifest import write_comparison_manifest
-    from nanolab.tasks.recipes.workflow import (
-        RecipeDistribution,
-        read_distribution,
-        recipe_command,
-    )
-    from nanolab.tasks.vm.runners import VmFileFetcher
 
     require_recorded_publications(
         manifest=manifest, provider=provider, request=request, root=root

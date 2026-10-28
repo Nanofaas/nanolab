@@ -240,7 +240,7 @@ def test_soak_stamps_the_run_built_digest_into_every_diagnosed_role(
     """The checked-in protocol carries no helper, so the run must supply one."""
     built = "localhost:5000/nanolab/diagnostic-helper@" + DIGEST
     monkeypatch.setattr(
-        "nanolab.tasks.soak.helper_build.build_helper_image", lambda request: built
+        "nanolab.tasks.soak.runtime.build_helper_image", lambda request: built
     )
     config = _soak_config()
     assert config.diagnostics.helper_images == {}
@@ -257,7 +257,7 @@ def test_soak_stamps_the_run_built_digest_into_every_diagnosed_role(
 def test_soak_leaves_a_pinned_helper_alone(tmp_path, monkeypatch) -> None:
     """An operator who pinned one deliberately still gets exactly that one."""
     monkeypatch.setattr(
-        "nanolab.tasks.soak.helper_build.build_helper_image",
+        "nanolab.tasks.soak.runtime.build_helper_image",
         lambda request: pytest.fail("a pinned helper must not trigger a build"),
     )
     pinned = "localhost:5000/nanolab/p24-diagnostic-helper@" + DIGEST
@@ -270,7 +270,7 @@ def test_soak_leaves_a_pinned_helper_alone(tmp_path, monkeypatch) -> None:
 
 def test_soak_leaves_an_injected_memory_helper_alone(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "nanolab.tasks.soak.helper_build.build_helper_image",
+        "nanolab.tasks.soak.runtime.build_helper_image",
         lambda request: pytest.fail("an injected helper must not trigger a build"),
     )
     config = _soak_config()
@@ -288,7 +288,7 @@ def test_a_protocol_that_diagnoses_nothing_builds_no_helper(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "nanolab.tasks.soak.helper_build.build_helper_image",
+        "nanolab.tasks.soak.runtime.build_helper_image",
         lambda request: pytest.fail("no diagnostics means no helper to build"),
     )
     config = _soak_config(operations={})

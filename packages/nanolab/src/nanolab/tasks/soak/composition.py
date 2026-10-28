@@ -11,6 +11,7 @@ from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resourc
 from nanolab.tasks.platform import PlatformRequest, add_platform
 from nanolab.tasks.soak.owned_functions import journaled_function_resource
 from nanolab.tasks.soak.retention import CleanupState, journaled_compose_resource
+from nanolab.tasks.soak.teardown import LocalCleanupCommands
 
 
 class _MeasurementControl(Protocol):
@@ -62,7 +63,6 @@ def compose_frozen_soak_workflow(
     cleanup_state = CleanupState(
         JournalConfig(path=project_file.absolute().parent / "cleanup.jsonl")
     )
-    from nanolab.tasks.soak.teardown import LocalCleanupCommands
 
     cleanup_command = LocalCleanupCommands(
         project_file.absolute().parent,

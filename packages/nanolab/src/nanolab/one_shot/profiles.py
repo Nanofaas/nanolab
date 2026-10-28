@@ -15,7 +15,10 @@ from nanolab.config.one_shot import (
     OneShotConfig,
     resolve_node_functions,
 )
+from nanolab.functions.catalog import resolve_function_definition
 from nanolab.one_shot.models import CalibrationProfile, Purpose, verify_calibration
+from nanolab.tasks.one_shot.artifacts import canonical_bytes, content_hash
+from nanolab.workspace.paths import default_tool_paths
 
 
 class ProfileSet(BaseModel):
@@ -59,10 +62,6 @@ def verify_node_resources(
     profile: CalibrationProfile, settings: OneShotConfig, node_id: str
 ) -> None:
     """Reject a quota, input or replica-range swap before provider acquisition."""
-    from nanolab.functions.catalog import resolve_function_definition
-    from nanolab.tasks.one_shot.artifacts import canonical_bytes, content_hash
-    from nanolab.workspace.paths import default_tool_paths
-
     measured = {
         str(row["function"]): cast(dict[str, Any], row) for row in profile.functions
     }

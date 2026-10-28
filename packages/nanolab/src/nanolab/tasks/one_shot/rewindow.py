@@ -3,6 +3,7 @@
 from collections import defaultdict
 from collections.abc import Callable
 from copy import deepcopy
+from decimal import ROUND_HALF_UP, Decimal
 from math import isfinite
 
 
@@ -102,8 +103,6 @@ def quantize_means(
     means: list[dict[str, dict[str, float]]], *, quantum: float, period_seconds: int
 ) -> tuple[list[dict[str, dict[str, float]]], list[dict]]:
     """Round nearest with ties upward; retain integrated means and signed errors."""
-    from decimal import ROUND_HALF_UP, Decimal
-
     if isinstance(quantum, bool) or not isfinite(quantum) or quantum <= 0:
         raise ValueError("positive finite quantum required")
     q = Decimal(str(quantum))

@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import math
+import os
+import tempfile
 from collections.abc import Callable
 from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -12,7 +18,10 @@ from typing import Any, Protocol, cast
 from sonata_engine import Steps, Task, TaskInputs, TaskOutcome
 
 from nanolab.config.soak import SoakConfig
+from nanolab.tasks.soak.artifacts import ArtifactWriter, fingerprint
 from nanolab.tasks.soak.ports import WORKLOAD_RECEIPT, Clock, WorkloadDriver
+from nanolab.tasks.soak.prerequisites import run_prerequisites, validate_receipt
+from nanolab.tasks.soak.workload import K6WorkloadDriver
 
 
 class Sampling(Protocol):
@@ -318,10 +327,6 @@ class SoakLifecycle(Task[LifecycleState]):
 
 def publish_run_document(run_dir: Path, name: str, payload: dict[str, Any]) -> Path:
     """Publish beside Sonata's journal without acquiring the nonempty run root."""
-    import json
-    import os
-    import tempfile
-
     if run_dir.is_symlink():
         raise ValueError("run root cannot be a symbolic link")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -362,8 +367,6 @@ def write_terminal_receipt(
 
 def write_policy_input(run_dir: Path, scenario: Any) -> Path | None:
     """Persist the loader's policy receipt and fingerprint the resolved policy."""
-    from nanolab.tasks.soak.artifacts import fingerprint
-
     receipt = getattr(scenario, "_soak_policy_receipt", None)
     if receipt is None:
         return None
@@ -426,8 +429,6 @@ class TerminalSoakLifecycle(SoakLifecycle):
 
 def observer_startup_timeout(config: SoakConfig, *, overhead_s: float = 5.0) -> float:
     """Budget the observer's first sequential sweep of every configured role."""
-    import math
-
     if isinstance(overhead_s, bool) or not math.isfinite(overhead_s) or overhead_s <= 0:
         raise ValueError("observer startup overhead must be finite and positive")
     return len(config.roles) * config.scrape_timeout_s + overhead_s
@@ -447,8 +448,6 @@ def make_workload_driver_factory(
     Preserve fractional arrival rates and both VU bounds. Freeze the artifact
     budget with the rest of the policy before either workload phase starts.
     """
-    from copy import deepcopy
-
     rates = config.workload.rates
     if set(payloads) != set(rates) or set(image_digests) != set(config.roles):
         raise ValueError(
@@ -464,7 +463,6 @@ def make_workload_driver_factory(
     stop_timeout = config.cancellation_timeout_s
 
     def create(phase: str) -> WorkloadDriver:
-        from nanolab.tasks.soak.workload import K6WorkloadDriver
 
         if phase not in {"warmup", "steady"}:
             raise ValueError("workload may run only during warmup or steady")
@@ -500,13 +498,6 @@ def run_prerequisite_gate(
     coverage ID and observe actual retained populations. This function never
     substitutes the measured platform or inferred HTTP success for that runner.
     """
-    import asyncio
-    import json
-    from copy import deepcopy
-
-    from nanolab.tasks.soak.artifacts import ArtifactWriter, fingerprint
-    from nanolab.tasks.soak.prerequisites import run_prerequisites, validate_receipt
-
     coverage = frozenset(config.prerequisites.required_coverage)
     if not coverage:
         if config.purpose != "smoke":

@@ -34,6 +34,7 @@ from nanolab.one_shot.profiles import (
     profile_for_node,
     validate_trace_capacity,
 )
+from nanolab.one_shot.returned_errors import classify_response
 from nanolab.one_shot.topology import observe_neighbors
 from nanolab.one_shot.vm_resources import telemetry_policy
 from nanolab.tasks.loadtest.soak import parse_prometheus
@@ -1552,7 +1553,6 @@ def classify_result(row: dict, *, expected: str, physical: list[dict]) -> dict:
         and str(row["responseStatus"]).upper() == "SUCCESS"
         and row.get("outputJson") == expected
     )
-    from nanolab.one_shot.returned_errors import classify_response
 
     explicit_refusal = classify_response(row) == "reject"
     terminal_error = not success and (

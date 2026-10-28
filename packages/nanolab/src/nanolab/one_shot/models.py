@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from typing import Annotated, Any, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -194,8 +195,6 @@ class CampaignProtocol(BaseModel):
     @model_validator(mode="after")
     def checked(self) -> Self:
         """Validate the frozen execution registry."""
-        from collections import Counter
-
         from nanolab.tasks.one_shot.trace import TraceArtifact
 
         n = self.planned_blocks

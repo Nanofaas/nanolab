@@ -17,9 +17,13 @@ from uuid import uuid4
 
 from sonata_engine import Resource
 
-from nanolab.config.one_shot import operational_limit
+from nanolab.config.one_shot import ArtifactReference, OneShotConfig, operational_limit
 from nanolab.one_shot import vm_sampler
-from nanolab.tasks.one_shot.artifacts import canonical_bytes, write_immutable_artifact
+from nanolab.tasks.one_shot.artifacts import (
+    canonical_bytes,
+    package_fingerprint,
+    write_immutable_artifact,
+)
 
 
 def telemetry_policy() -> dict:
@@ -646,7 +650,6 @@ def require_resource_overhead(settings) -> dict | None:
             "whole-VM telemetry overhead qualification is required before measurements"
         )
     value = json.loads(reference.read_verified())
-    from nanolab.tasks.one_shot.artifacts import package_fingerprint
 
     if (
         value.get("policy") != telemetry_policy()
@@ -660,7 +663,6 @@ def require_resource_overhead(settings) -> dict | None:
     cells = {
         node.id + "/" + name for node in settings.nodes for name in settings.functions
     }
-    from nanolab.config.one_shot import ArtifactReference
 
     receipts = value.get("rawEvidence")
     if not isinstance(receipts, list) or len(receipts) != 3:
@@ -694,8 +696,6 @@ def require_resource_overhead(settings) -> dict | None:
 
 def capacity_telemetry_enabled(settings) -> bool:
     """Keep physical trial instrumentation identical after its gate is qualified."""
-    from nanolab.config.one_shot import OneShotConfig
-
     return (
         isinstance(settings, OneShotConfig)
         and settings.strict_memory

@@ -15,6 +15,11 @@ from typing import Any, cast
 import plotly.graph_objects as go
 
 from nanolab.one_shot.models import CampaignManifest
+from nanolab.one_shot.vm_resources import (
+    correlate_sample,
+    read_samples,
+    resource_clock_context,
+)
 from nanolab.tasks.one_shot.conservation import RunEvidence
 from nanolab.tasks.one_shot.statistics import quantile
 
@@ -445,8 +450,6 @@ def _write(
 
 def assignment_observations(directory: Path) -> dict:
     """Keep node-local quantities separate from actual request observations."""
-    from nanolab.one_shot.vm_resources import read_samples
-
     cells = []
     path = directory / "epochs.jsonl"
     epochs, malformed_epochs = read_samples(path)
@@ -695,12 +698,6 @@ def render_paired_campaign(blocks, output: Path, *, seed: int, protocol=None) ->
 
 def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
     """Show full node CPU/RAM/swap and individual replica counters, with gaps."""
-    from nanolab.one_shot.vm_resources import (
-        correlate_sample,
-        read_samples,
-        resource_clock_context,
-    )
-
     charts = []
     anchor = datetime.fromisoformat(manifest.anchor)
     clock_context = resource_clock_context(directory)

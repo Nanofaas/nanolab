@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import random
 import statistics
 from collections.abc import Sequence
-from itertools import pairwise
+from itertools import pairwise, permutations
+from pathlib import Path
 from typing import Any, cast
 
+import yaml
+
+from nanolab.config import ScenarioConfig
+from nanolab.config.one_shot import OneShotConfig
 from nanolab.one_shot.models import CampaignManifest, TimingQualification
+from nanolab.one_shot.vm_resources import telemetry_policy
 from nanolab.tasks.one_shot.artifacts import (
     canonical_bytes,
     content_hash,
     package_fingerprint,
+    write_immutable_artifact,
 )
 from nanolab.tasks.one_shot.conservation import RunEvidence
 from nanolab.tasks.one_shot.statistics import quantile
@@ -350,10 +358,7 @@ def paired_summary(
 
 def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -> dict:
     """Freeze pilot order or main N only after immutable prerequisite verification."""
-    from itertools import permutations
-
     from nanolab.one_shot.profiles import read_profiles, validate_trace_capacity
-    from nanolab.one_shot.vm_resources import telemetry_policy
     from nanolab.tasks.one_shot.experiment import (
         read_qualification,
         verify_qualified_load,
@@ -552,13 +557,6 @@ def freeze_campaign_protocol(*, profiles, qualification, pilot_rows, settings) -
 
 def write_campaign_scenarios(protocol: dict, output) -> list:
     """Emit immutable standard public scenarios, including preset replacement seeds."""
-    from pathlib import Path
-
-    import yaml
-
-    from nanolab.config import ScenarioConfig
-    from nanolab.tasks.one_shot.artifacts import write_immutable_artifact
-
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     content = canonical_bytes(protocol)
@@ -623,9 +621,6 @@ def write_campaign_scenarios(protocol: dict, output) -> list:
 
 def read_campaign_binding(settings) -> dict | None:
     """Reject scenario changes before any owned VM or generator can be acquired."""
-    import json
-
-    from nanolab.config.one_shot import OneShotConfig
     from nanolab.one_shot.models import CampaignProtocol
     from nanolab.tasks.one_shot.trace import experiment_trace
 

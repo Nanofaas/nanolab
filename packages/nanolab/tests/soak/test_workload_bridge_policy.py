@@ -12,7 +12,7 @@ def test_bridge_preserves_fractional_rates_and_distinct_vu_limits(monkeypatch):
         observed.update(kwargs)
         return SimpleNamespace()
 
-    monkeypatch.setattr("nanolab.tasks.soak.workload.K6WorkloadDriver", driver)
+    monkeypatch.setattr("nanolab.tasks.soak.workflow.K6WorkloadDriver", driver)
     config = SimpleNamespace(
         workload=SimpleNamespace(
             rates={"fn": 0.5},

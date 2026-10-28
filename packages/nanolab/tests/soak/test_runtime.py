@@ -1893,7 +1893,7 @@ def test_the_shipped_nmt_spikes_provision_and_reserve(tmp_path, monkeypatch, sce
     # which roles get one is itself a gate that reads the declared maps.
     built = "localhost:5000/nanolab/diagnostic-helper@sha256:" + "c" * 64
     monkeypatch.setattr(
-        "nanolab.tasks.soak.helper_build.build_helper_image", lambda request: built
+        "nanolab.tasks.soak.runtime.build_helper_image", lambda request: built
     )
     config = module._with_built_helper(
         value.config, run_dir=tmp_path / "run", options=module.RuntimeOptions()
@@ -2029,7 +2029,7 @@ def test_public_builder_explicitly_authorizes_only_default_owned_cleanup(
         tasks.append(task)
         return task
 
-    monkeypatch.setattr(module, "RunSingleVersionSoak", record)
+    monkeypatch.setattr("nanolab.plans.soak.RunSingleVersionSoak", record)
     for options in (None, module.RuntimeOptions()):
         build_soak_plan(
             cast(ScenarioConfig, SimpleNamespace(workflow="soak", soak=object())),

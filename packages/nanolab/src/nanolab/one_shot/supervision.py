@@ -23,6 +23,8 @@ from sonata_engine.workflow.context import active_sink
 
 from nanolab.one_shot.presentation import SinkCampaignPresentation
 from nanolab.one_shot.recording import CampaignRecorder
+from nanolab.one_shot.report import finalize_operational_outcome
+from nanolab.tasks.one_shot.clock import ClockMonitor
 
 _INHERIT = object()
 
@@ -309,8 +311,6 @@ class CampaignSupervision:
         join_seconds: float = 300,
     ) -> Resource:
         """Run blocking service probes outside the lock with the existing worker."""
-        from nanolab.tasks.one_shot.clock import ClockMonitor
-
         worker = None
 
         def acquire(inputs):
@@ -691,7 +691,6 @@ class CampaignSupervision:
 
     def _write_result(self):
         self._terminal_outcome()
-        from nanolab.one_shot.report import finalize_operational_outcome
 
         errors = []
         # Each diagnostic channel is independent; storage can reject any of

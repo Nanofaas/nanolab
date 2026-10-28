@@ -6,6 +6,7 @@ import hashlib
 import math
 from pathlib import Path
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -245,8 +246,6 @@ class OneShotLogs(BaseModel):
     @model_validator(mode="after")
     def validate_endpoint(self) -> Self:
         """Reject ambiguous endpoints and unpinned collectors before provisioning."""
-        from urllib.parse import urlsplit
-
         if self.enabled:
             if not self.endpoint:
                 raise ValueError("logging endpoint is required")

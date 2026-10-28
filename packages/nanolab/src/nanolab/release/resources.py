@@ -23,6 +23,7 @@ from nanolab.images.plan import ImageArchitecture
 from nanolab.release.build import (
     ArchiveProvider,
     create_source_archive,
+    git_state,
     provider_exec,
     provider_transfer_to,
     stage_source_archive,
@@ -371,7 +372,6 @@ def build_release_source_resources(
             return create_source_archive(repo_root, commit, archive)
         if digest_path(source_archive) != archive_digest:
             raise ValueError("Frozen source archive changed before acquisition")
-        from nanolab.release.build import git_state
 
         state = git_state(repo_root)
         if not state.clean or state.commit != commit:

@@ -7,6 +7,8 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
+from nanolab.config.one_shot import ArtifactReference, resolve_node_functions
+
 CAPACITY_FACTORS = (0.5, 0.7, 0.9, 1.0, 1.1, 1.25)
 
 
@@ -14,8 +16,6 @@ def comparison_replica_vectors(
     settings, aliases: dict[str, str]
 ) -> dict[str, dict[str, int]]:
     """Use one feasible balanced vector for strict concurrent baseline and cloud."""
-    from nanolab.config.one_shot import resolve_node_functions
-
     if settings.strict_memory and len(settings.functions) > 1:
         return next(
             entry["vectors"]
@@ -33,8 +33,6 @@ def comparison_replica_vectors(
 
 def capacity_configurations(settings, aliases: dict[str, str]) -> list[dict]:
     """Predeclare every pure integer level and six feasible concurrent mixes."""
-    from nanolab.config.one_shot import resolve_node_functions
-
     local = {
         node.id: {
             aliases[name]: fn
@@ -188,7 +186,6 @@ def read_concurrent_capacity(
     tolerance: float,
 ) -> list[dict]:
     """Verify exact joint rates and all three immutable raw trial artifacts."""
-    from nanolab.config.one_shot import ArtifactReference
     from nanolab.one_shot.profiles import relative_reference
 
     if (

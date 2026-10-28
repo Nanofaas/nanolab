@@ -47,7 +47,7 @@ def test_constructor_compiles_deferred_pipeline_without_side_effects(tmp_path):
 
 
 def test_compiled_platform_resources_outlive_measurement(tmp_path, monkeypatch):
-    import nanolab.tasks.soak.teardown as teardown
+    import nanolab.tasks.soak.composition as composition
 
     cleanup = {}
 
@@ -59,7 +59,7 @@ def test_compiled_platform_resources_outlive_measurement(tmp_path, monkeypatch):
         )
         return object()
 
-    monkeypatch.setattr(teardown, "LocalCleanupCommands", cleanup_commands)
+    monkeypatch.setattr(composition, "LocalCleanupCommands", cleanup_commands)
     digest = "registry/image@sha256:" + "a" * 64
     request = PlatformRequest(
         backend="container",
@@ -529,7 +529,6 @@ def test_recipe_owned_resources_cleanup_preserves_selection(
     import sonata_tasks.registry as registry_module
     from sonata_tasks.execution.models import TaskResult
 
-    import nanolab.tasks.soak.runtime as runtime
     from nanolab.application.inputs import load_scenario
 
     seen = []
@@ -572,7 +571,7 @@ def test_recipe_owned_resources_cleanup_preserves_selection(
         "nanolab.plans.soak.docker_registry_resource",
         lambda **kwargs: original_registry(**kwargs, ready=lambda: True),
     )
-    monkeypatch.setattr(runtime, "RunSingleVersionSoak", FailRuntime)
+    monkeypatch.setattr("nanolab.plans.soak.RunSingleVersionSoak", FailRuntime)
     monkeypatch.setattr(
         "nanolab.tasks.soak.preparation.check_local_process_support",
         lambda config: None,

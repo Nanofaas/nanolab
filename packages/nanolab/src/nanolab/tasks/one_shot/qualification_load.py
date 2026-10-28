@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+from nanolab.one_shot.vm_resources import capacity_telemetry_enabled
 from nanolab.tasks.one_shot.artifacts import canonical_bytes, write_immutable_artifact
 from nanolab.tasks.one_shot.trace import TraceArtifact, request_schedule
 from nanolab.tasks.one_shot.verification import validate_proof
@@ -90,7 +91,6 @@ class QualificationLoad:
         """Bind the cell, physical topology and future absolute load schedule."""
         self.inputs, self.clock, self.run_dir = inputs, clock, run_dir
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        from nanolab.one_shot.vm_resources import capacity_telemetry_enabled
 
         self.use_telemetry = capacity_telemetry_enabled(settings)
         self.telemetry = None

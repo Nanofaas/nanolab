@@ -1,9 +1,13 @@
 """Concrete campaign views, constructed only at the observation launch boundary."""
 
-from contextlib import AbstractContextManager, contextmanager
+import json
+from contextlib import AbstractContextManager, contextmanager, nullcontext
+from dataclasses import asdict
+from datetime import UTC, datetime
 
 from sonata_engine import WorkflowEvent
 
+from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.one_shot.presentation import SinkCampaignPresentation, campaign_line
 
 
@@ -12,9 +16,6 @@ class JsonCampaignPresentation:
 
     def emit(self, event: WorkflowEvent) -> None:
         """Serialize task events; raw command lines keep the console policy."""
-        from dataclasses import asdict
-        from datetime import UTC, datetime
-
         if event.kind != "log.line":
             row = asdict(event)
             row["at"] = event.at.isoformat()
@@ -22,14 +23,10 @@ class JsonCampaignPresentation:
 
     def status(self, label: str) -> AbstractContextManager[None]:
         """Status rows arrive through the campaign channel."""
-        from contextlib import nullcontext
-
         return nullcontext()
 
     def campaign_event(self, row: dict) -> None:
         """Write one established JSON row."""
-        import json
-
         print(json.dumps(row, default=str), flush=True)
 
 
@@ -38,8 +35,6 @@ class ConsoleCampaignPresentation(SinkCampaignPresentation):
 
     def __init__(self, *, write=None, **kwargs):
         """Accept the same output and clock options as ConsoleProgressSink."""
-        from nanolab.cli.progress import ConsoleProgressSink
-
         self.write = write or (lambda line: print(line, flush=True))
         super().__init__(ConsoleProgressSink(write=self.write, **kwargs))
 

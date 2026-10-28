@@ -213,7 +213,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
 
         return SimpleNamespace(close=close, require_healthy=lambda: None)
 
-    monkeypatch.setattr("nanolab.one_shot.vm_resources.VmTelemetrySession", sampler)
+    monkeypatch.setattr("nanolab.tasks.one_shot.capacity.VmTelemetrySession", sampler)
 
     def close():
         if fault == "generator-cleanup-error":

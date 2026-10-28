@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -11,10 +13,12 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from sonata_engine import Task, TaskInputs, TaskOutcome
+from sonata_tasks.command import CommandTask
 
 from nanolab.config.one_shot import operational_limit
-from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
+from nanolab.one_shot.infrastructure import NodeExecutor, NodeResource, OneShotResources
 from nanolab.one_shot.topology import observe_neighbors
+from nanolab.tasks.managed_containers import inspect_managed_container
 
 
 class NodeEvidence(BaseModel):
@@ -227,9 +231,6 @@ def runtime_endpoint(
     node: NodeResource, function: str, *, inputs: TaskInputs, replica: int = 1
 ) -> tuple[str, dict]:
     """Resolve replica one by verified managed-container labels."""
-    from nanolab.one_shot.infrastructure import NodeExecutor
-    from nanolab.tasks.managed_containers import inspect_managed_container
-
     observed = inspect_managed_container(
         function=f"{node.request.name}/{function}",
         replica=replica,
@@ -248,13 +249,6 @@ def runtime_inventory(
     node: NodeResource, *, functions: list[str], inputs: TaskInputs
 ) -> list[tuple[str, int, str, dict]]:
     """Resolve current owned replicas in two commands instead of querying all maxima."""
-    import json
-    import re
-
-    from sonata_tasks.command import CommandTask
-
-    from nanolab.one_shot.infrastructure import NodeExecutor
-
     executor = NodeExecutor(node)
     result = (
         CommandTask(
@@ -387,8 +381,6 @@ class CollectTopologyTask(Task[TopologyEvidence]):
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[TopologyEvidence]:
         """Preserve partial observations even when collection or validation fails."""
-        import json
-
         self.observations = {}
         self.output.write_text(
             json.dumps(
@@ -416,8 +408,6 @@ class CollectTopologyTask(Task[TopologyEvidence]):
 
     def _collect(self, inputs: TaskInputs) -> TaskOutcome[TopologyEvidence]:
         """Save observed assumptions and fail before any experimental load."""
-        import json
-
         from nanolab.one_shot.client import NanoFaasOneShotClient
 
         evidence = []
@@ -733,9 +723,6 @@ print(json.dumps(value))
 
 def collect_container_cgroup(node: NodeResource, observed: dict) -> dict:
     """Read on the VM host: distroless function images need no shell or tools."""
-    import json
-    import re
-
     identifier = observed.get("Id", "")
     pid = observed.get("State", {}).get("Pid")
     if (

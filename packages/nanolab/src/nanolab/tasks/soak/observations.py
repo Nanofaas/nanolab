@@ -6,13 +6,22 @@ import base64
 import hashlib
 import json
 import os
+import re
+import shlex
 import stat
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.request import ProxyHandler, Request, build_opener
 
-from nanolab.tasks.soak.collector import collect_procfs, docker_get
+from nanolab.tasks.soak.collector import (
+    NoRedirect,
+    collect_procfs,
+    docker_get,
+    read_bounded,
+)
 from nanolab.tasks.soak.models import Target
+from nanolab.tasks.soak.preflight import effective_cpu_limit
 from nanolab.tasks.soak.preparation import PreparedSoak
 
 if TYPE_CHECKING:
@@ -21,8 +30,6 @@ if TYPE_CHECKING:
 
 def _duration_seconds(value: object) -> float:
     """Parse observed Spring Duration values without assuming an absent default."""
-    import re
-
     if not isinstance(value, str):
         raise ValueError("effective duration must be an observed string")
     match = re.fullmatch(
@@ -174,10 +181,6 @@ def _observed_java_options(
 
 def observe_local_process(target: Target) -> dict[str, Any]:
     """Observe local PID identity, cgroup-v2 limits and actual runtime arguments."""
-    import shlex
-
-    from nanolab.tasks.soak.preflight import effective_cpu_limit
-
     before = collect_procfs(target.process_id, target.container_id)
     directory = Path("/proc") / str(target.process_id)
 
@@ -276,10 +279,6 @@ def observe_local_configuration(
     api_url: str | None = None,
 ) -> dict[str, Any]:
     """Query bounded actuator documents; missing bound values stay unavailable."""
-    from urllib.request import ProxyHandler, Request, build_opener
-
-    from nanolab.tasks.soak.collector import NoRedirect, read_bounded
-
     result: dict[str, Any] = {"unavailable": {}}
     # Build metadata still comes from its module on the application port.
     sources = {"info": management_url + "/actuator/info"}
