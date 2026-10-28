@@ -1,6 +1,6 @@
 # Experiment 02 — plan 3: faasd
 
-Status: implementation approved by the author in chat on 28 October 2026. Native containment probe completed on an approved Spot VM, now deallocated. Full three-role Spot smoke separately approved; implementation remains pending that integration acceptance.
+Status: implementation and full three-role Spot smoke approved and completed on 28 October 2026 at code commit 5ac285e. Run experiment-02-faasd-smoke-20261028T1748 passed correctness, containment, cleanup, unchanged resume and error/secret checks. All three VMs were deallocated within the approved window. Final independent review found no actionable defects; Linux verification passed: 5109 pure tests, 644 source contracts, 53 TUI tests; combined NanoLab coverage 87.55%. No campaign approval or NanoLab merge/push.
 Base: experiment-02/completion-minors, derived from review commit 7da834b.
 Authority: nanofaas-paper/notes/experiment-02-platform-comparison-prompt.md.
 

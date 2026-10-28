@@ -1,7 +1,7 @@
 # Experiment 02: complete platforms under one CPU/memory budget
 
-`compare` measures complete FaaS deployments on Docker, on an Azure stack VM
-without k3s. Each deployment runs inside one cgroup whose CPU quota and memory
+`compare` measures complete FaaS deployments on Docker on an Azure stack VM
+without k3s, or native containerd on a separate faasd VM. Each deployment runs inside one cgroup whose CPU quota and memory
 limit are a budget from the protocol's grid. The calendar, the request ledger,
 the receipts and the per-step verdicts are experiment 01's; what this experiment
 adds is the budget, the Docker stack, the platforms and the cost per useful
@@ -9,8 +9,9 @@ response.
 
 **Status: nanoFaaS P1 JVM, the function alone and five baselines (FunLess,
 Spin, tinyFaaS, Serverledge, Fn) run on Azure, one cell each at 2 CPUs and
-2048 MiB (27 October 2026).** faasd, on its own containerd VM, is the next
-plan; Sledge is out of the comparison (it cannot compile the shared function,
+2048 MiB (27 October 2026).** A native faasd cell, cleanup and unchanged resume
+were verified on three Azure Spot VMs on 28 October 2026 at the same budget.
+Sledge is out of the comparison (it cannot compile the shared function,
 see below). The pilot thresholds are not frozen, so no step is qualified and
 no result, capacity or budget follows from these runs.
 
@@ -343,11 +344,30 @@ descendants of the same enforced budget. The engine-only series reads the
 cgroups. Required faasd services, including its registry, remain inside the
 full-deployment budget. Credentials are read on the VM into memory only.
 
-Native containment was verified on an Azure Spot VM on 28 October 2026 at
-2 CPU, 2 GiB and no swap, including both containerd namespaces. That was a
-manual containment probe, not a QR correctness smoke or a campaign result.
-The CLI integration still requires a fresh full Azure smoke with the shared
-QR image and resume checks before experimental use.
+The complete CLI smoke at commit `5ac285e` is
+`runs/experiment-02-faasd-smoke-20261028T1748`: one measured integration cell
+at 2 CPU / 2048 MiB, followed by a resume that skipped its completed cell and
+preserved all 21 cell/preparation evidence files byte-for-byte and with
+unchanged modification times. The decoded PNG SHA-256 was
+`aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1`.
+All six recorded service/function task PIDs, including registry, were within
+the enforced SUT slice. The error probe returned HTTP 500 for empty text;
+secret scans found neither the password nor its Basic-auth encoding in the
+checked run and paper evidence. Cleanup verified empty task/container namespaces
+and no CNI leases. All three Spot VMs were deallocated before the approved
+18:02 UTC deadline. These are integration checks; pilot thresholds and campaign
+results remain unapproved and unfrozen.
+
+An earlier cell (`...T1740`) was discarded when DELETE completed after its
+old two-second timeout and retries returned 404. Cleanup now allows 30 seconds
+and accepts an already-absent response only with the same strict runtime/CNI
+postconditions. Its data must not be aggregated with the accepted cell.
+
+The CE evaluation continues the author's 27 October start date. Since its exact
+start time is unavailable, stop before 26 December 2026 00:00 Europe/Rome
+(25 December 23:00 UTC). Reinstallation does not restart the evaluation;
+see the [official CE EULA](https://github.com/openfaas/faas/blob/master/EULA.md)
+and faasd addendum at the pinned release.
 
 The current provider configuration does not select Spot priority. When Spot
 is requested, create the explicitly approved Spot VMs first and set `host` to each live
@@ -355,3 +375,8 @@ public IP for every role. This selects verified SSH access to existing Azure
 targets, without taking OpenTofu lifecycle ownership. The live name/IP, SKU,
 region, image and running state must match; a stopped VM is never started
 implicitly. Configured NSG restrictions still apply. Follow the operator approval policy for all VM lifecycle actions.
+
+Repository verification of code `5ac285e`: 5109 pure tests and 644 real-source
+contracts passed; combined NanoLab coverage is 87.55%, above 86%. TUI toolkit's
+53 tests and all pre-commit checks passed. Test execution used native Linux
+temporary files, real Git metadata and installed system Python/Node/util-linux.
