@@ -277,3 +277,16 @@ def test_cached_install_refuses_when_its_image_cannot_be_republished(key):
     provider.handler = missing_image
     with pytest.raises(RuntimeError, match="image does not exist locally"):
         install_baselines(vm(provider), (key,), **arguments)
+
+
+def test_tinyfaas_refreshes_packages_before_installing_toolchain():
+    provider = _installer()
+    install_baselines(
+        vm(provider),
+        ("tinyfaas",),
+        source=SOURCE,
+        artifacts=ARTIFACT_SHA,
+        workload_tree=TREE,
+    )
+    script = _scripts(provider)
+    assert script.index("apt-get update") < script.index("apt-get install")

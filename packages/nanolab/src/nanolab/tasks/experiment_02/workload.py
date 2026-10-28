@@ -67,15 +67,16 @@ def build_workloads(
     remote_root: PurePosixPath,
     payload: bytes,
     png_sha256: str | None,
+    workload_commit: str | None = None,
 ) -> dict[str, str]:
     """Build every wrapper on the stack; return each artifact's sha256 by key."""
-    _ = capture_workloads(workloads)
+    commit = workload_commit or capture_workloads(workloads)["commit"]
     source = remote_root / WORKLOAD
     with tempfile.TemporaryDirectory() as scratch:
         archive = Path(scratch) / "qr-code.tar"
         archive.write_bytes(
             subprocess.check_output(
-                ("git", "archive", "--format=tar", "HEAD", WORKLOAD),
+                ("git", "archive", "--format=tar", commit, WORKLOAD),
                 cwd=workloads,
                 timeout=600,
             )
@@ -127,6 +128,7 @@ def ensure_workloads(
     remote_root: PurePosixPath,
     payload: bytes,
     png_sha256: str | None,
+    workload_commit: str | None = None,
     record: Path,
 ) -> dict[str, str]:
     """Build the wrappers once per run; on a resume, require the ones recorded.
@@ -141,6 +143,7 @@ def ensure_workloads(
             remote_root=remote_root,
             payload=payload,
             png_sha256=png_sha256,
+            workload_commit=workload_commit,
         )
         record.parent.mkdir(parents=True, exist_ok=True)
         record.write_text(json.dumps(artifacts, indent=2) + "\n")

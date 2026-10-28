@@ -111,3 +111,28 @@ def test_without_a_frozen_hash_the_measured_png_is_required(tmp_path):
             payload=b"{}",
             png_sha256=None,
         )
+
+
+def test_build_uses_the_identity_commit_after_head_advances(tmp_path):
+    functions = _repository(tmp_path)
+    identity = capture_workloads(functions)
+    (functions / "qr-code" / "Cargo.toml").write_text("changed\n")
+    subprocess.run(("git", "add", "."), cwd=functions, check=True)
+    subprocess.run(("git", "commit", "-qm", "advance"), cwd=functions, check=True)
+    provider = _stack(PNG)
+    build_workloads(
+        vm(provider),
+        workloads=functions,
+        remote_root=REMOTE,
+        payload=b"{}",
+        png_sha256=hashlib.sha256(PNG).hexdigest(),
+        workload_commit=identity["commit"],
+    )
+    import io
+    import tarfile
+
+    archive = provider.files[str(REMOTE / "qr-code.tar")]
+    with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+        member = source.extractfile("qr-code/Cargo.toml")
+        assert member is not None
+        assert member.read() == b"[workspace]\n"

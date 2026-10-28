@@ -533,6 +533,7 @@ def _install_script(
     if key == "tinyfaas":
         return "\n".join(
             (
+                "apt-get update -q >/dev/null",
                 "apt-get install -y -q make golang-go >/dev/null",
                 f"git clone -q {_GIT['tinyfaas']} {root}/src",
                 f"cd {root}/src",

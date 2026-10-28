@@ -440,6 +440,7 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
                 payload=payload,
                 png_sha256=protocol.png_sha256,
                 record=root / "prepare" / "workloads.json",
+                workload_commit=workloads["commit"],
             )
             installed = ensure_baselines(
                 stack,
