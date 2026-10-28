@@ -128,4 +128,13 @@ def provider_for_environment(
     """
     if orchestrator_factory is not None:
         return orchestrator_factory(repo_root)
+    if environment.provider == "azure":
+        explicit = [target.host is not None for target in environment.roles.values()]
+        if any(explicit) and not all(explicit):
+            missing = ", ".join(
+                role
+                for role, target in environment.roles.items()
+                if target.host is None
+            )
+            raise ValueError(f"pre-provisioned Azure roles missing host: {missing}")
     return command_provider_for(vm_request_for_role(environment, "stack"), repo_root)

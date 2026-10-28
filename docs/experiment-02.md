@@ -350,6 +350,8 @@ The CLI integration still requires a fresh full Azure smoke with the shared
 QR image and resume checks before experimental use.
 
 The current provider configuration does not select Spot priority. When Spot
-is requested, create the explicitly approved Spot VMs first and let the
-Azure provider reuse those named machines; do not silently create on-demand
-substitutes. Follow the operator approval policy for all VM lifecycle actions.
+is requested, create the explicitly approved Spot VMs first and set `host` to each live
+public IP for every role. This selects verified SSH access to existing Azure
+targets, without taking OpenTofu lifecycle ownership. The live name/IP, SKU,
+region, image and running state must match; a stopped VM is never started
+implicitly. Configured NSG restrictions still apply. Follow the operator approval policy for all VM lifecycle actions.

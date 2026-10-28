@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from nanolab.application.vm_provider import vm_request_for_role
+import pytest
+
+from nanolab.application.vm_provider import (
+    provider_for_environment,
+    vm_request_for_role,
+)
 from nanolab.config import EnvironmentConfig
 
 
@@ -153,3 +158,15 @@ def test_azure_faasd_role_matches_stack_hardware_without_public_ports():
     assert faasd.azure_vm_size == stack.azure_vm_size
     assert faasd.azure_image_urn == stack.azure_image_urn
     assert faasd.azure_open_ports is None
+
+
+def test_preprovisioned_azure_requires_an_address_for_each_role(tmp_path):
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "azure",
+            "roles": {"stack": {"host": "203.0.113.1"}, "loadgen": {}},
+            "azure": {"resource_group": "rg", "location": "westeurope"},
+        }
+    )
+    with pytest.raises(ValueError, match="loadgen"):
+        provider_for_environment(environment, tmp_path)

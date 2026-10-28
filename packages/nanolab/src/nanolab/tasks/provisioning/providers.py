@@ -20,6 +20,10 @@ def provider_for(request: VmRequest, repo_root: Path) -> VmCommandProvider:
     if request.lifecycle == "azure":
         from sonata_tasks.vm.providers.azure import AzureVmProvider
 
+        if request.host is not None:
+            from nanolab.tasks.vm.azure_existing import ExistingAzureVmProvider
+
+            return ExistingAzureVmProvider(repo_root, remote_project_name="nanofaas")
         return AzureVmProvider(repo_root, remote_project_name="nanofaas")
     if request.lifecycle == "proxmox":
         from sonata_tasks.vm.providers.proxmox import ProxmoxVmProvider
