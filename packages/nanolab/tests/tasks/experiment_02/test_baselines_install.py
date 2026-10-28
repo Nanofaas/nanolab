@@ -241,3 +241,39 @@ def test_resume_refuses_changed_artifacts(tmp_path: Path):
             png_sha256=None,
             record=record,
         )
+
+
+@pytest.mark.parametrize("key", ["fn", "serverledge"])
+def test_cached_install_republishes_its_image_into_a_new_registry(key):
+    published = set()
+
+    def handler(argv, _env):
+        if argv[:2] == ("sudo", "touch"):
+            provider.files[argv[2]] = b""
+        if argv[:2] == ("docker", "push"):
+            published.add(argv[2])
+
+    provider = RecordingProvider(handler=handler)
+    arguments = {"source": SOURCE, "artifacts": ARTIFACT_SHA, "workload_tree": TREE}
+    first = install_baselines(vm(provider), (key,), **arguments)
+    # A new run recreates the registry but preserves the installation marker.
+    published.clear()
+    again = install_baselines(vm(provider), (key,), **arguments)
+    assert again == first
+    assert published == {first[key]["image"]}
+
+
+@pytest.mark.parametrize("key", ["fn", "serverledge"])
+def test_cached_install_refuses_when_its_image_cannot_be_republished(key):
+    provider = _installer()
+    arguments = {"source": SOURCE, "artifacts": ARTIFACT_SHA, "workload_tree": TREE}
+    install_baselines(vm(provider), (key,), **arguments)
+
+    def missing_image(argv, _env):
+        if argv[:2] == ("docker", "push"):
+            return Result(1, "", "image does not exist locally")
+        return None
+
+    provider.handler = missing_image
+    with pytest.raises(RuntimeError, match="image does not exist locally"):
+        install_baselines(vm(provider), (key,), **arguments)

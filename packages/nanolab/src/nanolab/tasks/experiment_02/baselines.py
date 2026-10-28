@@ -648,6 +648,11 @@ def install_baselines(
             _ = comparison_remote_command(
                 stack.provider, stack.request, ("sudo", "touch", str(marker))
             )
+        elif key in ("fn", "serverledge"):
+            # A new run recreates the registry, while this installation survives.
+            _ = comparison_remote_command(
+                stack.provider, stack.request, ("docker", "push", _image(key, identity))
+            )
         installed[key] = {
             "identity": identity,
             "root": str(root),
