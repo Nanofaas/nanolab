@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -206,3 +207,29 @@ def test_connection_retries_are_bounded_and_exclude_remote_failures(
     assert ExistingAzureVmProvider._execute([transport, "target"]).return_code == 255
     assert len(calls) == expected_calls
     assert delays == ([5, 10] if expected_calls == 3 else [])
+
+
+def test_ssh_and_scp_reuse_a_private_control_socket(tmp_path, monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    provider = ExistingAzureVmProvider(tmp_path)
+    provider.exec_argv(request(), ("true",))
+    provider.transfer_to(request(), source=tmp_path / "file", destination="/tmp/file")
+    first, second = calls
+    assert "ControlMaster=auto" in first
+    assert "ControlPersist=60" in first
+    control = next(
+        value.removeprefix("ControlPath=")
+        for value in first
+        if value.startswith("ControlPath=")
+    )
+    assert "ControlPath=" + control in second
+    assert Path(control).parent.stat().st_mode & 0o777 == 0o700
+    other = request().model_copy(update={"azure_ssh_key_path": "/different/key.pub"})
+    provider.exec_argv(other, ("true",))
+    assert "ControlPath=" + control not in calls[-1]

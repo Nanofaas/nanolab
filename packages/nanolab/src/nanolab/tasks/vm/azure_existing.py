@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 import subprocess
+import tempfile
 import time
+from functools import cached_property
 from pathlib import Path
 
 from sonata_tasks.vm.models import VmRequest
@@ -121,13 +124,30 @@ class ExistingAzureVmProvider(AzureVmProvider):
             stderr=result.stderr,
         )
 
+    @cached_property
+    def _control_directory(self) -> tempfile.TemporaryDirectory[str]:
+        # Keep Unix socket paths below OpenSSH's macOS length limit.
+        return tempfile.TemporaryDirectory(
+            prefix="nanolab-ssh-",
+            dir="/tmp",  # nosec B108: TemporaryDirectory securely creates mode 0700.
+        )
+
     def _ssh(self, request: VmRequest) -> list[str]:
+        key = str(self.ssh_private_key_path(request))
+        identity = hashlib.sha256(key.encode()).hexdigest()[:12]
+        socket = f"{self._control_directory.name}/{identity}-%C"
         return [
             *shlex.split(
                 ssh_command(private_key_path=self.ssh_private_key_path(request))
             ),
             "-o",
             "ConnectTimeout=15",
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            "ControlPersist=60",
+            "-o",
+            f"ControlPath={socket}",
             "-o",
             "BatchMode=yes",
             "-o",
