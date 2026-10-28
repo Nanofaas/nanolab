@@ -27,11 +27,17 @@ def teardown_argv(
 containers=$(ctr -n openfaas-fn containers list -q)
 if printf '%s\n' "$containers" | grep -qx qr; then
   systemctl start faasd-provider
-  curl -fsS --retry 5 --retry-all-errors --retry-delay 1 --max-time 2 \
+  status=$(curl -sS --retry 5 --retry-all-errors --retry-delay 1 --max-time 30 \
     --request DELETE -u "admin:$(cat %SECRET%)" \
     -H 'Content-Type: application/json' \
     -d '{"functionName":"qr","namespace":"openfaas-fn"}' \
-    http://127.0.0.1:8081/system/functions >/dev/null
+    --output /dev/null --write-out '%{http_code}' \
+    http://127.0.0.1:8081/system/functions)
+  # A completed DELETE may time out before its response; verify state below.
+  case "$status" in
+    200|202|204|404) ;;
+    *) echo "faasd DELETE failed with HTTP $status" >&2; exit 1 ;;
+  esac
 fi
 systemctl stop faasd faasd-provider
 for namespace in openfaas openfaas-fn; do

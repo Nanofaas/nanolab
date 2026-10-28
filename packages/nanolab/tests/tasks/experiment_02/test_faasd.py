@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import PurePosixPath
 
+import pytest
+
 from nanolab.tasks.experiment_02.faasd import Faasd, teardown_argv
 from nanolab.tasks.experiment_02.platforms import FIRST_RESPONSE
 
@@ -70,3 +72,44 @@ def test_cleanup_refuses_an_unreachable_containerd(tmp_path):
         capture_output=True,
     )
     assert result.returncode != 0
+
+
+@pytest.mark.parametrize(
+    ("http_status", "residual", "success"),
+    [
+        ("404", False, True),
+        ("404", True, False),
+        ("401", False, False),
+        ("204", False, True),
+    ],
+)
+def test_cleanup_verifies_state_after_idempotent_delete(
+    tmp_path, http_status, residual, success
+):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    state = tmp_path / "listed"
+    root = tmp_path / "faasd"
+    (root / "secrets").mkdir(parents=True)
+    (root / "secrets/basic-auth-password").write_text("test-password")
+    ctr = f'if [ ! -e "{state}" ]; then touch "{state}"; echo qr;'
+    ctr += " else echo qr;" if residual else " else :;"
+    ctr += " fi"
+    for name, content in {
+        "ctr": ctr,
+        "systemctl": "exit 0",
+        "curl": (
+            'for arg; do case "$arg" in -f|-fsS) '
+            f"[ {http_status} -lt 400 ] || exit 22;; esac; done; "
+            f"printf {http_status}"
+        ),
+    }.items():
+        path = bindir / name
+        path.write_text(f"#!/bin/sh\n{content}\n")
+        path.chmod(0o755)
+    result = subprocess.run(
+        ("sh", "-c", teardown_argv(PurePosixPath(root))[-1]),
+        env={**os.environ, "PATH": f"{bindir}:{os.defpath}"},
+        capture_output=True,
+    )
+    assert (result.returncode == 0) is success
