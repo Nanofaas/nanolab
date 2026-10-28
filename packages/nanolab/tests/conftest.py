@@ -40,6 +40,14 @@ class FakeSink:
             self.status_events.append(("end", label))
 
 
+@pytest.fixture(autouse=True)
+def isolated_operator_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep default run outputs away from the checkout and operator credentials."""
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "operator"))
+
+
 @pytest.fixture
 def simulated_one_shot_host(monkeypatch):
     """Keep fake VM workflows independent of the runner's CPUs and free RAM."""

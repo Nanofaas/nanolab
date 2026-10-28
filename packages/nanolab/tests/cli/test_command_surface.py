@@ -44,9 +44,8 @@ def test_multiarch_rejects_incomplete_cleanup_or_resume_before_provisioning(
 
 
 @pytest.fixture(autouse=True)
-def _run_from_project_root(monkeypatch, tmp_path):
+def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)
-    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
 
 
 def _sonata_workflow(*, fails: str | None = None) -> SonataWorkflow:
