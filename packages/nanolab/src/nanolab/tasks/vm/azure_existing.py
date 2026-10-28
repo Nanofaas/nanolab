@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 from sonata_tasks.vm.models import VmRequest
@@ -91,12 +92,24 @@ class ExistingAzureVmProvider(AzureVmProvider):
         reported: list[str] | None = None,
         timeout: int = 3600,
     ) -> ShellExecutionResult:
-        try:
-            result = subprocess.run(
-                command, capture_output=True, text=True, timeout=timeout
-            )
-        except subprocess.TimeoutExpired:
-            result = None
+        result = None
+        for attempt in range(3):
+            try:
+                result = subprocess.run(
+                    command, capture_output=True, text=True, timeout=timeout
+                )
+            except subprocess.TimeoutExpired:
+                result = None
+                break
+            # KEX failures precede authentication: the remote command has not run.
+            if (
+                command[0] not in {"ssh", "scp"}
+                or result.returncode != 255
+                or "kex_exchange_identification:" not in result.stderr
+            ):
+                break
+            if attempt < 2:
+                time.sleep(1)
         if result is None:
             # Raise outside the handler: even __context__ must not retain SSH
             # transport arguments containing the generator credentials.

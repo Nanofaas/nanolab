@@ -4,6 +4,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -155,3 +156,49 @@ def test_transfers_use_the_configured_key_and_never_a_workspace(tmp_path, monkey
     assert all(
         argv[0] == "scp" and str(tmp_path / "operator") in argv for argv in calls
     )
+
+
+@pytest.mark.parametrize("transport", ["ssh", "scp"])
+def test_retry_only_pre_authentication_connection_resets(monkeypatch, transport):
+    calls = []
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(
+                argv,
+                255,
+                "",
+                "kex_exchange_identification: read: Connection reset by peer",
+            )
+        return subprocess.CompletedProcess(argv, 0, "done", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = ExistingAzureVmProvider._execute([transport, "target"])
+    assert result.return_code == 0
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("transport", "stderr", "expected_calls"),
+    [
+        ("ssh", "kex_exchange_identification: read: Connection reset by peer", 3),
+        ("ssh", "Permission denied (publickey)", 1),
+        ("ssh", "remote command failed", 1),
+        ("az", "kex_exchange_identification: read: Connection reset by peer", 1),
+    ],
+)
+def test_connection_retries_are_bounded_and_exclude_remote_failures(
+    monkeypatch, transport, stderr, expected_calls
+):
+    calls = []
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 255, "", stderr)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert ExistingAzureVmProvider._execute([transport, "target"]).return_code == 255
+    assert len(calls) == expected_calls
