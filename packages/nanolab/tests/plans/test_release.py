@@ -471,6 +471,11 @@ def _arm_failure_workflow(
         release_build, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
     )
     monkeypatch.setattr(
+        release_resources,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=True),
+    )
+    monkeypatch.setattr(
         release_plan,
         "extract_commit_tree",
         captured_release_tree,

@@ -18,6 +18,7 @@ from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, build_image_plan
 from nanolab.release import arm
 from nanolab.release import build as release_build
+from nanolab.release import resources as release_resources
 from nanolab.release.metrics import build_release_record
 from nanolab.release.model import (
     Amd64ReleasePlan,
@@ -78,6 +79,11 @@ def _plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Amd64ReleasePlan:
     """
     monkeypatch.setattr(
         release_build,
+        "git_state",
+        lambda _root: GitState(commit=GUARDED_COMMIT, clean=True),
+    )
+    monkeypatch.setattr(
+        release_resources,
         "git_state",
         lambda _root: GitState(commit=GUARDED_COMMIT, clean=True),
     )
