@@ -14,10 +14,11 @@ REGISTRY = "localhost:5000/nanofaas"
 
 
 def _plan():
-    return arm.build_arm64_image_plan(
+    return build_image_plan(
         NANOFAAS_ROOT,
         "v0.18.0",
         registry=REGISTRY,
+        architectures=("arm64",),
     )
 
 

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
 
-from nanolab.images.plan import ImageCell, ImagePlan, build_image_plan
+from nanolab.images.plan import ImageCell, ImagePlan
 from nanolab.release.model import ArtifactEvidence
 
 ARM64_PLATFORM = "linux/arm64"
@@ -37,21 +36,6 @@ class ServerSmokeSpec:
     container_name: str
     container_port: int
     health_path: str
-
-
-def build_arm64_image_plan(
-    repo_root: Path,
-    version: str,
-    *,
-    registry: str,
-) -> ImagePlan:
-    """Build the ARM64 variant of the release image plan."""
-    return build_image_plan(
-        repo_root,
-        version,
-        registry=registry,
-        architectures=("arm64",),
-    )
 
 
 def require_arm64_builder(output: str) -> None:

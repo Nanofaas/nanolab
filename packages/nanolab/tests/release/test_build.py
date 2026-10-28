@@ -102,8 +102,11 @@ def test_amd64_commands_delegate_all_image_builds_to_root_recipes() -> None:
 
 def _arm_registry_fixture(plan, provider):
     """External registry fixture for smoke, separate from assembly/push tests."""
-    arm_plan = arm.build_arm64_image_plan(
-        plan.repo_root, plan.version, registry=plan.image_plan.registry
+    arm_plan = build_image_plan(
+        plan.repo_root,
+        plan.version,
+        registry=plan.image_plan.registry,
+        architectures=("arm64",),
     )
     for cell in arm_plan.cells:
         provider.registry_digests[cell.image] = "sha256:" + "b" * 64
