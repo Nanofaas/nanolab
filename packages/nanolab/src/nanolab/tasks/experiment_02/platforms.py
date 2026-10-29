@@ -108,7 +108,7 @@ class Platform(Protocol):
         ...
 
     def teardown(self, vm: Vm) -> None:
-        """Remove everything the platform started."""
+        """Idempotently remove everything started; raise if state is not clean."""
         ...
 
 
