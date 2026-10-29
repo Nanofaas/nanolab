@@ -241,7 +241,13 @@ def successful_query(monkeypatch):
         lambda *args, **kwargs: httpx.Response(
             200,
             request=httpx.Request("GET", "http://loki.test"),
-            json={"data": {"result": [{"values": [["1", "record"]]}]}},
+            json={
+                "data": {
+                    "result": []
+                    if "QueueObservation" in kwargs.get("params", {}).get("query", "")
+                    else [{"values": [["1", "record"]]}]
+                }
+            },
         ),
     )
 

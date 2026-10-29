@@ -22,11 +22,51 @@ from sonata_tasks.compensation import compensated_resource
 from nanolab.config.one_shot import OneShotLogs, operational_limit
 from nanolab.one_shot.infrastructure import NodeResource
 from nanolab.tasks.loadtest.soak import parse_prometheus
+from nanolab.tasks.one_shot.artifacts import append_observation
+from nanolab.tasks.one_shot.queue_telemetry import queue_timings
 
 
 def query_url(endpoint: str) -> str:
     """Derive the query API beside the configured push endpoint."""
     return endpoint.removesuffix("/push") + "/query_range"
+
+
+def export_queue_events(http, url, query, start, end, limit, path) -> int:
+    """Page queue observations with overlapping boundaries; fail on truncation."""
+    count = 0
+    boundary = set()
+    while start <= end:
+        response = http.get(
+            url,
+            params={
+                "query": query,
+                "start": str(start),
+                "end": str(end),
+                "limit": str(limit),
+                "direction": "forward",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        values = sorted(
+            (int(stamp), line)
+            for stream in response.json()["data"]["result"]
+            for stamp, line in stream["values"]
+        )
+        fresh = [value for value in values if value not in boundary]
+        for stamp, line in fresh:
+            row = json.loads(line)
+            append_observation(path, {**row, "lokiTimestampNanos": str(stamp)})
+            count += 1
+        if len(values) < limit:
+            return count
+        if not fresh:
+            raise RuntimeError(
+                "queue log timestamp boundary cannot be paged completely"
+            )
+        start = values[-1][0]
+        boundary = {value for value in values if value[0] == start}
+    return count
 
 
 def backend_resource(
@@ -482,6 +522,46 @@ def _export_collector(
     except Exception as error:
         status["issues"].append(str(error))
         status["exportStatus"] = "partial"
+    try:
+        if session is None or logs.endpoint is None:
+            raise RuntimeError("queue log export needs collector identity and endpoint")
+        query = (
+            '{job="nanofaas",node='
+            + json.dumps(node.config.id)
+            + "} | json | runId="
+            + json.dumps(run_dir.name)
+            + ' | logger="it.unimib.datai.nanofaas.execution.QueueObservation"'
+        )
+        with httpx.Client(trust_env=False) as http:
+            count = export_queue_events(
+                http,
+                query_url(logs.endpoint),
+                query,
+                session.started_ns,
+                time.time_ns(),
+                logs.export_limit,
+                directory / "queue-events.jsonl",
+            )
+        event_path = directory / "queue-events.jsonl"
+        timings = (
+            queue_timings(
+                [json.loads(line) for line in event_path.read_text().splitlines()]
+            )
+            if event_path.exists()
+            else []
+        )
+        (directory / "queue-timings.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in timings)
+        )
+        status["queueEventExport"] = {
+            "status": "complete",
+            "events": count,
+            "attempts": len(timings),
+            "measuredAttempts": sum(row["measurementComplete"] for row in timings),
+        }
+    except Exception as error:
+        status["queueEventExport"] = {"status": "partial", "error": str(error)}
+        status["issues"].append("queue event export: " + str(error))
     if status["issues"]:
         status["status"] = "partial"
     (directory / "status.json").write_text(json.dumps(status, indent=2) + "\n")

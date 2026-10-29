@@ -295,7 +295,11 @@ class OneShotLogs(BaseModel):
         return {
             **self.model_dump(by_alias=True, exclude={"campaign_id"}),
             "format": "json",
-            "levels": {"controlPlane": "WARN", "functions": "runtime-default"},
+            "levels": {
+                "controlPlane": "WARN",
+                "queueObservations": "INFO",
+                "functions": "runtime-default",
+            },
             "collectorConfigVersion": 1,
             "backendImages": ["grafana/loki:3.7.8", "grafana/grafana:13.2.3"],
             "backendBudget": {"cpu": 1.5, "memoryMiB": 768}

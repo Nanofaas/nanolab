@@ -289,6 +289,13 @@ def _control_plane(
             "--server.port=8080",
             "--management.server.port=9090",
             "--logging.level.root=WARN",
+            *(
+                [
+                    "--logging.level.it.unimib.datai.nanofaas.execution.QueueObservation=INFO"
+                ]
+                if collector is not None
+                else []
+            ),
             "--nanofaas.admission.profile=SYNC_QUEUE",
             "--nanofaas.metrics.profile=advanced",
             "--nanofaas.registry.path=/tmp/functions.json",

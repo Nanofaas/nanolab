@@ -55,6 +55,7 @@ from nanolab.tasks.one_shot.qualification import (
     wait_until,
     wait_until_monotonic,
 )
+from nanolab.tasks.one_shot.queue_telemetry import QueueTelemetryCollector
 from nanolab.tasks.one_shot.trace import oracle_entries, request_schedule, warmup_trace
 from nanolab.tasks.one_shot.verification import (
     realized_utility,
@@ -933,11 +934,26 @@ class LiveEvidenceCollector:
 
 def evidence_collector_resource(run, generator) -> Resource[LiveEvidenceCollector]:
     """Keep evidence collection alive exactly through the owned load task."""
+    queues = Resource(
+        title="Sample per-function queues every second",
+        acquire=lambda inputs: QueueTelemetryCollector(
+            run.run_dir,
+            CampaignManifest.model_validate_json(
+                (run.run_dir / "manifest.json").read_bytes()
+            ).run_id,
+            {
+                node: inputs.resource(endpoint)
+                for node, endpoint in run.topology.endpoints.items()
+            },
+        ),
+        release=lambda _inputs, collector: collector.close(),
+        requires=run.topology.requires,
+    )
     return Resource(
         title="Own live physical evidence collector",
         acquire=lambda inputs: LiveEvidenceCollector(run, inputs),
         release=lambda _inputs, collector: collector.close(),
-        requires=(*run.topology.requires, generator),
+        requires=(*run.topology.requires, generator, queues),
     )
 
 

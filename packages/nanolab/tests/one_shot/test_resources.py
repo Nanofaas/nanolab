@@ -468,6 +468,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
         archive=archive,
         run_dir=tmp_path,
         terminal_queueing=terminal_queueing,
+        collector=bootstrap if terminal_queueing else None,
         scientific=scientific,
         forecast_max_age_seconds=forecast_max_age_seconds,
         **(
@@ -506,6 +507,10 @@ def test_control_plane_namespace_and_compensated_cleanup(
         )
         assert "--nanofaas.admission.profile=SYNC_QUEUE" in launch
         assert "--nanofaas.metrics.profile=advanced" in launch
+        queue_logger = (
+            "--logging.level.it.unimib.datai.nanofaas.execution.QueueObservation=INFO"
+        )
+        assert (queue_logger in launch) == terminal_queueing
         ages = [
             argument
             for argument in launch
