@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanolab.config.experiment_02 import Budget
+from nanolab.tasks.experiment_02.baselines import TinyFaas
 from nanolab.tasks.experiment_02.budget import (
     SLICE_SETUP_SCRIPT,
     apply_budget_argv,
@@ -157,3 +158,14 @@ def test_initial_slice_transition_stops_the_cached_engine_before_reload(tmp_path
     reload = calls.index("systemctl daemon-reload")
     start = calls.index("systemctl start containerd docker")
     assert remove < stop < reload < start
+
+
+def test_tinyfaas_embedded_proxy_cannot_escape_the_budget(tmp_path):
+    # The pinned binary extracts and runs /tmp/<uuid>/rproxy.bin on the host.
+    platform = TinyFaas(root=tmp_path)
+    escaped = "123 rproxy.bin /system.slice/escaped.service"
+    inside = (
+        "124 rproxy.bin /nanolab.slice/nanolab-sut.slice/nanolab-e02-platform.service"
+    )
+    assert processes_outside(escaped, platform.host_commands) == [escaped]
+    assert processes_outside(inside, platform.host_commands) == []

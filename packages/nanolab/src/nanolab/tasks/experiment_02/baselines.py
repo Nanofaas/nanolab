@@ -198,8 +198,8 @@ class TinyFaas(_Baseline):
     """
 
     root: PurePosixPath
-    # `comm` keeps 15 characters of a process name.
-    host_commands: tuple[str, ...] = ("tinyfaas-linux-", "rproxy-linux-am")
+    # `comm` truncates the manager; the embedded proxy runs as rproxy.bin.
+    host_commands: tuple[str, ...] = ("tinyfaas-linux-", "rproxy.bin")
 
     def start(
         self,
