@@ -449,3 +449,11 @@ pilot resource proposal must budget those separately. Collect Fn HTTP-trigger
 error behavior and tinyFaaS process/prefetch evidence during this fresh-VM pilot.
 New VM/resource actions and the later frozen campaign still require separate
 approval; local implementation does not allocate infrastructure.
+
+Local campaign-preparation verification: product sources at `274234b` and CLI
+surface-test correction at `c0059d9`: 5128 Linux pure tests, 644 real CI-pin
+nanoFaaS contracts and 53 TUI tests passed; combined NanoLab coverage 87.57%.
+Pre-commit passed. The first pure run exposed the missing `compare-report`
+allowlist expectation; only that test changed, and the entire pure suite was
+rerun successfully. A fresh whole-branch review found no blocking or minor
+issues. This is software verification, not pilot/campaign execution.
