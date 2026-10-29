@@ -330,6 +330,7 @@ def summarize_phases(
         if service_mode == "correct":
             row.update(
                 correctThroughput=len(correct) / duration,
+                sentThroughput=sent / duration,
                 successFraction=len(correct) / sent if sent else None,
                 incorrect=sum(
                     1

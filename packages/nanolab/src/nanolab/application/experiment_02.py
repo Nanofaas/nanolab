@@ -41,6 +41,10 @@ from nanolab.comparison.experiment_02 import (
     required_evidence,
     write_experiment_02_report,
 )
+from nanolab.comparison.experiment_02_campaign import (
+    archive_experiment_02_inputs,
+    write_experiment_02_campaign_report,
+)
 from nanolab.comparison.manifest import (
     ComparisonManifest,
     capture_comparison_inputs,
@@ -389,6 +393,7 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             write_comparison_manifest(root, manifest)
     except ValueError as error:
         raise ValueError(str(error)) from error
+    archive_experiment_02_inputs(root, payload=payload, script=script)
     provider = provider_for_environment(environment_config, paths.nanofaas_root)
     requests = {
         role: vm_request_for_role(environment_config, role, loadtest=True)
@@ -543,5 +548,6 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             provider, request, ("rm", "-rf", "--", str(owned))
         )
     report = write_experiment_02_report(root, cells, protocol)
+    write_experiment_02_campaign_report(root)
     notify(f"matrix complete: {root}")
     notify(f"report: {report}")

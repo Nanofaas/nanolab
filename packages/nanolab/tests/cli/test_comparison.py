@@ -569,6 +569,7 @@ def test_compare_direct_and_p1_with_two_budgets_can_resume(command_case, monkeyp
         (run_dir / "metrics").mkdir(parents=True, exist_ok=True)
         for name in (SUMMARY, EVENTS, SAMPLES, SCHEDULER):
             (run_dir / name).write_text("{}\n")
+        (run_dir / EVENTS).write_text('{"t":"origin","ts":1000000}\n')
         return "measured"
 
     monkeypatch.setattr(experiment_02, "run_cell", cell)
@@ -709,6 +710,7 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
         (kwargs["run_dir"] / "metrics").mkdir(parents=True, exist_ok=True)
         for name in (SUMMARY, EVENTS, SAMPLES, SCHEDULER):
             (kwargs["run_dir"] / name).write_text("{}\n")
+        (kwargs["run_dir"] / EVENTS).write_text('{"t":"origin","ts":1000000}\n')
         return "measured"
 
     monkeypatch.setattr(experiment_02, "run_cell", cell)

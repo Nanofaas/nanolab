@@ -57,6 +57,9 @@ from nanolab.comparison.experiment_01 import (
 from nanolab.comparison.experiment_02 import (
     CONFIGURATIONS_BY_KEY,
 )
+from nanolab.comparison.experiment_02_campaign import (
+    write_experiment_02_campaign_report,
+)
 from nanolab.comparison.manifest import (
     ComparisonManifest,
     capture_comparison_inputs,
@@ -387,6 +390,17 @@ def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfi
 
 def register(app: typer.Typer) -> None:
     """Register the `compare` command on `app`."""
+
+    @app.command("compare-report")
+    def compare_report_command(
+        run_dir: Path = typer.Argument(..., exists=True, file_okay=False),  # noqa: B008
+    ) -> None:
+        """Recompute experiment-02 aggregates from saved evidence without VMs."""
+        try:
+            report = write_experiment_02_campaign_report(run_dir)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        typer.echo(f"report: {report}")
 
     @app.command("compare")
     # Typer's documented API takes the parameter spec as the default, and each

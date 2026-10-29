@@ -328,3 +328,15 @@ def test_correct_only_protocol_has_no_fabricated_timely_fraction(tmp_path):
     assert row["withinThresholdFraction"] is None
     assert row["successFraction"] == 1
     assert row["p99Ms"] == 100
+
+
+@pytest.mark.parametrize(
+    "scrapes", ["{}\n", "null\n", '{"ts":"bad"}\n', '{"ts":NaN,"status":"ok"}\n']
+)
+def test_malformed_scheduler_sample_keeps_service_and_marks_telemetry_partial(
+    tmp_path, scrapes
+):
+    cell = _measured_cell(tmp_path, scrapes=scrapes)
+    summary = summarize_experiment_02_cell(cell, tmp_path, PROTOCOL)
+    assert summary["schedulerCoverage"] == "partial"
+    assert _phase(summary, "step-01")["successFraction"] == 1

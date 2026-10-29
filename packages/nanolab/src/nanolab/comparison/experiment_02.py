@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import random
 import statistics
 from bisect import bisect_left, bisect_right
@@ -330,10 +331,13 @@ def _scheduler_coverage(
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             scrape = json.loads(line)
-        except ValueError:
+            at = float(scrape["ts"])
+        except (ValueError, KeyError, TypeError):
             failed = True
             continue
-        at = float(scrape["ts"])
+        if not math.isfinite(at):
+            failed = True
+            continue
         if scrape.get("status") == "ok":
             times.append(at)
         # Refused scrapes before the platform is up are expected; only the
@@ -473,6 +477,7 @@ _CSV_FIELDS: tuple[str, ...] = (
     "correct",
     "incorrect",
     "correctThroughput",
+    "sentThroughput",
     "successFraction",
     "withinThresholdFraction",
     "pending",
