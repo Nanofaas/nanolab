@@ -24,6 +24,12 @@ def parse_args(argv=None):
     for key in ["tuning", "observations", "distribution", "source", "output"]:
         prep.add_argument("--" + key, type=Path, required=True)
     prep.add_argument("--arrival-profile", type=Path)
+    prep.add_argument(
+        "--decision-period-seconds",
+        type=int,
+        choices=(60,),
+        help="subdivide uniform step decisions, preserving load duration and rates",
+    )
     prep.add_argument("--parent-freeze", type=Path)
     prep.add_argument(
         "--forecast",
@@ -283,6 +289,35 @@ def dependency_files():
     }
 
 
+def step_decision_grid(trace, selected, period):
+    """Change decision cadence without changing the piecewise-constant load."""
+    factor = trace.period_seconds / period if period > 0 else 0
+    if (
+        factor < 1
+        or not factor.is_integer()
+        or [r["rates"] for r in selected] != trace.windows
+    ):
+        raise ValueError("step decision period or reference scope mismatch")
+    factor = int(factor)
+    data = trace.model_dump()
+    data["period_seconds"] = period
+    for name in ("windows", "requested_windows"):
+        if data.get(name) is not None:
+            data[name] = [
+                copy.deepcopy(row) for row in data[name] for _ in range(factor)
+            ]
+    data["phase_ids"] = [
+        f"step-{i}-decision-{j}"
+        for i in range(len(trace.windows))
+        for j in range(factor)
+    ]
+    minute = TraceArtifact.model_validate(data)
+    decisions = [copy.deepcopy(row) for row in selected for _ in range(factor)]
+    for row, identity in zip(decisions, minute.phase_ids, strict=True):
+        row["id"] = identity
+    return minute, decisions
+
+
 def prepare(args):
     """Capture the package, script and inputs without starting any VM."""
     forecast = forecast_protocol(args)
@@ -330,6 +365,30 @@ def prepare(args):
         package / "assets/presets/recipes/one-shot-multifunction-jvm.yaml",
         args.output / "recipe.yaml",
     )
+    step_period = getattr(args, "decision_period_seconds", None)
+    if step_period is not None:
+        if arrival_input is not None:
+            raise ValueError("decision-period override is only for uniform step load")
+        original = TraceArtifact.model_validate_json(
+            (args.output / "trace.json").read_bytes()
+        )
+        reference = json.loads((args.output / "selected.json").read_bytes())
+        minute, decisions = step_decision_grid(original, reference, step_period)
+        for name in ("trace.json", "selected.json"):
+            (args.output / name).rename(args.output / ("source-" + name))
+        save(args.output / "trace.json", minute.model_dump())
+        save(args.output / "selected.json", decisions)
+        save(
+            args.output / "decision-grid.json",
+            {
+                "sourcePeriodSeconds": original.period_seconds,
+                "periodSeconds": step_period,
+                "sourceEpochs": len(original.windows),
+                "decisionEpochs": len(minute.windows),
+                "loadDurationSeconds": original.period_seconds * len(original.windows),
+                "coverageScope": "offload-coverage.json describes the original load steps",
+            },
+        )
     scenario = bind_scenario(
         yaml.safe_load(
             (
@@ -345,7 +404,7 @@ def prepare(args):
                     (args.output / "trace.json").read_bytes()
                 )
             }
-            if derived
+            if derived or step_period is not None
             else {}
         ),
     )
@@ -360,7 +419,15 @@ def prepare(args):
     )
     trace = TraceArtifact.model_validate_json((args.output / "trace.json").read_text())
     if (
-        (not derived and (len(trace.windows) != 9 or trace.period_seconds != 360))
+        (
+            not derived
+            and step_period is None
+            and (len(trace.windows) != 9 or trace.period_seconds != 360)
+        )
+        or (
+            step_period is not None
+            and (len(trace.windows) != 54 or trace.period_seconds != 60)
+        )
         or (derived and (len(trace.windows) != 54 or trace.period_seconds != 60))
         or len(trace.nodes) != 6
         or len(trace.functions) != 5

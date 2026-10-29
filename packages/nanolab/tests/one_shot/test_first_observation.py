@@ -1408,3 +1408,49 @@ def test_preparation_dependency_inventory_includes_actual_view_code(observer):
     for module in ("rich", "tui_toolkit", "sonata_engine"):
         assert any(f"/{module}/" in name for name in inventory)
     assert all(observer.sha(Path(name)) == digest for name, digest in inventory.items())
+
+
+def test_minute_decisions_keep_step_durations_rates_and_arrival_calendar(observer):
+    from datetime import UTC, datetime
+
+    from nanolab.tasks.one_shot.trace import TraceArtifact, request_schedule
+
+    trace = TraceArtifact(
+        nodes=["edge"],
+        functions=["f"],
+        period_seconds=360,
+        flow_quantum=0.05,
+        seed=7,
+        payloads={"f": {}},
+        phase_ids=["low", "high"],
+        windows=[{"edge": {"f": 0.05}}, {"edge": {"f": 0.1}}],
+    )
+    selected = [
+        {"id": phase, "rates": window}
+        for phase, window in zip(trace.phase_ids, trace.windows, strict=True)
+    ]
+    minute, decisions = observer.step_decision_grid(trace, selected, 60)
+    assert minute.period_seconds == 60
+    assert len(minute.windows) == 12
+    assert len(set(minute.phase_ids)) == 12
+    from nanolab.config.one_shot import ExperimentWindow
+
+    for identity, rates in zip(minute.phase_ids, minute.windows, strict=True):
+        ExperimentWindow.model_validate({"id": identity, "rates": rates})
+    assert [row["rates"] for row in decisions] == [{"edge": {"f": 0.05}}] * 6 + [
+        {"edge": {"f": 0.1}}
+    ] * 6
+    kwargs = {
+        "anchor": datetime(1970, 1, 1, tzinfo=UTC),
+        "endpoints": {"edge": "http://edge"},
+        "run_id": "test",
+    }
+    original = request_schedule(trace, **kwargs)
+    updated = request_schedule(minute, **kwargs)
+    assert [row["scheduledAt"] for row in updated] == pytest.approx(
+        [row["scheduledAt"] for row in original], abs=1e-12
+    )
+    assert len(original) == len(updated) == 54
+    assert trace.period_seconds == 360
+    with pytest.raises(ValueError, match="period"):
+        observer.step_decision_grid(trace, selected, 61)
