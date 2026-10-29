@@ -142,7 +142,7 @@ def host_budget(
 def external_vm_cpus() -> int:
     """Inventory running VM allocations without adopting or changing them."""
     result = subprocess.run(
-        ("multipass", "info", "--all", "--format", "json"),
+        ("multipass", "info", "--format", "json"),
         capture_output=True,
         text=True,
         check=True,

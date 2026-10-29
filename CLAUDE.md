@@ -73,6 +73,11 @@ uv run --frozen --all-packages --all-groups basedpyright --project packages/tui-
 uv run pre-commit run --all-files
 ```
 
+The CI pin is the `ref:` in `.github/actions/setup-workspace/action.yml`.
+Keep both source references in the README and the verified runtime reference in
+`packages/nanolab/tests/one_shot/test_forecast_replay.py` aligned when changing it,
+and run the checkout contracts against the new revision.
+
 Contracts may fail against a revision other than the CI pin. Verify the pinned
 source first; never stash or edit the operator's NanoFaaS checkout.
 

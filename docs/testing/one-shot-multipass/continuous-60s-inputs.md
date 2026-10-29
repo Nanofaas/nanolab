@@ -131,6 +131,8 @@ and ARI an autoregression of the window-to-window changes (`--ari-order`,
 default 6), both over the latest 360 windows. Unlike EWMA, they forecast each
 window up to the interval and answer the mean over it; NanoFaaS's
 `docs/forecasting.md` defines them. The runtime needs Nanofaas/nanofaas#259.
+CI is pinned to `c0d15e3d`, which includes the forecast snapshot fixes of #261
+and the one-shot roulette routing and per-function sync queue limits.
 The freeze records the settings in `operator-protocol.json` under `forecast`,
 with a maximum age of two windows: NanoFaaS dates a forecast at the start of its
 current window. Each auction freezes its forecasts when it starts, the lead

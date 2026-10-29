@@ -1,9 +1,38 @@
 """Heterogeneous budgets must reach node registration without changing inputs."""
 
+import json
+import subprocess
+
 import pytest
 
 from nanolab.config import one_shot as config
 from nanolab.one_shot import infrastructure
+
+
+def test_external_vm_inventory_uses_supported_command_and_counts_running_cpus(
+    monkeypatch,
+):
+    def multipass(argv, **kwargs):
+        if "--all" in argv:
+            raise subprocess.CalledProcessError(1, argv, stderr="Unknown option 'all'.")
+        assert argv == ("multipass", "info", "--format", "json")
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "errors": [],
+                    "info": {
+                        "a": {"state": "Running", "cpu_count": "2"},
+                        "b": {"state": "Running", "cpu_count": "4"},
+                        "stopped": {"state": "Stopped", "cpu_count": "12"},
+                    },
+                }
+            ),
+        )
+
+    monkeypatch.setattr(infrastructure.subprocess, "run", multipass)
+    assert infrastructure.external_vm_cpus() == 6
 
 
 def settings():

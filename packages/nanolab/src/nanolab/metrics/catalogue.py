@@ -493,11 +493,16 @@ def _sync_queue_queries(function_name: str) -> Queries:
     function = _fn(function_name)
     return (
         PrometheusQuery("sync_queue_depth", f"sync_queue_depth{function}"),
+        PrometheusQuery("sync_queue_capacity", f"sync_queue_capacity{function}"),
         PrometheusQuery(
             "sync_queue_admitted_total", f"sync_queue_admitted_total{function}"
         ),
         PrometheusQuery(
             "sync_queue_rejected_total", f"sync_queue_rejected_total{function}"
+        ),
+        PrometheusQuery(
+            "sync_queue_rejected_by_reason_total",
+            f"sync_queue_rejected_by_reason_total{function}",
         ),
         PrometheusQuery(
             "sync_queue_timedout_total", f"sync_queue_timedout_total{function}"

@@ -65,8 +65,10 @@ their sibling recipe/payload files remain ordinary operator-owned inputs.
 ## Tests and supported NanoFaaS source
 
 The CI-tested NanoFaaS source revision is
-`3327c4aa723d743a07d6b5bcd4110d4c917bef84`, `main` at the merge of
-Nanofaas/nanofaas#259, which adds the Holt and ARI forecasters used by
+`c0d15e3d1c132ee9691f4d3dd34b9b611b92cedd`, which includes one-shot roulette routing, per-function sync
+queue limits and the forecast snapshot fixes of Nanofaas/nanofaas#261.
+It also includes the Holt and ARI forecasters introduced by
+Nanofaas/nanofaas#259 and used by
 `one-shot-observe.py prepare --forecast holt|ari`. It builds the recipes with the
 published Gradle plugin `io.github.nanofaas.build` 0.1.2 (Nanofaas/nanofaas#258),
 resolved from the Gradle Plugin Portal, and includes the one-shot work of
@@ -105,7 +107,7 @@ The public console command is `nanolab`.
 
 `.github/workflows/ci.yml` runs on every push and pull request against
 `main`. It checks out this repo and the pinned nanoFaaS source at
-`3327c4aa723d743a07d6b5bcd4110d4c917bef84` into `.nanofaas-source`, points
+`c0d15e3d1c132ee9691f4d3dd34b9b611b92cedd` into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below. The gate
 validates all checked-in recipe profiles. To reproduce profile validation
 and the full container lifecycles locally, use the commands below.

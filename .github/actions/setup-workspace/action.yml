@@ -41,7 +41,7 @@ runs:
         # terminal execution identity / remote diagnostic fixes, and the native
         # maxHeap recipe field (#256).
         # Keep the immutable pin aligned with the bundled recipe contracts.
-        ref: 3327c4aa723d743a07d6b5bcd4110d4c917bef84
+        ref: c0d15e3d1c132ee9691f4d3dd34b9b611b92cedd
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 

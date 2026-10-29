@@ -16,7 +16,7 @@ from nanolab.tasks.one_shot.forecast_replay import (
 )
 from tests.one_shot.test_forecast_errors import emitted, manifest, trace
 
-# Computed by TrendForecastSource.holt/ari/mean at Nanofaas/nanofaas 3327c4aa.
+# Reference values for TrendForecastSource.holt/ari/mean at NanoFaaS c0d15e3d.
 SERIES = [
     0.1 * ((i * 7) % 13) + 0.05 * i + (1.5 if i % 5 == 0 else 0) for i in range(80)
 ]
