@@ -452,6 +452,7 @@ def summarize_experiment_02_cell(
             origin,
             origin + last["startSeconds"] + last["durationSeconds"],
         )
+    result["calendarOriginMs"] = ledger["origin"]
     result["malformedEvents"] = malformed
     result["malformedSamples"] = read.malformed
     result["anomalies"] = ledger["anomalies"]
