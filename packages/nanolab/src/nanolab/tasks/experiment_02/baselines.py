@@ -593,7 +593,7 @@ def _observe(stack: Vm, key: str, root: PurePosixPath) -> str:
     if key == "spin":
         probes.append(f"{root}/spin --version")
     if key in _GIT:
-        probes.append(f"git -C {root}/src rev-parse HEAD")
+        probes.append(f"sudo git -C {root}/src rev-parse HEAD")
     if not probes:
         return ""
     return comparison_remote_command(

@@ -327,3 +327,25 @@ def test_version_probe_failure_cannot_be_recorded_as_a_valid_installation():
             artifacts=ARTIFACT_SHA,
             workload_tree=TREE,
         )
+
+
+@pytest.mark.parametrize("key", ["tinyfaas", "serverledge"])
+def test_git_revision_probe_reads_the_root_owned_installation(key):
+    revision = baselines._GIT[key]
+
+    def handler(argv, _env):
+        if argv[:2] == ("sudo", "touch"):
+            provider.files[argv[2]] = b""
+        if argv[:2] == ("sh", "-c") and "rev-parse HEAD" in argv[-1]:
+            if "sudo git -C " not in argv[-1]:
+                return Result(
+                    128, "", "fatal: detected dubious ownership in repository"
+                )
+            return Result(0, revision + "\n")
+        return None
+
+    provider = RecordingProvider(handler=handler)
+    installed = install_baselines(
+        vm(provider), (key,), source=SOURCE, artifacts=ARTIFACT_SHA, workload_tree=TREE
+    )
+    assert installed[key]["observed"].strip() == revision
