@@ -510,6 +510,10 @@ def _install_script(
         ).read_text()
         return "\n".join(
             (
+                "apt-get update -q >/dev/null",
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y -q "
+                "docker-compose-v2 >/dev/null",
+                "docker compose version",
                 f"cat > {root}/compose.yaml <<'NANOLAB_EOF'\n{compose}NANOLAB_EOF",
                 f"cp {source}/target/wasm32-wasip1/release/qr_funless.wasm {root}/",
                 *(f"docker pull -q {image}" for image in _FUNLESS_IMAGES),
@@ -584,13 +588,17 @@ def _observe(stack: Vm, key: str, root: PurePosixPath) -> str:
         f"docker image inspect --format '{{{{index .RepoDigests 0}}}}' {image}"
         for image in _PULLED.get(key, ())
     ]
+    if key == "funless":
+        probes.append("docker compose version")
     if key == "spin":
         probes.append(f"{root}/spin --version")
     if key in _GIT:
         probes.append(f"git -C {root}/src rev-parse HEAD")
     if not probes:
         return ""
-    return exec_status(stack, ("sh", "-c", "; ".join(probes))).stdout
+    return comparison_remote_command(
+        stack.provider, stack.request, ("sh", "-c", " && ".join(probes))
+    )
 
 
 def baseline_identity(

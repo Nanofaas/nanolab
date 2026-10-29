@@ -457,3 +457,26 @@ Pre-commit passed. The first pure run exposed the missing `compare-report`
 allowlist expectation; only that test changed, and the entire pure suite was
 rerun successfully. A fresh whole-branch review found no blocking or minor
 issues. This is software verification, not pilot/campaign execution.
+
+## Fresh-host preparation repairs
+
+The 29 October pilot exposed missing host prerequisites before measurements.
+Experiment-02 native publications now read GraalVM release/Java version from the
+captured source's gradle.properties and invoke that source's checksum-verifying
+Community installer, after installing build-essential and zlib headers. Native
+commands explicitly select /opt/graalvm; tool versions and hashes are retained
+in prepare/<variant>/native-toolchain.log. Existing incompatible toolchains fail
+closed. JVM, experiment01 and already published artifacts do not run this setup.
+
+Initial slice setup stops the registry and both engines fully before changing
+systemd configuration, then starts them under the configured slice. A restart
+alone can retain containerd's cached old cgroup while its Slice property shows
+the new one. Per-cell kernel/process checks remain mandatory. Registry recreation
+semantics are unchanged. FunLess preparation installs Ubuntu's docker-compose-v2
+and records docker compose version; failed version probes stop preparation.
+
+Sonata0.6.18 is the published dependency pair; actual NSG discovery is delegated
+to it, removing the duplicate provider method. These repairs were prepared in a
+separate worktree while the pilot remained frozen on74d5758/Sonata0.6.17. Unit and
+contract checks verify the wiring; the live pilot used recorded manual prerequisite
+repairs. Do not describe that as a second fresh-VM test of the automated path.

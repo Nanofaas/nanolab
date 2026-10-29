@@ -175,11 +175,19 @@ def _run_script(tmp_path: Path, monkeypatch, key: str, fail: str) -> tuple[int, 
     calls = tmp_path / "calls"
     tools = tmp_path / "bin"
     tools.mkdir()
-    for tool in ("curl", "grep", "sha256sum", "tar", "cp", "docker"):
+    for tool in ("curl", "grep", "sha256sum", "tar", "cp", "docker", "apt-get"):
         code = 1 if tool == fail else 0
-        (tools / tool).write_text(
-            f'#!/bin/sh\necho {tool} "$@" >> {calls}\nexit {code}\n'
-        )
+        script = f'#!/bin/sh\necho {tool} "$@" >> {calls}\n'
+        if tool == "apt-get" and code == 0:
+            script += (
+                f'case "$*" in *docker-compose-v2*) touch "{tmp_path}/compose";; esac\n'
+            )
+        if tool == "docker":
+            script += (
+                f'if [ "$1" = compose ] && [ ! -f "{tmp_path}/compose" ]; '
+                "then exit 125; fi\n"
+            )
+        (tools / tool).write_text(script + f"exit {code}\n")
         (tools / tool).chmod(0o755)
     root = tmp_path / "opt" / key / "x"
     root.mkdir(parents=True)
@@ -200,6 +208,7 @@ def _run_script(tmp_path: Path, monkeypatch, key: str, fail: str) -> tuple[int, 
         ("spin", "sha256sum", "tar "),  # a checksum mismatch never extracts
         ("spin", "curl", "tar "),
         ("fn", "docker", "docker push"),  # a failed pull or build never pushes
+        ("funless", "apt-get", "docker pull"),
     ],
 )
 def test_a_failed_step_stops_the_install(tmp_path, monkeypatch, key, fail, never):
@@ -290,3 +299,31 @@ def test_tinyfaas_refreshes_packages_before_installing_toolchain():
     )
     script = _scripts(provider)
     assert script.index("apt-get update") < script.index("apt-get install")
+
+
+def test_fresh_funless_preparation_makes_compose_available(tmp_path, monkeypatch):
+    code, _calls = _run_script(tmp_path, monkeypatch, "funless", "none")
+    assert code == 0
+    probe = subprocess.run(
+        (str(tmp_path / "bin/docker"), "compose", "version"), check=False
+    )
+    assert probe.returncode == 0
+
+
+def test_version_probe_failure_cannot_be_recorded_as_a_valid_installation():
+    def handler(argv, _env):
+        if argv[:2] == ("sudo", "touch"):
+            provider.files[argv[2]] = b""
+        if argv[:2] == ("sh", "-c") and "docker compose version" in argv[-1]:
+            return Result(125, "", "docker compose unavailable")
+        return None
+
+    provider = RecordingProvider(handler=handler)
+    with pytest.raises(RuntimeError, match="compose unavailable"):
+        install_baselines(
+            vm(provider),
+            ("funless",),
+            source=SOURCE,
+            artifacts=ARTIFACT_SHA,
+            workload_tree=TREE,
+        )
