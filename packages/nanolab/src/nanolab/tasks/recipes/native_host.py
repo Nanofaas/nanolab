@@ -13,7 +13,8 @@ fi
 version="$({GRAALVM_HOME}/bin/native-image --version)"
 printf '%s\n' "$version"
 java=$(printf '%s\n' "$version" | head -n1 | cut -d' ' -f2)
-release=$(printf '%s\n' "$version" | sed -n 's/.*GraalVM CE \([^+ ]*\).*/\1/p')
+release=$(printf '%s\n' "$version" |
+  sed -n 's/.*GraalVM CE \([^+ ]*\).*/\1/p' | head -n1)
 if [ "$java" != "$3" ] || [ "$release" != "$2" ]; then
   echo 'native toolchain differs from captured source pins' >&2
   exit 1

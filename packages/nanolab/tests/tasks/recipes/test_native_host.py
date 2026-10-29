@@ -55,7 +55,8 @@ def test_native_bootstrap_installs_once_and_rejects_another_toolchain(tmp_path):
         f'echo "install $*" >> {shlex.quote(str(calls))}\n'
         f"mkdir -p {shlex.quote(str(home / 'bin'))}\n"
         "printf '#!/bin/sh\\necho native-image 25.0.4\\n"
-        "echo GraalVM CE 25.2.4\\n' > "
+        "echo GraalVM Runtime Environment GraalVM CE 25.2.4+7.1\\n"
+        "echo Substrate VM GraalVM CE 25.2.4+7\\n' > "
         f"{shlex.quote(str(home / 'bin/native-image'))}\n"
         f"chmod +x {shlex.quote(str(home / 'bin/native-image'))}\n"
     )
