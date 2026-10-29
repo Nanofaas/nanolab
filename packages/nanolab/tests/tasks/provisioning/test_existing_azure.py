@@ -263,7 +263,9 @@ def test_ingress_uses_attached_nsgs_instead_of_vm_name(
         else:
             assert argv[1:5] == ["network", "nsg", "rule", "create"]
             value = sources
-        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+        return subprocess.CompletedProcess(
+            argv, 0, "" if value is None else json.dumps(value), ""
+        )
 
     monkeypatch.setattr(subprocess, "run", run)
     ExistingAzureVmProvider(tmp_path).restrict_inbound_sources(

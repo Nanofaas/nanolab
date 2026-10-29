@@ -106,7 +106,7 @@ class ExistingAzureVmProvider(AzureVmProvider):
                 raise RuntimeError(
                     result.stderr or "Unable to resolve existing Azure NSGs"
                 )
-            return json.loads(result.stdout)
+            return json.loads(result.stdout) if result.stdout.strip() else None
 
         nics = az(
             "vm",
