@@ -141,3 +141,28 @@ def test_snapshot_preserves_patch_for_tracked_addition_deletion_and_mode(tmp_pat
         source, "diff", "HEAD", "--binary"
     )
     assert not (run.source_dir / "untracked").exists()
+
+
+def test_measurement_archive_leaves_recipe_capture_directory_available(tmp_path):
+    from nanolab.comparison.experiment_02_campaign import archive_experiment_02_inputs
+
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    _git(source, "config", "user.email", "test@example.com")
+    _git(source, "config", "user.name", "Test")
+    (source / "tracked").write_text("source")
+    _git(source, "add", ".")
+    _git(source, "commit", "-qm", "initial")
+    recipe = tmp_path / "recipe.yaml"
+    recipe.write_text("schemaVersion: 2\n")
+    script = tmp_path / "generator.js"
+    script.write_text("// exact generator\n")
+    root = tmp_path / "run"
+    archive_experiment_02_inputs(root, payload=b"{}\n", script=script)
+
+    run = prepare_recipe_run(source, recipe, root / "inputs", "pilot")
+
+    assert run.source_dir.is_dir()
+    assert prepare_recipe_run(source, recipe, root / "inputs", "pilot") == run
+    archive_experiment_02_inputs(root, payload=b"{}\n", script=script)

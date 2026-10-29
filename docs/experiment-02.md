@@ -437,7 +437,7 @@ Raw data retained for downstream processing:
   scheduler samples where the configuration exposes them.
 - readiness, first-response body, process/task evidence and receipt digests.
 - New runs archive exact non-secret payload and generator bytes under
-  `inputs/experiment-02-payload.json` and `inputs/experiment-02-generator.js`;
+  `measurement-inputs/experiment-02-payload.json` and `measurement-inputs/experiment-02-generator.js`;
   these are never silently replaced. Historical runs missing these two copies
   remain analysable and explicitly report their absence. Generated auth headers
   and passwords are never archived.

@@ -191,8 +191,8 @@ def aggregate_experiment_02(
 
 
 _ARCHIVED_INPUTS = {
-    "payload": "inputs/experiment-02-payload.json",
-    "generator": "inputs/experiment-02-generator.js",
+    "payload": "measurement-inputs/experiment-02-payload.json",
+    "generator": "measurement-inputs/experiment-02-generator.js",
 }
 
 

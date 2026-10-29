@@ -142,7 +142,10 @@ def test_report_command_is_offline_and_preserves_raw_evidence(tmp_path, monkeypa
     )
     assert missing["outcomes"]["incomplete"] == 1
     assert missing["metrics"]["correctThroughput"]["mean"] is None
-    assert report["archivedInputs"]["payload"] == "inputs/experiment-02-payload.json"
+    assert (
+        report["archivedInputs"]["payload"]
+        == "measurement-inputs/experiment-02-payload.json"
+    )
     assert any(
         str((selected / EVENTS).relative_to(root)) in item["files"]
         for item in report["rawArtifacts"]
@@ -184,7 +187,7 @@ def test_archived_inputs_are_exact_and_never_replaced(tmp_path):
 
 def test_changed_archived_generator_is_rejected(tmp_path):
     root, _selected = _saved_run(tmp_path)
-    (root / "inputs/experiment-02-generator.js").write_text("changed")
+    (root / "measurement-inputs/experiment-02-generator.js").write_text("changed")
     with pytest.raises(ValueError, match="archived input differs"):
         write_experiment_02_campaign_report(root)
     assert not (root / "analysis").exists()
