@@ -90,12 +90,12 @@ def test_slice_setup_moves_the_engine_into_the_budget_and_the_registry_out(tmp_p
     assert (units / "nanolab-infra-observers.slice").is_file()
     daemon = json.loads((tmp_path / "etc" / "docker" / "daemon.json").read_text())
     assert daemon["cgroup-parent"] == "nanolab-sut.slice"
-    restart = calls.index("systemctl restart containerd docker")
-    assert calls.index("systemctl daemon-reload") < restart
+    start = calls.index("systemctl start containerd docker")
+    assert calls.index("systemctl daemon-reload") < start
     registry = [call for call in calls if call.startswith("docker run")]
     assert len(registry) == 1
     assert "--cgroup-parent=nanolab-infra.slice" in registry[0].split()
-    assert calls.index(registry[0]) > restart
+    assert calls.index(registry[0]) > start
     assert "swapoff -a" in calls
 
 
@@ -148,3 +148,12 @@ def test_processes_outside_checks_declared_host_commands():
         "301 spin /system.slice/run-x.service"
     ]
     assert processes_outside(listing) == []
+
+
+def test_initial_slice_transition_stops_the_cached_engine_before_reload(tmp_path):
+    calls = _run_setup(tmp_path)
+    remove = calls.index("docker rm -f nanofaas-e2e-registry")
+    stop = calls.index("systemctl stop docker.socket docker containerd")
+    reload = calls.index("systemctl daemon-reload")
+    start = calls.index("systemctl start containerd docker")
+    assert remove < stop < reload < start

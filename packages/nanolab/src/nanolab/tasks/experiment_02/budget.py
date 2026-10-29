@@ -59,6 +59,9 @@ _ENGINE_COMMANDS = frozenset(
 SLICE_SETUP_SCRIPT = f"""set -eu
 root="${{NANOLAB_SLICE_ROOT:-}}"
 units="$root/etc/systemd/system"
+docker rm -f {REGISTRY_CONTAINER_NAME} >/dev/null 2>&1 || true
+# Stop fully: restart can retain containerd's cached cgroup after a Slice change.
+systemctl stop docker.socket docker containerd
 mkdir -p "$units/docker.service.d" "$units/containerd.service.d" "$root/etc/docker"
 printf '[Unit]\\nDescription=NanoLab experiment 02\\n\\n[Slice]\\n' \\
   > "$units/nanolab.slice"
@@ -85,8 +88,7 @@ with open(path, "w") as stream:
 ' "$root/etc/docker/daemon.json"
 swapoff -a
 systemctl daemon-reload
-systemctl restart containerd docker
-docker rm -f {REGISTRY_CONTAINER_NAME} >/dev/null 2>&1 || true
+systemctl start containerd docker
 docker run -d --restart unless-stopped --name {REGISTRY_CONTAINER_NAME} \\
   --cgroup-parent={INFRA_SLICE} -p 5000:5000 registry:2 >/dev/null
 """
