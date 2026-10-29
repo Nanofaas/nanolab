@@ -151,10 +151,19 @@ def write_cell_result(
 
 
 def read_cell_result(
-    cell: MatrixCell, root: Path, identity: Mapping[str, object]
+    cell: MatrixCell,
+    root: Path,
+    identity: Mapping[str, object],
+    *,
+    archived_attempt: int | None = None,
 ) -> dict[str, Any] | None:
-    """Return a cell's receipt if it is definitive and its evidence intact."""
-    path = cell.run_dir(root) / CELL_RESULT
+    """Validate the current receipt or an explicitly selected archived receipt."""
+    cell_dir = cell.run_dir(root)
+    path = (
+        cell_dir
+        if archived_attempt is None
+        else attempt_dir(cell_dir, archived_attempt)
+    ) / CELL_RESULT
     if not path.is_file():
         return None
     receipt = json.loads(path.read_text(encoding="utf-8"))
@@ -162,6 +171,7 @@ def read_cell_result(
         receipt.get("outcome") not in DEFINITIVE
         or receipt.get("cell") != cell.label
         or receipt.get("identitySha256") != identity_sha256(identity)
+        or (archived_attempt is not None and receipt.get("attempt") != archived_attempt)
     ):
         raise ValueError(f"{cell.label}: receipt does not belong to this run")
     selected = attempt_dir(cell.run_dir(root), int(receipt["attempt"]))

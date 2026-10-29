@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -29,6 +29,7 @@ from nanolab.comparison.cells import (
     attempt_dir,
     experiment_completed,
     next_attempt,
+    read_cell_result,
     write_cell_result,
 )
 from nanolab.comparison.evidence import require_recorded_publications
@@ -125,6 +126,70 @@ class ComparisonPreparer(Protocol):
         ...
 
 
+class CellCleanupError(RuntimeError):
+    """A recorded cell whose post-measurement cleanup is unresolved."""
+
+    def __init__(self, message: str, *, target_only: bool) -> None:
+        """Distinguish target teardown from shared evidence or observer failures."""
+        super().__init__(message)
+        self.target_only = target_only
+
+
+def run_available_cells(
+    cells: Sequence[Experiment02Cell],
+    run: Callable[[Experiment02Cell], None],
+    *,
+    notify: Callable[[str], None],
+) -> set[str]:
+    """Keep a dirty target quarantined while measuring on independent targets."""
+    blocked: set[str] = set()
+    for index, cell in enumerate(cells, start=1):
+        target = "faasd" if cell.key == "faasd" else "stack"
+        if target in blocked:
+            notify(
+                f"[{index}/{len(cells)}] {cell.label}: incomplete, "
+                f"target {target} blocked"
+            )
+            continue
+        notify(f"[{index}/{len(cells)}] {cell.label}")
+        try:
+            run(cell)
+        except CellCleanupError as error:
+            if not error.target_only:
+                raise
+            blocked.add(target)
+            notify(
+                f"{error}; target {target} blocked, independent targets may continue"
+            )
+    return blocked
+
+
+def require_safe_resume(
+    cell: Experiment02Cell, root: Path, identity: Mapping[str, object]
+) -> None:
+    """Refuse unresolved cleanup or a loaded attempt without a valid receipt."""
+    cell_dir = cell.run_dir(root)
+    receipt = read_cell_result(cell, root, identity)
+    for attempt in sorted((cell_dir / "attempts").glob("*")):
+        if (attempt / DIAGNOSTICS / CLEANUP_ERRORS).is_file():
+            raise RuntimeError(
+                f"{cell.label}: unresolved cleanup in {attempt}; "
+                "verify remote state before resuming"
+            )
+        if not (attempt / LOAD_STARTED).is_file():
+            continue
+        selected = receipt
+        if receipt is None or attempt.name != str(receipt["attempt"]):
+            selected = read_cell_result(
+                cell, root, identity, archived_attempt=int(attempt.name)
+            )
+        if selected is None:
+            raise RuntimeError(
+                f"{cell.label}: load already started in {attempt}; "
+                "preserve the partial result, do not retry automatically"
+            )
+
+
 def run_experiment_02_cell(
     cell: Experiment02Cell,
     *,
@@ -141,9 +206,10 @@ def run_experiment_02_cell(
     stops at once. Any other failure before the load is taken as transport and
     retried once in a new attempt, provided the attempt cleaned up after
     itself; after the load started, it stops. A cleanup that failed leaves
-    the remote state unknown: a documented `oom` or `startup_failed` keeps its
-    receipt, a `measured` cell does not, and the matrix stops either way.
+    the remote state unknown: every documented outcome keeps its receipt,
+    and the target is blocked before its next cell.
     """
+    require_safe_resume(cell, root, identity)
     transport_retried = False
     while True:
         cell_dir = cell.run_dir(root)
@@ -172,26 +238,27 @@ def run_experiment_02_cell(
             transport_retried = True
             notify(f"  {cell.label} failed before load ({error}); retrying once")
             continue
-        if cleanup_errors.is_file() and outcome == "measured":
-            raise RuntimeError(
-                f"{cell.label}: cleanup failed, see {cleanup_errors}; "
-                "the remote state is unknown, so the measurement is not kept"
-            )
         _ = write_cell_result(
             cell,
             root,
             identity=identity,
             attempt=attempt,
             outcome=outcome,
-            reason=_EXPERIMENT_02_REASONS[outcome],
+            reason=_EXPERIMENT_02_REASONS[outcome]
+            + ("; cleanup failed, target blocked" if cleanup_errors.is_file() else ""),
             started_at=started,
             required=required_evidence(cell.configuration),
         )
         notify(f"  {cell.label}: {outcome} (attempt {attempt})")
         if cleanup_errors.is_file():
-            raise RuntimeError(
-                f"{cell.label}: cleanup failed, see {cleanup_errors}; "
-                "stopping before the next cell"
+            errors = json.loads(cleanup_errors.read_text())
+            raise CellCleanupError(
+                f"{cell.label}: cleanup failed, see {cleanup_errors}",
+                # OOM can override a refusal or generator/transport exception.
+                # Without that provenance, do not continue on another target.
+                target_only=outcome != "oom"
+                and bool(errors)
+                and all(error.get("step") == "teardown" for error in errors),
             )
         return outcome
 
@@ -337,6 +404,9 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
         root = (run_dir or paths.runs_dir / "experiment-02").resolve()
         manifest = read_comparison_manifest(root)
         new_run = manifest is None
+        if manifest is not None:
+            for cell in cells:
+                require_safe_resume(cell, root, manifest.identity)
         tag = (
             f"recipe-{uuid4().hex}"
             if manifest is None
@@ -498,8 +568,7 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
             require_matching_inputs(manifest, capture())
             require_comparison_target(target, read_target())
 
-        for index, cell in enumerate(todo, start=1):
-            notify(f"[{index}/{len(todo)}] {cell.label}")
+        def measure(cell: Experiment02Cell) -> None:
             platform = experiment_02_platform(
                 cell,
                 prepared,
@@ -541,6 +610,15 @@ def compare_experiment_02(  # NOSONAR (S3776): one sequential matrix run
                 before_attempt=before_attempt,
                 run_attempt=run_attempt,
                 notify=notify,
+            )
+
+        blocked = run_available_cells(todo, measure, notify=notify)
+        if blocked:
+            report = write_experiment_02_report(root, cells, protocol)
+            write_experiment_02_campaign_report(root)
+            raise RuntimeError(
+                f"matrix incomplete: blocked targets {sorted(blocked)}; "
+                f"partial report: {report}"
             )
         if prepared.remote_source != owned / "source":
             raise ValueError("Comparison cleanup source is outside its owned staging")

@@ -29,6 +29,7 @@ to the end is `measured`. The receipt is written by the caller.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
 from traceback import format_exception_only
@@ -386,7 +387,25 @@ def run_cell(
                     loadgen, remote_root / name, run_dir / name
                 ),
             )
-    _ = attempt("teardown", lambda: platform.teardown(stack))
+    # Teardown is idempotent for every platform. Retry cleanup only, never
+    # start/readiness/generator: a transient teardown error must not remeasure.
+    try:
+        platform.teardown(stack)
+    except Exception as failure:
+        first_error = "".join(format_exception_only(failure))
+        time.sleep(2)
+        error_count = len(cleanup_errors)
+        _ = attempt("teardown", lambda: platform.teardown(stack))
+        _write_json(
+            diagnostics / "cleanup-recovery.json",
+            [
+                {
+                    "step": "teardown",
+                    "firstError": first_error,
+                    "recovered": len(cleanup_errors) == error_count,
+                }
+            ],
+        )
     if cleanup_errors:
         _write_json(diagnostics / CLEANUP_ERRORS, cleanup_errors)
     samples = run_dir / SAMPLES

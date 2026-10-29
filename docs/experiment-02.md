@@ -242,9 +242,27 @@ engine restart and a failed generator included. OOM evidence that cannot be
 compared is unknown and stops the matrix. A refusal stops the matrix; any other
 failure before the load is retried once in a new attempt, provided the cleanup
 succeeded; after the load started, it stops. A non-zero k6 exit is never
-`measured`. A failed cleanup keeps the receipt of a documented `oom` or
-`startup_failed`, keeps no measurement, and stops the matrix. Attempts,
-receipts and resume work as in experiment 01, with the cgroup samples, and for
+`measured`. The teardown is retried once, without restarting the platform or
+replaying load. Its first failure and recovery status are retained in
+`diagnostics/cleanup-recovery.json`; unresolved failures remain in
+`diagnostics/cleanup-errors.json`. Every documented outcome, including
+`measured` with all required evidence, keeps its hashed receipt. A cleanup
+failure is included in the receipt reason and does not change the load outcome.
+
+If only target teardown failed, the coordinator blocks that VM for the rest of
+the invocation. Every remaining cell on it stays incomplete; cells on the other
+VM can continue. This applies to all configurations: the four NanoFaaS variants
+and six Docker baselines share the stack, while faasd uses its dedicated VM.
+Generator, evidence, identity and refusal errors still stop the entire matrix.
+An OOM may override a refusal or generator failure, so it is never eligible
+for target-only recovery when cleanup fails. A blocked matrix writes partial
+reports and exits unsuccessfully instead of announcing completion.
+
+Before provisioning on resume, unresolved cleanup or a loaded attempt without a
+matching valid receipt requires operator review. Resuming cannot silently
+remeasure an interrupted cell. This policy does not repair persistent CNI leaks
+or authorize new hosts or altered experimental inputs. Attempts,
+receipts and resume otherwise work as in experiment 01, with the cgroup samples, and for
 nanoFaaS the scrapes, in place of the Prometheus snapshot.
 
 ## The generator

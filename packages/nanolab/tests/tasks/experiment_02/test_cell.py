@@ -463,3 +463,29 @@ def test_faasd_cell_uses_only_containerd_for_runtime_and_evidence(tmp_path):
     assert outcome == "measured"
     assert not any("docker" in " ".join(argv) for argv in stack.commands())
     assert ("sudo", "systemctl", "restart", "containerd") in stack.commands()
+
+
+@pytest.mark.parametrize("permanent", [False, True])
+def test_teardown_recovery_never_replays_the_load(tmp_path, monkeypatch, permanent):
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    platform = FakePlatform()
+    calls = []
+
+    def teardown(vm):
+        calls.append(vm)
+        if permanent or len(calls) == 1:
+            raise RuntimeError("cleanup transport lost")
+
+    platform.teardown = teardown
+    stack, loadgen = _stack(), _loadgen()
+    assert _run(stack, loadgen, platform, tmp_path) == "measured"
+    assert len(calls) == 2
+    assert platform.calls.count("start") == 1
+    assert sum(argv[:2] == ("k6", "run") for argv in loadgen.commands()) == 1
+    diagnostics = tmp_path / DIAGNOSTICS
+    assert (diagnostics / CLEANUP_ERRORS).exists() is permanent
+    recovery = json.loads((diagnostics / "cleanup-recovery.json").read_text())
+    assert recovery[0]["step"] == "teardown"
+    assert recovery[0]["recovered"] is (not permanent)
