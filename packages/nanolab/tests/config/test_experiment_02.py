@@ -83,3 +83,14 @@ def test_pilot_preset_loads_with_its_payload():
     assert protocol.reference_budget in protocol.budgets
     raw = experiment_01_payload(protocol, SCENARIOS / "payloads")
     assert raw == b'{"size":1024,"text":"' + b"A" * 1024 + b'"}\n'
+
+
+def test_frozen_experiment02_needs_no_service_or_generator_thresholds():
+    protocol = _protocol(
+        status="frozen", criteria=None, generator=None, pngSha256="ab" * 32
+    )
+    assert protocol.criteria is None
+    assert protocol.generator is None
+    values = _pilot()["experiment02"]
+    values.pop("criteria", None)
+    assert Experiment02Protocol.model_validate(values).criteria is None

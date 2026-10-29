@@ -51,7 +51,7 @@ def test_generator_environment_serializes_protocol_target_and_body():
         "extractor": "json-base64",
         "field": None,
         "idHeader": "X-Execution-Id",
-        "pngSha256": None,
+        "pngSha256": protocol.png_sha256,
     }
     sent = json.loads(env["E01_PROTOCOL"])
     assert set(sent) == {

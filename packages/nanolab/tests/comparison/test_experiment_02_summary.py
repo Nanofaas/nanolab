@@ -5,6 +5,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from nanolab.comparison.cells import (
     EVENTS,
     SUMMARY,
@@ -145,7 +147,7 @@ def _phase(summary: dict, name: str) -> dict:
     return next(row for row in summary["phases"] if row["phase"] == name)
 
 
-def test_efficiency_includes_drain_and_divides_by_responses_within_threshold(
+def test_efficiency_includes_drain_and_divides_by_correct_responses(
     tmp_path,
 ):
     cell = _measured_cell(tmp_path)
@@ -267,3 +269,62 @@ def test_scrape_errors_before_the_calendar_do_not_make_coverage_partial(tmp_path
     cell = _measured_cell(tmp_path, scrapes=_scrapes(failed_at=995))
     summary = summarize_experiment_02_cell(cell, tmp_path, PROTOCOL)
     assert summary["schedulerCoverage"] == "complete"
+
+
+def test_experiment02_uses_all_correct_responses_for_latency_and_efficiency(tmp_path):
+    cell = _measured_cell(tmp_path)
+    selected = attempt_dir(cell.run_dir(tmp_path), 1)
+    lines = [{"t": "origin", "ts": ORIGIN_MS}]
+    for index, (kind, duration, correct) in enumerate(
+        [
+            ("done", 20, True),
+            ("done", 2000, True),
+            ("done", 1, False),
+            ("error", 25, False),
+            ("timeout", 1000, False),
+            (None, 0, False),
+        ]
+    ):
+        sent = 1_020_000 + index * 1000
+        lines.append({"t": "send", "id": str(index), "phase": "step-01", "ts": sent})
+        if kind is not None:
+            lines.append(
+                {
+                    "t": kind,
+                    "id": str(index),
+                    "phase": "step-01",
+                    "ts": sent + duration,
+                    "dur": duration,
+                    "ok": correct,
+                    "status": 200,
+                }
+            )
+    (selected / EVENTS).write_text("\n".join(json.dumps(v) for v in lines) + "\n")
+    summary = summarize_experiment_02_cell(cell, tmp_path, PROTOCOL)
+    row = _phase(summary, "step-01")
+    assert row["sent"] == 6
+    assert row["correct"] == 2
+    assert row["incorrect"] == 1
+    assert row["correctThroughput"] == 0.2
+    assert row["successFraction"] == pytest.approx(2 / 6)
+    assert row["p50Ms"] == 20
+    assert row["p99Ms"] == 2000
+    assert row["latencyPopulation"] == "correct responses of the send cohort"
+    assert row["errors"] == row["timeouts"] == row["pending"] == 1
+    assert row["cpuSecondsPerUseful"] == 3.0
+    assert row["memoryByteSecondsPerUseful"] == 6000.0
+    assert "sustainability" not in row
+    assert "verdict" not in row["load"]
+    assert summary["serviceDefinition"] == "correct-response"
+
+
+def test_correct_only_protocol_has_no_fabricated_timely_fraction(tmp_path):
+    protocol = PROTOCOL.model_copy(update={"criteria": None})
+    row = _phase(
+        summarize_experiment_02_cell(_measured_cell(tmp_path), tmp_path, protocol),
+        "step-01",
+    )
+    assert row["withinThreshold"] is None
+    assert row["withinThresholdFraction"] is None
+    assert row["successFraction"] == 1
+    assert row["p99Ms"] == 100

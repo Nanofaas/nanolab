@@ -375,6 +375,7 @@ def summarize_experiment_02_cell(
     readiness = selected / "readiness.json"
     result: dict[str, object] = {
         "cell": receipt["cell"],
+        "serviceDefinition": "correct-response",
         "configuration": cell.key,
         "budget": cell.budget.label,
         "repetition": cell.repetition,
@@ -399,6 +400,7 @@ def summarize_experiment_02_cell(
         summary=json.loads((selected / SUMMARY).read_text(encoding="utf-8")),
         snapshot=None,
         malformed_events=malformed,
+        service_mode="correct",
     )
     phases = protocol.phases()
     origin = None if ledger["origin"] is None else ledger["origin"] / 1000
@@ -436,7 +438,7 @@ def summarize_experiment_02_cell(
             row.update(
                 _efficiency(
                     samples,
-                    int(row["withinThreshold"]),
+                    int(row["correct"]),
                     start,
                     end + protocol.drain_seconds,
                     origin,
@@ -467,6 +469,10 @@ _CSV_FIELDS: tuple[str, ...] = (
     "offeredRate",
     "sent",
     "completed",
+    "correct",
+    "incorrect",
+    "correctThroughput",
+    "successFraction",
     "withinThresholdFraction",
     "pending",
     "timeouts",

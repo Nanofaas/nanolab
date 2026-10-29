@@ -2,10 +2,10 @@
 # CPU e memoria che vale per l'intero deployment.
 #
 # Eseguito da `compare` con le chiavi di configurazione experiment-02 e una
-# ripetizione. Calendario, payload e criteri sono quelli del pilot dell'esperimento 1,
+# ripetizione. Calendario e payload sono quelli del pilot dell'esperimento 1,
 # cosi' un gradino significa la stessa cosa nei due esperimenti. I valori sono
-# provvisori: il pilot sceglie le soglie di fedelta' del generatore, l'hash del PNG,
-# la griglia dei budget e il numero di ripetizioni, da congelare prima della campagna.
+# provvisori: il pilot verifica il carico effettivamente emesso, la griglia dei budget
+# e il numero di ripetizioni. Latenze ed errori sono misure, senza soglie di giudizio.
 #
 # Il budget copre servizi della piattaforma, motore Docker e funzioni insieme, non un
 # singolo container: per questo non ci sono `resources` per componente.
@@ -36,14 +36,10 @@ experiment02:
   queueCapacity: 200
   preAllocatedVUs: 100
   maxVUs: 6000
-  criteria:
-    latencyThresholdMs: 1000
-    minWithinThresholdFraction: 0.99
-    maxPendingFraction: 0.01
   budgets:
     - {cpus: 2, memoryMiB: 2048}
   referenceBudget: {cpus: 2, memoryMiB: 2048}
   readinessTimeoutSeconds: 300
-  # Si legge da una risposta corretta nel pilot; obbligatorio quando si congela.
-  pngSha256: null
+  # Hash verificato nello smoke Azure; tutte le risposte corrette contano, senza L.
+  pngSha256: aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1
   orderSeed: 20261026

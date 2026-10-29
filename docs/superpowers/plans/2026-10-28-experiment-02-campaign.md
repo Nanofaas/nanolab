@@ -53,7 +53,7 @@ Files: comparison/experiment_02_campaign.py, application/experiment_02.py, cli/c
 
 Interface: write_experiment_02_campaign_report(root: Path) -> Path. Read the real saved manifest, reconstruct its matrix using recorded variants/configurations, validate receipt digests, summarize available cells and write analysis/{experiment-02-campaign.json,experiment-02-reference.csv,experiment-02-budget-grid.csv}. New command compare-report RUN_DIR invokes only that function. Existing compare invokes it after its existing report.
 
-- [ ] Tests: offline command works with no NANOFAAS_ROOT/VM provider; source labels/publication identities preserved; missing cells reported; tampered evidence rejected; input evidence hashes and mtimes unchanged.
+- [ ] Tests: offline command works with no NANOFAAS_ROOT/VM provider; source labels/publication identities preserved; missing cells reported; tampered evidence rejected; input evidence hashes and mtimes unchanged. Archive the validated payload bytes and generator script under inputs/ before provisioning, without replacing existing differing files.
 - [ ] Observe RED, implement the narrow CLI/report integration, GREEN; keep existing CLI behavior and experiment-01 tests passing.
 - [ ] Commit.
 

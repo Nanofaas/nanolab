@@ -85,8 +85,8 @@ class SustainabilityCriteria(_StrictModel):
     max_pending_fraction: Fraction = Field(alias="maxPendingFraction")
 
 
-class Experiment01Protocol(_StrictModel):
-    """Everything a cell of experiment 01 sends, and how it is judged."""
+class ExperimentCalendar(_StrictModel):
+    """The shared arrival calendar and finite execution limits."""
 
     status: Literal["pilot", "frozen"]
     payload_file: Annotated[str, Field(min_length=1)] = Field(alias="payloadFile")
@@ -106,7 +106,6 @@ class Experiment01Protocol(_StrictModel):
     queue_capacity: PositiveInt = Field(alias="queueCapacity")
     pre_allocated_vus: PositiveInt = Field(alias="preAllocatedVUs")
     max_vus: PositiveInt = Field(alias="maxVUs")
-    criteria: SustainabilityCriteria
     generator: GeneratorFidelity | None = None
 
     @model_validator(mode="after")
@@ -129,11 +128,6 @@ class Experiment01Protocol(_StrictModel):
             raise ValueError("experiment01 drainSeconds must cover gracefulStopSeconds")
         if self.pre_allocated_vus > self.max_vus:
             raise ValueError("experiment01 preAllocatedVUs cannot exceed maxVUs")
-        if self.status == "frozen" and self.generator is None:
-            raise ValueError(
-                "a frozen experiment01 protocol requires explicit generator "
-                "fidelity thresholds"
-            )
         if self.generator is not None and self.generator.window_seconds > min(
             step.duration_seconds for step in (self.warmup, *self.steps)
         ):
@@ -179,12 +173,28 @@ class Experiment01Protocol(_StrictModel):
         return phases
 
 
+class Experiment01Protocol(ExperimentCalendar):
+    """Experiment 01 retains its declared service and generator objectives."""
+
+    criteria: SustainabilityCriteria
+
+    @model_validator(mode="after")
+    def frozen_generator(self) -> Self:
+        """Require the generator objectives of experiment 01 once frozen."""
+        if self.status == "frozen" and self.generator is None:
+            raise ValueError(
+                "a frozen experiment01 protocol requires explicit generator "
+                "fidelity thresholds"
+            )
+        return self
+
+
 def invocation_body(payload: bytes) -> bytes:
     """Wrap the protocol payload as a compact invocation request."""
     return json.dumps({"input": json.loads(payload)}, separators=(",", ":")).encode()
 
 
-def experiment_01_payload(protocol: Experiment01Protocol, payload_dir: Path) -> bytes:
+def experiment_01_payload(protocol: ExperimentCalendar, payload_dir: Path) -> bytes:
     """Return the validated payload file bytes, verified against the protocol hash.
 
     The generator wraps these bytes' JSON value with `invocation_body`; the
@@ -207,7 +217,7 @@ def experiment_01_payload(protocol: Experiment01Protocol, payload_dir: Path) -> 
     return raw
 
 
-def k6_protocol(protocol: Experiment01Protocol, *, size: int) -> str:
+def k6_protocol(protocol: ExperimentCalendar, *, size: int) -> str:
     """Return the protocol as `assets/k6/experiment-01.js` reads it, `E01_PROTOCOL`.
 
     Experiments 01 and 02 run that one script, so they share this one

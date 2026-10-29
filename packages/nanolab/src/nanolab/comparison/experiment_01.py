@@ -47,6 +47,7 @@ from nanolab.comparison.matrix import (
     ComparisonCell,
 )
 from nanolab.config.experiment_01 import Experiment01Protocol, invocation_body
+from nanolab.config.experiment_02 import Experiment02Protocol
 from nanolab.images.control_plane_variants import EXPERIMENT_01_VARIANTS_BY_KEY
 
 # The Prometheus resolution the snapshot adapter queries at, and the window of
@@ -234,7 +235,7 @@ def _resource(
 
 
 def summarize_phases(
-    protocol: Experiment01Protocol,
+    protocol: Experiment01Protocol | Experiment02Protocol,
     ledger: Mapping[str, Any],
     *,
     summary: Mapping[str, Any] | None,
@@ -242,6 +243,7 @@ def summarize_phases(
     malformed_events: int = 0,
     memory_series: str = "container_memory_bytes@control-plane",
     cpu_series: str = "container_cpu_cores_max@control-plane",
+    service_mode: Literal["timely", "correct"] = "timely",
 ) -> list[dict[str, Any]]:
     """Reduce one measured attempt to a row per phase, with its verdicts.
 
@@ -264,11 +266,14 @@ def summarize_phases(
         sent = len(cohort)
         terminals = [r["terminal"] for r in cohort if r["terminal"] is not None]
         completed = [t for t in terminals if t["t"] == "done"]
-        latencies = [float(t["dur"]) for t in completed]
         correct = [t for t in completed if t.get("ok")]
-        within = [
-            t for t in correct if float(t["dur"]) <= criteria.latency_threshold_ms
-        ]
+        latency_population = correct if service_mode == "correct" else completed
+        latencies = [float(t["dur"]) for t in latency_population]
+        within = (
+            [t for t in correct if float(t["dur"]) <= criteria.latency_threshold_ms]
+            if criteria is not None
+            else None
+        )
         pending = sent - len(terminals)
         row: dict[str, Any] = {
             "phase": name,
@@ -277,8 +282,10 @@ def summarize_phases(
             "sent": sent,
             "completed": len(completed),
             "correct": len(correct),
-            "withinThreshold": len(within),
-            "withinThresholdFraction": len(within) / sent if sent else None,
+            "withinThreshold": len(within) if within is not None else None,
+            "withinThresholdFraction": (
+                len(within) / sent if sent and within is not None else None
+            ),
             "timeouts": sum(1 for t in terminals if t["t"] == "timeout"),
             "errors": sum(1 for t in terminals if t["t"] == "error"),
             "rejected": sum(1 for t in completed if t.get("status") in (429, 503)),
@@ -306,7 +313,6 @@ def summarize_phases(
             row["cpuDeltaFromIdle"] = _delta(cores, idle_reference.get("cpu"))
         if rate > 0:
             row["load"] = _load_validity(
-                protocol,
                 cohort,
                 rate=rate,
                 start=start,
@@ -314,9 +320,24 @@ def summarize_phases(
                 dropped=_dropped(summary, name),
                 malformed_events=malformed_events,
                 anomalies=len(ledger["anomalies"]),
-                generator=generator,
+                generator=generator if service_mode == "timely" else None,
             )
-            row["sustainability"] = _sustainability(row, criteria)
+            if service_mode == "timely":
+                row["sustainability"] = _sustainability(row, criteria)
+            else:
+                row["load"].pop("verdict")
+                row["load"].pop("reasons")
+        if service_mode == "correct":
+            row.update(
+                correctThroughput=len(correct) / duration,
+                successFraction=len(correct) / sent if sent else None,
+                incorrect=sum(
+                    1
+                    for t in completed
+                    if not t.get("ok") and t.get("status") not in (429, 503)
+                ),
+                latencyPopulation="correct responses of the send cohort",
+            )
         rows.append(row)
     return rows
 
@@ -335,7 +356,6 @@ def _delta(
 
 
 def _load_validity(
-    protocol: Experiment01Protocol,
     cohort: list[dict[str, Any]],
     *,
     rate: float,

@@ -2,14 +2,15 @@
 
 Experiment 02 sends experiment 01's calendar and payload to complete FaaS
 deployments, nanoFaaS and the baselines it is compared with, each confined to a
-cgroup whose CPU quota and memory limit are the budget. The calendar, criteria
-and generator thresholds are experiment 01's, inherited unchanged, so a step
-means the same thing in both experiments.
+cgroup whose CPU quota and memory limit are the budget. The arrival calendar
+and operational limits are shared with experiment 01.
+All correct responses count as useful; latency is reported independently.
+Historical objective fields remain readable without qualifying new comparisons.
 
 What this protocol adds is the budget grid. Every configuration runs under every
 budget, and the reference budget is the one the summary table reports; the
-others trace the feasible region. A budget is the whole deployment's, not one
-container's, which is why it carries no per-component split.
+others describe service and resource use across the grid. A budget covers the
+whole deployment, not one container, so it has no per-component split.
 
 The order seed belongs to the protocol rather than to the command line: the order
 the cells run in is part of what a resume must reproduce.
@@ -22,9 +23,10 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nanolab.config.experiment_01 import (
-    Experiment01Protocol,
+    ExperimentCalendar,
     PositiveInt,
     PositiveNumber,
+    SustainabilityCriteria,
 )
 
 EXPERIMENT_02_FUNCTION = "qr-code-rust"
@@ -50,8 +52,11 @@ class Budget(BaseModel):
         return f"cpu{self.cpus:g}-mem{self.memory_mib}"
 
 
-class Experiment02Protocol(Experiment01Protocol):
-    """Experiment 01's calendar and criteria, run under a grid of budgets."""
+class Experiment02Protocol(ExperimentCalendar):
+    """A shared calendar and budget grid, with correctness-only service."""
+
+    # Kept for loading historical scenarios; no experiment-02 service verdicts.
+    criteria: SustainabilityCriteria | None = None
 
     budgets: list[Budget] = Field(min_length=1)
     reference_budget: Budget = Field(alias="referenceBudget")
