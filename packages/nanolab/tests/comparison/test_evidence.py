@@ -527,3 +527,43 @@ def test_single_platform_index_with_attestation_has_verified_config(
     result = _registry_identity(image, command)
     assert result["config"] == config
     assert result["digest"] == digest
+
+
+@pytest.mark.parametrize("variant", ["jvm", "native-o3"])
+@pytest.mark.parametrize("experiment", ["experiment-01", "experiment-02"])
+def test_only_missing_experiment02_native_publications_prepare_toolchain(
+    resume_case, monkeypatch, variant, experiment
+):
+    from nanolab.comparison import prepare
+
+    kwargs, _publications, _provider = resume_case
+    stage = kwargs["stage"]
+    kwargs["stage"] = ComparisonStage(
+        stage.source, stage.remote_root, {variant: stage.runs[variant]}
+    )
+    manifest = kwargs["manifest"]
+    manifest.publications = {}
+    manifest.identity["experiment"] = {"profile": experiment}
+    commands = []
+
+    def logged(_provider, _request, steps, **_kwargs):
+        commands.extend(steps)
+        if any("publishRecipe" in step for step in steps):
+            raise RuntimeError("publication reached")
+
+    monkeypatch.setattr(prepare, "run_remote_logged", logged)
+    monkeypatch.setattr(
+        prepare, "native_host_command", lambda *_args: ("setup-native",), raising=False
+    )
+    with pytest.raises(RuntimeError, match="publication reached"):
+        prepare.prepare_comparison(**kwargs)
+    if variant == "native-o3" and experiment == "experiment-02":
+        assert commands[0] == ("setup-native",)
+        assert commands[1][:3] == (
+            "env",
+            "JAVA_HOME=/opt/graalvm",
+            "GRAALVM_HOME=/opt/graalvm",
+        )
+    else:
+        assert len(commands) == 1
+        assert commands[0][0] != "env"

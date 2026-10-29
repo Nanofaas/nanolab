@@ -33,6 +33,7 @@ from nanolab.comparison.manifest import ComparisonManifest, write_comparison_man
 from nanolab.comparison.profiles import PreparedComparison
 from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT
 from nanolab.tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.recipes.native_host import GRAALVM_HOME, native_host_command
 from nanolab.tasks.recipes.remote import bundle_recipe_source, remote_recipe_root
 from nanolab.tasks.recipes.workflow import (
     RecipeDistribution,
@@ -338,6 +339,24 @@ def prepare_comparison(
                 native_build_memory=properties["buildMemory"] if native else None,
                 native_parallelism=properties["parallelism"] if native else None,
             )
+            if (
+                native
+                and (identity.get("experiment") or {}).get("profile") == "experiment-02"
+            ):
+                run_remote_logged(
+                    provider,
+                    request,
+                    (native_host_command(stage.source, stage.remote_root / "source"),),
+                    remote_dir=stage.remote_root / "source",
+                    remote_log=stage.remote_root / f"{key}.native-toolchain.log",
+                    local_log=evidence_dir / "native-toolchain.log",
+                )
+                command = (
+                    "env",
+                    f"JAVA_HOME={GRAALVM_HOME}",
+                    f"GRAALVM_HOME={GRAALVM_HOME}",
+                    *command,
+                )
             fetcher = VmFileFetcher(provider, request)
             try:
                 run_remote_logged(
