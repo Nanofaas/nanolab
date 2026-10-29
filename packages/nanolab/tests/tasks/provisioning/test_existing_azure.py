@@ -233,3 +233,60 @@ def test_ssh_and_scp_reuse_a_private_control_socket(tmp_path, monkeypatch):
     other = request().model_copy(update={"azure_ssh_key_path": "/different/key.pub"})
     provider.exec_argv(other, ("true",))
     assert "ControlPath=" + control not in calls[-1]
+
+
+@pytest.mark.parametrize("attachment", ["nic", "subnet", "both"])
+def test_ingress_uses_attached_nsgs_instead_of_vm_name(
+    tmp_path, monkeypatch, attachment
+):
+    calls = []
+    prefix = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network"
+    nic = prefix + "/networkInterfaces/nic"
+    subnet = prefix + "/virtualNetworks/net/subnets/default"
+    groups = {
+        "nic": prefix.replace("/rg/", "/shared/") + "/networkSecurityGroups/reused-nsg",
+        "subnet": prefix + "/networkSecurityGroups/subnet-policy",
+    }
+    sources = ["203.0.113.9/32", "203.0.113.8/32"]
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1:3] == ["vm", "show"]:
+            value = [nic]
+        elif argv[1:4] == ["network", "nic", "show"]:
+            value = {
+                "nsg": groups["nic"] if attachment in {"nic", "both"} else None,
+                "subnets": [subnet],
+            }
+        elif argv[1:5] == ["network", "vnet", "subnet", "show"]:
+            value = groups["subnet"] if attachment in {"subnet", "both"} else None
+        else:
+            assert argv[1:5] == ["network", "nsg", "rule", "create"]
+            value = sources
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    ExistingAzureVmProvider(tmp_path).restrict_inbound_sources(
+        request(), ports=(30080,), source_cidrs=tuple(sources)
+    )
+    writes = [argv for argv in calls if "create" in argv]
+    assert {argv[argv.index("--nsg-name") + 1] for argv in writes} == {
+        groups[key].rsplit("/", 1)[-1]
+        for key in ({"nic", "subnet"} if attachment == "both" else {attachment})
+    }
+    for argv in writes:
+        name = argv[argv.index("--nsg-name") + 1]
+        assert argv[argv.index("--resource-group") + 1] == (
+            "shared" if name == "reused-nsg" else "rg"
+        )
+
+
+def test_existing_ingress_rejects_unbounded_sources_before_azure(tmp_path, monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("unbounded ingress must not reach Azure")
+
+    monkeypatch.setattr(subprocess, "run", unexpected)
+    with pytest.raises(ValueError, match="bounded"):
+        ExistingAzureVmProvider(tmp_path).restrict_inbound_sources(
+            request(), ports=(30080,), source_cidrs=("0.0.0.0/0",)
+        )
