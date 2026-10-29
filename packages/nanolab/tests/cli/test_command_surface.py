@@ -75,7 +75,8 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
 
     `compare` earns its place by being the one thing `run` cannot express: it
     holds one cluster across many runs and varies the control-plane build between
-    them, where `run` compiles a single scenario once.
+    them, where `run` compiles a single scenario once. `compare-report` recomputes
+    experiment-02 aggregates from saved evidence without provisioning.
     """
     result = CliRunner().invoke(app, ["--help"])
 
@@ -91,6 +92,7 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
         "doctor",
         "tui",
         "compare",
+        "compare-report",
         "soak-evaluate",
     }
 
