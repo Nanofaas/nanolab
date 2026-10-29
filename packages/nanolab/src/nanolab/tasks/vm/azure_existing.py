@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import shlex
 import subprocess
@@ -11,7 +10,6 @@ import tempfile
 import time
 from functools import cached_property
 from pathlib import Path
-from typing import Any
 
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.providers.azure import AzureVmProvider
@@ -77,108 +75,6 @@ class ExistingAzureVmProvider(AzureVmProvider):
         if request.azure_image_urn and image != request.azure_image_urn:
             raise ValueError("existing Azure VM image does not match the environment")
         return successful_result(["azure", "existing", request.name])
-
-    def restrict_inbound_sources(
-        self,
-        request: VmRequest,
-        *,
-        ports: tuple[int, ...],
-        source_cidrs: tuple[str, ...],
-        priority_base: int = 1010,
-    ) -> None:
-        """Restrict actual NIC/subnet NSGs, whose names need not follow the VM."""
-        networks = tuple(
-            ipaddress.ip_network(value, strict=False) for value in source_cidrs
-        )
-        if not networks or any(network.prefixlen == 0 for network in networks):
-            raise ValueError("Azure NSG source CIDRs must be nonempty and bounded")
-        if any(not 1 <= port <= 65535 for port in ports):
-            raise ValueError("invalid Azure NSG port")
-        if not request.name or not request.azure_resource_group:
-            raise ValueError(
-                "existing Azure targets require a VM name and resource group"
-            )
-        sources = tuple(dict.fromkeys(map(str, networks)))
-
-        def az(*argv: str) -> Any:
-            result = self._execute(["az", *argv, "--output", "json"], timeout=60)
-            if result.return_code:
-                raise RuntimeError(
-                    result.stderr or "Unable to resolve existing Azure NSGs"
-                )
-            return json.loads(result.stdout) if result.stdout.strip() else None
-
-        nics = az(
-            "vm",
-            "show",
-            "--resource-group",
-            request.azure_resource_group,
-            "--name",
-            request.name,
-            "--query",
-            "networkProfile.networkInterfaces[].id",
-        )
-        groups = set()
-        for nic in nics:
-            details = az(
-                "network",
-                "nic",
-                "show",
-                "--ids",
-                nic,
-                "--query",
-                "{nsg:networkSecurityGroup.id,subnets:ipConfigurations[].subnet.id}",
-            )
-            if details["nsg"]:
-                groups.add(details["nsg"])
-            for subnet in set(details["subnets"]):
-                group = az(
-                    "network",
-                    "vnet",
-                    "subnet",
-                    "show",
-                    "--ids",
-                    subnet,
-                    "--query",
-                    "networkSecurityGroup.id",
-                )
-                if group:
-                    groups.add(group)
-        if not groups:
-            raise ValueError("existing Azure VM has no attached NSG")
-        for group in sorted(groups):
-            parts = group.split("/")
-            if len(parts) != 9 or parts[7].lower() != "networksecuritygroups":
-                raise ValueError("invalid attached Azure NSG identity")
-            for index, port in enumerate(sorted(set(ports))):
-                observed = az(
-                    "network",
-                    "nsg",
-                    "rule",
-                    "create",
-                    "--resource-group",
-                    parts[4],
-                    "--nsg-name",
-                    parts[8],
-                    "--name",
-                    f"Port{port}",
-                    "--priority",
-                    str(priority_base + index),
-                    "--direction",
-                    "Inbound",
-                    "--access",
-                    "Allow",
-                    "--protocol",
-                    "Tcp",
-                    "--destination-port-ranges",
-                    str(port),
-                    "--source-address-prefixes",
-                    *sources,
-                    "--query",
-                    "sourceAddressPrefixes || [sourceAddressPrefix]",
-                )
-                if not isinstance(observed, list) or set(observed) != set(sources):
-                    raise RuntimeError("Azure NSG source restriction mismatch")
 
     def teardown(self, request: VmRequest) -> ShellExecutionResult:
         """Refuse to delete an operator-owned VM through a managed SDK workspace."""
