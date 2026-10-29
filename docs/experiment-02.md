@@ -1,19 +1,21 @@
 # Experiment 02: complete platforms under one CPU/memory budget
 
 `compare` measures complete FaaS deployments on Docker on an Azure stack VM
-without k3s, or native containerd on a separate faasd VM. Each deployment runs inside one cgroup whose CPU quota and memory
-limit are a budget from the protocol's grid. The calendar, the request ledger,
-the receipts and the per-step verdicts are experiment 01's; what this experiment
-adds is the budget, the Docker stack, the platforms and the cost per useful
-response.
+without k3s, or native containerd on a separate faasd VM. Each deployment runs
+inside one cgroup whose CPU quota and memory limit are a protocol budget.
+The arrival calendar, request ledger and receipts are shared with experiment 01.
+Experiment 02 counts every correct response as useful and reports latency,
+failures and actual emitted load separately, without a latency objective or
+sustainability/delivery qualification thresholds.
 
 **Status: nanoFaaS P1 JVM, the function alone and five baselines (FunLess,
 Spin, tinyFaaS, Serverledge, Fn) run on Azure, one cell each at 2 CPUs and
 2048 MiB (27 October 2026).** A native faasd cell, cleanup and unchanged resume
 were verified on three Azure Spot VMs on 28 October 2026 at the same budget.
 Sledge is out of the comparison (it cannot compile the shared function,
-see below). The pilot thresholds are not frozen, so no step is qualified and
-no result, capacity or budget follows from these runs.
+see below). These are integration observations, not the completed pilot or
+campaign. The correctness-only definition below was approved on 29 October;
+historical smoke tables retain their original threshold-based labels.
 
 ## Baselines
 
@@ -201,13 +203,12 @@ Every value needs its window covered: samples on both sides of it, no gap
 longer than two intervals, no counter going backwards. Otherwise the value is
 unknown, with the reason recorded, never zero. This holds for means, maxima,
 counts and deltas from idle as much as for totals; a CPU rate also needs its
-whole 30 s look-back. The ledger's service values and verdicts stand whatever
-the samples' coverage.
+whole 30 s look-back. The ledger's service values stand independently of resource-sample coverage.
 
 Per-response efficiency divides the deployment's CPU time and its memory
 occupancy (the time integral of the working set) over a cohort's arrival window
 and the drain after it, `[s, s + T + drainSeconds]`, by the responses of that
-cohort that were correct within the latency threshold (paper §4.5). The
+cohort that were correct, including slow correct responses. The
 windows of neighbouring steps overlap: a step's value includes the concurrent
 work of other cohorts, is not an exclusive attribution, and does not add up
 across steps. The last step's window ends at the calendar's drain end. A step
@@ -256,8 +257,8 @@ header that carries each request's id, and where the PNG is in the answer
 `raw-png`). Without it the script behaves as in experiment 01. The check is
 the same for every platform: a PNG signature and a square IHDR at least the
 requested size and, once `pngSha256` is frozen, the hash of the whole PNG. The
-pilot reads that hash from the first correct response, recorded in each cell's
-`readiness.json`.
+current pilot pins the already verified PNG hash; first-response bodies and
+readiness records retain the correctness evidence.
 
 The loadgen reaches the stack on the NodePorts that provisioning already opens
 to the operator and the loadgen only: every platform publishes its entry point
@@ -266,7 +267,8 @@ on 30080 (and nanoFaaS its management port on 30081). No other port is opened.
 ## Report
 
 `experiment-02-summary.json` and `.csv` hold one row per cell and phase: the
-configuration, the budget, experiment 01's counts, latencies and three verdicts,
+configuration, budget, sent/correct/incorrect/rejected/error/timeout/pending
+counts, correct-response latency and actual emitted load,
 the deployment's working set and CPU with their coverage, the engine's share,
 the agents' cost, the live instances, the efficiency window and the CPU seconds
 and byte-seconds per useful response, the three readiness times and, for
@@ -355,8 +357,8 @@ the enforced SUT slice. The error probe returned HTTP 500 for empty text;
 secret scans found neither the password nor its Basic-auth encoding in the
 checked run and paper evidence. Cleanup verified empty task/container namespaces
 and no CNI leases. All three Spot VMs were deallocated before the approved
-18:02 UTC deadline. These are integration checks; pilot thresholds and campaign
-results remain unapproved and unfrozen.
+18:02 UTC deadline. These are integration checks; the final campaign scenario and its results
+remain unapproved. Plan 4 local preparation was approved on 29 October.
 
 An earlier cell (`...T1740`) was discarded when DELETE completed after its
 old two-second timeout and retries returned 404. Cleanup now allows 30 seconds
@@ -380,3 +382,70 @@ Repository verification of code `5ac285e`: 5109 pure tests and 644 real-source
 contracts passed; combined NanoLab coverage is 87.55%, above 86%. TUI toolkit's
 53 tests and all pre-commit checks passed. Test execution used native Linux
 temporary files, real Git metadata and installed system Python/Node/util-linux.
+
+
+## Correctness-only campaign preparation (29 October 2026)
+
+All correct completed responses count as useful: G = correct/T and
+S = correct/sent, with T the arrival-window duration. p50/p95/p99 use all
+correct completed responses of the send cohort, including slow responses.
+Incorrect HTTP responses do not enter these latency quantiles. Rejections,
+incorrect non-rejected responses, transport errors, timeouts and pending
+requests stay visible; success uses every sent request as its denominator.
+CPU seconds and memory byte-seconds per useful response divide by the correct
+count. With no correct response these costs are undefined (`null`). HTTP timeout,
+finite drain, source/receipt integrity and budget enforcement remain operational
+requirements rather than service-quality thresholds.
+
+Experiment 01 keeps its existing objective semantics. Old experiment-02
+criteria/generator fields remain readable, and legacy within-threshold fields
+may still be populated as diagnostics; they do not define new G/S, latency,
+efficiency or qualification verdicts. The budget grid reports measurements and
+startup/OOM/incomplete outcomes; it makes no binary feasible-region assertion.
+The paper's G_L/S_L and objective-qualified feasibility definitions consequently
+need updating before reporting the new campaign. Existing operator edits to
+paper sections are preserved.
+
+`compare` now also writes `analysis/experiment-02-campaign.json`,
+`analysis/experiment-02-reference.csv` and `analysis/experiment-02-budget-grid.csv`.
+Means and percentile 95% bootstrap intervals resample independent runs with the
+recorded seed, never individual requests. Failure/incomplete counts remain
+visible; each metric records its available and missing run counts. One measured
+run gives a point estimate and no confidence interval. Missing resource samples
+remain unknown without erasing observed request outcomes. Broken request-ledger
+integrity is rejected rather than converted to an empty successful measurement.
+
+Recompute from saved data without VM access or a nanoFaaS checkout:
+
+```bash
+nanolab compare-report /path/to/saved-run
+```
+
+This reads the frozen manifest/configuration labels and verifies receipt digests.
+It writes only derived files under `analysis/`, preserving raw inputs, cell
+receipts, evidence bytes and modification times. JSON includes measurement
+identity/publications and a relative-path/digest index of the raw artifacts;
+CSV identifies the measurement/protocol/workload and host image/size.
+
+Raw data retained for downstream processing:
+
+- `k6-events.jsonl`: request IDs, send/completion epoch timestamps in milliseconds,
+  HTTP status, recorded correctness and duration; timeouts/errors/pending remain
+  distinguishable. Latency can be recomputed from the correct-response records.
+- `k6-summary.json`: generator counters, including dropped emissions.
+- `metrics/cgroup-samples.jsonl`: 5-second CPU/memory counters, throttling and OOM;
+  scheduler samples where the configuration exposes them.
+- readiness, first-response body, process/task evidence and receipt digests.
+- New runs archive exact non-secret payload and generator bytes under
+  `inputs/experiment-02-payload.json` and `inputs/experiment-02-generator.js`;
+  these are never silently replaced. Historical runs missing these two copies
+  remain analysable and explicitly report their absence. Generated auth headers
+  and passwords are never archived.
+
+The existing pilot calendar totals 420 seconds per cell (60 idle + 60 warmup +
+4 × 60 steps + 60 drain). Eleven configurations and one repetition therefore
+need 77 minutes of calendar time, plus preparation, readiness and cleanup. The
+pilot resource proposal must budget those separately. Collect Fn HTTP-trigger
+error behavior and tinyFaaS process/prefetch evidence during this fresh-VM pilot.
+New VM/resource actions and the later frozen campaign still require separate
+approval; local implementation does not allocate infrastructure.
