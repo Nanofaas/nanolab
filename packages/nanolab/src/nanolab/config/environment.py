@@ -64,6 +64,9 @@ class AzureEnvironment(BaseModel):
     image_urn: str | None = None
     ssh_key_path: str | None = None
     operator_source_cidr: str | None = None
+    priority: Literal["Regular", "Spot"] = "Regular"
+    eviction_policy: Literal["Delete", "Deallocate"] | None = None
+    max_bid_price: float | None = Field(default=None, strict=True, allow_inf_nan=False)
     vm_size: str = "Standard_D4s_v5"
     loadgen_vm_size: str = "Standard_B1s"
     # Native ARM64 builder (Ampere): used by the release arm64 phases.

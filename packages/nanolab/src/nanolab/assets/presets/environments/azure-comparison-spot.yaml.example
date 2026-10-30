@@ -1,0 +1,24 @@
+# Managed Azure Spot pair for the August GC/JIT/native campaign.
+# Copy outside the installed package, set resource group and public key path.
+# Leave host unset: the comparison workflow creates and tears down both VMs.
+provider: azure
+roles:
+  stack:
+    name: nanofaas-comparison-spot
+    disk: 128G
+    user: azureuser
+  loadgen:
+    name: nanofaas-comparison-spot-loadgen
+    disk: 30G
+    user: azureuser
+azure:
+  resource_group: your-resource-group
+  location: westeurope
+  priority: Spot
+  eviction_policy: Deallocate
+  max_bid_price: -1
+  vm_size: Standard_D8s_v5
+  loadgen_vm_size: Standard_D2s_v5
+  image_urn: Canonical:ubuntu-24_04-lts:server:24.04.202607140
+  operator_source_cidr: auto
+  ssh_key_path: /home/you/.ssh/id_rsa.pub

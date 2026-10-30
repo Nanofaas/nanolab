@@ -46,6 +46,29 @@ not a pure collector effect.
 
 ## Workload and execution
 
+Use managed Azure **Spot** VMs for both `stack` and `loadgen`. Copy
+`azure-comparison-spot.yaml.example` from the bundled environment presets to
+your working environment file, then set the resource group and SSH public key.
+Leave `host` unset for both roles: the existing comparison workflow provisions
+the two VMs and tears down the resources it created, including on failure,
+unless explicitly kept. No separate provisioning script or precreated VM is
+required. Use distinct VM names for concurrent runs.
+
+The preset requests `priority: Spot`, `eviction_policy: Deallocate` and
+`max_bid_price: -1`, retaining the ordinary comparison's VM sizes and pinned
+Ubuntu image. Sonata forwards these settings to the existing Azure SDK and
+checks the actual policy reported by Azure. A pre-existing VM with a different
+policy is rejected before adoption; there is no fallback to Regular capacity.
+NanoLab pins the published Sonata 0.6.19 release carrying managed Spot support.
+
+Spot capacity can be evicted even at `max_bid_price: -1`. Preserve completed
+cells and failure evidence; an interrupted cell is not a complete measurement.
+The existing target-identity checks still apply to resume: a replacement or
+rebooted target that fails those checks requires a new run directory. There is
+no automatic replacement or cross-target resume. `Deallocate` preserves disks
+on eviction; normal workflow teardown still deletes owned resources, and a
+failed/interrupted teardown must be completed by the operator.
+
 Retain the historical word-stats Java and JavaScript functions and the existing
 comparison arrival calendar, concurrency and queue configuration. The JVM
 publisher builds the shared function images once; `jvm-int` declares no
@@ -56,7 +79,7 @@ experiment-01 step calendar is introduced into this comparison.
 export NANOFAAS_ROOT=/path/to/pinned/nanofaas
 RUNTIMES=jvm,jvm-g1,jvm-c2,jvm-g1-c2,native-os,native-o3,native-o3-g1,jvm-int
 ./nanolab.sh compare runtime-comparison-cpu1.yaml \
-  --environment /path/to/azure-comparison.yaml \
+  --environment /path/to/azure-comparison-spot.yaml \
   --variants "$RUNTIMES" --repetitions 3 \
   --native-build-memory 8g --native-parallelism 4 \
   --run-dir /path/to/new-august-cpu1-run
@@ -84,8 +107,9 @@ Plugin **0.1.3 is published** at
 https://plugins.gradle.org/plugin/io.github.nanofaas.build/0.1.3
 (tag v0.1.3, commit b24c10abe813de76952f5f2502c0185459965a52).
 Release CI and an independent consumer resolving only from the Plugin Portal
-passed. NanoFaaS still pins 0.1.2: update that pin to 0.1.3 and freeze the new
-NanoFaaS revision before standard remote eight-variant campaign builds.
+passed. NanoFaaS main pins 0.1.3 at revision
+`beb179426de2914cd116f43353ef5e12730ebfdf`; freeze the NanoFaaS revision
+before standard remote eight-variant campaign builds.
 Do not launch the command above with the old pin for `jvm-int`.
 
 ## Verification boundary
