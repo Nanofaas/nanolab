@@ -260,8 +260,8 @@ reports and exits unsuccessfully instead of announcing completion.
 
 Before provisioning on resume, unresolved cleanup or a loaded attempt without a
 matching valid receipt requires operator review. Resuming cannot silently
-remeasure an interrupted cell. This policy does not repair persistent CNI leaks
-or authorize new hosts or altered experimental inputs. Attempts,
+remeasure an interrupted cell. This policy does not authorize new hosts or
+altered experimental inputs. Attempts,
 receipts and resume otherwise work as in experiment 01, with the cgroup samples, and for
 nanoFaaS the scrapes, in place of the Prometheus snapshot.
 
@@ -382,6 +382,18 @@ An earlier cell (`...T1740`) was discarded when DELETE completed after its
 old two-second timeout and retries returned 404. Cleanup now allows 30 seconds
 and accepts an already-absent response only with the same strict runtime/CNI
 postconditions. Its data must not be aggregated with the accepted cell.
+
+faasd 0.19.7 can leave CNI attachments behind when it recreates a stopped
+function task: its network ID includes that task's old PID. After all faasd
+tasks and containers are gone, cleanup releases only verified `qr-<PID>`
+attachments through the installed CNI plugins, using the original cached
+configuration and result. It refuses live PIDs, unknown lease owners, missing
+or changed caches, plugin failures and remaining IPAM leases. Caches are kept
+until release is verified, so an incomplete CNI DEL can be retried. This changes
+post-cell cleanup only; function crashes and request failures remain results.
+For CNI 0.9.1, DEL runs in a temporary isolated namespace with a down dummy
+interface holding the cached addresses, so the bridge plugin also removes its
+original masquerade rules. Only a namespace created by this cleanup is removed.
 
 The CE evaluation continues the author's 27 October start date. Since its exact
 start time is unavailable, stop before 26 December 2026 00:00 Europe/Rome
