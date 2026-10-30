@@ -1,0 +1,49 @@
+workflow: loadtest
+backend: k8s
+loadProfile: experiment-01
+functions:
+- qr-code-rust
+resources:
+  control-plane:
+    requests:
+      cpu: 2
+      memoryMiB: 512
+    limits:
+      cpu: 2
+      memoryMiB: 512
+  qr-code-rust:
+    requests:
+      cpu: 1
+      memoryMiB: 256
+    limits:
+      cpu: 1
+      memoryMiB: 256
+experiment01:
+  status: pilot
+  payloadFile: experiment-01-qr-1024.json
+  payloadSha256: 75939ab38335f301b61cc12d7aada34d95fee21cbc44757a42383366a7104aa7
+  idleSeconds: 60
+  warmup:
+    rate: 20
+    durationSeconds: 60
+  steps:
+  - rate: 25
+    durationSeconds: 60
+  - rate: 50
+    durationSeconds: 60
+  - rate: 100
+    durationSeconds: 60
+  - rate: 200
+    durationSeconds: 60
+  httpTimeoutSeconds: 30
+  completionMarginSeconds: 10
+  gracefulStopSeconds: 40
+  drainSeconds: 60
+  fixedConcurrency: 2
+  queueCapacity: 200
+  preAllocatedVUs: 100
+  maxVUs: 6000
+  criteria:
+    latencyThresholdMs: 1000
+    minWithinThresholdFraction: 0.99
+    maxPendingFraction: 0.01

@@ -99,7 +99,10 @@ def build_matrix(
 
 
 def build_experiment_01_matrix(
-    variants: tuple[ControlPlaneVariant, ...], repetitions: int
+    variants: tuple[ControlPlaneVariant, ...],
+    repetitions: int,
+    *,
+    catalog: tuple[ControlPlaneVariant, ...] = EXPERIMENT_01_VARIANTS,
 ) -> tuple[ComparisonCell, ...]:
     """Every cell of experiment 01, each repetition in its declared order.
 
@@ -109,8 +112,7 @@ def build_experiment_01_matrix(
     if repetitions < 1:
         raise ValueError("a comparison needs at least one repetition")
     letters = {
-        variant.key: chr(ord("A") + index)
-        for index, variant in enumerate(EXPERIMENT_01_VARIANTS)
+        variant.key: chr(ord("A") + index) for index, variant in enumerate(catalog)
     }
     if not variants or any(variant.key not in letters for variant in variants):
         raise ValueError("experiment-01 matrix takes only experiment-01 builds")

@@ -1,0 +1,17 @@
+{
+  "nanolabBase": "6f32a3f3770a59b50ef96338de5a52f2b69c2b59",
+  "nanofaasPin": "c0d15e3d1c132ee9691f4d3dd34b9b611b92cedd",
+  "plugin": "0.1.2",
+  "fullLinux": {
+    "purePassed": 5414,
+    "contractsPassed": 645,
+    "tuiPassed": 53,
+    "combinedCoveragePercent": 87.67396517334888,
+    "allGatesExitCode": 0
+  },
+  "incrementalChecks": {
+    "missingOriginFixLinuxPassed": 317,
+    "latestSourceAndJfrTargetedPassed": 365
+  },
+  "scope": "Local build/readiness/QR correctness only; no managed Kubernetes deployment, cloud pilot or performance campaign."
+}

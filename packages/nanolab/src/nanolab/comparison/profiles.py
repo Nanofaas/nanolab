@@ -18,6 +18,8 @@ from nanolab.images.control_plane_variants import (
     EXPERIMENT_01_VARIANTS_BY_KEY,
     VARIANTS_BY_KEY,
     ControlPlaneVariant,
+    experiment_01_catalog,
+    runtime_class,
 )
 from nanolab.tasks.recipes.workflow import RecipeDistribution
 
@@ -48,6 +50,39 @@ _JVM_TIER_ARGS = {
     "c1": ["-XX:TieredStopAtLevel=1"],
     "tiered": [],
 }
+
+
+def runtime_gc_options(profile: Path, key: str, *, shares: bool) -> dict[str, object]:
+    """Verify the campaign constraints using the existing recipe options."""
+    options = declared_options(profile)
+    recipe = yaml.safe_load(profile.read_text())
+    cp = recipe["controlPlane"]
+    variant = VARIANTS_BY_KEY[key]
+    if cp["build"].get("variant") != key or cp.get("config"):
+        raise ValueError("runtime GC recipe identity/configuration differs")
+    if key.startswith("native-"):
+        expected = {
+            "builder": "container",
+            "distribution": "oracle" if key.endswith("g1") else "community",
+            "gc": "G1" if key.endswith("g1") else "serial",
+            "monitoring": ["jfr"] if key.endswith("g1") else [],
+            "optimization": variant.build_env["NATIVE_OPTIMIZATION"],
+            "maxHeap": _NATIVE_HEAP,
+        }
+        if options["mode"] != "native" or options["native"] != expected or "jvm" in cp:
+            raise ValueError("runtime GC native options differ")
+    else:
+        expected_args = ["-XX:+UseG1GC" if "g1" in key else "-XX:+UseSerialGC", _HEAP]
+        if runtime_class(variant) == "c1":
+            expected_args.append("-XX:TieredStopAtLevel=1")
+        if options["mode"] != "jvm" or options["jvm_args"] != expected_args:
+            raise ValueError("runtime GC JVM options differ")
+    expected_functions = [("qr-code", "rust")] if shares else []
+    if [
+        (f["name"], f["sdk"]) for f in recipe.get("functions", [])
+    ] != expected_functions or recipe.get("services"):
+        raise ValueError("only the runtime GC publisher declares QR")
+    return options
 
 
 @dataclass(frozen=True)
@@ -83,18 +118,21 @@ def experiment_01_profiles(
     """
     if not variants or len(set(variants)) != len(variants):
         raise ValueError("experiment-01 variants must be nonempty and unique")
-    unknown = set(variants) - EXPERIMENT_01_VARIANTS_BY_KEY.keys()
-    if unknown:
-        raise ValueError(
-            "unknown experiment-01 variants: " + ", ".join(sorted(unknown))
-        )
-    shared = next(iter(EXPERIMENT_01_VARIANTS_BY_KEY))
+    catalog = experiment_01_catalog(variants)
+    shared = next(iter(catalog))
+    runtime_gc = shared == "jvm"
     ordered = (shared, *(key for key in variants if key != shared))
-    profiles = {key: tool_root / "recipes" / f"{key}.yaml" for key in ordered}
+    profiles = {
+        key: tool_root
+        / "recipes"
+        / f"{'experiment-01-runtime-' if runtime_gc else ''}{key}.yaml"
+        for key in ordered
+    }
     for key, profile in profiles.items():
-        experiment_01_options(
-            profile, EXPERIMENT_01_VARIANTS_BY_KEY[key], shares=key == shared
-        )
+        if runtime_gc:
+            runtime_gc_options(profile, key, shares=key == shared)
+        else:
+            experiment_01_options(profile, catalog[key], shares=key == shared)
     return profiles
 
 
@@ -270,6 +308,11 @@ def declared_options(
         "jvm_args": cp.get("jvm", {}).get("args", []),
         "native": {
             "builder": build.get("builder", "host"),
+            **(
+                {"distribution": "oracle" if gc == "G1" else "community"}
+                if build.get("builder") == "container"
+                else {}
+            ),
             "optimization": str(native.get("optimization", "3")),
             "gc": gc,
             "monitoring": sorted(monitoring),
@@ -298,13 +341,13 @@ class ProfileContract:
     historical contract, and each experiment is recognised by its own block.
     """
 
-    kind: Literal["historical", "experiment-01", "experiment-02"]
+    kind: Literal["historical", "experiment-01", "experiment-02", "runtime-gc"]
     shared: str
     functions: Mapping[str, tuple[str, str]]
 
     def modules(self, key: str) -> frozenset[str]:
         """Return the exact module set the profile `key` must be built with."""
-        if self.kind == "historical":
+        if self.kind in {"historical", "runtime-gc"}:
             return COMPARISON_RECIPE_MODULES
         if self.kind == "experiment-02":
             profile = CONFIGURATIONS_BY_KEY[key].profile
@@ -315,6 +358,8 @@ class ProfileContract:
 
     def options(self, key: str, profile: Path) -> dict[str, object]:
         """Return the declared options recorded for the profile `key`."""
+        if self.kind == "runtime-gc":
+            return runtime_gc_options(profile, key, shares=key == self.shared)
         if self.kind == "historical":
             return declared_options(profile)
         if self.kind == "experiment-02":
@@ -342,4 +387,8 @@ def contract_for(identity: Mapping[str, object]) -> ProfileContract:
         return HISTORICAL_CONTRACT
     if isinstance(experiment, Mapping) and experiment.get("profile") == "experiment-02":
         return EXPERIMENT_02_CONTRACT
+    if isinstance(experiment, Mapping) and experiment.get("builds"):
+        catalog = experiment_01_catalog(tuple(experiment.get("builds", {})))
+        if next(iter(catalog)) == "jvm":
+            return ProfileContract("runtime-gc", "jvm", EXPERIMENT_01_FUNCTIONS)
     return EXPERIMENT_01_CONTRACT

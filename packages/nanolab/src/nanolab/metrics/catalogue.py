@@ -308,6 +308,11 @@ def runtime_queries(_function_name: str, *, heap_required: bool = True) -> Queri
             "jfr_vm_operation_count",
             f"nanofaas_jfr_vm_operation_count_total{CONTROL_PLANE_SELECTOR}",
         ),
+        # Keep every operation's time: names vary across SubstrateVM versions.
+        PrometheusQuery(
+            "jfr_vm_operation_time",
+            f"nanofaas_jfr_vm_operation_time_seconds_total{CONTROL_PLANE_SELECTOR}",
+        ),
         PrometheusQuery(
             "jfr_gc_operation_time",
             "nanofaas_jfr_vm_operation_time_seconds_total"
@@ -657,6 +662,9 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
         "absent IS the reading: the build has no usable collector MXBean"
     ),
     "jfr_vm_operation_count": (
+        "the JFR stream is opened only where the MXBeans cannot answer"
+    ),
+    "jfr_vm_operation_time": (
         "the JFR stream is opened only where the MXBeans cannot answer"
     ),
     "jfr_gc_operation_time": (

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
 from nanolab.application import experiment_02
@@ -106,17 +107,26 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
             profile.parent.mkdir(parents=True, exist_ok=True)
             profile.write_bytes(original_profile.read_bytes())
             options: dict[str, Any] = declared_options(profile)
+            image_name = yaml.safe_load(profile.read_text())["controlPlane"][
+                "container"
+            ]["image"]
             components = [
                 {
                     "kind": "control-plane",
                     "name": "control-plane",
                     "sdk": "java",
                     "mode": options["mode"],
-                    "variant": key,
-                    "optimization": "c1" if key == "jvm" else "3",
+                    "variant": options["variant"],
+                    "optimization": options["native"]["optimization"]
+                    if options["native"]
+                    else (
+                        "c1"
+                        if "-XX:TieredStopAtLevel=1" in options["jvm_args"]
+                        else "c2"
+                    ),
                     "image": {
                         "reference": (
-                            f"127.0.0.1:5000/nanofaas/control-plane-{key}:"
+                            f"127.0.0.1:5000/nanofaas/{image_name}:"
                             f"{manifest.identity['tag']}"
                         ),
                         "id": "sha256:" + "b" * 64,
@@ -428,9 +438,9 @@ def test_experiment_01_requires_azure_before_side_effects(command_case):
     assert events == [] and not root.exists()
 
 
-def test_experiment_01_refuses_historical_variants(command_case):
+def test_experiment_01_refuses_non_campaign_variants(command_case):
     invoke, events, root = _experiment_case(command_case, azure=True)
-    result = invoke("--variants", "jvm")
+    result = invoke("--variants", "jvm-loop1")
     assert result.exit_code != 0
     assert events == [] and not root.exists()
 
@@ -747,3 +757,49 @@ def test_compare_runs_a_baseline_cell_end_to_end(command_case, monkeypatch, tmp_
     result = invoke(*arguments, "--fresh")
     assert result.exit_code != 0 and "changed" in str(result.exception)
     assert not [event for event in events if event[0] == "install"]
+
+
+def test_runtime_gc_subset_prepares_qr_publisher_and_resumes(command_case, monkeypatch):
+    from datetime import UTC, datetime
+
+    from nanolab.comparison.cells import attempt_dir, write_cell_result
+
+    invoke, events, root = _experiment_case(command_case, azure=True)
+    monkeypatch.setattr(comparison, "read_host_facts", lambda *args: {})
+
+    def measured(cell, *, root, identity, before_attempt, **kwargs):
+        before_attempt()
+        events.append(("runtime-cell", cell.key, cell.repetition))
+        folder = attempt_dir(cell.run_dir(root), 1)
+        (folder / "metrics").mkdir(parents=True)
+        (folder / "k6-summary.json").write_text('{"metrics":{}}')
+        (folder / "k6-events.jsonl").write_text('{"t":"origin","ts":1000000}\n')
+        (folder / "metrics/prometheus-snapshot.json").write_text(
+            '{"start":"1970-01-01T00:16:40+00:00","queries":{}}'
+        )
+        write_cell_result(
+            cell,
+            root,
+            identity=identity,
+            attempt=1,
+            outcome="measured",
+            reason="fixture",
+            started_at=datetime.now(UTC),
+        )
+        return "measured"
+
+    monkeypatch.setattr(comparison, "_run_experiment_cell", measured)
+    result = invoke("--variants", "native-o3")
+    assert result.exit_code == 0, (result.output, result.exception)
+    manifest = json.loads((root / "comparison-manifest.json").read_text())
+    assert set(manifest["identity"]["profiles"]) == {"jvm", "native-o3"}
+    functions = manifest["identity"]["profiles"]["jvm"]["options"]["functions"]
+    assert [(f["name"], f["sdk"]) for f in functions] == [("qr-code", "rust")]
+    assert [("runtime-cell", "native-o3", n) for n in (1, 2)] == [
+        event
+        for event in events
+        if isinstance(event, tuple) and event[0] == "runtime-cell"
+    ]
+    result = invoke("--variants", "native-o3")
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "2 of 2 cells" in result.output

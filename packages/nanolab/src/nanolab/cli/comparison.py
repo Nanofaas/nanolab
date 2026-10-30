@@ -22,6 +22,7 @@ from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from traceback import format_exception_only
+from typing import Any, cast
 from uuid import uuid4
 
 import typer
@@ -82,10 +83,11 @@ from nanolab.comparison.prepare import (
 )
 from nanolab.comparison.profiles import (
     COMPARISON_FUNCTIONS,
-    EXPERIMENT_01_CONTRACT,
     EXPERIMENT_01_FUNCTIONS,
     PreparedComparison,
     comparison_profiles,
+    contract_for,
+    experiment_01_catalog,
     experiment_01_profiles,
 )
 from nanolab.comparison.target import (
@@ -395,9 +397,29 @@ def register(app: typer.Typer) -> None:
     def compare_report_command(
         run_dir: Path = typer.Argument(..., exists=True, file_okay=False),  # noqa: B008
     ) -> None:
-        """Recompute experiment-02 aggregates from saved evidence without VMs."""
+        """Recompute experiment aggregates from saved evidence without VMs."""
         try:
-            report = write_experiment_02_campaign_report(run_dir)
+            manifest = read_comparison_manifest(run_dir)
+            identity = cast(dict[str, Any], manifest.identity) if manifest else {}
+            experiment = identity.get("experiment") or {}
+            if manifest is not None and experiment.get("profile") == "experiment-01":
+                from nanolab.comparison.cells import read_cell_result
+                from nanolab.config.experiment_01 import Experiment01Protocol
+
+                protocol = Experiment01Protocol.model_validate(experiment["protocol"])
+                selected = tuple(identity["variants"])
+                cells = build_experiment_01_matrix(
+                    resolve_variants(selected),
+                    manifest.repetitions,
+                    catalog=tuple(experiment_01_catalog(selected).values()),
+                )
+                if [cell.label for cell in cells] != experiment["order"]:
+                    raise ValueError("recorded experiment-01 order differs")
+                for cell in cells:
+                    read_cell_result(cell, run_dir, manifest.identity)
+                report = write_experiment_01_report(run_dir, cells, protocol)
+            else:
+                report = write_experiment_02_campaign_report(run_dir)
         except ValueError as error:
             raise typer.BadParameter(str(error)) from error
         typer.echo(f"report: {report}")
@@ -523,7 +545,9 @@ def register(app: typer.Typer) -> None:
             if protocol is not None:
                 profiles = experiment_01_profiles(paths.tool_root, selected)
                 cells = build_experiment_01_matrix(
-                    resolve_variants(selected), repetitions
+                    resolve_variants(selected),
+                    repetitions,
+                    catalog=tuple(experiment_01_catalog(selected).values()),
                 )
                 experiment_identity: dict[str, object] | None = experiment_01_identity(
                     protocol,
@@ -569,7 +593,11 @@ def register(app: typer.Typer) -> None:
                     parallelism=native_parallelism,
                     experiment=experiment_identity,
                     **(
-                        {"profile_options": EXPERIMENT_01_CONTRACT.options}
+                        {
+                            "profile_options": contract_for(
+                                {"experiment": experiment_identity}
+                            ).options
+                        }
                         if experiment
                         else {}
                     ),

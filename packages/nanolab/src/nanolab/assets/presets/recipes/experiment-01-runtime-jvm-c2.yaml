@@ -1,0 +1,19 @@
+schemaVersion: 2
+name: experiment-01-runtime-jvm-c2
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: comparison
+controlPlane:
+  modules:
+  - k8s-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+    variant: jvm-c2
+  container:
+    image: experiment-01-runtime-jvm-c2
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -Xmx64m

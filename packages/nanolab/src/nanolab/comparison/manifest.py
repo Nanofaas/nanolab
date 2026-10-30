@@ -19,7 +19,11 @@ from nanolab.application.functions import ResolvedFunction, resolve_function
 from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.comparison.experiment_02 import EXPERIMENT_02_PUBLISHER
 from nanolab.comparison.matrix import ComparisonCell, MatrixCell
-from nanolab.comparison.profiles import COMPARISON_SCHEDULER_STRATEGY, declared_options
+from nanolab.comparison.profiles import (
+    COMPARISON_SCHEDULER_STRATEGY,
+    contract_for,
+    declared_options,
+)
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
@@ -153,7 +157,8 @@ def _profiled_keys(
     if experiment is None:
         return tuple(dict.fromkeys(("jvm", *variants)))
     if experiment.get("profile") != "experiment-02":
-        return tuple(variants)
+        contract = contract_for({"experiment": experiment})
+        return tuple(dict.fromkeys((contract.shared, *variants)))
     configurations = experiment["configurations"]
     assert isinstance(configurations, dict)  # nosec B101 - validated before
     recipes = [

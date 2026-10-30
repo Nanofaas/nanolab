@@ -16,7 +16,7 @@ function rebuilt per variant would put a second moving part in every comparison.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
@@ -24,7 +24,9 @@ from typing import Literal
 # What a build executes as, kept apart from the key that names the build. The
 # historical tuning only ever distinguished C1 from C2, and calling every JVM
 # that does not stop at level 1 "c2" would describe -Xint as a C2 build.
-RuntimeClass = Literal["interpreted", "c1", "tiered", "native-o2", "native-o3"]
+RuntimeClass = Literal[
+    "interpreted", "c1", "tiered", "native-o2", "native-o3", "native-os"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +210,8 @@ def runtime_class(variant: ControlPlaneVariant) -> RuntimeClass:
         return variant.runtime
     if "NATIVE_OPTIMIZATION" in variant.build_env:
         level = variant.build_env["NATIVE_OPTIMIZATION"]
+        if level == "s":
+            return "native-os"
         if level == "3":
             return "native-o3"
         if level == "2":
@@ -306,3 +310,23 @@ def resolve_variants(keys: tuple[str, ...]) -> tuple[ControlPlaneVariant, ...]:
             + ", ".join(_ALL_VARIANTS_BY_KEY)
         )
     return tuple(_ALL_VARIANTS_BY_KEY[key] for key in keys)
+
+
+RUNTIME_GC_KEYS = (
+    "jvm",
+    "jvm-g1",
+    "jvm-c2",
+    "jvm-g1-c2",
+    "native-os",
+    "native-o3",
+    "native-o3-g1",
+)
+
+
+def experiment_01_catalog(keys: Sequence[str]) -> Mapping[str, ControlPlaneVariant]:
+    """Select one known campaign group; never mix its publication contracts."""
+    if keys and set(keys) <= set(RUNTIME_GC_KEYS):
+        return {key: VARIANTS_BY_KEY[key] for key in RUNTIME_GC_KEYS}
+    if keys and set(keys) <= EXPERIMENT_01_VARIANTS_BY_KEY.keys():
+        return EXPERIMENT_01_VARIANTS_BY_KEY
+    raise ValueError("unknown or mixed experiment-01 variants")

@@ -195,8 +195,7 @@ def test_runtime_class_is_separate_from_the_historical_c1_c2_label():
         "jvm-g1-c2": "tiered",
         "native-o3": "native-o3",
     }
-    with pytest.raises(ValueError, match="-Os"):
-        runtime_class(historical["native-os"])
+    assert runtime_class(historical["native-os"]) == "native-os"
 
 
 def test_contract_is_chosen_from_the_identity():

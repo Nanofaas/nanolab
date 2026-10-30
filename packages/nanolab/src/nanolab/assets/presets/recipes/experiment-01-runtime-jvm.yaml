@@ -1,0 +1,25 @@
+schemaVersion: 2
+name: experiment-01-runtime-jvm
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: comparison
+controlPlane:
+  modules:
+  - k8s-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+    variant: jvm
+  container:
+    image: experiment-01-runtime-jvm
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -Xmx64m
+    - -XX:TieredStopAtLevel=1
+functions:
+- name: qr-code
+  sdk: rust
+  container:
+    image: runtime-gc-qr-code

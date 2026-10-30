@@ -53,6 +53,16 @@ def main() -> None:
         from importlib.resources import files
 
         assets = files("nanolab").joinpath("assets")
+        from nanolab.comparison.profiles import experiment_01_profiles
+        from nanolab.images.control_plane_variants import RUNTIME_GC_KEYS
+
+        presets = Path(str(assets.joinpath("presets")))
+        assert len(experiment_01_profiles(presets, RUNTIME_GC_KEYS)) == 7
+        for cpu in (1, 2, 4):
+            assert (
+                presets / "scenarios" / f"experiment-01-runtime-gc-pilot-cpu{cpu}.yaml"
+            ).is_file()
+
         for name in (
             "k6/one-shot.js",
             "one-shot/contracts/service-profile.schema.json",

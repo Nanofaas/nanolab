@@ -43,6 +43,7 @@ from nanolab.comparison.profiles import (
     COMPARISON_SCHEDULER_STRATEGY,
     EXPERIMENT_01_FUNCTIONS,
     PreparedComparison,
+    contract_for,
 )
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.experiment_01 import (
@@ -53,7 +54,6 @@ from nanolab.config.experiment_01 import (
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.core.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from nanolab.images.control_plane_variants import (
-    EXPERIMENT_01_VARIANTS,
     resolve_variants,
 )
 from nanolab.plans.loadtest import build_loadtest_plan
@@ -477,7 +477,8 @@ def _experiment_01_plan(
         )
     variant = resolve_variants((config.control_plane_variant,))[0]
     selected = prepared.distributions[variant.key]
-    shared = prepared.distributions[EXPERIMENT_01_VARIANTS[0].key]
+    contract = contract_for({"experiment": {"builds": {variant.key: {}}}})
+    shared = prepared.distributions[contract.shared]
     key = config.functions[0]
     function_image = shared.function(*EXPERIMENT_01_FUNCTIONS[key]).image.reference
     payload = experiment_01_payload(protocol, tool_root / "scenarios" / "payloads")
@@ -565,7 +566,7 @@ def _experiment_01_plan(
         script_name=EXPERIMENT_01_SCRIPT_NAME,
         k6_env_overrides=experiment_01_k6_environment(config, payload),
         container_metrics=True,
-        observed_modules=variant.modules,
+        observed_modules=tuple(sorted(contract.modules(variant.key))),
         before_load=before_load,
         snapshot_lead_seconds=0.0,
         heap_metrics_required=False,
@@ -573,7 +574,7 @@ def _experiment_01_plan(
         # The queue capacity belongs to the composition that has a queue; the
         # baseline keeps the core's own admission, recorded as it is.
         function_queue_size=protocol.queue_capacity
-        if "async-queue" in variant.modules
+        if "async-queue" in contract.modules(variant.key)
         else None,
         k6_events=True,
         function_resources=lambda name: declared_function_resources(config, name),

@@ -1425,6 +1425,7 @@ def test_minute_decisions_keep_step_durations_rates_and_arrival_calendar(observe
         phase_ids=["low", "high"],
         windows=[{"edge": {"f": 0.05}}, {"edge": {"f": 0.1}}],
     )
+    assert trace.phase_ids is not None
     selected = [
         {"id": phase, "rates": window}
         for phase, window in zip(trace.phase_ids, trace.windows, strict=True)

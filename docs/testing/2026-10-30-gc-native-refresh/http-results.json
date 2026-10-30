@@ -1,0 +1,94 @@
+{
+  "jvm": {
+    "key": "jvm",
+    "image": {
+      "reference": "127.0.0.1:5000/nanofaas/experiment-01-runtime-jvm:comparison",
+      "status": "built",
+      "id": "sha256:2a96e4e49c88afb9a078328438b155dc8b7493d6e0f43545fc72c5aefc694ca6"
+    },
+    "architecture": "linux/arm64",
+    "scope": "control-plane health/identity and correct QR through EXTERNAL endpoint; no Kubernetes managed deployment",
+    "readySeconds": 8.145739916944876,
+    "pngSha256": "aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1",
+    "status": "passed"
+  },
+  "jvm-c2": {
+    "key": "jvm-c2",
+    "image": {
+      "reference": "127.0.0.1:5000/nanofaas/experiment-01-runtime-jvm-c2:comparison",
+      "status": "built",
+      "id": "sha256:2302e10c7cc9b19221c7a6763d52fde6e69061f4b0fe3c591fff65ff79011805"
+    },
+    "architecture": "linux/arm64",
+    "scope": "control-plane health/identity and correct QR through EXTERNAL endpoint; no Kubernetes managed deployment",
+    "readySeconds": 14.570640709018335,
+    "pngSha256": "aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1",
+    "status": "passed"
+  },
+  "jvm-g1": {
+    "key": "jvm-g1",
+    "image": {
+      "reference": "127.0.0.1:5000/nanofaas/experiment-01-runtime-jvm-g1:comparison",
+      "status": "built",
+      "id": "sha256:d8cb63bbabe29417e81e46b54b2737af343de2868b8cdf07497ef7ca612b4125"
+    },
+    "architecture": "linux/arm64",
+    "scope": "control-plane health/identity and correct QR through EXTERNAL endpoint; no Kubernetes managed deployment",
+    "readySeconds": 7.887551291147247,
+    "pngSha256": "aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1",
+    "status": "passed"
+  },
+  "jvm-g1-c2": {
+    "key": "jvm-g1-c2",
+    "image": {
+      "reference": "127.0.0.1:5000/nanofaas/experiment-01-runtime-jvm-g1-c2:comparison",
+      "status": "built",
+      "id": "sha256:e506c0a50762a8dff286c3affae5c0e21bfd75b0485c85c21e43764b5d94dea0"
+    },
+    "architecture": "linux/arm64",
+    "scope": "control-plane health/identity and correct QR through EXTERNAL endpoint; no Kubernetes managed deployment",
+    "readySeconds": 16.059827374992892,
+    "pngSha256": "aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1",
+    "status": "passed"
+  },
+  "native-o3": {
+    "key": "native-o3",
+    "image": {
+      "reference": "127.0.0.1:5000/nanofaas/experiment-01-runtime-native-o3:comparison",
+      "status": "built",
+      "id": "sha256:9edba8c7b8a90a35ae912a22d74b961fc536d39b6a7bf99335273393ecd6895b"
+    },
+    "architecture": "linux/arm64",
+    "scope": "control-plane health/identity and correct QR through EXTERNAL endpoint; no Kubernetes managed deployment",
+    "readySeconds": 1.2023726659826934,
+    "pngSha256": "aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1",
+    "status": "passed"
+  },
+  "native-o3-g1": {
+    "key": "native-o3-g1",
+    "image": {
+      "reference": "127.0.0.1:5000/nanofaas/experiment-01-runtime-native-o3-g1:comparison",
+      "status": "built",
+      "id": "sha256:191c4cbee3433913d49bd79d23dd02ac11a5684c67893264133a0fbfdeb2cd15"
+    },
+    "architecture": "linux/arm64",
+    "scope": "control-plane health/identity and correct QR through EXTERNAL endpoint; no Kubernetes managed deployment",
+    "readySeconds": 1.0594191669952124,
+    "pngSha256": "aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1",
+    "gcProbeCorrectRequests": 50,
+    "status": "passed"
+  },
+  "native-os": {
+    "key": "native-os",
+    "image": {
+      "reference": "127.0.0.1:5000/nanofaas/experiment-01-runtime-native-os:comparison",
+      "status": "built",
+      "id": "sha256:29b54d7fd6253fc5bd34caaf461ab5387f4316d282463aca402963b1d9eaf949"
+    },
+    "architecture": "linux/arm64",
+    "scope": "control-plane health/identity and correct QR through EXTERNAL endpoint; no Kubernetes managed deployment",
+    "readySeconds": 1.1110689169727266,
+    "pngSha256": "aa04cabc94ed3cecf89cabd027588b5c6ca19b1d3bdd2efa6d74c3af9b3086c1",
+    "status": "passed"
+  }
+}

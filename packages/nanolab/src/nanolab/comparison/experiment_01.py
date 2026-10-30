@@ -48,7 +48,7 @@ from nanolab.comparison.matrix import (
 )
 from nanolab.config.experiment_01 import Experiment01Protocol, invocation_body
 from nanolab.config.experiment_02 import Experiment02Protocol
-from nanolab.images.control_plane_variants import EXPERIMENT_01_VARIANTS_BY_KEY
+from nanolab.images.control_plane_variants import experiment_01_catalog, runtime_class
 
 # The Prometheus resolution the snapshot adapter queries at, and the window of
 # every CPU rate in the catalogue. Recorded with each summary: a plateau
@@ -234,6 +234,42 @@ def _resource(
     }
 
 
+_GC_COUNTERS = (
+    "jvm_gc_collection_count",
+    "jvm_gc_collection_time",
+    "jvm_gc_young_count",
+    "jvm_gc_full_count",
+    "jvm_gc_young_time",
+    "jvm_gc_full_time",
+    "jvm_gc_pause_count",
+    "jvm_gc_pause_sum",
+    "jfr_vm_operation_count",
+    "jfr_gc_operation_time",
+)
+
+
+def gc_phase(
+    snapshot: Mapping[str, Any] | None, start: float, end: float
+) -> dict[str, float | None]:
+    """Keep missing counters distinct from zero using the shared reset reader."""
+    from nanolab.metrics.interpretation import counter_delta
+
+    values = {}
+    for name in _GC_COUNTERS:
+        entry = (snapshot or {}).get("queries", {}).get(name, {})
+        points = [
+            point
+            for point in entry.get("points", [])
+            if start <= datetime.fromisoformat(point["timestamp"]).timestamp() <= end
+        ]
+        values[name] = (
+            counter_delta(points)
+            if len(points) >= 2 and not entry.get("error")
+            else None
+        )
+    return values
+
+
 def summarize_phases(
     protocol: Experiment01Protocol | Experiment02Protocol,
     ledger: Mapping[str, Any],
@@ -303,6 +339,8 @@ def summarize_phases(
             cores = _resource(
                 cpu, start, end, rate_window=float(CPU_RATE_WINDOW_SECONDS)
             )
+            if service_mode == "timely":
+                row["gc"] = gc_phase(snapshot, start, end)
             row["workingSetBytes"] = working_set
             row["cpuCores"] = cores
             if name == "idle":
@@ -514,6 +552,12 @@ def write_experiment_01_report(
 
     Cells without a receipt are listed as incomplete, never as zero.
     """
+    cells = tuple(cells)
+    runtime_gc = (
+        bool(cells)
+        and next(iter(experiment_01_catalog(tuple(c.key for c in cells)))) == "jvm"
+    )
+    fields = (*_CSV_FIELDS, *_GC_COUNTERS) if runtime_gc else _CSV_FIELDS
     summaries: list[dict[str, object]] = []
     for cell in cells:
         if (cell.run_dir(root) / CELL_RESULT).is_file():
@@ -531,7 +575,7 @@ def write_experiment_01_report(
     write_json_atomically(root / "experiment-01-summary.json", summaries)
     path = root / "experiment-01-summary.csv"
     with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=_CSV_FIELDS)
+        writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         for summary in summaries:
             phases: list[dict[str, Any]] = summary["phases"] or [{}]  # type: ignore[assignment]
@@ -548,8 +592,155 @@ def write_experiment_01_report(
                     ),
                     cpuMeanCores=(phase.get("cpuCores") or {}).get("mean"),
                 )
+                if runtime_gc:
+                    row.update(
+                        {
+                            name: (phase.get("gc") or {}).get(name)
+                            for name in _GC_COUNTERS
+                        }
+                    )
                 writer.writerow(row)
+    if runtime_gc:
+        write_runtime_gc_html(root, cells, summaries, protocol)
     return path
+
+
+def write_runtime_gc_html(
+    root: Path,
+    cells: tuple[ComparisonCell, ...],
+    summaries: list[dict[str, Any]],
+    protocol: Experiment01Protocol,
+) -> None:
+    """Reuse the comparison charts and phase shading for offline evidence."""
+    from typing import cast
+
+    import pandas as pd
+    import plotly.io as pio
+
+    from nanolab.tasks.loadtest.comparison_report import CellData, _over_time, _series
+    from nanolab.tasks.loadtest.report import (
+        _STYLE,
+        ReportPhase,
+        _shade_phases,
+        _table_html,
+    )
+
+    metrics = {
+        "container_memory_bytes@control-plane": "Control-plane working set (bytes)",
+        "container_cpu_cores_max@control-plane": "Control-plane CPU (cores, 30 s)",
+        "function_queue_depth": "Queue depth (requests)",
+        "container_cpu_throttled_seconds@control-plane": "CPU throttling (seconds)",
+    }
+    cohort_metrics = {
+        "offeredRate": ("Scheduled arrivals (requests/s)", None),
+        "sent": ("Emitted requests (cohort requests/s)", "rate"),
+        "completed": ("Completed HTTP responses (cohort requests/s)", "rate"),
+        "p95Ms": ("Cohort p95 latency (ms)", None),
+        "jvm_gc_young_time": ("MXBean young GC time per phase (seconds)", None),
+        "jvm_gc_full_time": ("MXBean full GC time per phase (seconds)", None),
+        "jfr_gc_operation_time": (
+            "JFR collection-named operation time per phase (seconds)",
+            None,
+        ),
+    }
+    calendar = {phase["name"]: phase for phase in protocol.phases()}
+    data = []
+    labels = {cell.key: cell.variant.label for cell in cells}
+    for cell, summary in zip(cells, summaries, strict=True):
+        if summary["outcome"] != "measured":
+            continue
+        selected = attempt_dir(cell.run_dir(root), int(summary["attempt"]))
+        snapshot = json.loads((selected / SNAPSHOT).read_text())
+        events, _ = read_events(selected / EVENTS)
+        origin = build_ledger(events).get("origin")
+        series = {
+            key: _series(snapshot, key)
+            if origin is not None
+            else pd.DataFrame(columns=["elapsed", "value"])
+            for key in metrics
+        }
+        if origin is not None:
+            offset = (
+                datetime.fromisoformat(snapshot["start"]).timestamp() - origin / 1000
+            )
+            for frame in series.values():
+                frame["elapsed"] += offset
+        for field, (_title, reduction) in cohort_metrics.items():
+            points = []
+            for phase in summary["phases"]:
+                window = calendar[phase["phase"]]
+                value = (
+                    (phase.get("gc") or {}).get(field)
+                    if field in _GC_COUNTERS
+                    else phase.get(field)
+                )
+                if value is not None and reduction == "rate":
+                    value /= window["durationSeconds"]
+                points.extend(
+                    {"elapsed": elapsed, "value": value}
+                    for elapsed in (
+                        window["startSeconds"],
+                        window["startSeconds"] + window["durationSeconds"],
+                    )
+                )
+            series[field] = pd.DataFrame(points, columns=["elapsed", "value"])
+        data.append(
+            CellData(
+                cell.key,
+                cell.repetition,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                series,
+            )
+        )
+    phases = tuple(
+        ReportPhase(
+            p["name"], p["startSeconds"], p["startSeconds"] + p["durationSeconds"]
+        )
+        for p in protocol.phases()
+    )
+    charts = []
+    titles = metrics | {key: title for key, (title, _) in cohort_metrics.items()}
+    for metric, title in titles.items():
+        figure = _over_time(data, labels, metric, title, title)
+        _shade_phases(figure, phases)
+        charts.append(
+            pio.to_html(
+                figure,
+                full_html=False,
+                include_plotlyjs=cast(bool, "inline" if not charts else False),
+            )
+        )
+    rows = [
+        {
+            "variant": summary["variant"],
+            "run": summary["repetition"],
+            "outcome": summary["outcome"],
+            **phase,
+        }
+        for summary in summaries
+        for phase in (summary["phases"] or [{}])
+    ]
+    table = _table_html(pd.json_normalize(rows), "Per-phase observations")
+    (root / "experiment-01-report.html").write_text(
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<style>{_STYLE}</style></head><body>"
+        "<title>Runtime GC comparison</title><h1>Runtime GC comparison</h1>"
+        "<p>Missing GC data is unavailable, not zero. "
+        "MXBean and JFR values are distinct. "
+        "Unaligned resource curves are omitted when the generator origin is missing. "
+        "Timelines use idle start. Traffic and latency steps summarize send cohorts; "
+        "they are phase values, including responses completed in later phases.</p>"
+        + table
+        + "".join(charts)
+        + "</body></html>",
+        encoding="utf-8",
+    )
 
 
 def experiment_01_identity(
@@ -565,10 +756,14 @@ def experiment_01_identity(
     The effective order is part of the identity: a resume runs the remaining
     cells in it, and a changed order needs a new directory.
     """
+    catalog = experiment_01_catalog(selected)
+    runtime_gc = next(iter(catalog)) == "jvm"
     values = protocol.model_dump(mode="json", by_alias=True)
     return {
         "profile": "experiment-01",
-        "orderPolicy": EXPERIMENT_01_ORDER_POLICY,
+        "orderPolicy": "runtime-gc-three-orders-v1"
+        if runtime_gc
+        else EXPERIMENT_01_ORDER_POLICY,
         "order": [cell.label for cell in cells],
         "protocol": values,
         "protocolSha256": identity_sha256(values),
@@ -582,11 +777,13 @@ def experiment_01_identity(
         "builds": {
             key: {
                 "label": variant.label,
-                "modules": list(variant.modules),
-                "runtime": variant.runtime,
+                "modules": ["async-queue", "build-metadata", "k8s-deployment-provider"]
+                if runtime_gc
+                else list(variant.modules),
+                "runtime": runtime_class(variant),
             }
-            for key, variant in EXPERIMENT_01_VARIANTS_BY_KEY.items()
+            for key, variant in catalog.items()
             if key in selected
         },
-        "subset": set(selected) != set(EXPERIMENT_01_VARIANTS_BY_KEY),
+        "subset": set(selected) != set(catalog),
     }

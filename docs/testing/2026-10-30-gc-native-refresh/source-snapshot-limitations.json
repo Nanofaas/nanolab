@@ -1,0 +1,8 @@
+{
+  "missingFromSnapshotCommit": [
+    "clients/cli/src/dist/bin/nanofaas",
+    "docs/testing/edge-logging/recovery/receipt.json",
+    "docs/testing/edge-logging/recovery/sha256.json"
+  ],
+  "changedInSnapshotCommit": []
+}

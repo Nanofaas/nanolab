@@ -12,6 +12,7 @@ import pytest
 def sequence_module():
     path = Path(__file__).parents[4] / "scripts/one-shot-sequence.py"
     spec = importlib.util.spec_from_file_location("one_shot_sequence", path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

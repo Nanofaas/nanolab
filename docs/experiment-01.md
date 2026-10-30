@@ -209,3 +209,9 @@ Every call the Sonata Azure provider makes (`AzureClient(...)`, `get_vm`,
 changes are additive (Spot parameters, `launch_many_iter`) plus orphan-disk
 cleanup in `delete`. Sonata 0.6.16 widened its range to `azure-vm-sdk>=0.6.2,<0.8`;
 nanolab pins `sonata-engine`/`sonata-tasks` 0.6.16 and `azure-vm-sdk` 0.7.0.
+
+## GC/JIT/native campaign refresh
+
+The explicit runtime group reuses the existing variant keys with dedicated QR
+recipes. See [runtime GC protocol](runtime-gc-comparison.md) for pilot presets,
+selection, limits and verification status. Original defaults remain unchanged.
