@@ -21,3 +21,10 @@ Published plugin 0.1.2 and NanoFaaS's existing pin are unchanged. The fix requir
 a plugin release and pin update before standard remote campaign builds.
 The stricter reader deliberately rejects old mislabeled interpreter reports;
 archived reports have not been rewritten. No cloud resources or registry pushes.
+
+## Publication completed
+
+Plugin 0.1.3 published by tag v0.1.3 at b24c10abe813de76952f5f2502c0185459965a52.
+Release CI and a standalone Portal-only consumer passed. See publication.json
+and portal-consumer.log. The previous development-status notes above are
+historical; only the NanoFaaS pin update remains outstanding.

@@ -80,14 +80,13 @@ same rule for runtime classification and distribution verification. The last
 execution-mode flag wins. A report claiming `c2` for an interpreted recipe is
 rejected instead of silently accepted. Old reports remain unchanged.
 
-**Release prerequisite:** NanoFaaS still pins published plugin 0.1.2. The fix is
-in the plugin development version 0.1.3-SNAPSHOT, commit
-`e119e4ea7594d5a868b2a8de943e526cf9eb9f76`. Local integration was verified with
-`-PnanofaasGradlePluginDir=/private/tmp/nanofaas-gradle-plugin-interpreter`.
-Before executing the eight-variant campaign through standard remote builds,
-release the corrected plugin, update the NanoFaaS pin, and freeze that new
-NanoFaaS revision. The command above does not inject the local plugin override
-into the remote build. Do not launch it with the old pin for `jvm-int`.
+Plugin **0.1.3 is published** at
+https://plugins.gradle.org/plugin/io.github.nanofaas.build/0.1.3
+(tag v0.1.3, commit b24c10abe813de76952f5f2502c0185459965a52).
+Release CI and an independent consumer resolving only from the Plugin Portal
+passed. NanoFaaS still pins 0.1.2: update that pin to 0.1.3 and freeze the new
+NanoFaaS revision before standard remote eight-variant campaign builds.
+Do not launch the command above with the old pin for `jvm-int`.
 
 ## Verification boundary
 
