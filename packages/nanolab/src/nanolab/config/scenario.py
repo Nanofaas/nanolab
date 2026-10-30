@@ -222,6 +222,9 @@ class ScenarioConfig(BaseModel):
     # make a change in effective concurrency unattributable, since that value is
     # replicas x per-replica target.
     concurrency_control: bool = Field(default=False, alias="concurrencyControl")
+    concurrency_total_budget: int | None = Field(
+        default=None, gt=0, alias="concurrencyTotalBudget"
+    )
     # Which controller the run exercises. Selectable because the question the harness
     # exists to answer is comparative: whether one mode holds latency or sheds fewer
     # requests than another is not answerable from a run of either alone.
@@ -578,6 +581,8 @@ class ScenarioConfig(BaseModel):
             )
         if self.concurrency_mode != "ADAPTIVE_PER_POD" and not self.concurrency_control:
             raise ValueError("concurrencyMode requires concurrencyControl=true")
+        if self.concurrency_total_budget is not None and not self.concurrency_control:
+            raise ValueError("concurrencyTotalBudget requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
 

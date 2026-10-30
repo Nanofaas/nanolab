@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check } from 'k6';
+import { SharedArray } from 'k6/data';
 
 // Arrivals that do not wait for the system, so the queue can grow on its own.
 //
@@ -94,9 +95,21 @@ const TEXTS = [
     'It was the best of times it was the worst of times it was the age of wisdom it was the age of foolishness.',
 ];
 
+// Keep the selected repository corpus shared across VUs, as in the other load profiles.
+const INPUTS = new SharedArray('open-loop-inputs', () => {
+    if (!__ENV.NANOFAAS_PAYLOAD) {
+        return TEXTS.map(text => ({ text, topN: 5 }));
+    }
+    const cases = JSON.parse(open(__ENV.NANOFAAS_PAYLOAD)).cases || [];
+    if (cases.length === 0) {
+        throw new Error('open-loop payload corpus carries no cases');
+    }
+    return cases.map(entry => entry.input);
+});
+
 function invoke(functionName) {
     const body = JSON.stringify({
-        input: { text: TEXTS[__ITER % TEXTS.length], topN: 5 },
+        input: INPUTS[__ITER % INPUTS.length],
     });
     const response = http.post(
         `${BASE_URL}/v1/functions/${functionName}:invoke`,

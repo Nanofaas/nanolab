@@ -48,7 +48,11 @@ CONCURRENCY_FUNCTION_RESOURCES: dict[str, dict[str, float]] = {
 
 
 def payload_corpus_path(
-    config: ScenarioConfig, root: Path, function: str
+    config: ScenarioConfig,
+    root: Path,
+    function: str,
+    *,
+    destination_root: Path | None = None,
 ) -> Path | None:
     """Return the corpus to send, or None to keep the generator's built-in text.
 
@@ -76,7 +80,7 @@ def payload_corpus_path(
             f"payloadProfile {config.payload_profile!r} needs {corpus}, "
             "which does not exist"
         )
-    return corpus
+    return destination_root / corpus.relative_to(root) if destination_root else corpus
 
 
 def declared_function_resources(
@@ -194,7 +198,7 @@ def controller_settings(config: ScenarioConfig) -> dict[str, object]:
             "mode": "SOJOURN",
             "minTargetInFlightPerPod": 1,
             "maxTargetInFlightPerPod": CONCURRENCY_CEILING,
-            "targetLatencyMs": END_TO_END_P95_BUDGET_MS,
+            "targetLatencyMs": end_to_end_p95_budget_ms(config),
         }
     if config.concurrency_mode == "BUDGETED":
         # No per-replica target and no gradient thresholds: this controller is

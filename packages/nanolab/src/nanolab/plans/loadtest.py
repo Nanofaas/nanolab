@@ -470,6 +470,7 @@ def _build_platform_request(
     hpa: bool,
     container_metrics: bool = False,
     control_plane_resources: dict[str, dict[str, float | int | str]] | None = None,
+    concurrency_total_budget: str = "",
 ) -> PlatformRequest:
     request = PlatformRequest(
         backend=backend,
@@ -513,9 +514,20 @@ def _build_platform_request(
             # value but not the controller's own verdict, so a plateau at
             # maxReplicas cannot be told apart from a metric that stopped rising.
             helm_values["kube-state-metrics.enabled"] = "true"
+        budget_args = (
+            (
+                "--set",
+                "controlPlane.extraEnv[0].name="
+                "NANOFAAS_CONCURRENCY_CONTROL_TOTAL_BUDGET",
+                "--set-string",
+                f"controlPlane.extraEnv[0].value={concurrency_total_budget}",
+            )
+            if concurrency_total_budget
+            else ()
+        )
         request = replace(
             request,
-            helm_values=helm_set_args(helm_values),
+            helm_values=(*helm_set_args(helm_values), *budget_args),
         )
     return request
 
@@ -573,6 +585,8 @@ def concurrency_budget(config: ScenarioConfig) -> str:
     shared four cores carried 14 in flight at full throughput, so 12 is a real
     capacity statement rather than an artificial squeeze.
     """
+    if config.concurrency_total_budget is not None:
+        return str(config.concurrency_total_budget)
     if not is_co_tenancy(config) or config.concurrency_mode != "BUDGETED":
         return ""
     return str(BURST_TOTAL_BUDGET)
@@ -1379,6 +1393,7 @@ def build_loadtest_plan(
         hpa=hpa,
         container_metrics=container_metrics,
         control_plane_resources=_control_plane_resources(config),
+        concurrency_total_budget=concurrency_budget(config),
     )
     if helm_values_overrides:
         request = replace(
@@ -1430,7 +1445,16 @@ def build_loadtest_plan(
         config=config,
         env_overrides=k6_env_overrides,
         remote=environment.provider != "local",
-        payload_path=payload_corpus_path(config, root, target.name),
+        payload_path=payload_corpus_path(
+            config,
+            root,
+            target.name,
+            destination_root=(
+                Path(environment.target(load_role).remote_home) / "nanofaas"
+                if environment.provider != "local"
+                else None
+            ),
+        ),
         events_path=events_path,
     )
     watcher, replica_probe = _build_replica_watcher(
