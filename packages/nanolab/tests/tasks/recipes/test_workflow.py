@@ -368,3 +368,46 @@ def test_distribution_preserves_native_build_evidence(tmp_path):
         "gc": "serial",
         "monitoring": [],
     }
+
+
+@pytest.mark.parametrize(
+    ("args", "optimization"),
+    [
+        (["-Xint"], "interpreted"),
+        (["-XX:TieredStopAtLevel=1"], "c1"),
+        ([], "c2"),
+        (["-Xint", "-XX:TieredStopAtLevel=1"], "interpreted"),
+        (["-Xint", "-Xmixed"], "c2"),
+        (["-Xmixed", "-Xint"], "interpreted"),
+        (["-Xint", "-Xcomp"], "c2"),
+        (["-XX:TieredStopAtLevel=1", "-XX:TieredStopAtLevel=4"], "c2"),
+    ],
+)
+def test_jvm_metadata_matches_effective_execution_mode(tmp_path, args, optimization):
+    import yaml
+
+    from nanolab.images.control_plane_variants import (
+        ControlPlaneVariant,
+        jvm_optimization,
+    )
+
+    recipe = tmp_path / "recipe.yaml"
+    _write_recipe(recipe)
+    profile = yaml.safe_load(recipe.read_text())
+    profile["controlPlane"]["jvm"] = {"args": args}
+    recipe.write_text(yaml.safe_dump(profile))
+    data = _report(recipe, "test", "built")
+    data["components"][0]["optimization"] = optimization
+    report = tmp_path / "distribution.json"
+    report.write_text(json.dumps(data))
+    result = read_distribution(report, recipe=recipe, tag="test", published=False)
+    assert result.control_plane().optimization == optimization
+    variant = ControlPlaneVariant(
+        "test", "test", "test", {"JVM_TUNING": " ".join(args)}
+    )
+    assert jvm_optimization(variant) == optimization
+    if optimization == "interpreted":
+        data["components"][0]["optimization"] = "c2"
+        report.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match="metadata differs"):
+            read_distribution(report, recipe=recipe, tag="test", published=False)

@@ -1,0 +1,28 @@
+{
+  "schemaVersion" : 2,
+  "recipe" : {
+    "name" : "comparison-jvm-int",
+    "sha256" : "97602180e6be18d029390ad5264be069656e016eeacb86469b23a275d6503e9b",
+    "schemaVersion" : 2
+  },
+  "tag" : "comparison",
+  "source" : {
+    "revision" : "876ed84c9f0323d361db267ff8af2378d0691bb7",
+    "dirty" : false
+  },
+  "modules" : [ "async-queue", "build-metadata", "k8s-deployment-provider" ],
+  "components" : [ {
+    "kind" : "control-plane",
+    "name" : "control-plane",
+    "sdk" : "java",
+    "mode" : "jvm",
+    "artifact" : "control-plane/",
+    "variant" : "jvm-int",
+    "optimization" : "interpreted",
+    "image" : {
+      "reference" : "127.0.0.1:5000/nanofaas/control-plane-jvm-int:comparison",
+      "status" : "built",
+      "id" : "sha256:ba4946e43f3202d7a7ae187e240ccf624915a1d40f2bbe55822b8d936660affc"
+    }
+  } ]
+}

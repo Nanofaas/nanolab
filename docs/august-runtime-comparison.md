@@ -75,10 +75,19 @@ it is not evidence of the historical calendar. Keep failures and generator
 shortfall visible, especially if the interpreter cannot sustain the offered
 load. New results must not be pooled with the August results.
 
-The plugin's generic JVM optimization metadata can say `c2` when no
-TieredStopAtLevel flag is supplied, including with `-Xint`. The new variant is
-classified as interpreted in NanoLab; verify actual launch arguments and
-UseCompiler=false rather than treating that generic field as proof of C2.
+The corrected plugin records `interpreted` for `-Xint`; NanoLab uses the
+same rule for runtime classification and distribution verification. The last
+execution-mode flag wins. A report claiming `c2` for an interpreted recipe is
+rejected instead of silently accepted. Old reports remain unchanged.
+
+**Release prerequisite:** NanoFaaS still pins published plugin 0.1.2. The fix is
+in the plugin development version 0.1.3-SNAPSHOT, commit
+`e119e4ea7594d5a868b2a8de943e526cf9eb9f76`. Local integration was verified with
+`-PnanofaasGradlePluginDir=/private/tmp/nanofaas-gradle-plugin-interpreter`.
+Before executing the eight-variant campaign through standard remote builds,
+release the corrected plugin, update the NanoFaaS pin, and freeze that new
+NanoFaaS revision. The command above does not inject the local plugin override
+into the remote build. Do not launch it with the old pin for `jvm-int`.
 
 ## Verification boundary
 

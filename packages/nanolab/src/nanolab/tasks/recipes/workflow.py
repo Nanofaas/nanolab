@@ -16,6 +16,7 @@ from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
 
 from nanolab.core.deployment import LOCAL_REGISTRY
+from nanolab.images.control_plane_variants import jvm_tier
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
@@ -158,7 +159,7 @@ def verify_recipe_identity(
         else:
             jvm = require_object(control.get("jvm", {}), "profile controlPlane jvm")
             args = jvm.get("args", [])
-            optimization = "c1" if "-XX:TieredStopAtLevel=1" in args else "c2"
+            optimization = jvm_tier(args)
     else:
         optimization = None
     control_component = next(c for c in components if c.kind == "control-plane")

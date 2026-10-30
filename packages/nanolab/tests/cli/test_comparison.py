@@ -15,6 +15,7 @@ from nanolab.application import experiment_02
 from nanolab.cli import comparison, product
 from nanolab.comparison.manifest import write_comparison_manifest
 from nanolab.comparison.profiles import PreparedComparison, declared_options
+from nanolab.images.control_plane_variants import jvm_tier
 from nanolab.tasks.recipes.workflow import read_distribution
 from nanolab.workspace.paths import ToolPaths, discover_tool_root
 
@@ -119,11 +120,7 @@ def command_case(tmp_path, monkeypatch, nanofaas_checkout):
                     "variant": options["variant"],
                     "optimization": options["native"]["optimization"]
                     if options["native"]
-                    else (
-                        "c1"
-                        if "-XX:TieredStopAtLevel=1" in options["jvm_args"]
-                        else "c2"
-                    ),
+                    else jvm_tier(options["jvm_args"]),
                     "image": {
                         "reference": (
                             f"127.0.0.1:5000/nanofaas/{image_name}:"

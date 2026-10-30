@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "scope": "local control-plane startup, identity and interpreter flags; no workload or Kubernetes pilot",
+  "image": "sha256:ba4946e43f3202d7a7ae187e240ccf624915a1d40f2bbe55822b8d936660affc",
+  "memoryLimitMiB": 2048,
+  "cpu": 1,
+  "maxHeapBytesObserved": 1503657984,
+  "optimization": "interpreted",
+  "useCompiler": false,
+  "maxRAMPercentage": 70,
+  "readySeconds": 32.726799624972045,
+  "source": {
+    "revision": "876ed84c9f0323d361db267ff8af2378d0691bb7",
+    "dirty": false
+  }
+}

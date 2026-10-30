@@ -1,0 +1,111 @@
+From e119e4ea7594d5a868b2a8de943e526cf9eb9f76 Mon Sep 17 00:00:00 2001
+From: miciav <5889596+miciav@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 13:50:36 +0100
+Subject: [PATCH] fix: identify interpreted JVM recipes in build metadata
+
+---
+ README.md                                           | 13 +++++++++++++
+ gradle.properties                                   |  2 +-
+ .../nanofaas/gradle/RecipeBuildProperties.java      | 10 ++++++++--
+ .../nanofaas/gradle/RecipeBuildPropertiesTest.java  | 10 ++++++++++
+ .../datai/nanofaas/gradle/RecipePluginTest.java     |  2 +-
+ 5 files changed, 33 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index 2f9d64c..1a5293f 100644
+--- a/README.md
++++ b/README.md
+@@ -236,3 +236,16 @@ recipes with `build.native.maxHeap` and Rust functions that share a Dockerfile
+ through symbolic links, and `0.1.1` supports neither. Until then use the
+ explicit local checkout override above. Creating the workflow does not publish a
+ release or configure the secrets automatically.
++
++### Interpreter metadata (development version 0.1.3-SNAPSHOT)
++
++JVM recipe identities distinguish `interpreted` (`-Xint`), `c1` and `c2`.
++The last `-Xint`/`-Xmixed`/`-Xcomp` selects execution mode; interpretation takes
++precedence over `TieredStopAtLevel`, whose last value selects C1 versus full
++tiering when JIT is enabled. These values describe configuration, not proof
++that a specific application method reached C2.
++
++Use NanoFaaS's existing `-PnanofaasGradlePluginDir=/path/to/this/checkout`
++override to verify the development version. Published 0.1.2 is unchanged.
++Consumers validating recipe metadata must recognize `interpreted` before
++adopting this version. Do not rewrite reports produced by older releases.
+diff --git a/gradle.properties b/gradle.properties
+index 455db9c..c8de987 100644
+--- a/gradle.properties
++++ b/gradle.properties
+@@ -1,4 +1,4 @@
+-version=0.1.2
++version=0.1.3-SNAPSHOT
+ org.gradle.jvmargs=-Xmx1g
+ org.gradle.workers.max=2
+ pmdVersion=7.28.0
+diff --git a/src/main/java/it/unimib/datai/nanofaas/gradle/RecipeBuildProperties.java b/src/main/java/it/unimib/datai/nanofaas/gradle/RecipeBuildProperties.java
+index c090ec5..c4a5484 100644
+--- a/src/main/java/it/unimib/datai/nanofaas/gradle/RecipeBuildProperties.java
++++ b/src/main/java/it/unimib/datai/nanofaas/gradle/RecipeBuildProperties.java
+@@ -160,17 +160,23 @@ final class RecipeBuildProperties {
+     }
+ 
+     /**
+-     * nanolab's rule: c1 when the effective options stop tiering at level 1. The control plane's fixed flags and its
++     * Interpretation takes precedence over tiering. The control plane's fixed flags and its
+      * default tuning never set TieredStopAtLevel, so jvm.args alone decides; the JVM keeps the last value.
+      */
+     static String jvmTier(List<String> args) {
+         String level = null;
++        boolean interpreted = false;
+         for (String arg : args == null ? List.<String>of() : args) {
++            if (arg.equals("-Xint")) {
++                interpreted = true;
++            } else if (arg.equals("-Xmixed") || arg.equals("-Xcomp")) {
++                interpreted = false;
++            }
+             if (arg.startsWith("-XX:TieredStopAtLevel=")) {
+                 level = arg.substring("-XX:TieredStopAtLevel=".length());
+             }
+         }
+-        return "1".equals(level) ? "c1" : "c2";
++        return interpreted ? "interpreted" : ("1".equals(level) ? "c1" : "c2");
+     }
+ 
+     static void rejectOwnedFlags(Path source, Set<String> projectProperties) {
+diff --git a/src/test/java/it/unimib/datai/nanofaas/gradle/RecipeBuildPropertiesTest.java b/src/test/java/it/unimib/datai/nanofaas/gradle/RecipeBuildPropertiesTest.java
+index 72b6d8f..494a0cf 100644
+--- a/src/test/java/it/unimib/datai/nanofaas/gradle/RecipeBuildPropertiesTest.java
++++ b/src/test/java/it/unimib/datai/nanofaas/gradle/RecipeBuildPropertiesTest.java
+@@ -118,6 +118,16 @@ class RecipeBuildPropertiesTest {
+         }
+     }
+ 
++    @Test
++    void interpreterModeFollowsTheLastExecutionMode() {
++        assertThat(RecipeBuildProperties.jvmTier(List.of("-Xint"))).isEqualTo("interpreted");
++        assertThat(RecipeBuildProperties.jvmTier(List.of("-Xint", "-XX:TieredStopAtLevel=1")))
++                .isEqualTo("interpreted");
++        assertThat(RecipeBuildProperties.jvmTier(List.of("-Xint", "-Xmixed"))).isEqualTo("c2");
++        assertThat(RecipeBuildProperties.jvmTier(List.of("-Xmixed", "-Xint"))).isEqualTo("interpreted");
++        assertThat(RecipeBuildProperties.jvmTier(List.of("-Xint", "-Xcomp"))).isEqualTo("c2");
++    }
++
+     @Test
+     void jvmTierFollowsTheLastTieredStopAtLevel() {
+         assertThat(RecipeBuildProperties.jvmTier(null)).isEqualTo("c2");
+diff --git a/src/test/java/it/unimib/datai/nanofaas/gradle/RecipePluginTest.java b/src/test/java/it/unimib/datai/nanofaas/gradle/RecipePluginTest.java
+index 6eb28e1..c4d1025 100644
+--- a/src/test/java/it/unimib/datai/nanofaas/gradle/RecipePluginTest.java
++++ b/src/test/java/it/unimib/datai/nanofaas/gradle/RecipePluginTest.java
+@@ -864,7 +864,7 @@ class RecipePluginTest {
+     @Test
+     void jvmTierReachesBuildMetadataAndTheReport() throws IOException {
+         writeModule("build-metadata", "");
+-        for (String[] tier : new String[][] {{"-XX:TieredStopAtLevel=1", "c1"}, {"-Xmx128m", "c2"}}) {
++        for (String[] tier : new String[][] {{"-XX:TieredStopAtLevel=1", "c1"}, {"-Xmx128m", "c2"}, {"-Xint", "interpreted"}}) {
+             recipe(V2_HEADER + "controlPlane: {modules: [build-metadata], build: {mode: jvm, variant: jvm-" + tier[1]
+                     + "}, jvm: {args: ['" + tier[0] + "']}}\n");
+ 
+-- 
+2.56.0
+

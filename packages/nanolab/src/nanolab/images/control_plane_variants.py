@@ -64,6 +64,22 @@ def _env(**values: str) -> Mapping[str, str]:
 DEFAULT_JVM_TUNING = "-XX:+UseSerialGC -XX:TieredStopAtLevel=1"
 
 
+def jvm_tier(args: Sequence[str]) -> str:
+    """Match the recipe plugin's execution mode and last tiering option."""
+    interpreted = False
+    level = None
+    for arg in args:
+        if arg == "-Xint":
+            interpreted = True
+        elif arg in {"-Xmixed", "-Xcomp"}:
+            interpreted = False
+        if arg.startswith("-XX:TieredStopAtLevel="):
+            level = arg.split("=", 1)[1]
+    if interpreted:
+        return "interpreted"
+    return "c1" if level == "1" else "c2"
+
+
 def jvm_optimization(variant: ControlPlaneVariant) -> str:
     """Return interpreted, c1 or c2 from the effective JVM tuning.
 
@@ -78,9 +94,7 @@ def jvm_optimization(variant: ControlPlaneVariant) -> str:
     if variant.runtime is not None:
         raise ValueError(f"{variant.key} declares its runtime; use runtime_class")
     tuning = variant.build_env.get("JVM_TUNING", DEFAULT_JVM_TUNING)
-    if "-Xint" in tuning.split():
-        return "interpreted"
-    return "c1" if "TieredStopAtLevel=1" in tuning else "c2"
+    return jvm_tier(tuning.split())
 
 
 # Serial is not written out for the Community builds: it is the only collector
