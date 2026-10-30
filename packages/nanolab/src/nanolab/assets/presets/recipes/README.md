@@ -345,3 +345,9 @@ Full preparation remains blocked by the undeclared Node diagnostic preload and
 missing automatic fault-capable prerequisite coverage. A short smoke or successful
 publication cannot qualify P24. See the [P24 verification gates](../../../../../../../docs/soak.md#p24-preparation-verification)
 before attempting a multi-hour run.
+
+`comparison-jvm-int.yaml` extends the historical comparison with Serial GC
+and `-Xint`, without an explicit heap cap. It reuses the functions published by
+`comparison-jvm.yaml`. Select it explicitly with the existing comparison keys;
+the original CLI default selection is unchanged. Historical comparison native
+recipes use the standard container builder without `maxHeap`.

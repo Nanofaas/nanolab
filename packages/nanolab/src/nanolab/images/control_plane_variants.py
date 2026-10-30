@@ -65,7 +65,7 @@ DEFAULT_JVM_TUNING = "-XX:+UseSerialGC -XX:TieredStopAtLevel=1"
 
 
 def jvm_optimization(variant: ControlPlaneVariant) -> str:
-    """Return the JIT tier this variant's tuning selects, 'c1' or 'c2'.
+    """Return interpreted, c1 or c2 from the effective JVM tuning.
 
     Derived from the effective JVM_TUNING — the variant's own, or the
     Dockerfile default when it sets none — so callers never have to reason
@@ -78,6 +78,8 @@ def jvm_optimization(variant: ControlPlaneVariant) -> str:
     if variant.runtime is not None:
         raise ValueError(f"{variant.key} declares its runtime; use runtime_class")
     tuning = variant.build_env.get("JVM_TUNING", DEFAULT_JVM_TUNING)
+    if "-Xint" in tuning.split():
+        return "interpreted"
     return "c1" if "TieredStopAtLevel=1" in tuning else "c2"
 
 
@@ -193,6 +195,12 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
         ),
         build_env=_env(NATIVE_OPTIMIZATION="3", NATIVE_GC="G1"),
     ),
+    ControlPlaneVariant(
+        key="jvm-int",
+        label="JVM (serial GC, interpreter only)",
+        rationale="August settings with JIT disabled and container-aware heap sizing.",
+        build_env=_env(JVM_TUNING="-XX:+UseSerialGC -Xint"),
+    ),
 )
 
 VARIANTS_BY_KEY: Mapping[str, ControlPlaneVariant] = MappingProxyType(
@@ -217,7 +225,10 @@ def runtime_class(variant: ControlPlaneVariant) -> RuntimeClass:
         if level == "2":
             return "native-o2"
         raise ValueError(f"{variant.key} has no runtime class for -O{level}")
-    return "c1" if jvm_optimization(variant) == "c1" else "tiered"
+    optimization = jvm_optimization(variant)
+    if optimization == "interpreted":
+        return "interpreted"
+    return "c1" if optimization == "c1" else "tiered"
 
 
 # Experiment 01: the control plane's own footprint in front of one function.

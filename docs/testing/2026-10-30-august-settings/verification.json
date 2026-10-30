@@ -1,0 +1,23 @@
+{
+  "sourceBase": "ff8823b",
+  "nanofaasPin": "c0d15e3d1c132ee9691f4d3dd34b9b611b92cedd",
+  "targetedTestsPassed": 381,
+  "typeErrors": 0,
+  "typeWarnings": 0,
+  "importContractsKept": 5,
+  "importContractsBroken": 0,
+  "officialRecipeValidation": [
+    "jvm-int",
+    "native-os",
+    "native-o3",
+    "native-o3-g1"
+  ],
+  "localBuildAndStartup": [
+    "jvm-int"
+  ],
+  "wheelAndSdistBuild": "passed",
+  "extractedWheelSmoke": "passed",
+  "fullSuiteRerun": false,
+  "nativeDefaultHeapBuildsRerun": false,
+  "cloudPilotRun": false
+}

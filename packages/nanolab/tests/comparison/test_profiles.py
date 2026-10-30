@@ -7,6 +7,7 @@ from nanolab.comparison.profiles import comparison_profiles, declared_options
 from nanolab.workspace.paths import discover_tool_root
 
 JVM = {
+    "jvm-int": ["-XX:+UseSerialGC", "-Xint"],
     "jvm": ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1"],
     "jvm-g1": ["-XX:+UseG1GC", "-XX:TieredStopAtLevel=1"],
     "jvm-c2": ["-XX:+UseSerialGC"],
@@ -60,7 +61,8 @@ def test_profile_declares_runtime_and_only_baseline_functions(key):
         optimization, gc, monitoring = NATIVE[key]
         assert options["mode"] == "native"
         assert options["native"] == {
-            "builder": "host",
+            "builder": "container",
+            "distribution": "oracle" if gc == "G1" else "community",
             "optimization": optimization,
             "gc": gc,
             "monitoring": monitoring,
@@ -130,3 +132,58 @@ def test_flat_or_relaxed_spring_configuration_cannot_override_scheduler(
     profile.write_text(yaml.safe_dump(recipe))
     with pytest.raises(ValueError, match="scheduler"):
         declared_options(profile)
+
+
+def test_august_settings_add_only_interpreter():
+    from nanolab.cli.comparison import DEFAULT_VARIANTS
+    from nanolab.comparison.matrix import build_matrix
+    from nanolab.images.control_plane_variants import resolve_variants, runtime_class
+
+    root = discover_tool_root()
+    profiles = comparison_profiles(root, ("jvm-int",))
+    assert tuple(profiles) == ("jvm", "jvm-int")
+    baseline = yaml.safe_load(profiles["jvm"].read_text())
+    interpreted = yaml.safe_load(profiles["jvm-int"].read_text())
+    assert interpreted["controlPlane"]["modules"] == baseline["controlPlane"]["modules"]
+    assert interpreted["controlPlane"]["jvm"]["args"] == ["-XX:+UseSerialGC", "-Xint"]
+    assert "functions" not in interpreted
+    assert declared_options(profiles["jvm-int"])["variant"] == "jvm-int"
+    assert runtime_class(resolve_variants(("jvm-int",))[0]) == "interpreted"
+    assert "jvm-int" not in DEFAULT_VARIANTS
+    keys = (
+        "jvm",
+        "jvm-g1",
+        "jvm-c2",
+        "jvm-g1-c2",
+        "native-os",
+        "native-o3",
+        "native-o3-g1",
+        "jvm-int",
+    )
+    variants = resolve_variants(keys)
+    assert len(build_matrix(variants, 3)) == 24
+    for key, profile in comparison_profiles(root, keys).items():
+        options = declared_options(profile)
+        args = options["jvm_args"]
+        assert isinstance(args, list)
+        assert not any(arg.startswith(("-Xmx", "-Xms")) for arg in args)
+        if key.startswith("native-"):
+            native = options["native"]
+            assert isinstance(native, dict)
+            assert "maxHeap" not in native
+            assert native["builder"] == "container"
+    for name, cpu, memory in (
+        ("cpu1", 1, 2048),
+        ("cpu2", 2, 2048),
+        ("mem1024", 2, 1024),
+        ("mem512", 2, 512),
+    ):
+        scenario = yaml.safe_load(
+            (root / "scenarios" / f"runtime-comparison-{name}.yaml").read_text()
+        )
+        assert scenario["loadProfile"] == "comparison"
+        assert scenario["functions"] == ["word-stats-java", "word-stats-javascript"]
+        assert scenario["resources"]["control-plane"]["limits"] == {
+            "cpu": cpu,
+            "memoryMiB": memory,
+        }

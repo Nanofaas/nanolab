@@ -11,7 +11,7 @@ controlPlane:
   build:
     mode: native
     variant: native-o3-g1
-    builder: host
+    builder: container
     native:
       optimization: '3'
       gc: G1

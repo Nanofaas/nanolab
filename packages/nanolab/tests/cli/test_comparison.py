@@ -803,3 +803,29 @@ def test_runtime_gc_subset_prepares_qr_publisher_and_resumes(command_case, monke
     result = invoke("--variants", "native-o3")
     assert result.exit_code == 0, (result.output, result.exception)
     assert "2 of 2 cells" in result.output
+
+
+def test_august_interpreter_reuses_publisher_and_resumes(command_case):
+    invoke, events, root, *_ = command_case
+    result = invoke("--variants", "jvm-int", "--repetitions", "1")
+    assert result.exit_code == 0, (result.output, result.exception)
+    manifest = json.loads((root / "comparison-manifest.json").read_text())
+    profiles = manifest["identity"]["profiles"]
+    assert set(profiles) == {"jvm", "jvm-int"}
+    assert profiles["jvm-int"]["options"]["jvm_args"] == [
+        "-XX:+UseSerialGC",
+        "-Xint",
+    ]
+    assert profiles["jvm-int"]["options"]["functions"] == []
+    assert [f["sdk"] for f in profiles["jvm"]["options"]["functions"]] == [
+        "java",
+        "javascript",
+    ]
+    events.clear()
+    result = invoke("--variants", "jvm-int", "--repetitions", "1")
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "provision" not in events
+    assert not any(
+        isinstance(event, tuple) and event[0] in {"publication", "cell"}
+        for event in events
+    )

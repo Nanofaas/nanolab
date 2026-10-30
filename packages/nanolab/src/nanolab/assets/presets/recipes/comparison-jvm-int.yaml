@@ -1,0 +1,19 @@
+schemaVersion: 2
+name: comparison-jvm-int
+registry:
+  repository: 127.0.0.1:5000/nanofaas
+  tag: comparison
+controlPlane:
+  modules:
+  - k8s-deployment-provider
+  - async-queue
+  - build-metadata
+  build:
+    mode: jvm
+    variant: jvm-int
+  container:
+    image: control-plane-jvm-int
+  jvm:
+    args:
+    - -XX:+UseSerialGC
+    - -Xint

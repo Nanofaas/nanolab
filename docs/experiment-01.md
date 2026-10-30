@@ -215,3 +215,7 @@ nanolab pins `sonata-engine`/`sonata-tasks` 0.6.16 and `azure-vm-sdk` 0.7.0.
 The explicit runtime group reuses the existing variant keys with dedicated QR
 recipes. See [runtime GC protocol](runtime-gc-comparison.md) for pilot presets,
 selection, limits and verification status. Original defaults remain unchanged.
+
+For the selected rerun of the August GC/JIT/native study, use
+[August settings plus interpreter](august-runtime-comparison.md). This
+experiment-01 protocol and its 64 MiB heap are separate.

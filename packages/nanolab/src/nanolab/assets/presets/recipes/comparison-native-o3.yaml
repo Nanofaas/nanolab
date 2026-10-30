@@ -11,7 +11,7 @@ controlPlane:
   build:
     mode: native
     variant: native-o3
-    builder: host
+    builder: container
     native:
       optimization: '3'
       gc: serial

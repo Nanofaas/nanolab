@@ -110,7 +110,7 @@ from nanolab.tasks.recipes.remote import remote_recipe_root
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.workspace.paths import bundled_assets_root, default_tool_paths
 
-DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
+DEFAULT_VARIANTS = tuple(key for key in VARIANTS_BY_KEY if key != "jvm-int")
 EXPERIMENT_01_DEFAULT_VARIANTS = tuple(EXPERIMENT_01_VARIANTS_BY_KEY)
 EXPERIMENT_02_DEFAULT_CONFIGURATIONS = tuple(
     key for key in CONFIGURATIONS_BY_KEY if key != "faasd"

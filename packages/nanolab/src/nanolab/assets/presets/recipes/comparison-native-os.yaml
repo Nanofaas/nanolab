@@ -11,7 +11,7 @@ controlPlane:
   build:
     mode: native
     variant: native-os
-    builder: host
+    builder: container
     native:
       optimization: s
       gc: serial

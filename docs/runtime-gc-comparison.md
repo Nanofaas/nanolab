@@ -1,5 +1,7 @@
 # GC, JIT and native comparison
 
+**Campaign decision, 30 October:** use [August settings plus interpreter](august-runtime-comparison.md). The QR/64 MiB pilot below is a separate retained protocol and is not the selected August rerun.
+
 Use the existing `compare` command with the experiment-01 arrival calendar.
 Select the runtime group explicitly (the original default remains unchanged):
 
