@@ -36,8 +36,9 @@ are different controller signals, not equivalent latency objectives. Do not
 retune one arm after seeing its result.
 
 Run all three with NanoLab's `run` command and a managed Azure Spot environment,
-using distinct names from other campaigns. Keep the same dedicated stack and
-loadgen VMs across arms and release them through NanoLab after the campaign.
+using distinct names from other campaigns. Each arm uses a fresh dedicated VM
+pair of the same SKU, created and released by NanoLab itself (no --keep). This
+retains the workflow-owned lifecycle; cloud-host variation remains a limitation.
 A pilot uses one run per mode, in declared order; later repetitions should
 balance order. Use an 8-vCPU/32-GiB stack and an 8-vCPU/32-GiB loadgen to keep
 builds and generator capacity separate from measured container limits.
@@ -48,3 +49,7 @@ HTTP outcomes, generator drops and resources. The legacy k6 `served` and
 correctness or success rate. Preserve failed acceptance checks and partial raw
 results. A planning pass does not prove the governor responds; runtime results
 must establish that the workload actually exercises it.
+
+On the operator VM, set NANOLAB_WORKSPACE and TMPDIR under /data and pass an
+explicit /data run directory for every arm. Fetch results before workflow-owned
+VM release. Do not interpret an absent remote VM as loss of the controller copy.
