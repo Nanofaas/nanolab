@@ -927,6 +927,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     concurrency_report: WriteConcurrencyReport | None = None,
     drain_minutes: int | None = None,
     management_url: str | None = None,
+    fixed_concurrency: int | None = None,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     # First, because it has to sample while the stack is still up and before the
@@ -958,7 +959,11 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
         )
     if concurrency_watchers is not None:
         after.append(
-            ReportCoTenancyTask(watchers=concurrency_watchers, series_dir=run_dir)
+            ReportCoTenancyTask(
+                watchers=concurrency_watchers,
+                series_dir=run_dir,
+                fixed_concurrency=fixed_concurrency,
+            )
         )
     elif concurrency_watcher is not None:
         after.append(
@@ -1097,7 +1102,7 @@ def _build_concurrency_report(
     cores = shared_cpuset(config)
     conditions = [
         f"mode {mode}",
-        f"ceiling {CONCURRENCY_CEILING}",
+        f"ceiling {config.fixed_concurrency or CONCURRENCY_CEILING}",
         f"queue {CONCURRENCY_QUEUE_SIZE}",
     ]
     if budget:
@@ -1345,7 +1350,9 @@ def build_loadtest_plan(
         tool_root,
         scaling_config,
         prebuilt_function_images,
-        concurrency=CONCURRENCY_CEILING if config.concurrency_control else 4,
+        concurrency=(config.fixed_concurrency or CONCURRENCY_CEILING)
+        if config.concurrency_control
+        else 4,
         resources_for=(
             (lambda name: concurrency_function_resources(config, name))
             if config.concurrency_control
@@ -1484,6 +1491,7 @@ def build_loadtest_plan(
         watcher=watcher,
         concurrency_watcher=concurrency_watcher,
         concurrency_watchers=concurrency_watchers,
+        fixed_concurrency=config.fixed_concurrency,
         replica_probe=replica_probe,
         bindings=bindings,
         request=request,

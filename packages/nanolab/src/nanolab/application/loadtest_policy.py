@@ -188,6 +188,8 @@ def end_to_end_p95_budget_ms(config: ScenarioConfig) -> int:
 
 def controller_settings(config: ScenarioConfig) -> dict[str, object]:
     """Return the concurrency controller's settings for the scenario's mode."""
+    if config.concurrency_mode == "FIXED":
+        return {"mode": "FIXED"}
     if config.concurrency_mode == "SOJOURN":
         # Held to the SAME promise the load generator checks. For this mode
         # `targetLatencyMs` is end-to-end rather than service time, so reusing the

@@ -53,3 +53,22 @@ must establish that the workload actually exercises it.
 On the operator VM, set NANOLAB_WORKSPACE and TMPDIR under /data and pass an
 explicit /data run directory for every arm. Fetch results before workflow-owned
 VM release. Do not interpret an absent remote VM as loss of the controller copy.
+
+## B1.1: fixed baselines
+
+B1.1 reruns the three controllers together with fixed limits 1, 2, 4 and 8.
+The four `concurrency-comparison-fixedN.yaml` scenarios differ from the common
+adaptive scenario only by mode FIXED and the explicitly selected fixedConcurrency.
+FIXED is an existing NanoFaaS mode, not a new scheduling algorithm. Modules,
+images, resource limits, replicas, corpus, arrival schedule, queue capacity,
+timeouts and retries are held constant. Function registration uses N as its
+configured concurrency; the adaptive arms retain the ceiling of 8. The fixed
+runs record the same per-function telemetry but validate a constant limit and
+observed work rather than requiring the controller to change its target.
+
+The initial B1 run failed before measurement because the legacy Java-lite
+Docker contexts omitted the logging-runtime Gradle project. Correct all three
+Java-lite contexts together, preserve the failure evidence, and freeze that fix
+for every B1.1 arm. Do not append fixed baselines to an incomplete B1 run and
+present them as a completed seven-arm comparison. A single-run B1.1 pilot is
+still preliminary; use repeated, balanced orders before paper-level inference.

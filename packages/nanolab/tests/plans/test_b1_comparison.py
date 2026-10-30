@@ -123,7 +123,13 @@ def test_openloop_uses_selected_corpus(tmp_path):
     assert bodies == [{"input": {"text": "corpus-only", "topN": 3}}] * 2
 
 
-def test_payload_uses_the_synced_loadgen_repository(tmp_path):
+def test_payload_uses_the_synced_loadgen_repository(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "nanolab.application.loadtest_policy.resolve_function_definition",
+        lambda function: SimpleNamespace(family="word-stats"),
+    )
     from nanolab.application.loadtest_policy import payload_corpus_path
 
     corpus = tmp_path / "functions/test-data/word-stats/performance-medium.json"
@@ -144,3 +150,80 @@ def test_payload_uses_the_synced_loadgen_repository(tmp_path):
     ) == Path(
         "/home/azureuser/nanofaas/functions/test-data/word-stats/performance-medium.json"
     )
+
+
+@pytest.mark.parametrize("limit", [1, 2, 4, 8])
+def test_b11_fixed_baselines_keep_the_common_protocol(limit):
+    from nanolab.application.loadtest_policy import concurrency_control_setup
+
+    common = yaml.safe_load(
+        (ASSETS / "presets/scenarios/concurrency-comparison-adaptive.yaml").read_text()
+    )
+    fixed = yaml.safe_load(
+        (
+            ASSETS / f"presets/scenarios/concurrency-comparison-fixed{limit}.yaml"
+        ).read_text()
+    )
+    config = ScenarioConfig.model_validate(fixed)
+    assert config.fixed_concurrency == limit
+    assert concurrency_control_setup(config)["concurrencyControl"] == {"mode": "FIXED"}
+    fixed.pop("fixedConcurrency")
+    fixed["concurrencyMode"] = "ADAPTIVE_PER_POD"
+    assert fixed == common
+
+
+def test_fixed_mode_requires_explicit_valid_limit():
+    for limit in (None, 0, 9):
+        with pytest.raises(ValueError, match="fixedConcurrency"):
+            ScenarioConfig.model_validate(
+                {
+                    "workflow": "loadtest",
+                    "functions": ["word-stats-java"],
+                    "concurrencyControl": True,
+                    "concurrencyMode": "FIXED",
+                    "fixedConcurrency": limit,
+                }
+            )
+
+
+def test_fixed_observations_do_not_require_adaptive_response():
+    from nanolab.tasks.loadtest.concurrency import (
+        ConcurrencySample,
+        ConcurrencySummary,
+        verify_fixed_concurrency,
+    )
+
+    summary = ConcurrencySummary(
+        function_name="fn",
+        samples=(
+            ConcurrencySample(elapsed_seconds=0, effective=1, in_flight=0),
+            ConcurrencySample(elapsed_seconds=1, effective=1, in_flight=1),
+        ),
+    )
+    verify_fixed_concurrency(summary, 1)
+    with pytest.raises(RuntimeError, match="fixed"):
+        verify_fixed_concurrency(summary, 2)
+    with pytest.raises(RuntimeError):
+        verify_fixed_concurrency(ConcurrencySummary(function_name="fn"), 1)
+
+
+def test_fixed_task_records_a_constant_single_slot_series(monkeypatch):
+    from types import SimpleNamespace
+
+    from sonata_engine import TaskInputs
+
+    from nanolab.tasks.loadtest import LoadtestOutcome, ReportCoTenancyTask
+    from nanolab.tasks.loadtest.concurrency import ConcurrencySample, ConcurrencySummary
+
+    summary = ConcurrencySummary(
+        function_name="fn",
+        samples=(ConcurrencySample(elapsed_seconds=1, effective=1, in_flight=1),),
+    )
+    outcome = LoadtestOutcome(k6=object())
+    monkeypatch.setattr(
+        "nanolab.tasks.loadtest.load_outcome", lambda inputs, title: outcome
+    )
+    task = ReportCoTenancyTask(
+        watchers=SimpleNamespace(summaries=lambda: {"fn": summary}), fixed_concurrency=1
+    )
+    assert task.run(TaskInputs.empty()).value.concurrency is summary

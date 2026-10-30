@@ -23,6 +23,7 @@ from nanolab.tasks.loadtest.concurrency import (
     ConcurrencyWatcher,
     ConcurrencyWatcherGroup,
     verify_concurrency_cycle,
+    verify_fixed_concurrency,
     verify_observable,
     write_series,
 )
@@ -233,10 +234,12 @@ class ReportCoTenancyTask(Task[LoadtestOutcome]):
         watchers: ConcurrencyWatcherGroup,
         series_dir: Path | None = None,
         title: str = "Report co-tenancy",
+        fixed_concurrency: int | None = None,
     ) -> None:
         """Record the watcher group and where to write each function's series."""
         self.title = title
         self._watchers = watchers
+        self._fixed_concurrency = fixed_concurrency
         self._series_dir = series_dir
 
     @override
@@ -250,7 +253,10 @@ class ReportCoTenancyTask(Task[LoadtestOutcome]):
                 )
             print(summary.describe())
         for summary in summaries.values():
-            verify_observable(summary)
+            if self._fixed_concurrency is None:
+                verify_observable(summary)
+            else:
+                verify_fixed_concurrency(summary, self._fixed_concurrency)
         # The neighbour's series is the point, so the outcome keeps the function
         # the run was built around and the files keep the rest.
         first = next(iter(summaries.values()), None)

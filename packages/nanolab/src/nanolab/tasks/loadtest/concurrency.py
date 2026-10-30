@@ -362,6 +362,25 @@ def verify_observable(summary: ConcurrencySummary) -> None:
         )
 
 
+def verify_fixed_concurrency(summary: ConcurrencySummary, expected: int) -> None:
+    """Verify measured fixed limits without demanding an adaptive trajectory."""
+    if not summary.samples:
+        raise RuntimeError(
+            f"no fixed concurrency readings for {summary.function_name!r}"
+        )
+    if any(sample.effective != expected for sample in summary.samples):
+        raise RuntimeError(
+            f"fixed concurrency differs from {expected} for {summary.function_name!r}"
+        )
+    if not any(
+        sample.in_flight > 0 or (sample.throughput_rps or 0) > 0
+        for sample in summary.samples
+    ):
+        raise RuntimeError(
+            f"fixed concurrency run has no observed work for {summary.function_name!r}"
+        )
+
+
 def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
     """Raise unless the governor took concurrency back while the function was busy.
 
