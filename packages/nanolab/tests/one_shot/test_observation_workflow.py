@@ -457,6 +457,8 @@ def run_observation_workflow(
     monkeypatch.setattr(observation, "collect_container_cgroup", cgroup)
     monkeypatch.setattr(experiment, "runtime_inventory", lambda *a, **k: [])
     original_http = httpx.Client
+    queue_admitted = dict.fromkeys(node_ids, 0)
+    queue_scrapes = dict.fromkeys(node_ids, 0)
 
     def respond(request):
         path = request.url.path
@@ -497,6 +499,9 @@ def run_observation_workflow(
                 "dispatchAttempt": "1",
                 "occupancySeconds": 0.1,
             }
+        elif path.startswith("/v1/functions/") and path.endswith(":invoke"):
+            queue_admitted[node] += 1
+            result = {"status": "success"}
         elif path.startswith("/v1/functions/"):
             result = {
                 "runtimeMode": "HTTP",
@@ -522,11 +527,20 @@ def run_observation_workflow(
                 "nodeId": node,
                 "producedAt": data["producedAt"],
             }
-        elif path.endswith("/prometheus") or path.endswith("/metrics"):
+        elif path.endswith("/prometheus") and queue_scrapes[node] < 2:
+            # Queue admission is a required preflight; later diagnostic scrapes
+            # still fail, preserving the test's partial-evidence coverage.
+            queue_scrapes[node] += 1
             return httpx.Response(
-                503
-            )  # Missing diagnostic metrics do not stop usable plans.
-        elif path.endswith("/events"):
+                200,
+                text=(
+                    f'sync_queue_admitted_total{{function="{names[0]}"}} '
+                    f"{queue_admitted[node]}\n"
+                    f'sync_queue_capacity{{function="{names[0]}"}} 100\n'
+                    'sync_queue_capacity{function=""} 200\n'
+                ),
+            )
+        elif path.endswith(("/prometheus", "/metrics", "/events")):
             return httpx.Response(503)
         elif path.endswith("/prepare") or path.endswith("/activate"):
             if (

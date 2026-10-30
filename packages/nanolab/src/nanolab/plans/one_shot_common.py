@@ -330,10 +330,7 @@ def _control_plane(
             ),
             f"--nanofaas.offload.one-shot.enabled={boolean}",
             "--sync-queue.enabled="
-            + str(
-                (not edge and terminal_queueing)
-                or (edge and baseline_depth is not None)
-            ).lower(),
+            + str(terminal_queueing or (edge and baseline_depth is not None)).lower(),
         ]
         if edge and baseline_depth is not None:
             cloud = next(

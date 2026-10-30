@@ -56,6 +56,7 @@ from nanolab.tasks.one_shot.preflight import (
     validate_strict_cgroup,
 )
 from nanolab.tasks.one_shot.qualification import configuration_for_node, configure_node
+from nanolab.tasks.one_shot.queue_telemetry import queue_samples
 from nanolab.tasks.one_shot.trace import (
     oracle_entries,
     request_schedule,
@@ -283,6 +284,47 @@ def native_profile(
     )
 
 
+def verify_queue_admission(http, endpoint, function, payload):
+    """Refuse a campaign unless a real local invocation enters the sync queue."""
+
+    def snapshot():
+        response = http.get(endpoint.replace(":8080", ":9090") + "/actuator/prometheus")
+        response.raise_for_status()
+        values = {
+            (row["name"], row["labels"].get("function", "")): row["value"]
+            for row in queue_samples(response.text)
+        }
+        required = (
+            ("sync_queue_admitted_total", function),
+            ("sync_queue_capacity", function),
+            ("sync_queue_capacity", ""),
+        )
+        if any(values.get(key) is None for key in required):
+            raise RuntimeError("queue preflight metrics missing")
+        return values
+
+    before = snapshot()
+    response = http.post(
+        endpoint + f"/v1/functions/{function}:invoke",
+        json={"input": payload},
+        headers={"Idempotency-Key": "queue-preflight:" + uuid4().hex},
+    )
+    response.raise_for_status()
+    if str(response.json().get("status", "")).upper() != "SUCCESS":
+        raise RuntimeError("queue preflight invocation failed")
+    after = snapshot()
+    key = ("sync_queue_admitted_total", function)
+    if after[key] <= before[key]:
+        raise RuntimeError("queue admission did not increase: " + endpoint)
+    return {
+        "function": function,
+        "admittedBefore": before[key],
+        "admittedAfter": after[key],
+        "functionQueueCapacity": after["sync_queue_capacity", function],
+        "globalQueueCapacity": after["sync_queue_capacity", ""],
+    }
+
+
 class WarmInstances(Task):
     """Warm the balanced vectors and validate actual kernel quotas."""
 
@@ -360,6 +402,15 @@ class WarmInstances(Task):
                             run.run_dir / f"{node}-{name}-r{replica}-warm.json",
                             {"invocation": result, "cgroup": cgroup},
                         )
+                function = next(iter(vector))
+                queue = verify_queue_admission(
+                    http,
+                    endpoint,
+                    function,
+                    run.topology.node_function_settings[node][function].input,
+                )
+                save(run.run_dir / f"{node}-queue-preflight.json", queue)
+                event(run.run_dir, "queue-admission-verified", node=node, **queue)
                 event(
                     run.run_dir,
                     "instances-warm",

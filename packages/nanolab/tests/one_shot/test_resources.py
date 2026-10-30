@@ -375,6 +375,7 @@ def test_image_archive_keeps_all_named_images_for_oci_import(
 
 
 @pytest.mark.parametrize("failure", [None, "transfer", "image", "socket"])
+@pytest.mark.parametrize("node_id", ["edge-0", "cloud"])
 @pytest.mark.parametrize("terminal_queueing", [False, True])
 @pytest.mark.parametrize("baseline", [False, True])
 @pytest.mark.parametrize("scientific", [False, True])
@@ -386,6 +387,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
     tmp_path,
     monkeypatch,
     failure,
+    node_id,
     terminal_queueing,
     baseline,
     scientific,
@@ -406,7 +408,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
     resources = build_one_shot_resources(
         config(), environment, run_id="socket", repo_root=tmp_path
     )
-    node = resources.nodes["cloud" if terminal_queueing else "edge-0"]
+    node = resources.nodes[node_id]
     monkeypatch.setattr(
         node.provider,
         "transfer_to",
@@ -501,10 +503,8 @@ def test_control_plane_namespace_and_compensated_cleanup(
             assert "--cpus" not in launch
         assert "--group-add" in launch
         assert launch[launch.index("--group-add") + 1] == "999"
-        assert (
-            f"--sync-queue.enabled={str(terminal_queueing or baseline).lower()}"
-            in launch
-        )
+        queued = terminal_queueing or (baseline and node_id != "cloud")
+        assert f"--sync-queue.enabled={str(queued).lower()}" in launch
         assert "--nanofaas.admission.profile=SYNC_QUEUE" in launch
         assert "--nanofaas.metrics.profile=advanced" in launch
         queue_logger = (
@@ -539,7 +539,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
             if forecaster
             else ["--nanofaas.forecasting.window=1s"]
         )
-        if baseline and not terminal_queueing:
+        if baseline and node_id != "cloud":
             assert "--nanofaas.offload.target-url=http://10.0.0.1:8080" in launch
             assert "--sync-queue.max-depth=2" in launch
         resource.release(inputs, url)

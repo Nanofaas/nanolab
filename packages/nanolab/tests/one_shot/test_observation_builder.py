@@ -81,3 +81,40 @@ def test_added_external_source_file_invalidates_fingerprint(tmp_path):
     (source / "new-function.yaml").write_text("new runtime definition")
     with pytest.raises(ValueError, match="source inventory changed"):
         verify_files(tmp_path, frozen)
+
+
+def test_queue_preflight_requires_real_admission_and_records_capacity():
+    import httpx
+    import pytest
+
+    from nanolab.tasks.one_shot.observation import verify_queue_admission
+
+    for enabled in (False, True):
+        invoked = False
+
+        def handle(request, enabled=enabled):
+            nonlocal invoked
+            if request.method == "POST":
+                invoked = True
+                return httpx.Response(200, json={"status": "success"})
+            count = 1 if enabled and invoked else 0
+            return httpx.Response(
+                200,
+                text=(
+                    f'sync_queue_admitted_total{{function="f"}} {count}\n'
+                    'sync_queue_capacity{function="f"} 100\n'
+                    'sync_queue_capacity{function=""} 200\n'
+                ),
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            if enabled:
+                result = verify_queue_admission(client, "http://node:8080", "f", {})
+                assert result["admittedAfter"] - result["admittedBefore"] == 1
+                assert result["functionQueueCapacity"] == 100
+                assert result["globalQueueCapacity"] == 200
+            else:
+                with pytest.raises(
+                    RuntimeError, match="queue admission did not increase"
+                ):
+                    verify_queue_admission(client, "http://node:8080", "f", {})
