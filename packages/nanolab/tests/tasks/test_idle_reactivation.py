@@ -289,3 +289,89 @@ def test_offline_lifecycle_rechecks_raw_observations_outside_idle_windows():
     assert verify_lifecycle(summary, samples)
     samples[20]["control_plane"][0]["uid"] = "replaced"
     assert not verify_lifecycle(summary, samples)
+
+
+@pytest.mark.parametrize("operation", ["observe", "probe"])
+def test_remote_measurement_commands_preserve_deadlines_with_vm_executor(
+    tmp_path, operation
+):
+    import json
+
+    from sonata_tasks.execution.adapters import VmCommandTaskExecutor
+
+    from nanolab.config.idle_reactivation import IdleReactivationConfig
+    from nanolab.tasks.idle_reactivation_runtime import (
+        LifecycleWatcher,
+        RunIdleReactivation,
+    )
+    from tests.cli.test_execution_bindings import _Result
+    from tests.plans.test_loadtest import NoopPrometheus
+
+    calls = []
+    records = []
+    for part in range(6):
+        identity = {
+            "request_id": str(part),
+            "phase": "cycle",
+            "cycle": 0,
+            "part": part,
+            "function": "word-stats-java",
+        }
+        records.extend(
+            [
+                dict(identity, event="started"),
+                dict(identity, event="response", valid=True),
+            ]
+        )
+
+    class Runner:
+        def run_vm_command(self, argv, **kwargs):
+            calls.append(argv)
+            if "kubectl" in argv:
+                stdout = json.dumps(
+                    {
+                        "items": [
+                            {
+                                "kind": "Deployment",
+                                "metadata": {"name": "fn-word-stats-java"},
+                                "spec": {
+                                    "replicas": 0,
+                                    "selector": {
+                                        "matchLabels": {"app": "fn-word-stats-java"}
+                                    },
+                                },
+                            }
+                        ]
+                    }
+                )
+            else:
+                stdout = "\n".join(json.dumps(r) for r in records)
+            return _Result(stdout=stdout)
+
+    executor = VmCommandTaskExecutor(Runner(), target_key="azure:test")
+    if operation == "observe":
+        watcher = LifecycleWatcher(
+            executor, "word-stats-java", "nanofaas", tmp_path / "lifecycle.jsonl"
+        )
+        sample = watcher.observe()
+        assert "error" not in sample, sample
+        assert sample["desired"] == 0
+    else:
+        task = RunIdleReactivation(
+            "word-stats-java",
+            "scale-to-zero",
+            "nanofaas",
+            IdleReactivationConfig(),
+            executor,
+            NoopPrometheus(),
+            None,
+            tmp_path,
+            tmp_path / "remote",
+            "http://stack:30080",
+        )
+        assert len(task._probe("cycle")) == 6
+    assert calls[0][:3] == (
+        "timeout",
+        "--kill-after=5s",
+        "15s" if operation == "observe" else "300s",
+    )

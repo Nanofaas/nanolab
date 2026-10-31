@@ -12,7 +12,6 @@ from typing import Any, override
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.bindings import CommandTaskExecutor
-from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.idle_reactivation import IdleReactivationConfig
@@ -98,6 +97,9 @@ class LifecycleWatcher:
                         summary="Observe B6 pod lifecycle",
                         role="stack",
                         argv=(
+                            "timeout",
+                            "--kill-after=5s",
+                            "15s",
                             "sudo",
                             "kubectl",
                             "--request-timeout=5s",
@@ -108,7 +110,6 @@ class LifecycleWatcher:
                             "-o",
                             "json",
                         ),
-                        options=CommandOptions(timeout_seconds=15),
                     )
                 )
                 if result.return_code != 0:
@@ -201,9 +202,8 @@ class RunIdleReactivation(Task[dict[str, Any]]):
                 CommandTaskSpec(
                     task_id=f"b6-{phase}-{cycle}",
                     summary=f"B6 {phase} {cycle}",
-                    argv=argv,
+                    argv=("timeout", "--kill-after=5s", "300s", *argv),
                     role="loadgen",
-                    options=CommandOptions(timeout_seconds=300),
                 )
             )
         finally:

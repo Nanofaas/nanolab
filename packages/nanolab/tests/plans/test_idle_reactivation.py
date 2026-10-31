@@ -184,3 +184,64 @@ def test_azure_probe_uses_the_same_resolved_home_as_provisioning(
         if isinstance(t.task, RunIdleReactivation)
     ]
     assert all(str(t.remote_home) == "/home/azureuser" for t in tasks)
+
+
+@pytest.mark.nanofaas
+def test_platform_commands_translate_controller_checkout_through_real_vm_bindings(
+    tmp_path, nanofaas_root, monkeypatch
+):
+    from sonata_engine import TaskOutcome
+
+    from nanolab.application.execution import build_role_bindings
+    from nanolab.plans.idle_reactivation import build_idle_reactivation_plan
+    from nanolab.tasks.idle_reactivation_runtime import (
+        RunIdleReactivation,
+        VerifyIdlePair,
+    )
+    from tests.cli.test_execution_bindings import RecordingVmProvider
+
+    class Provider(RecordingVmProvider):
+        def exec_argv(self, request, argv, **kwargs):
+            result = super().exec_argv(request, argv, **kwargs)
+            result.stdout = (
+                "10.43.0.7" if "get service control-plane" in " ".join(argv) else ""
+            )
+            return result
+
+    provider = Provider()
+
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "azure",
+            "roles": {"stack": {"name": "stack"}, "loadgen": {"name": "loadgen"}},
+            "azure": {"resource_group": "test", "location": "westeurope"},
+        }
+    )
+    bindings, _ = build_role_bindings(
+        environment, vm_provider=provider, repo_root=nanofaas_root
+    )
+    monkeypatch.setattr(
+        RunIdleReactivation, "run", lambda self, inputs: TaskOutcome(value={})
+    )
+    monkeypatch.setattr(
+        VerifyIdlePair, "run", lambda self, inputs: TaskOutcome(value={})
+    )
+    build_idle_reactivation_plan(
+        ScenarioConfig.model_validate(idle_scenario()),
+        environment,
+        bindings,
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path / "b6",
+        repo_root=nanofaas_root,
+    ).run()
+    calls = [(argv, directory) for _, argv, _, directory, _ in provider.exec_calls]
+    assert calls
+    assert all(directory == "/home/azureuser/nanofaas" for _, directory in calls)
+    assert any(argv[0] == "./gradlew" for argv, _ in calls)
+    assert [argv[1] for argv, _ in calls if argv[0] == "helm"] == [
+        "upgrade",
+        "uninstall",
+        "upgrade",
+        "uninstall",
+    ]

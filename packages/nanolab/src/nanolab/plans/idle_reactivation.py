@@ -121,7 +121,7 @@ def build_idle_reactivation_plan(
                 build_control_plane=False,
                 control_plane_image=request.control_plane_image_reference(),
             )
-        platform = add_platform(workflow, request, executor=executor, cwd=root)
+        platform = add_platform(workflow, request, executor=executor, cwd=repo_root)
         workflow.add(
             RunIdleReactivation(
                 function=measured.name,
