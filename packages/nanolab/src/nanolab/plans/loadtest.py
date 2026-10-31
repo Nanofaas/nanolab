@@ -182,6 +182,7 @@ def _default_prometheus_queries(
     heap_metrics_required: bool = True,
     container_functions: tuple[str, ...] | None = None,
     completion_latency: bool = False,
+    function_runtime: bool = False,
 ) -> tuple[PrometheusQuery, ...]:
     """Return the metrics this run can meaningfully be asked about.
 
@@ -199,6 +200,7 @@ def _default_prometheus_queries(
         heap_metrics_required=heap_metrics_required,
         container_functions=container_functions,
         completion_latency=completion_latency,
+        function_runtime=function_runtime,
     )
 
 
@@ -334,6 +336,13 @@ def _resolve_functions(
         config, repo_root, tool_root, prebuilt_function_images
     )
     functions = tuple(sonata_function(function) for function in resolved)
+    if config.load_profile == "function-runtime":
+        functions = tuple(
+            replace(
+                function, concurrency=2, queue_size=20, timeout_ms=30000, max_retries=3
+            )
+            for function in functions
+        )
     if scaling_config is not None:
         functions = tuple(
             replace(
@@ -764,6 +773,16 @@ def _build_run_k6(
                 )
             ),
             env={
+                **(
+                    {
+                        "NANOFAAS_CONTRACT": str(
+                            payload_path.with_name("runtime-contract.json")
+                        )
+                    }
+                    if config.load_profile == "function-runtime"
+                    and payload_path is not None
+                    else {}
+                ),
                 **k6_environment(config, control_plane_url, target.name),
                 **dict(env_overrides or {}),
             },
@@ -791,6 +810,8 @@ def _default_stages(
 ) -> tuple[
     tuple[str, int], ...
 ]:  # NOSONAR (S8495): stage count depends on the selected profile
+    if config.load_profile == "function-runtime":
+        return ()
     if is_co_tenancy(config):
         # None: the phases live in the script, and a --stage flag would override
         # the scenarios that stagger them.
@@ -933,6 +954,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     management_url: str | None = None,
     fixed_concurrency: int | None = None,
     completion_latency: bool = False,
+    function_runtime: bool = False,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     # First, because it has to sample while the stack is still up and before the
@@ -1023,6 +1045,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                             heap_metrics_required=heap_metrics_required,
                             container_functions=container_functions,
                             completion_latency=completion_latency,
+                            function_runtime=function_runtime,
                         )
                     ),
                     window=window,
@@ -1350,6 +1373,10 @@ def build_loadtest_plan(
     hpa, replica_floor, scaling_config = _autoscaling_setup(config)
     scaling_config = scaling_config or concurrency_control_setup(config)
     root = repo_root or Path.cwd()
+    function_runtime = config.load_profile == "function-runtime"
+    container_metrics = container_metrics or function_runtime
+    if function_runtime:
+        snapshot_lead_seconds = 0.0
     functions, functions_prebuilt = _resolve_functions(
         config,
         repo_root,
@@ -1380,7 +1407,7 @@ def build_loadtest_plan(
         remote_repo_root = Path(
             remote_project_dir(vm_request_for_role(environment, "stack"))
         )
-    k6_events = k6_events or config.load_profile == "mixed"
+    k6_events = k6_events or config.load_profile in ("mixed", "function-runtime")
     script_path, summary_path = _resolve_script_and_summary(
         config,
         environment,
@@ -1392,8 +1419,10 @@ def build_loadtest_plan(
         preserve_attempt=k6_events,
     )
     events_path = summary_path.parent / "k6-events.jsonl" if k6_events else None
-    additional_modules = _additional_modules(
-        config.autoscaling, hpa, config.concurrency_control
+    additional_modules = (
+        ("async-queue", "build-metadata")
+        if function_runtime
+        else _additional_modules(config.autoscaling, hpa, config.concurrency_control)
     )
     request = _build_platform_request(
         backend=backend,
@@ -1499,6 +1528,7 @@ def build_loadtest_plan(
         concurrency_watcher=concurrency_watcher,
         concurrency_watchers=concurrency_watchers,
         completion_latency=config.completion_latency,
+        function_runtime=function_runtime,
         fixed_concurrency=config.fixed_concurrency,
         replica_probe=replica_probe,
         bindings=bindings,
@@ -1539,8 +1569,13 @@ def build_loadtest_plan(
             )
             for function in request.functions
         ] + after
-    if config.load_profile == "mixed":
-        after.insert(-1, WriteMixedHttpAccountingTask(run_dir))
+    if config.load_profile in ("mixed", "function-runtime"):
+        after.insert(
+            next(
+                i for i, task in enumerate(after) if isinstance(task, EvaluateGateTask)
+            ),
+            WriteMixedHttpAccountingTask(run_dir),
+        )
     prepare_argv = _prepare_run_directory_argv(
         summary_path, remote_run_dir, events_path
     )

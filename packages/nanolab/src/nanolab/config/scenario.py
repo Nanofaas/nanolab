@@ -128,6 +128,7 @@ ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN", "FIXED"]
 # `experiment-02` sends the same calendar to complete platforms on Docker, each
 # under the CPU/memory budgets declared in its `experiment02` block.
 LoadProfile = Literal[
+    "function-runtime",
     "cycle",
     "saturation",
     "burst",
@@ -595,6 +596,44 @@ class ScenarioConfig(BaseModel):
             raise ValueError("concurrencyControl cannot run together with autoscaling")
 
     def _validate_load_profile(self) -> None:
+        if self.load_profile == "function-runtime":
+            allowed = {
+                f"word-stats-{runtime}"
+                for runtime in ("java", "go", "javascript", "python", "rust")
+            }
+            if (
+                self.workflow != "loadtest"
+                or self.backend != "k8s"
+                or len(self.functions) != 1
+                or self.functions[0] not in allowed
+                or self.concurrency_control
+                or self.autoscaling
+                or self.control_plane_runtime != "jvm"
+                or self.payload_profile != "medium"
+                or self.control_plane_image
+                or self.function_images
+                or self.recipe_profile
+            ):
+                raise ValueError(
+                    "function-runtime requires one word-stats runtime, Kubernetes JVM, "
+                    "medium payloads and fixed scheduling"
+                )
+            for key in ("control-plane", self.functions[0]):
+                value = self.resources.get(key)
+                if (
+                    value is None
+                    or value.requests is None
+                    or value.limits is None
+                    or any(
+                        getattr(section, field) is None
+                        for section in (value.requests, value.limits)
+                        for field in ("cpu", "memory_mib")
+                    )
+                ):
+                    raise ValueError(
+                        "function-runtime requires explicit CPU/memory "
+                        "requests and limits"
+                    )
         if self.load_profile != "mixed" and (
             self.async_share is not None or self.idem_share is not None
         ):

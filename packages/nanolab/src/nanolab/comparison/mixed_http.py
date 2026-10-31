@@ -11,7 +11,10 @@ def write_http_accounting(run_dir: Path) -> dict:
     """Write exact response counts and reject incomplete generator evidence."""
     events, malformed = read_events(run_dir / "k6-events.jsonl")
     metrics = json.loads((run_dir / "k6-summary.json").read_text())["metrics"]
+    b5 = "b5_offered" in metrics
     fields = ("fn", "path", "idem", "part", "status", "error_code")
+    if b5:
+        fields += ("phase", "outcome")
     counts = Counter(
         (
             e["fn"],
@@ -21,6 +24,7 @@ def write_http_accounting(run_dir: Path) -> dict:
             e["status"],
             e.get("error_code") or 0,
         )
+        + ((e.get("phase", ""), e.get("outcome", "")) if b5 else ())
         for e in events
         if e.get("t") == "http"
     )
@@ -51,12 +55,42 @@ def write_http_accounting(run_dir: Path) -> dict:
         "unexpected_http": unexpected,
         "malformed_lines": malformed,
     }
+    body_mismatch = False
+    if b5:
+        outcomes = ("valid_completed", "refused", "invalid_output", "http_error")
+        measured = [
+            e
+            for e in events
+            if e.get("t") == "http" and e.get("phase") == "measurement"
+        ]
+        observed = Counter(e.get("outcome") for e in measured)
+        measurement = {
+            "offered": len(measured),
+            **{name: observed[name] for name in outcomes},
+        }
+        result["measurement"] = measurement
+        result["k6_measurement"] = {
+            name: metrics.get(f"b5_{name}", {}).get("count") for name in measurement
+        }
+        body_mismatch = (
+            measurement != result["k6_measurement"]
+            or sum(observed[name] for name in outcomes) != len(measured)
+            or any(
+                e.get("phase") not in ("qualification", "measurement")
+                for e in events
+                if e.get("t") == "http"
+            )
+        )
     (run_dir / "http-status-counts.json").write_text(
         json.dumps(result, indent=2) + "\n"
     )
-    if malformed or total != result["k6_http"] or failed != result["k6_failed_http"]:
+    if (
+        body_mismatch
+        or malformed
+        or total != result["k6_http"]
+        or failed != result["k6_failed_http"]
+    ):
         raise RuntimeError(
-            "Mixed HTTP ledger does not reconcile with k6; "
-            "retained http-status-counts.json"
+            "HTTP ledger does not reconcile with k6; retained http-status-counts.json"
         )
     return result

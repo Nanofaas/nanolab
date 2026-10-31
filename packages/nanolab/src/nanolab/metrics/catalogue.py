@@ -726,6 +726,7 @@ def queries_for(
     heap_metrics_required: bool = True,
     container_functions: Iterable[str] | None = None,
     completion_latency: bool = False,
+    function_runtime: bool = False,
 ) -> Queries:
     """Everything this run can meaningfully be asked, and nothing it cannot.
 
@@ -758,6 +759,8 @@ def queries_for(
     # prevent.
     if container_functions is not None:
         queries.extend(container_queries(container_functions))
+    if function_runtime:
+        queries.extend(function_runtime_queries(function_name))
     return _require_everything_that_can_answer(tuple(queries))
 
 
@@ -906,4 +909,40 @@ def container_queries(function_names: Iterable[str]) -> Queries:
                 ),
             )
         )
+    return tuple(queries)
+
+
+def function_runtime_queries(function_name: str) -> Queries:
+    """Raw counters and RSS complement working set and smoothed CPU in B5."""
+    namespace = json.dumps(DEFAULT_NAMESPACE)
+    selectors = {
+        "control-plane": f'namespace={namespace},container="control-plane"',
+        function_name: (
+            f'namespace={namespace},container="function",pod=~"fn-{function_name}-.*"'
+        ),
+    }
+    queries = [
+        PrometheusQuery(f"{name}@{component}", f"{metric}{{{selector}}}", True)
+        for component, selector in selectors.items()
+        for name, metric in (
+            ("container_cpu_seconds", "container_cpu_usage_seconds_total"),
+            ("container_rss_bytes", "container_memory_rss"),
+        )
+    ]
+    queries.extend(
+        PrometheusQuery(
+            f"{name}@{function_name}", f"{metric}{{{selectors[function_name]}}}", True
+        )
+        for name, metric in (
+            (
+                "container_cpu_throttled_periods",
+                "container_cpu_cfs_throttled_periods_total",
+            ),
+            ("container_cpu_periods", "container_cpu_cfs_periods_total"),
+            (
+                "container_cpu_throttled_seconds",
+                "container_cpu_cfs_throttled_seconds_total",
+            ),
+        )
+    )
     return tuple(queries)

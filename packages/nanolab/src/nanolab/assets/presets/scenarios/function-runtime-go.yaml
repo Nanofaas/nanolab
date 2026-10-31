@@ -1,0 +1,25 @@
+# B5: identical protocol; only the function runtime changes.
+workflow: loadtest
+backend: k8s
+build: docker
+loadProfile: function-runtime
+payloadProfile: medium
+loadVus: 5000
+controlPlaneRuntime: jvm
+functions:
+- word-stats-go
+resources:
+  control-plane:
+    requests:
+      cpu: 0.25
+      memoryMiB: 512
+    limits:
+      cpu: 2
+      memoryMiB: 2048
+  word-stats-go:
+    requests:
+      cpu: 1
+      memoryMiB: 256
+    limits:
+      cpu: 2
+      memoryMiB: 512

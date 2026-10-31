@@ -75,6 +75,13 @@ def payload_corpus_path(
         / family
         / f"performance-{config.payload_profile}.json"
     )
+    if (
+        config.load_profile == "function-runtime"
+        and not corpus.with_name("runtime-contract.json").is_file()
+    ):
+        raise FileNotFoundError(
+            "function-runtime needs the generated runtime-contract.json"
+        )
     if not corpus.is_file():
         raise FileNotFoundError(
             f"payloadProfile {config.payload_profile!r} needs {corpus}, "
@@ -243,6 +250,8 @@ def load_script_name(config: ScenarioConfig) -> str:
     8 — so the function was never concurrent, the governor had nothing to react
     to, and a think-time override aimed at the other script changed nothing.
     """
+    if config.load_profile == "function-runtime":
+        return "function-runtime.js"
     if is_co_tenancy(config):
         # Staggered phases, which one global stage list cannot express, so these
         # scripts carry their own k6 scenarios.
