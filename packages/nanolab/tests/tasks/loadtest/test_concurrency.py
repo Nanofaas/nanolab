@@ -158,15 +158,34 @@ def test_watcher_opens_the_series_before_the_background_thread_runs() -> None:
         watcher.stop()
 
 
-def test_watcher_records_probe_failures_without_dying() -> None:
+def test_watcher_refuses_to_start_without_metrics() -> None:
     watcher = ConcurrencyWatcher(_StubProbe(), poll_interval_seconds=60)
+    with pytest.raises(RuntimeError, match="scrape unavailable"):
+        watcher.start()
+    assert watcher._thread is None
 
+
+def test_watcher_records_mid_load_probe_failures_without_dying() -> None:
+    watcher = ConcurrencyWatcher(_StubProbe(2), poll_interval_seconds=60)
     watcher.start()
     try:
-        assert watcher.samples == ()
+        watcher._sample()
+        assert len(watcher.samples) == 1
         assert watcher.errors == ["scrape unavailable"]
     finally:
         watcher.stop()
+
+
+def test_group_stops_started_watchers_if_another_cannot_start() -> None:
+    from nanolab.tasks.loadtest.concurrency import ConcurrencyWatcherGroup
+
+    ready = ConcurrencyWatcher(_StubProbe(2), poll_interval_seconds=60)
+    group = ConcurrencyWatcherGroup(
+        {"ready": ready, "missing": ConcurrencyWatcher(_StubProbe())}
+    )
+    with pytest.raises(RuntimeError, match="scrape unavailable"):
+        group.start()
+    assert ready._thread is None
 
 
 def test_watcher_refuses_a_second_start() -> None:

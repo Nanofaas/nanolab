@@ -158,6 +158,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
+from nanolab.tasks.metrics import management_base_url
 from nanolab.tasks.platform import Backend, Build, Platform, PlatformRequest
 from nanolab.tasks.recipes.validation import (
     RecipeImageCheckTask,
@@ -868,7 +869,7 @@ def _build_concurrency_watcher(
     """
     if not config.concurrency_control:
         return None
-    management_url = control_plane_url.replace(":8080", ":8081")
+    management_url = management_base_url(control_plane_url)
     return ConcurrencyWatcher(
         ScrapeConcurrencyProbe(management_url=management_url, function_name=target.name)
     )
@@ -882,7 +883,7 @@ def _build_concurrency_watchers(
 ) -> ConcurrencyWatcherGroup | None:
     if not is_co_tenancy(config):
         return None
-    management_url = control_plane_url.replace(":8080", ":8081")
+    management_url = management_base_url(control_plane_url)
     return ConcurrencyWatcherGroup(
         {
             function.name: ConcurrencyWatcher(

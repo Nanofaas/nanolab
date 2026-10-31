@@ -472,8 +472,12 @@ class ConcurrencyWatcherGroup:
 
     def start(self) -> None:
         """Start every watcher, so each series covers the same window."""
-        for watcher in self._watchers.values():
-            watcher.start()
+        try:
+            for watcher in self._watchers.values():
+                watcher.start()
+        except BaseException:
+            self.stop()
+            raise
 
     def stop(self) -> None:
         """Stop every watcher."""
@@ -540,6 +544,8 @@ class ConcurrencyWatcher:
         # from the limit the load arrived at, which is the peak the later trough
         # is measured against.
         self._sample()
+        if not self._samples:
+            raise RuntimeError(f"Cannot start concurrency sampling: {self.errors[-1]}")
         self._thread = threading.Thread(
             target=self._loop, name="concurrency-watcher", daemon=True
         )

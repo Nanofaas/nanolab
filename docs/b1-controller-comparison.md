@@ -72,3 +72,10 @@ Java-lite contexts together, preserve the failure evidence, and freeze that fix
 for every B1.1 arm. Do not append fixed baselines to an incomplete B1 run and
 present them as a completed seven-arm comparison. A single-run B1.1 pilot is
 still preliminary; use repeated, balanced orders before paper-level inference.
+
+The first B1.1 attempt built successfully and completed the fixed2 load, but
+its concurrency watchers scraped API NodePort 30080 instead of management
+NodePort 30081. Its empty telemetry makes that arm unsuitable for the controller
+comparison. Preserve the failed attempt and rerun all seven arms in a new run
+directory. Watchers now require a successful opening reading before starting
+k6; transient failures after that remain recorded as gaps.

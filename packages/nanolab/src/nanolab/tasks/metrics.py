@@ -54,8 +54,13 @@ class PrometheusScrapeCheckTask(SharedPrometheusScrapeCheckTask):
         )
 
 
+def management_base_url(api_url: str) -> str:
+    """Resolve the management port for compose and Kubernetes NodePort APIs."""
+    return api_url.replace(":8080", ":8081").replace(":30080", ":30081")
+
+
 def _actuator_url(endpoint: Resource[str], inputs: TaskInputs) -> str:
-    return inputs.resource(endpoint).replace(":8080", ":8081") + "/actuator/prometheus"
+    return management_base_url(inputs.resource(endpoint)) + "/actuator/prometheus"
 
 
 class PrometheusMinimumCheckTask(SharedPrometheusMinimumCheckTask):

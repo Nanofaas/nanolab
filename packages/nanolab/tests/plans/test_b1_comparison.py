@@ -227,3 +227,39 @@ def test_fixed_task_records_a_constant_single_slot_series(monkeypatch):
         watchers=SimpleNamespace(summaries=lambda: {"fn": summary}), fixed_concurrency=1
     )
     assert task.run(TaskInputs.empty()).value.concurrency is summary
+
+
+@pytest.mark.parametrize(("api_port", "metrics_port"), [(8080, 8081), (30080, 30081)])
+def test_concurrency_watchers_use_management_port(api_port, metrics_port):
+    from types import SimpleNamespace
+
+    from nanolab.plans.loadtest import (
+        _build_concurrency_watcher,
+        _build_concurrency_watchers,
+    )
+
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "concurrencyControl": True,
+            "functions": ["word-stats-java", "word-stats-java-lite"],
+        }
+    )
+    functions = tuple(SimpleNamespace(name=name) for name in config.functions)
+    url = f"http://20.224.195.10:{api_port}"
+    watcher = _build_concurrency_watcher(
+        config=config,
+        control_plane_url=url,
+        target=functions[0],
+    )
+    group = _build_concurrency_watchers(
+        config=config,
+        control_plane_url=url,
+        functions=functions,
+    )
+    assert watcher._probe.management_url == f"http://20.224.195.10:{metrics_port}"
+    assert all(
+        w._probe.management_url == f"http://20.224.195.10:{metrics_port}"
+        for w in group._watchers.values()
+    )
