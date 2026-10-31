@@ -1,0 +1,30 @@
+# A3 admission-to-terminal latency
+
+Set `completionLatency: true` on the four existing mixed-profile A3 scenarios.
+Keep the two word-statistics functions, JVM C2, two control-plane CPUs, 2048 MiB,
+5000 VUs per function, scales 2/3, and async/idempotent shares 0/0 or 0.20/0.05.
+Run the four arms again on one isolated Spot pair through `nanolab compare`.
+Use explicit `/data` run directories and a final provider teardown hook, as in
+the first A3 campaign. Preserve the earlier campaign as separate evidence.
+
+The option requires a NanoFaaS build exposing
+`function_completion_latency_ms_seconds_{bucket,count,sum}`. The advanced
+metrics profile publishes the histogram. Preflight checks the management port
+before k6 starts; the snapshot requires all three families for both functions.
+Queries preserve function, path (`sync`/`async`), outcome
+(`success`/`error`/`timeout`) and bucket bounds rather than mixing populations.
+
+NanoFaaS records the existing terminal observer's original admission-to-terminal
+duration once per execution, including queue wait and retries. The engine's
+existing duration is resolved in milliseconds. Replayed keyed requests are not
+new executions. Refused requests are excluded because they were not admitted.
+The aggregate e2e timer read by the concurrency controller is unchanged.
+The new timer is diagnostic and is omitted by the basic metrics profile.
+
+This measures server-side conclusion time, not client network delay or the time
+at which a client observes the result. Keep async ACK latency separate. Save raw
+cumulative buckets, counts and sums for offline window deltas, means and
+histogram percentile estimates; retain reset/publisher labels and mark incomplete
+coverage. Percentiles reconstructed from buckets are estimates. Preserve the
+trailing collection margin and distinguish work admitted in the load window
+from work that happens to conclude in it. No polling traffic is added.

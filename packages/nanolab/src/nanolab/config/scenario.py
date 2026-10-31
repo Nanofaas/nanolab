@@ -238,6 +238,7 @@ class ScenarioConfig(BaseModel):
     # than the queue can hold, which is the only condition under which a request
     # is ever rejected. Whether one controller sheds fewer than another cannot be
     # asked of a run where neither shed any.
+    completion_latency: bool = Field(default=False, alias="completionLatency")
     load_profile: LoadProfile = Field(default="cycle", alias="loadProfile")
     # La composizione del carico misto. Con entrambe a zero il generatore misto e'
     # il generatore puramente sincrono, che e' come si guida un braccio di

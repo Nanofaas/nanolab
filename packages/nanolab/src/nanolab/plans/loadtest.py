@@ -158,7 +158,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from nanolab.tasks.metrics import management_base_url
+from nanolab.tasks.metrics import PrometheusScrapeCheckTask, management_base_url
 from nanolab.tasks.platform import Backend, Build, Platform, PlatformRequest
 from nanolab.tasks.recipes.validation import (
     RecipeImageCheckTask,
@@ -180,6 +180,7 @@ def _default_prometheus_queries(
     hpa: bool = False,
     heap_metrics_required: bool = True,
     container_functions: tuple[str, ...] | None = None,
+    completion_latency: bool = False,
 ) -> tuple[PrometheusQuery, ...]:
     """Return the metrics this run can meaningfully be asked about.
 
@@ -196,6 +197,7 @@ def _default_prometheus_queries(
         hpa=hpa,
         heap_metrics_required=heap_metrics_required,
         container_functions=container_functions,
+        completion_latency=completion_latency,
     )
 
 
@@ -929,6 +931,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     drain_minutes: int | None = None,
     management_url: str | None = None,
     fixed_concurrency: int | None = None,
+    completion_latency: bool = False,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     # First, because it has to sample while the stack is still up and before the
@@ -1018,6 +1021,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                             hpa=hpa_metrics,
                             heap_metrics_required=heap_metrics_required,
                             container_functions=container_functions,
+                            completion_latency=completion_latency,
                         )
                     ),
                     window=window,
@@ -1492,6 +1496,7 @@ def build_loadtest_plan(
         watcher=watcher,
         concurrency_watcher=concurrency_watcher,
         concurrency_watchers=concurrency_watchers,
+        completion_latency=config.completion_latency,
         fixed_concurrency=config.fixed_concurrency,
         replica_probe=replica_probe,
         bindings=bindings,
@@ -1543,6 +1548,24 @@ def build_loadtest_plan(
         request=request,
         target=target,
     )
+
+    if config.completion_latency:
+        preflight = Steps(
+            title="Check completion telemetry before load",
+            steps=(
+                preflight,
+                PrometheusScrapeCheckTask(
+                    title="Check completion histograms are exposed",
+                    url=management_base_url(control_plane_url) + "/actuator/prometheus",
+                    executor=executor,
+                    role=load_role,
+                    expect=(
+                        "function_completion_latency_ms_seconds_bucket",
+                        "function_completion_latency_ms_seconds_count",
+                    ),
+                ),
+            ),
+        )
 
     return build_loadtest_workflow(
         request,

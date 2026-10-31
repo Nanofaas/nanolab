@@ -1101,3 +1101,42 @@ def test_internal_autoscaling_waits_for_the_park_at_zero_it_configures(
     # No HPA object exists on this path, so nothing may wait on its external metric.
     assert not any("external.metrics.k8s.io" in command for command in commands)
     assert not any("describe hpa" in command for command in commands)
+
+
+def test_completion_collection_checks_management_port_before_k6(
+    tmp_path, nanofaas_root
+):
+    from sonata_engine import TaskInputs
+
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "loadProfile": "mixed",
+            "completionLatency": True,
+            "functions": ["word-stats-java", "word-stats-javascript"],
+        }
+    )
+    executor = RecordingExecutor()
+    workflow = build_loadtest_plan(
+        config,
+        EnvironmentConfig(provider="local"),
+        RoleBindings({"host": executor, "stack": executor}),
+        control_plane_url="http://20.224.195.10:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        repo_root=nanofaas_root,
+    )
+    load = next(
+        unit.task
+        for unit in workflow.compile().tasks
+        if unit.task.title == "Run the load test"
+    )
+    preflight = load._steps[0]
+    assert preflight.title == "Check completion telemetry before load"
+    scrape = preflight._steps[-1]
+    with pytest.raises(RuntimeError, match="expected sample not scraped"):
+        scrape.run(TaskInputs.empty())
+    command = " ".join(executor.seen[-1].argv)
+    assert "http://20.224.195.10:30081/actuator/prometheus" in command
+    assert "Run k6" not in [spec.summary for spec in executor.seen]
