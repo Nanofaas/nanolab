@@ -92,6 +92,8 @@ def test_exact_output_and_response_classification(status, body, outcome):
     assert result["checks"] == [outcome in ("valid_completed", "refused")]
     assert result["events"][0]["outcome"] == outcome
     assert result["events"][0]["phase"] == "measurement"
+    assert result["events"][0]["case_name"] == "benchmark medium-0"
+    assert result["events"][0]["iteration"] == 0
     assert len(result["requests"]) == 1  # No client retries or second function.
 
 
@@ -100,13 +102,17 @@ def test_qualification_is_separate_and_fails_before_load():
     assert len(result["requests"]) == 4
     assert not result["error"] and not any(result["counters"].values())
     assert {e["phase"] for e in result["events"]} == {"qualification"}
+    assert [e["case_name"] for e in result["events"]] == [
+        f"benchmark medium-{i}" for i in range(4)
+    ]
+    assert all(e["iteration"] is None for e in result["events"])
     assert run_generator(body="{}", action="setup()")["error"].startswith(
         "B5 qualification failed"
     )
 
 
 def test_same_single_function_schedule_and_deterministic_payloads():
-    result = run_generator(iteration=3)
+    result = run_generator(iteration=7)
     (scenario,) = result["options"]["scenarios"].values()
     assert sum(int(s["duration"][:-1]) for s in scenario["stages"]) == 450
     assert [s["target"] for s in scenario["stages"]] == [
@@ -125,6 +131,8 @@ def test_same_single_function_schedule_and_deterministic_payloads():
     ]
     assert scenario["gracefulStop"] == "40s" and scenario["preAllocatedVUs"] == 5000
     assert result["requests"][0]["body"] == {"input": {"text": "text3"}}
+    assert result["events"][0]["case_name"] == "benchmark medium-3"
+    assert result["events"][0]["iteration"] == 7
 
 
 def test_body_counters_reconcile_with_measurement_ledger(tmp_path):

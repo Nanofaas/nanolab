@@ -43,7 +43,7 @@ export const options = {
     }},
     maxRedirects: 0, thresholds: {},
 };
-function invokeCase(fixture, phase) {
+function invokeCase(fixture, phase, iteration = null) {
     const tags = {fn: FN, path: 'sync', phase};
     const response = http.post(`${BASE_URL}/v1/functions/${encodeURIComponent(FN)}:invoke`,
         JSON.stringify({input: fixture.input}),
@@ -58,7 +58,8 @@ function invokeCase(fixture, phase) {
     const outcome = valid ? 'valid_completed' : response.status === 200 ? 'invalid_output'
         : [429,503].includes(response.status) ? 'refused' : 'http_error';
     console.log(JSON.stringify({t: 'http', fn: FN, path: 'sync', idem: 'no', part: 'single',
-        phase, outcome, status: response.status, error_code: response.error_code || 0,
+        phase, case_name: fixture.name, iteration, outcome,
+        status: response.status, error_code: response.error_code || 0,
         ts: Date.now(), duration_ms: response.timings.duration}));
     if (phase === 'measurement') {
         counters.offered.add(1, tags);
@@ -74,5 +75,6 @@ export function setup() {
         if (!invokeCase(fixture, 'qualification')) throw new Error(`B5 qualification failed: ${fixture.name}`);
 }
 export function invoke() {
-    invokeCase(INPUTS[execution.scenario.iterationInTest % INPUTS.length], 'measurement');
+    const iteration = execution.scenario.iterationInTest;
+    invokeCase(INPUTS[iteration % INPUTS.length], 'measurement', iteration);
 }

@@ -48,7 +48,10 @@ samples means latency is unavailable. Ordinary HTTP duration mixes refusals and
 successes and must not be presented as successful-execution latency.
 
 The existing console ledger records every response, its phase (qualification or
-measurement), classification, status, transport error, duration and timestamp.
+measurement), classification, status, transport error, duration and timestamp. Each record also
+includes `case_name` and `iteration`, the global scenario iteration index;
+qualification requests have a null iteration. This permits reconstruction of
+the actual input mix, including accepted and refused requests.
 It stores no response bodies. `http-status-counts.json` reconciles all HTTP counts
 with k6, and separately reconciles the measured outcome counts with B5 counters.
 Qualification HTTP requests remain visible but do not count as measured offered
