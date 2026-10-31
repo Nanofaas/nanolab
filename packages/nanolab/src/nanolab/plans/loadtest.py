@@ -1407,7 +1407,11 @@ def build_loadtest_plan(
         remote_repo_root = Path(
             remote_project_dir(vm_request_for_role(environment, "stack"))
         )
-    k6_events = k6_events or config.load_profile in ("mixed", "function-runtime")
+    k6_events = k6_events or config.load_profile in (
+        "mixed",
+        "function-runtime",
+        "openloop",
+    )
     script_path, summary_path = _resolve_script_and_summary(
         config,
         environment,
@@ -1569,7 +1573,7 @@ def build_loadtest_plan(
             )
             for function in request.functions
         ] + after
-    if config.load_profile in ("mixed", "function-runtime"):
+    if config.load_profile in ("mixed", "function-runtime", "openloop"):
         after.insert(
             next(
                 i for i, task in enumerate(after) if isinstance(task, EvaluateGateTask)

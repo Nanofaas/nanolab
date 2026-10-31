@@ -1,4 +1,5 @@
 import http from 'k6/http';
+import execution from 'k6/execution';
 import { check } from 'k6';
 import { SharedArray } from 'k6/data';
 
@@ -98,18 +99,21 @@ const TEXTS = [
 // Keep the selected repository corpus shared across VUs, as in the other load profiles.
 const INPUTS = new SharedArray('open-loop-inputs', () => {
     if (!__ENV.NANOFAAS_PAYLOAD) {
-        return TEXTS.map(text => ({ text, topN: 5 }));
+        return TEXTS.map((text, i) => ({ name: `default-${i}`, input: { text, topN: 5 } }));
     }
     const cases = JSON.parse(open(__ENV.NANOFAAS_PAYLOAD)).cases || [];
     if (cases.length === 0) {
         throw new Error('open-loop payload corpus carries no cases');
     }
-    return cases.map(entry => entry.input);
+    return cases;
 });
 
 function invoke(functionName) {
+    const iteration = execution.scenario.iterationInTest;
+    const inputIndex = iteration % INPUTS.length;
+    const fixture = INPUTS[inputIndex];
     const body = JSON.stringify({
-        input: INPUTS[__ITER % INPUTS.length],
+        input: fixture.input,
     });
     const response = http.post(
         `${BASE_URL}/v1/functions/${functionName}:invoke`,
@@ -120,6 +124,13 @@ function invoke(functionName) {
             tags: { fn: functionName },
         },
     );
+    console.log(JSON.stringify({
+        t: 'http', fn: functionName, path: 'sync', idem: 'no', part: 'single',
+        scenario: execution.scenario.name, iteration, input_index: inputIndex,
+        case_name: fixture.name || `case-${inputIndex}`, status: response.status,
+        error_code: response.error_code || 0, ts: Date.now(),
+        duration_ms: response.timings.duration,
+    }));
     check(response, {
         'served': (r) => r.status === 200,
         'refused': (r) => r.status === 429 || r.status === 503,

@@ -98,10 +98,20 @@ def test_sojourn_uses_payload_specific_latency_budget():
     assert controller_settings(scenario)["targetLatencyMs"] == 120
 
 
-def test_openloop_uses_selected_corpus(tmp_path):
+@pytest.mark.parametrize("status", [200, 429, 503, 500, 0])
+def test_openloop_rotates_globally_and_records_every_response(tmp_path, status):
+    from nanolab.comparison.mixed_http import write_http_accounting
+
     corpus = tmp_path / "corpus.json"
     corpus.write_text(
-        json.dumps({"cases": [{"input": {"text": "corpus-only", "topN": 3}}]})
+        json.dumps(
+            {
+                "cases": [
+                    {"name": f"case-{i}", "input": {"text": f"text-{i}", "topN": 3}}
+                    for i in range(4)
+                ]
+            }
+        )
     )
     source = (ASSETS / "k6/open-loop.js").read_text()
     source = "\n".join(
@@ -109,18 +119,109 @@ def test_openloop_uses_selected_corpus(tmp_path):
     ).replace("export ", "")
     harness = """const fs=require('fs'); const __ENV={NANOFAAS_PAYLOAD:process.argv[1]};
     const __ITER=0; const open=p=>fs.readFileSync(p,'utf8');
+    const execution={scenario:{iterationInTest:7,name:'steady'}};
+    const status=Number(process.argv[2]), requests=[], events=[];
+    const console={log:line=>events.push(JSON.parse(line))};
     class SharedArray {constructor(name,factory){return factory();}}
     const check=()=>{};
-    const http={post:(url,body)=>{console.log(body);return {status:200};}};
+    const http={post:(url,body)=>{requests.push(JSON.parse(body));
+      return {status,error_code:status===0?1050:0,timings:{duration:7}};}};
     """
     result = subprocess.run(
-        ["node", "-e", harness + source + "\nsteady();burst();", str(corpus)],
+        [
+            "node",
+            "-e",
+            harness + source + "\nsteady();"
+            "execution.scenario={iterationInTest:2,name:'burst'};burst();"
+            "process.stdout.write(JSON.stringify({requests,events}));",
+            str(corpus),
+            str(status),
+        ],
         capture_output=True,
         text=True,
         check=True,
     )
-    bodies = [json.loads(line) for line in result.stdout.splitlines()]
-    assert bodies == [{"input": {"text": "corpus-only", "topN": 3}}] * 2
+    data = json.loads(result.stdout)
+    assert data["requests"] == [
+        {"input": {"text": "text-3", "topN": 3}},
+        {"input": {"text": "text-2", "topN": 3}},
+    ]
+    events = data["events"]
+    assert [e["case_name"] for e in events] == ["case-3", "case-2"]
+    assert [e["input_index"] for e in events] == [3, 2]
+    assert [e["iteration"] for e in events] == [7, 2]
+    assert [e["scenario"] for e in events] == ["steady", "burst"]
+    assert [e["fn"] for e in events] == ["word-stats-java", "word-stats-java-lite"]
+    assert all(e["status"] == status and e["duration_ms"] == 7 for e in events)
+    assert all(e["error_code"] == (1050 if status == 0 else 0) for e in events)
+    (tmp_path / "k6-events.jsonl").write_text("\n".join(map(json.dumps, events)) + "\n")
+    (tmp_path / "k6-summary.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "http_reqs": {"count": 2},
+                    "http_req_failed": {"passes": 0 if status == 200 else 2},
+                }
+            }
+        )
+    )
+    assert write_http_accounting(tmp_path)["recorded_http"] == 2
+
+
+def test_openloop_workflow_collects_and_reconciles_response_ledger(
+    nanofaas_checkout, tmp_path, monkeypatch
+):
+    from sonata_tasks.execution.bindings import RoleBindings
+
+    from nanolab.config.environment import EnvironmentConfig
+    from nanolab.plans import loadtest
+
+    from .test_loadtest import NoopPrometheus, RecordingExecutor
+
+    loads, accounting = [], []
+    original_load = loadtest.K6Task
+    original_accounting = loadtest.WriteMixedHttpAccountingTask
+
+    def load(config, **kwargs):
+        loads.append(config)
+        return original_load(config, **kwargs)
+
+    def reconcile(path):
+        accounting.append(path)
+        return original_accounting(path)
+
+    monkeypatch.setattr(loadtest, "K6Task", load)
+    monkeypatch.setattr(loadtest, "WriteMixedHttpAccountingTask", reconcile)
+    config = ScenarioConfig.model_validate(
+        yaml.safe_load(
+            (
+                ASSETS / "presets/scenarios/concurrency-comparison-fixed2.yaml"
+            ).read_text()
+        )
+    )
+    executor = RecordingExecutor()
+    workflow = loadtest.build_loadtest_plan(
+        config,
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "external",
+                "roles": {
+                    "stack": {"host": "stack.example"},
+                    "loadgen": {"host": "load.example"},
+                },
+            }
+        ),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        control_plane_url="http://stack.example:30080",
+        prometheus_client=NoopPrometheus(),
+        repo_root=nanofaas_checkout,
+        remote_repo_root=Path("/data/source"),
+        remote_run_dir=Path("/home/ubuntu/nanofaas-release/b11/benchmarks/run-1"),
+        run_dir=tmp_path,
+    )
+    assert workflow.compile().tasks and not executor.seen
+    assert loads[0].process_env["K6_CONSOLE_OUTPUT"].endswith("k6-events.jsonl")
+    assert accounting == [tmp_path]
 
 
 def test_payload_uses_the_synced_loadgen_repository(tmp_path, monkeypatch):
