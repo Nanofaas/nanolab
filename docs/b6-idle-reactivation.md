@@ -3,7 +3,7 @@
 `idle-reactivation` measures the memory retained by a ready function against the
 first-response cost after naturally reaching zero replicas. It is a dedicated
 workflow, using the same platform resources, role executors, provisioning and
-artifact collection as other NanoLab workflows. No NanoFaaS changes are required.
+artifact collection as other NanoLab workflows.
 
 Five bundled scenarios select the equivalent B5 wordstats implementations:
 `idle-reactivation-java.yaml`, `-go.yaml`, `-javascript.yaml`, `-python.yaml`, and
@@ -51,7 +51,11 @@ in the fresh source checkout before freezing provenance; otherwise the source's
 Gradle heap default still applies. Runtime budgets remain fixed.
 
 The INTERNAL scaler uses min/max 1/1 in `keep-ready` and 0/1 in `scale-to-zero`,
-with the normal poll/cooldown settings and RPS target 100. Both use cached images
+with the normal poll/cooldown settings and RPS target 100. Use a NanoFaaS revision
+with the idle-window and atomic dispatch protection fixes. The 60-second observed
+quiet window is distinct from the scale-down cooldown; its retained-memory cost
+belongs to the whole-cycle accounting. Record the exact source revision in the
+manifest. Both use cached images
 (`IfNotPresent`). Qualification invokes all four medium inputs against the B5
 oracle; warmup sends 60 requests at least one second apart. A cycle waits the
 configured idle duration, qualifies its last 60 seconds, and sends one request
@@ -70,8 +74,12 @@ is not a qualified wake-up. Both offered and configured cycle counts are retaine
 The run contains `protocol.json`, frozen corpus/oracle in `inputs/`, and one
 folder per treatment. Each arm saves flushed request ledgers (including started
 attempts, full response bodies, failures and monotonic durations), raw Kubernetes
-observations, cycle records, a summary and labelled Prometheus series. Existing
-NanoLab run provenance additionally records the environment and source metadata.
+observations, cycle records, a summary and labelled Prometheus series. Finalization
+also captures a timestamped `control-plane.log` from the stack role before the
+deployment is released, including after measurement failure or interruption.
+Collection has a 30-second deadline plus a 5-second kill grace. A collection
+failure is retained in the summary without replacing the original failure.
+Process termination or VM loss can still prevent capture. Existing NanoLab run provenance additionally records the environment and source metadata.
 
 ```sh
 python -m nanolab.tasks.idle_reactivation_report /data/results/b6-java-block01

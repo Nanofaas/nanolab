@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, override
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
 
@@ -155,6 +156,7 @@ class RunIdleReactivation(Task[dict[str, Any]]):
     run_dir: Path
     remote_home: Path
     control_plane_url: str
+    control_plane_log: CommandTask | None = None
 
     title: str = field(init=False)
 
@@ -327,7 +329,6 @@ class RunIdleReactivation(Task[dict[str, Any]]):
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[dict[str, Any]]:
         """Preserve partial evidence and capture metrics before resource release."""
-        del inputs
         self.run_dir.mkdir(parents=True, exist_ok=False)
         report: dict[str, Any] = {
             "treatment": self.treatment,
@@ -359,6 +360,13 @@ class RunIdleReactivation(Task[dict[str, Any]]):
                 watcher.stop()
             except Exception as error:
                 report["errors"].append(str(error))
+            if self.control_plane_log is not None:
+                try:
+                    self.control_plane_log.run(inputs)
+                except Exception as error:
+                    report["errors"].append(
+                        f"Control-plane log collection failed: {error}"
+                    )
             queries = queries_for(
                 self.function,
                 modules=("autoscaler", "async-queue"),

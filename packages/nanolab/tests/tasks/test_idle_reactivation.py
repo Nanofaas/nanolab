@@ -375,3 +375,93 @@ def test_remote_measurement_commands_preserve_deadlines_with_vm_executor(
         "--kill-after=5s",
         "15s" if operation == "observe" else "300s",
     )
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+@pytest.mark.parametrize("log_failure", [False, True])
+def test_finalization_collects_bounded_vm_logs_and_preserves_measurement_failure(
+    tmp_path, monkeypatch, interrupted, log_failure
+):
+    import json
+
+    from sonata_engine import TaskInputs
+    from sonata_tasks.execution.adapters import VmCommandTaskExecutor
+
+    from nanolab.config.idle_reactivation import IdleReactivationConfig
+    from nanolab.plans.diagnostics import collect_control_plane_log
+    from tests.cli.test_execution_bindings import _Result
+    from tests.plans.test_loadtest import NoopPrometheus
+
+    module = importlib.import_module("nanolab.tasks.idle_reactivation_runtime")
+    calls = []
+
+    class Runner:
+        def run_vm_command(self, argv, **kwargs):
+            calls.append(argv)
+            return _Result(
+                stdout="2026-10-31T12:00:00Z Scaling DOWN echo\n",
+                stderr="log endpoint unavailable" if log_failure else "",
+                return_code=1 if log_failure else 0,
+            )
+
+    def fail_measurement(self, watcher, report):
+        if interrupted:
+            raise KeyboardInterrupt()
+        raise RuntimeError("measurement failed")
+
+    monkeypatch.setattr(module.LifecycleWatcher, "start", lambda self: None)
+    monkeypatch.setattr(module.LifecycleWatcher, "stop", lambda self: None)
+    monkeypatch.setattr(module.RunIdleReactivation, "_measure", fail_measurement)
+    monkeypatch.setattr(module.CapturePrometheusSnapshot, "_WINDOW_MARGIN_S", 0)
+    executor = VmCommandTaskExecutor(Runner(), target_key="azure:stack")
+    output = tmp_path / "arm"
+    task = module.RunIdleReactivation(
+        "word-stats-java",
+        "scale-to-zero",
+        "nanofaas",
+        IdleReactivationConfig(),
+        executor,
+        NoopPrometheus(),
+        None,
+        output,
+        tmp_path / "remote",
+        "http://stack:30080",
+        control_plane_log=collect_control_plane_log(
+            executor=executor,
+            role="stack",
+            namespace="nanofaas",
+            destination=output / "control-plane.log",
+        ),
+    )
+    if interrupted:
+        with pytest.raises(KeyboardInterrupt):
+            task.run(TaskInputs({}, frozenset()))
+    else:
+        task.run(TaskInputs({}, frozenset()))
+    summary = json.loads((output / "summary.json").read_text())
+    assert summary["complete"] is False
+    assert ("KeyboardInterrupt" if interrupted else "measurement failed") in summary[
+        "errors"
+    ]
+    assert calls == [
+        (
+            "timeout",
+            "--kill-after=5s",
+            "30s",
+            "sudo",
+            "kubectl",
+            "--request-timeout=10s",
+            "-n",
+            "nanofaas",
+            "logs",
+            "deploy/nanofaas-control-plane",
+            "--tail=-1",
+            "--timestamps=true",
+        )
+    ]
+    if log_failure:
+        assert any("log endpoint unavailable" in error for error in summary["errors"])
+    else:
+        assert (
+            (output / "control-plane.log").read_text().endswith("Scaling DOWN echo\n")
+        )

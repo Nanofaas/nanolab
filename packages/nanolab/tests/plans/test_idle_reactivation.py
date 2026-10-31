@@ -117,6 +117,20 @@ def test_pair_registers_fixed_budgets_and_reuses_images_with_cleanup(
         report = json.loads((tmp_path / "b6/paired-summary.json").read_text())
         assert report["passed"] is False
         assert all(not arm["complete"] for arm in report["arms"].values())
+        for arm in ("keep-ready", "scale-to-zero"):
+            assert (tmp_path / "b6" / arm / "control-plane.log").is_file()
+        log_positions = [
+            i
+            for i, task in enumerate(executor.seen)
+            if "Collect" in task.summary and "control-plane log" in task.summary
+        ]
+        releases = [
+            i
+            for i, task in enumerate(executor.seen)
+            if task.argv[:2] == ("helm", "uninstall")
+        ]
+        assert len(log_positions) == len(releases) == 2
+        assert log_positions[0] < releases[0] < log_positions[1] < releases[1]
     else:
         workflow.run()
     registrations = [
