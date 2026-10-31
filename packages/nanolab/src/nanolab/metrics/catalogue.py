@@ -701,6 +701,22 @@ def _require_everything_that_can_answer(queries: Queries) -> Queries:
     )
 
 
+def completion_latency_queries(function_name: str, *, suffix: str = "") -> Queries:
+    """Keep path/outcome and histogram bounds for offline completion percentiles."""
+    return tuple(
+        PrometheusQuery(
+            f"function_completion_latency_{kind}{suffix}",
+            f"function_completion_latency_ms_seconds_{exported}{_fn(function_name)}",
+            True,
+        )
+        for kind, exported in (
+            ("count", "count"),
+            ("sum", "sum"),
+            ("buckets", "bucket"),
+        )
+    )
+
+
 def queries_for(
     function_name: str,
     *,
@@ -709,6 +725,7 @@ def queries_for(
     hpa: bool = False,
     heap_metrics_required: bool = True,
     container_functions: Iterable[str] | None = None,
+    completion_latency: bool = False,
 ) -> Queries:
     """Everything this run can meaningfully be asked, and nothing it cannot.
 
@@ -725,6 +742,12 @@ def queries_for(
         builder = MODULE_QUERIES.get(module)
         if builder is not None:
             queries.extend(builder(function_name))
+    if completion_latency:
+        queries.extend(completion_latency_queries(function_name))
+        if neighbour is not None:
+            queries.extend(
+                completion_latency_queries(neighbour, suffix=f"@{neighbour}")
+            )
     if hpa:
         queries.extend(hpa_queries(function_name))
     if neighbour is not None:

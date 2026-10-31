@@ -108,7 +108,7 @@ class ReleaseConfig(BaseModel):
 # where the other two decide from service time alone. Comparing it against
 # ADAPTIVE_PER_POD isolates the signal, since both govern one function at a time
 # and neither divides a budget.
-ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
+ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN", "FIXED"]
 # `burst` is the two-function profile: variable closed-loop load calibrated to
 # fill the queue without automatically overflowing it, so queue depth, queue
 # wait and rejections are readings about the controller rather than about how
@@ -222,6 +222,12 @@ class ScenarioConfig(BaseModel):
     # make a change in effective concurrency unattributable, since that value is
     # replicas x per-replica target.
     concurrency_control: bool = Field(default=False, alias="concurrencyControl")
+    fixed_concurrency: int | None = Field(
+        default=None, ge=1, le=8, alias="fixedConcurrency"
+    )
+    concurrency_total_budget: int | None = Field(
+        default=None, gt=0, alias="concurrencyTotalBudget"
+    )
     # Which controller the run exercises. Selectable because the question the harness
     # exists to answer is comparative: whether one mode holds latency or sheds fewer
     # requests than another is not answerable from a run of either alone.
@@ -232,6 +238,7 @@ class ScenarioConfig(BaseModel):
     # than the queue can hold, which is the only condition under which a request
     # is ever rejected. Whether one controller sheds fewer than another cannot be
     # asked of a run where neither shed any.
+    completion_latency: bool = Field(default=False, alias="completionLatency")
     load_profile: LoadProfile = Field(default="cycle", alias="loadProfile")
     # La composizione del carico misto. Con entrambe a zero il generatore misto e'
     # il generatore puramente sincrono, che e' come si guida un braccio di
@@ -578,6 +585,12 @@ class ScenarioConfig(BaseModel):
             )
         if self.concurrency_mode != "ADAPTIVE_PER_POD" and not self.concurrency_control:
             raise ValueError("concurrencyMode requires concurrencyControl=true")
+        if (self.concurrency_mode == "FIXED") != (self.fixed_concurrency is not None):
+            raise ValueError(
+                "fixedConcurrency is required only for concurrencyMode=FIXED"
+            )
+        if self.concurrency_total_budget is not None and not self.concurrency_control:
+            raise ValueError("concurrencyTotalBudget requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
 

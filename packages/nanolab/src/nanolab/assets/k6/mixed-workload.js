@@ -150,6 +150,7 @@ export function probe() {
         timeout: '5s',
         tags: { fn: 'management', path: 'probe' },
     });
+    observe(response, {fn: 'management', path: 'probe'});
     probeDuration.add(response.timings.duration);
     probeOverBudget.add(response.timings.duration > PROBE_BUDGET_MS || response.status !== 200);
 }
@@ -165,12 +166,20 @@ function body() {
     return JSON.stringify({ input: { text: TEXTS[__ITER % TEXTS.length], topN: 5 } });
 }
 
-function post(url, payload, extraHeaders, tags) {
-    return http.post(url, payload, {
+function observe(response, tags, part = 'single') {
+    console.log(JSON.stringify({t: 'http', ts: Date.now(), vu: __VU, iteration: __ITER,
+        fn: tags.fn, path: tags.path, idem: tags.idem || 'no', part,
+        status: response.status, error_code: response.error_code || null,
+        duration_ms: response.timings.duration}));
+    return response;
+}
+
+function post(url, payload, extraHeaders, tags, part = 'single') {
+    return observe(http.post(url, payload, {
         headers: Object.assign({ 'Content-Type': 'application/json' }, extraHeaders || {}),
         timeout: '30s',
         tags,
-    });
+    }), tags, part);
 }
 
 // A key is not a load-shaping trick: it is a client that did not get an answer and is
@@ -183,8 +192,11 @@ function idempotent(functionName) {
     const tags = { fn: functionName, path: 'sync', idem: 'yes' };
     const url = `${BASE_URL}/v1/functions/${functionName}:invoke`;
 
-    const first = post(url, payload, headers, tags);
-    const second = post(url, payload, headers, tags);
+    const first = post(url, payload, headers, tags, 'first');
+    const second = post(url, payload, headers, tags, 'second');
+    for (const response of [first, second]) {
+        check(response, { 'idempotent request answered': r => r.status === 200 || r.status === 429 || r.status === 503 });
+    }
     syncIdemDuration.add(first.timings.duration);
     syncIdemDuration.add(second.timings.duration);
     syncRefused.add(first.status === 429 || first.status === 503);

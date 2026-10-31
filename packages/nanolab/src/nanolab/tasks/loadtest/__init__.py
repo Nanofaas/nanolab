@@ -23,6 +23,7 @@ from nanolab.tasks.loadtest.concurrency import (
     ConcurrencyWatcher,
     ConcurrencyWatcherGroup,
     verify_concurrency_cycle,
+    verify_fixed_concurrency,
     verify_observable,
     write_series,
 )
@@ -233,10 +234,12 @@ class ReportCoTenancyTask(Task[LoadtestOutcome]):
         watchers: ConcurrencyWatcherGroup,
         series_dir: Path | None = None,
         title: str = "Report co-tenancy",
+        fixed_concurrency: int | None = None,
     ) -> None:
         """Record the watcher group and where to write each function's series."""
         self.title = title
         self._watchers = watchers
+        self._fixed_concurrency = fixed_concurrency
         self._series_dir = series_dir
 
     @override
@@ -250,7 +253,10 @@ class ReportCoTenancyTask(Task[LoadtestOutcome]):
                 )
             print(summary.describe())
         for summary in summaries.values():
-            verify_observable(summary)
+            if self._fixed_concurrency is None:
+                verify_observable(summary)
+            else:
+                verify_fixed_concurrency(summary, self._fixed_concurrency)
         # The neighbour's series is the point, so the outcome keeps the function
         # the run was built around and the files keep the rest.
         first = next(iter(summaries.values()), None)
@@ -354,6 +360,23 @@ class WriteSummaryTask(Task[LoadtestOutcome]):
         outcome = load_outcome(inputs, self.title)
         written = self._summary(outcome.autoscaling).run()
         return TaskOutcome(value=replace(outcome, summary=written))
+
+
+class WriteMixedHttpAccountingTask(Task[LoadtestOutcome]):
+    """Retain per-status evidence after collecting the other run artifacts."""
+
+    def __init__(self, run_dir: Path) -> None:
+        """Read the fetched response ledger beside the retained k6 summary."""
+        self.title = "Reconcile mixed HTTP status counts"
+        self._run_dir = run_dir
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        from nanolab.comparison.mixed_http import write_http_accounting
+
+        outcome = load_outcome(inputs, self.title)
+        write_http_accounting(self._run_dir)
+        return TaskOutcome(value=outcome)
 
 
 class EvaluateGateTask(Task[LoadtestOutcome]):

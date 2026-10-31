@@ -21,6 +21,7 @@ import pytest
 from nanolab.metrics.catalogue import (
     MODULE_QUERIES,
     MODULES_WITHOUT_QUERIES,
+    completion_latency_queries,
     core_queries,
     queries_for,
     runtime_queries,
@@ -233,7 +234,11 @@ def test_the_core_metrics_are_collected() -> None:
     published = _published_metrics(
         _nanofaas_root() / "platform" / "control-plane" / "src" / "main"
     )
-    catalogue = core_queries("word-stats-java") + runtime_queries("word-stats-java")
+    catalogue = (
+        core_queries("word-stats-java")
+        + runtime_queries("word-stats-java")
+        + completion_latency_queries("word-stats-java")
+    )
     queried = {n for q in catalogue for n in re.findall(r"[a-z_0-9]+", q.expr)}
     # Core timers are exported by Micrometer with _seconds_count/_sum suffixes,
     # so match on the stem rather than the literal registered name.

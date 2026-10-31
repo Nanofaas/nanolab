@@ -125,6 +125,7 @@ from nanolab.tasks.loadtest import (
     VerifyAutoscalingTask,
     VerifyConcurrencyTask,
     WriteConcurrencyReportTask,
+    WriteMixedHttpAccountingTask,
     WriteReportTask,
     WriteSummaryTask,
     build_loadtest_workflow,
@@ -158,6 +159,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
+from nanolab.tasks.metrics import PrometheusScrapeCheckTask, management_base_url
 from nanolab.tasks.platform import Backend, Build, Platform, PlatformRequest
 from nanolab.tasks.recipes.validation import (
     RecipeImageCheckTask,
@@ -179,6 +181,7 @@ def _default_prometheus_queries(
     hpa: bool = False,
     heap_metrics_required: bool = True,
     container_functions: tuple[str, ...] | None = None,
+    completion_latency: bool = False,
 ) -> tuple[PrometheusQuery, ...]:
     """Return the metrics this run can meaningfully be asked about.
 
@@ -195,6 +198,7 @@ def _default_prometheus_queries(
         hpa=hpa,
         heap_metrics_required=heap_metrics_required,
         container_functions=container_functions,
+        completion_latency=completion_latency,
     )
 
 
@@ -470,6 +474,7 @@ def _build_platform_request(
     hpa: bool,
     container_metrics: bool = False,
     control_plane_resources: dict[str, dict[str, float | int | str]] | None = None,
+    concurrency_total_budget: str = "",
 ) -> PlatformRequest:
     request = PlatformRequest(
         backend=backend,
@@ -513,9 +518,20 @@ def _build_platform_request(
             # value but not the controller's own verdict, so a plateau at
             # maxReplicas cannot be told apart from a metric that stopped rising.
             helm_values["kube-state-metrics.enabled"] = "true"
+        budget_args = (
+            (
+                "--set",
+                "controlPlane.extraEnv[0].name="
+                "NANOFAAS_CONCURRENCY_CONTROL_TOTAL_BUDGET",
+                "--set-string",
+                f"controlPlane.extraEnv[0].value={concurrency_total_budget}",
+            )
+            if concurrency_total_budget
+            else ()
+        )
         request = replace(
             request,
-            helm_values=helm_set_args(helm_values),
+            helm_values=(*helm_set_args(helm_values), *budget_args),
         )
     return request
 
@@ -573,6 +589,8 @@ def concurrency_budget(config: ScenarioConfig) -> str:
     shared four cores carried 14 in flight at full throughput, so 12 is a real
     capacity statement rather than an artificial squeeze.
     """
+    if config.concurrency_total_budget is not None:
+        return str(config.concurrency_total_budget)
     if not is_co_tenancy(config) or config.concurrency_mode != "BUDGETED":
         return ""
     return str(BURST_TOTAL_BUDGET)
@@ -854,7 +872,7 @@ def _build_concurrency_watcher(
     """
     if not config.concurrency_control:
         return None
-    management_url = control_plane_url.replace(":8080", ":8081")
+    management_url = management_base_url(control_plane_url)
     return ConcurrencyWatcher(
         ScrapeConcurrencyProbe(management_url=management_url, function_name=target.name)
     )
@@ -868,7 +886,7 @@ def _build_concurrency_watchers(
 ) -> ConcurrencyWatcherGroup | None:
     if not is_co_tenancy(config):
         return None
-    management_url = control_plane_url.replace(":8080", ":8081")
+    management_url = management_base_url(control_plane_url)
     return ConcurrencyWatcherGroup(
         {
             function.name: ConcurrencyWatcher(
@@ -913,6 +931,8 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     concurrency_report: WriteConcurrencyReport | None = None,
     drain_minutes: int | None = None,
     management_url: str | None = None,
+    fixed_concurrency: int | None = None,
+    completion_latency: bool = False,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     # First, because it has to sample while the stack is still up and before the
@@ -944,7 +964,11 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
         )
     if concurrency_watchers is not None:
         after.append(
-            ReportCoTenancyTask(watchers=concurrency_watchers, series_dir=run_dir)
+            ReportCoTenancyTask(
+                watchers=concurrency_watchers,
+                series_dir=run_dir,
+                fixed_concurrency=fixed_concurrency,
+            )
         )
     elif concurrency_watcher is not None:
         after.append(
@@ -998,6 +1022,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                             hpa=hpa_metrics,
                             heap_metrics_required=heap_metrics_required,
                             container_functions=container_functions,
+                            completion_latency=completion_latency,
                         )
                     ),
                     window=window,
@@ -1083,7 +1108,7 @@ def _build_concurrency_report(
     cores = shared_cpuset(config)
     conditions = [
         f"mode {mode}",
-        f"ceiling {CONCURRENCY_CEILING}",
+        f"ceiling {config.fixed_concurrency or CONCURRENCY_CEILING}",
         f"queue {CONCURRENCY_QUEUE_SIZE}",
     ]
     if budget:
@@ -1331,7 +1356,9 @@ def build_loadtest_plan(
         tool_root,
         scaling_config,
         prebuilt_function_images,
-        concurrency=CONCURRENCY_CEILING if config.concurrency_control else 4,
+        concurrency=(config.fixed_concurrency or CONCURRENCY_CEILING)
+        if config.concurrency_control
+        else 4,
         resources_for=(
             (lambda name: concurrency_function_resources(config, name))
             if config.concurrency_control
@@ -1353,6 +1380,7 @@ def build_loadtest_plan(
         remote_repo_root = Path(
             remote_project_dir(vm_request_for_role(environment, "stack"))
         )
+    k6_events = k6_events or config.load_profile == "mixed"
     script_path, summary_path = _resolve_script_and_summary(
         config,
         environment,
@@ -1379,6 +1407,7 @@ def build_loadtest_plan(
         hpa=hpa,
         container_metrics=container_metrics,
         control_plane_resources=_control_plane_resources(config),
+        concurrency_total_budget=concurrency_budget(config),
     )
     if helm_values_overrides:
         request = replace(
@@ -1430,7 +1459,16 @@ def build_loadtest_plan(
         config=config,
         env_overrides=k6_env_overrides,
         remote=environment.provider != "local",
-        payload_path=payload_corpus_path(config, root, target.name),
+        payload_path=payload_corpus_path(
+            config,
+            root,
+            target.name,
+            destination_root=(
+                Path(environment.target(load_role).remote_home) / "nanofaas"
+                if environment.provider != "local"
+                else None
+            ),
+        ),
         events_path=events_path,
     )
     watcher, replica_probe = _build_replica_watcher(
@@ -1460,6 +1498,8 @@ def build_loadtest_plan(
         watcher=watcher,
         concurrency_watcher=concurrency_watcher,
         concurrency_watchers=concurrency_watchers,
+        completion_latency=config.completion_latency,
+        fixed_concurrency=config.fixed_concurrency,
         replica_probe=replica_probe,
         bindings=bindings,
         request=request,
@@ -1499,6 +1539,8 @@ def build_loadtest_plan(
             )
             for function in request.functions
         ] + after
+    if config.load_profile == "mixed":
+        after.insert(-1, WriteMixedHttpAccountingTask(run_dir))
     prepare_argv = _prepare_run_directory_argv(
         summary_path, remote_run_dir, events_path
     )
@@ -1510,6 +1552,24 @@ def build_loadtest_plan(
         request=request,
         target=target,
     )
+
+    if config.completion_latency:
+        preflight = Steps(
+            title="Check completion telemetry before load",
+            steps=(
+                preflight,
+                PrometheusScrapeCheckTask(
+                    title="Check completion histograms are exposed",
+                    url=management_base_url(control_plane_url) + "/actuator/prometheus",
+                    executor=executor,
+                    role=load_role,
+                    expect=(
+                        "function_completion_latency_ms_seconds_bucket",
+                        "function_completion_latency_ms_seconds_count",
+                    ),
+                ),
+            ),
+        )
 
     return build_loadtest_workflow(
         request,

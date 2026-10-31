@@ -1,0 +1,34 @@
+# B1: same open-loop workload and resources; only controller mode differs.
+workflow: loadtest
+backend: k8s
+concurrencyControl: true
+concurrencyMode: SOJOURN
+concurrencyTotalBudget: 16
+loadProfile: openloop
+payloadProfile: medium
+loadVus: 5000
+functions:
+- word-stats-java
+- word-stats-java-lite
+resources:
+  control-plane:
+    requests:
+      cpu: 0.25
+      memoryMiB: 512
+    limits:
+      cpu: 2
+      memoryMiB: 2048
+  word-stats-java:
+    requests:
+      cpu: 1
+      memoryMiB: 256
+    limits:
+      cpu: 2
+      memoryMiB: 512
+  word-stats-java-lite:
+    requests:
+      cpu: 1
+      memoryMiB: 256
+    limits:
+      cpu: 2
+      memoryMiB: 512
