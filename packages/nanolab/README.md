@@ -398,3 +398,11 @@ cleanup. Its final report distinguishes numerical results from evidence
 completeness and always records `purpose: smoke`, `p24_qualified: false`.
 See [the soak contract](../../docs/soak.md) for verification results and
 retention/attribution requirements.
+
+## Idle footprint and reactivation (B6)
+
+The dedicated `idle-reactivation` workflow pairs a ready replica with natural
+scale-to-zero, using the same cached images and fixed runtime budgets. Five
+`idle-reactivation-*.yaml` scenarios cover the B5 runtimes. See
+[the protocol and CLI commands](../../docs/b6-idle-reactivation.md) for managed
+Spot provisioning, output under `/data`, evidence gates and offline reanalysis.

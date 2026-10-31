@@ -12,9 +12,10 @@ from nanolab.tasks.loadtest.prometheus import (
 class HttpPrometheusClient:
     """Implements PrometheusClient using the Prometheus HTTP API."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, preserve_labels: bool = False) -> None:
         """Remember the Prometheus base URL every query is issued against."""
         self._url = url
+        self._preserve_labels = preserve_labels
 
     def query_range(
         self,
@@ -24,7 +25,12 @@ class HttpPrometheusClient:
     ) -> list[dict[str, float | str]]:
         """Return the `expr` samples inside `window`, one per `step_seconds`."""
         return query_prometheus_range_series(
-            self._url, expr, window.start, window.end, step_seconds
+            self._url,
+            expr,
+            window.start,
+            window.end,
+            step_seconds,
+            **({"preserve_labels": True} if self._preserve_labels else {}),
         )
 
     def server_time(self) -> float:

@@ -18,10 +18,12 @@ from nanolab.config.contract import ContractConfig
 from nanolab.config.experiment_01 import EXPERIMENT_01_FUNCTION, Experiment01Protocol
 from nanolab.config.experiment_02 import EXPERIMENT_02_FUNCTION, Experiment02Protocol
 from nanolab.config.heap_analysis import HeapAnalysisConfig
+from nanolab.config.idle_reactivation import IdleReactivationConfig
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.config.soak import RolePolicy, SoakConfig
 
 WorkflowName = Literal[
+    "idle-reactivation",
     "one-shot-calibration",
     "one-shot-qualification",
     "one-shot-experiment",
@@ -190,6 +192,9 @@ class ScenarioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow: WorkflowName
+    idle_reactivation: IdleReactivationConfig | None = Field(
+        default=None, alias="idleReactivation"
+    )
     one_shot: OneShotConfig | None = Field(default=None, alias="oneShot")
     contract: ContractConfig | None = None
     backend: BackendName | None = None
@@ -319,6 +324,11 @@ class ScenarioConfig(BaseModel):
         the backend, the autoscaler, the concurrency governor and the load
         profile. Returns the instance unchanged once every rule holds.
         """
+        if self.workflow == "idle-reactivation":
+            self._validate_idle_reactivation()
+            return self
+        if self.idle_reactivation is not None:
+            raise ValueError("idleReactivation requires workflow idle-reactivation")
         if self.workflow.startswith("one-shot-"):
             self._validate_one_shot()
             return self
@@ -349,6 +359,54 @@ class ScenarioConfig(BaseModel):
 
     def _unconsumed(self, consumed: frozenset[str]) -> set[str]:
         return self.model_fields_set - consumed
+
+    def _validate_idle_reactivation(self) -> None:
+        allowed = frozenset(
+            {
+                "workflow",
+                "backend",
+                "build",
+                "functions",
+                "resources",
+                "idle_reactivation",
+            }
+        )
+        if extra := self._unconsumed(allowed):
+            raise ValueError(
+                "idle-reactivation does not consume " + self._option_list(extra)
+            )
+        functions = {
+            f"word-stats-{r}" for r in ("java", "go", "javascript", "python", "rust")
+        }
+        if (
+            self.idle_reactivation is None
+            or self.backend != "k8s"
+            or self.build != "docker"
+            or len(self.functions) != 1
+            or self.functions[0] not in functions
+        ):
+            raise ValueError(
+                "idle-reactivation requires Kubernetes, docker, "
+                "one B5 function and idleReactivation"
+            )
+        expected = {
+            "control-plane": {
+                "requests": {"cpu": 0.25, "memoryMiB": 512},
+                "limits": {"cpu": 2, "memoryMiB": 2048},
+            },
+            self.functions[0]: {
+                "requests": {"cpu": 1, "memoryMiB": 256},
+                "limits": {"cpu": 2, "memoryMiB": 512},
+            },
+        }
+        actual = {
+            name: spec.model_dump(by_alias=True, exclude_none=True)
+            for name, spec in self.resources.items()
+        }
+        if actual != expected:
+            raise ValueError(
+                "idle-reactivation requires the matched B5 CPU/memory budgets"
+            )
 
     @classmethod
     def _option_list(cls, names: set[str]) -> str:

@@ -395,6 +395,8 @@ def _write_run_metadata(
 def _default_run_dir(
     run_dir: Path | None, workflow: str, runs_dir: Path, *, recipe: bool = False
 ) -> Path | None:
+    if run_dir is None and workflow == "idle-reactivation":
+        return runs_dir / f"idle-reactivation-{uuid4().hex}"
     if run_dir is None and workflow == "contract":
         return runs_dir / f"contract-{uuid4().hex}"
     if run_dir is None and workflow == "soak":
@@ -653,7 +655,7 @@ def execute_workflow(
             else nullcontext()
         )
         with provisioning, ExitStack() as forwarding:
-            if scenario_config.workflow == "loadtest":
+            if scenario_config.workflow in ("loadtest", "idle-reactivation"):
                 control_plane_url, prometheus_url = _forward_loadtest_urls(
                     environment_config,
                     scenario_config,
@@ -914,6 +916,17 @@ def install_product_commands(
                 prometheus_url=prometheus_url,
                 release_config=release_config,
             )
+        if scenario_config.workflow == "idle-reactivation":
+            from nanolab.plans.idle_reactivation import require_idle_environment
+
+            with _bad_parameter():
+                require_idle_environment(environment_config)
+                if resume or keep or only or start or until or teardown:
+                    raise ValueError(
+                        "idle-reactivation requires a complete uninterrupted paired run"
+                    )
+                if run_dir is not None:
+                    require_unused_run_dir(run_dir)
         release = scenario_config.workflow == "release"
         if scenario_config.workflow == "soak":
             try:
@@ -1187,6 +1200,16 @@ def install_product_commands(
             )
         with _bad_parameter():
             validate_cli_container_options(scenario_config, environment_config)
+        if scenario_config.workflow == "idle-reactivation":
+            from nanolab.plans.idle_reactivation import require_idle_environment
+
+            with _bad_parameter():
+                require_idle_environment(environment_config)
+                if only or start or until:
+                    raise ValueError(
+                        "idle-reactivation requires a complete uninterrupted "
+                        "paired plan"
+                    )
         if scenario_config.workflow == "soak":
             with _bad_parameter():
                 _check_soak_options(
@@ -1221,7 +1244,7 @@ def install_product_commands(
                 raise typer.BadParameter(str(error)) from None
         with _bad_parameter():
             require_cli_endpoint(scenario_config, environment_config, control_plane_url)
-        if scenario_config.workflow == "loadtest":
+        if scenario_config.workflow in ("loadtest", "idle-reactivation"):
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment_config,
                 backend=scenario_config.backend or "k8s",

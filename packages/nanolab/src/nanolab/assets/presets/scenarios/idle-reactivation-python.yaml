@@ -1,0 +1,24 @@
+workflow: idle-reactivation
+backend: k8s
+build: docker
+functions:
+- word-stats-python
+idleReactivation:
+  cycles: 3
+  idleSeconds: 180
+  zeroFirst: false
+resources:
+  control-plane:
+    requests:
+      cpu: 0.25
+      memoryMiB: 512
+    limits:
+      cpu: 2
+      memoryMiB: 2048
+  word-stats-python:
+    requests:
+      cpu: 1
+      memoryMiB: 256
+    limits:
+      cpu: 2
+      memoryMiB: 512

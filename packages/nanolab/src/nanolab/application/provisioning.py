@@ -114,7 +114,12 @@ def _role_requests_and_operations(
     maven_source: Path | None = None,
 ) -> list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]]:
     """Build the per-role (role, request, operations) triples."""
-    loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
+    loadtest_workflow = scenario.workflow in (
+        "loadtest",
+        "offload-loadtest",
+        "release",
+        "idle-reactivation",
+    )
     dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
     dedicated_cloud = (
         scenario.workflow == "offload-loadtest" and "cloud" in environment.roles

@@ -43,12 +43,14 @@ def query_prometheus_range_series(
     start: datetime,
     end: datetime,
     step_seconds: int = 2,
+    *,
+    preserve_labels: bool = False,
 ) -> list[dict[str, Any]]:
     """Return `metric_name` samples over the range as sorted timestamp/value dicts."""
     series = _client(base_url).query_range(metric_name, start, end, step_seconds)
     # Gauges retain the summed view used by charts. Counters keep the publisher
     # labels, because summing before reset detection can hide a restart.
-    if not is_counter(metric_name):
+    if not preserve_labels and not is_counter(metric_name):
         merged = sum_series_by_timestamp(series)
         return [
             {

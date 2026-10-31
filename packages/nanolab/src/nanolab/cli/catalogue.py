@@ -43,6 +43,8 @@ def workflow_catalog(
         )
         if workflow.startswith("one-shot-"):
             environments = ("multipass",)
+        if workflow == "idle-reactivation":
+            environments = tuple(p for p in _ENVIRONMENT_PROVIDERS if p != "local")
         if workflow == "release":
             environments = ("azure",)
         workflows.setdefault(workflow, set()).update(environments)

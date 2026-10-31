@@ -268,11 +268,21 @@ def test_external_provisioning_reuses_ssh_host_without_teardown(tmp_path: Path) 
     assert all("vm.example" in " ".join(command) for command in _commands(orchestrator))
 
 
-def test_loadtest_provisions_dedicated_load_generator_with_k6(tmp_path: Path) -> None:
+@pytest.mark.parametrize("workflow", ["loadtest", "idle-reactivation"])
+def test_loadtest_provisions_dedicated_load_generator_with_k6(
+    tmp_path: Path, workflow: str
+) -> None:
     orchestrator = RecordingOrchestrator()
 
+    from tests.config.test_idle_reactivation import idle_scenario
+
+    scenario = (
+        ScenarioConfig.model_validate(idle_scenario())
+        if workflow == "idle-reactivation"
+        else ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])
+    )
     with provision_environment(
-        ScenarioConfig(workflow="loadtest", functions=["word-stats-java"]),
+        scenario,
         EnvironmentConfig.model_validate(
             {
                 "provider": "multipass",

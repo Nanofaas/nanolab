@@ -10,6 +10,26 @@ from sonata_tasks.prometheus import PrometheusRetryPolicy
 from nanolab.tasks.loadtest import prometheus as prom
 
 
+def test_b6_can_keep_gauge_labels_without_changing_loadtest_defaults(monkeypatch):
+    from sonata_tasks.prometheus import PrometheusSample, PrometheusSeries
+
+    class Client:
+        def query_range(self, *args):
+            return (
+                PrometheusSeries({"pod": "old"}, (PrometheusSample(1, 100),)),
+                PrometheusSeries({"pod": "new"}, (PrometheusSample(1, 20),)),
+            )
+
+    monkeypatch.setattr(prom, "_client", lambda _url: Client())
+    args = ("http://p", "container_memory_rss", datetime.now(UTC), datetime.now(UTC))
+    assert prom.query_prometheus_range_series(*args)[0]["value"] == 120
+    raw = prom.query_prometheus_range_series(*args, preserve_labels=True)
+    assert [(p["labels"]["pod"], p["value"]) for p in raw] == [
+        ("old", 100),
+        ("new", 20),
+    ]
+
+
 def test_the_product_client_configures_bounded_retries() -> None:
     """Prometheus answers a range query in under a millisecond, measured on the VM.
 
