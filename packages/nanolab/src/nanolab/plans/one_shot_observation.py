@@ -86,6 +86,7 @@ def build_one_shot_observation_plan(
         repo_root=Path(frozen["source"]),
         forecast_provider=mode.upper(),
         terminal_queueing=True,
+        max_retries=3,
         observer_bootstrap=True,
         supervision=supervision,
         forecast_max_age_seconds=forecast["maxAgeSeconds"],

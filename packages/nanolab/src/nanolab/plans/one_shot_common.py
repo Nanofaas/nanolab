@@ -403,6 +403,7 @@ def add_one_shot_platforms(
     repo_root: Path,
     forecast_provider: str = "ORACLE",
     terminal_queueing: bool = False,
+    max_retries: int = 0,
     baseline: bool = False,
     observer_bootstrap: bool = False,
     forecast_max_age_seconds: int | None = None,
@@ -740,7 +741,7 @@ def add_one_shot_platforms(
                 concurrency=function.max_replicas,
                 queue_size=100,
                 timeout_ms=30000,
-                max_retries=0,
+                max_retries=max_retries,
                 runtime_mode="HTTP",
                 env={
                     "NANOFAAS_ONE_SHOT_PROFILE": "true",
