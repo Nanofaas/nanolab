@@ -362,6 +362,23 @@ class WriteSummaryTask(Task[LoadtestOutcome]):
         return TaskOutcome(value=replace(outcome, summary=written))
 
 
+class WriteMixedHttpAccountingTask(Task[LoadtestOutcome]):
+    """Retain per-status evidence after collecting the other run artifacts."""
+
+    def __init__(self, run_dir: Path) -> None:
+        """Read the fetched response ledger beside the retained k6 summary."""
+        self.title = "Reconcile mixed HTTP status counts"
+        self._run_dir = run_dir
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        from nanolab.comparison.mixed_http import write_http_accounting
+
+        outcome = load_outcome(inputs, self.title)
+        write_http_accounting(self._run_dir)
+        return TaskOutcome(value=outcome)
+
+
 class EvaluateGateTask(Task[LoadtestOutcome]):
     """Fail the run when k6 breached its thresholds or the autoscaler oscillated.
 

@@ -28,3 +28,23 @@ histogram percentile estimates; retain reset/publisher labels and mark incomplet
 coverage. Percentiles reconstructed from buckets are estimates. Preserve the
 trailing collection margin and distinguish work admitted in the load window
 from work that happens to conclude in it. No polling traffic is added.
+
+## HTTP response accounting
+
+The first completion-repeat attempt was interrupted at the user's request and
+released its Spot pair. Restart all four arms in a new directory after fixing
+the mixed generator. Each keyed request now receives its own answered-status
+check; the execution-ID agreement check remains conditional on two HTTP 200s.
+The arrival schedule, payload, headers, request timeouts and replay policy stay
+unchanged.
+
+Every mixed-profile HTTP response, including probes and both keyed requests,
+is written to NanoLab's existing k6 console-event ledger (`k6-events.jsonl`).
+The event carries function, path, keyed/non-keyed, first/second/single, status,
+k6 transport error code, VU/iteration, timestamp and duration. No response bodies
+or headers are logged. The existing fetch-on-failure mechanism retrieves it.
+After collecting the normal run artifacts, the workflow writes
+`http-status-counts.json` and verifies that total responses and HTTP failures
+reconcile with k6. A damaged ledger fails verification after retaining evidence;
+unexpected HTTP statuses remain findings and do not abort later campaign arms.
+The extra diagnostics incur load-generator file I/O, with no extra HTTP traffic.

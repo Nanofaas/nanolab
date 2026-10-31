@@ -125,6 +125,7 @@ from nanolab.tasks.loadtest import (
     VerifyAutoscalingTask,
     VerifyConcurrencyTask,
     WriteConcurrencyReportTask,
+    WriteMixedHttpAccountingTask,
     WriteReportTask,
     WriteSummaryTask,
     build_loadtest_workflow,
@@ -1379,6 +1380,7 @@ def build_loadtest_plan(
         remote_repo_root = Path(
             remote_project_dir(vm_request_for_role(environment, "stack"))
         )
+    k6_events = k6_events or config.load_profile == "mixed"
     script_path, summary_path = _resolve_script_and_summary(
         config,
         environment,
@@ -1537,6 +1539,8 @@ def build_loadtest_plan(
             )
             for function in request.functions
         ] + after
+    if config.load_profile == "mixed":
+        after.insert(-1, WriteMixedHttpAccountingTask(run_dir))
     prepare_argv = _prepare_run_directory_argv(
         summary_path, remote_run_dir, events_path
     )
