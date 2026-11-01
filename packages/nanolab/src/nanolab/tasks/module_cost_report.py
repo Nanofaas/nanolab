@@ -266,6 +266,12 @@ def analyze_arm(block: Path, arm: str, protocol: dict) -> dict[str, Any]:
     require(images["function"] == function_image, "different function image")
     expected = fixed_function(function_image).manifest().body()
     require(load(directory / "registration.json") == expected, "registration drift")
+    mode = expected.pop("executionMode")
+    expected.update(
+        requestedExecutionMode=mode,
+        effectiveExecutionMode=mode,
+        deploymentBackend="k8s",
+    )
     for when in ("before", "after"):
         require(
             subset(expected, load(directory / f"spec-{when}.json")),

@@ -81,3 +81,25 @@ Linux run and explicit loopback checks above are the verification evidence.
 
 There are no deferred minor review findings. Frozen campaign input files are
 also in `nanofaas-paper/experiments/module-cost/manifests/mc-c481a04bfd0f/`.
+
+## Function-response correction after the first qualification
+
+The first `native-cs` arm collected successfully, then the offline gate compared
+request-only `executionMode` against `FunctionResponse`. NanoFaaS correctly
+returns `requestedExecutionMode` and `effectiveExecutionMode` instead. The gate
+now checks both plus `deploymentBackend=k8s`, retaining all nested policy and
+resource checks. No NanoFaaS change or compatibility fallback is needed.
+
+A captured response from `mc-c481a04bfd0f-1` replaces the request-shaped test
+fixture. The valid-arm test failed before the fix and passes afterward; fourteen
+mutations reject missing/changed mode, backend, concurrency, queue and retries
+before or after measurement. All 130 affected-path tests pass, along with Ruff,
+formatting and basedpyright. The full suite was not repeated for this six-line
+analyzer correction; the prior complete run and focused rechecks remain above.
+
+The paper repository retains the original compressed block and hashes under
+`experiments/module-cost/results/2026-11-01/`. Its `analysis/replay_policy_fix.py`
+verifies the archive and rechecks the collected arm in a temporary copy, removing
+only the known obsolete validator failure from that copy. All remaining real-data
+gates pass. The diagnostic output explicitly marks the block non-comparable;
+these partial data are not combined with the fresh campaign.

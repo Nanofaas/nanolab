@@ -1,0 +1,53 @@
+{
+  "command": [],
+  "concurrency": 2,
+  "deploymentBackend": "k8s",
+  "deploymentObjects": {
+    "deployment": "fn-word-stats-java",
+    "namespace": "nanofaas-e2e",
+    "service": "fn-word-stats-java"
+  },
+  "effectiveExecutionMode": "DEPLOYMENT",
+  "endpointUrl": "http://fn-word-stats-java.nanofaas-e2e.svc.cluster.local:8080/invoke",
+  "env": {},
+  "image": "127.0.0.1:5000/nanofaas/word-stats-java@sha256:ec346d8c68141a1bfdd831533659f56fc59d2a1d8457bfaa4cf1bf0cdb12512a",
+  "maxRetries": 0,
+  "name": "word-stats-java",
+  "queueSize": 20,
+  "requestedExecutionMode": "DEPLOYMENT",
+  "resources": {
+    "limits": {
+      "cpu": 2,
+      "memoryMiB": 512
+    },
+    "requests": {
+      "cpu": 1,
+      "memoryMiB": 256
+    }
+  },
+  "scalingConfig": {
+    "concurrencyControl": {
+      "downscaleCooldownMs": null,
+      "highLoadThreshold": null,
+      "lowLoadThreshold": null,
+      "maxTargetInFlightPerPod": null,
+      "minTargetInFlightPerPod": null,
+      "mode": "FIXED",
+      "targetInFlightPerPod": null,
+      "targetLatencyMs": null,
+      "upscaleCooldownMs": null,
+      "weight": null
+    },
+    "maxReplicas": 1,
+    "metrics": [
+      {
+        "query": null,
+        "target": "5",
+        "type": "queue_depth"
+      }
+    ],
+    "minReplicas": 1,
+    "strategy": "NONE"
+  },
+  "timeoutMs": 30000
+}

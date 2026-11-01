@@ -27,6 +27,7 @@ def test_within_runtime_contrast_signs():
 
 def arm_fixture(root, monkeypatch):
     import json
+    from pathlib import Path
     from types import SimpleNamespace
 
     import nanolab.tasks.module_cost_report as module
@@ -47,7 +48,12 @@ def arm_fixture(root, monkeypatch):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data))
 
-    digest = "registry/fn@sha256:" + "a" * 64
+    response = json.loads(
+        (
+            Path(__file__).parents[1] / "fixtures/module-cost/function-response.json"
+        ).read_text()
+    )
+    digest = response["image"]
     cp_digest = "registry/cp@sha256:" + "b" * 64
     write(root / "build/jvm-base/images.json", {"function": {"digest": digest}})
     write(
@@ -64,8 +70,9 @@ def arm_fixture(root, monkeypatch):
         {"images": {"function": digest, "control-plane": cp_digest}},
     )
     body = fixed_function(digest).manifest().body()
-    for name in ("registration", "spec-before", "spec-after"):
-        write(arm / (name + ".json"), body)
+    write(arm / "registration.json", body)
+    for name in ("spec-before", "spec-after"):
+        write(arm / (name + ".json"), response)
     write(
         arm / "measurement.json",
         {
@@ -295,3 +302,35 @@ def test_cohort_window_ignores_staging_and_fetch_delays():
     anchors[1]["remote"] = 381
     with pytest.raises(ValueError, match="clock"):
         cohort_window(load, anchors)
+
+
+@pytest.mark.parametrize("when", ["before", "after"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("requestedExecutionMode", "EXTERNAL"),
+        ("effectiveExecutionMode", "EXTERNAL"),
+        ("effectiveExecutionMode", None),
+        ("deploymentBackend", "docker"),
+        ("concurrency", 3),
+        ("queueSize", 21),
+        ("maxRetries", 1),
+    ],
+)
+def test_effective_policy_rejects_missing_or_changed_response_fields(
+    tmp_path, monkeypatch, when, field, value
+):
+    import json
+
+    from nanolab.tasks.module_cost_report import analyze_arm
+
+    arm, protocol = arm_fixture(tmp_path, monkeypatch)
+    path = arm / f"spec-{when}.json"
+    response = json.loads(path.read_text())
+    if value is None:
+        del response[field]
+    else:
+        response[field] = value
+    path.write_text(json.dumps(response))
+    with pytest.raises(ValueError, match="effective function policy drift"):
+        analyze_arm(tmp_path, "native-c", protocol)
