@@ -7,13 +7,14 @@ import math
 import os
 import subprocess
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from importlib.metadata import version
 from importlib.resources import files
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Any, cast
 from uuid import uuid4
 
@@ -775,6 +776,11 @@ def physical_attempts(path: Path) -> list[dict]:
     return list(unique.values())
 
 
+# The SDK keeps a terminal proof this long (NANOFAAS_OCCUPANCY_RETENTION default,
+# not overridden for one-shot functions); an older proof can no longer be read.
+PROOF_RETENTION_SECONDS = 600
+
+
 class LiveEvidenceCollector:
     """Capture proofs during load so an epoch transition cannot erase all history."""
 
@@ -785,6 +791,7 @@ class LiveEvidenceCollector:
         self.error = None
         self.event_cursors = {}
         self.pending: dict[str, dict] = {}
+        self.expired: set[str] = set()
         self.thread = Thread(target=self.loop, name="one-shot-evidence", daemon=False)
         self.thread.start()
 
@@ -805,8 +812,16 @@ class LiveEvidenceCollector:
                         row["phase"] == "campaign"
                         and row["event"] == "result"
                         and row["originalId"] not in seen
+                        and row["originalId"] not in self.expired
                     ):
                         self.pending.setdefault(row["originalId"], row)
+                # Past the runtime retention a row cannot be proven any more;
+                # retrying it would only delay rows that still can.
+                cutoff = time.time() - PROOF_RETENTION_SECONDS
+                for identity, row in tuple(self.pending.items()):
+                    if (row.get("finishedAt") or math.inf) < cutoff:
+                        del self.pending[identity]
+                        self.expired.add(identity)
                 progress = collect_runtime_evidence(
                     self.run,
                     self.inputs,
@@ -832,6 +847,7 @@ class LiveEvidenceCollector:
                         "visitedOriginals": len(visited),
                         "pendingOriginals": len(self.pending),
                         "provenOriginals": len(seen),
+                        "expiredOriginals": len(self.expired),
                     },
                 )
                 self.collect_events()
@@ -997,11 +1013,40 @@ def _runtime_candidates(run, inputs, node_id, node, functions, cancelled):
     return candidates
 
 
-def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout):
-    """Read identity-checked physical proof, retrying one failed transport read."""
+def _execution_hint(row, destinations):
+    """Name the node that the gateway reported, or that a local execution implies."""
+    if row.get("executionNode"):
+        return row["executionNode"]
+    target = row.get("offloadedTarget")
+    if target:
+        return destinations.get(target.rstrip("/"))
+    return row.get("origin")
+
+
+def _lookup_runtime_proofs(
+    row,
+    *,
+    run,
+    http,
+    runtimes,
+    cancelled,
+    read_timeout,
+    destinations=None,
+    record=None,
+):
+    """Read identity-checked physical proof, retrying one failed transport read.
+
+    The reported execution node is read first; the other nodes only when it
+    holds no proof, so a row costs its node's replicas rather than every one.
+    """
     proofs = []
     if cancelled():
         return False, proofs
+
+    def count(outcome):
+        if record is not None:
+            record(outcome)
+
     if not row.get("terminalExecutionId", row.get("executionId")):
         return True, proofs
     targets = getattr(run, "sdk_request_targets", {})
@@ -1027,12 +1072,17 @@ def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout)
             for runtime in runtimes
             if runtime == (node_id, name, target_url.removesuffix("/invoke"))
         ]
+    hint = _execution_hint(row, destinations or {})
+    # Stable: the hinted node first, the others in their discovery order.
+    candidates = sorted(candidates, key=lambda runtime: runtime[0] != hint)
     attempted = not any(name == row["function"] for _, name, _ in candidates)
     for node_id, name, url in candidates:
         if cancelled():
             break
         if name != row["function"]:
             continue
+        if hint is not None and proofs and node_id != hint:
+            break
         attempted = True
         read_attempt = 1
         try:
@@ -1064,6 +1114,7 @@ def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout)
                 except OSError as error:
                     raise httpx.ReadError(str(error)) from error
             if response.status_code == 404:
+                count("notFound")
                 continue
             response.raise_for_status()
             if not validate_proof(
@@ -1079,7 +1130,9 @@ def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout)
                     "runtimeUrl": url,
                 }
             )
+            count("found")
         except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            count("error")
             append_observation(
                 run.run_dir / "collection-errors.jsonl",
                 {
@@ -1136,24 +1189,84 @@ def collect_runtime_evidence(
             append_observation(
                 run.run_dir / "peer-graph.jsonl", {"at": sampled_at, "nodes": snapshot}
             )
-        for node_id, node in run.topology.resources.nodes.items():
+
+        def discover(item):
+            node_id, node = item
             if cancelled():
-                break
+                return []
             functions = getattr(run.topology, "node_function_settings", {}).get(
                 node_id, run.topology.function_settings
             )
-            candidates = _runtime_candidates(
-                run, inputs, node_id, node, functions, cancelled
-            )
-            for name, replica, url, container in candidates:
-                if cancelled():
-                    break
-                try:
-                    status = http.get(
-                        url + "/runtime/status",
-                        timeout=read_timeout(),
+            return [
+                (node_id, *candidate)
+                for candidate in _runtime_candidates(
+                    run, inputs, node_id, node, functions, cancelled
+                )
+            ]
+
+        def sample(candidate):
+            url = candidate[3]
+            result: dict[str, Any] = {"status": None, "metrics": None, "error": None}
+            if cancelled():
+                return result
+            try:
+                result["status"] = http.get(
+                    url + "/runtime/status", timeout=read_timeout()
+                )
+                result["status"].raise_for_status()
+                if not cancelled():
+                    result["metrics"] = http.get(
+                        url + "/metrics", timeout=read_timeout()
                     )
-                    status.raise_for_status()
+                    result["metrics"].raise_for_status()
+            except (httpx.HTTPError, ValueError, RuntimeError) as error:
+                result["error"] = error
+            return result
+
+        tally = Counter()
+        tally_lock = Lock()
+
+        def record(outcome):
+            with tally_lock:
+                tally[outcome] += 1
+
+        destinations = {
+            inputs.resource(endpoint).rstrip("/"): node_id
+            for node_id, endpoint in run.topology.endpoints.items()
+        }
+        lookup = partial(
+            _lookup_runtime_proofs,
+            run=run,
+            http=http,
+            runtimes=runtimes,
+            cancelled=cancelled,
+            read_timeout=read_timeout,
+            destinations=destinations,
+            record=record,
+        )
+        # Nodes and replicas are independent: sample them together, then write
+        # every observation from this thread in discovery order.
+        began = time.monotonic()
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            candidates = [
+                candidate
+                for found in executor.map(
+                    discover, run.topology.resources.nodes.items()
+                )
+                for candidate in found
+            ]
+            for candidate, result in zip(
+                candidates, executor.map(sample, candidates), strict=True
+            ):
+                node_id, name, replica, url, container = candidate
+                status, metrics = result["status"], result["metrics"]
+                try:
+                    if result["error"] is not None and (
+                        status is None or not status.is_success
+                    ):
+                        raise result["error"]
+                    if status is None:
+                        continue
                     runtimes.append((node_id, name, url))
                     append_observation(
                         run.run_dir / "runtime-inventory.jsonl",
@@ -1167,13 +1280,10 @@ def collect_runtime_evidence(
                             "status": status.json(),
                         },
                     )
-                    if cancelled():
-                        break
-                    metrics = http.get(
-                        url + "/metrics",
-                        timeout=read_timeout(),
-                    )
-                    metrics.raise_for_status()
+                    if result["error"] is not None:
+                        raise result["error"]
+                    if metrics is None:
+                        continue
                     append_observation(
                         run.run_dir / "metrics.jsonl",
                         {
@@ -1197,25 +1307,16 @@ def collect_runtime_evidence(
                             "error": str(error),
                         },
                     )
-
-        lookup = partial(
-            _lookup_runtime_proofs,
-            run=run,
-            http=http,
-            runtimes=runtimes,
-            cancelled=cancelled,
-            read_timeout=read_timeout,
-        )
-
-        with ThreadPoolExecutor(max_workers=16) as executor:
-            for offset in range(0, len(rows), 16):
+            sampled = time.monotonic()
+            selected = [
+                row
+                for row in rows
+                if row["event"] == "result" and row["phase"] == "campaign"
+            ]
+            for offset in range(0, len(selected), 16):
                 if cancelled():
                     break
-                batch = [
-                    row
-                    for row in rows[offset : offset + 16]
-                    if row["event"] == "result" and row["phase"] == "campaign"
-                ]
+                batch = selected[offset : offset + 16]
                 for row, (attempted, proofs) in zip(
                     batch, executor.map(lookup, batch), strict=True
                 ):
@@ -1225,6 +1326,19 @@ def collect_runtime_evidence(
                         append_observation(run.run_dir / "physical.jsonl", proof)
                         if proof.get("state") == "RELEASED":
                             released.add(proof["originalId"])
+        if rows:
+            append_observation(
+                run.run_dir / "evidence-lookups.jsonl",
+                {
+                    "atUtc": datetime.now(UTC).isoformat(),
+                    "runtimes": len(runtimes),
+                    "sampleSeconds": sampled - began,
+                    "lookupSeconds": time.monotonic() - sampled,
+                    "rows": len(selected),
+                    "visited": len(visited),
+                    **{key: tally[key] for key in ("found", "notFound", "error")},
+                },
+            )
         for node_id, endpoint in run.topology.endpoints.items():
             if cancelled():
                 break
@@ -1316,6 +1430,7 @@ class RunOneShotLoadTask(Task[None]):
                     if not getattr(run.trace, "node_roles", None)
                     or run.trace.node_roles[key] == "edge"
                 }
+                planless = 0
                 for epoch in range(len(run.trace.windows)):
                     start = anchor + timedelta(seconds=epoch * run.trace.period_seconds)
                     activation_at = mono_anchor + epoch * manifest.period_seconds
@@ -1423,6 +1538,17 @@ class RunOneShotLoadTask(Task[None]):
                                         "activationWallSeconds"
                                     ),
                                 },
+                            )
+                        # Without any plan every edge sends its load to the cloud:
+                        # tolerate a recovery, not a run that measures nothing.
+                        planless = 0 if plans else planless + 1
+                        tolerated = int(
+                            operational_limit(run.settings, "planless_epochs", 5)
+                        )
+                        if planless >= tolerated:
+                            raise RuntimeError(
+                                f"no edge produced a plan for {planless} "
+                                "consecutive epochs"
                             )
                         if not observation_only and (
                             sample.censored

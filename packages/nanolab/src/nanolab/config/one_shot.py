@@ -349,6 +349,9 @@ class OperationalLimits(BaseModel):
     process_drain_seconds: float = Field(default=30, alias="processDrainSeconds", gt=0)
     process_exit_seconds: float = Field(default=30, alias="processExitSeconds", gt=0)
     event_pages: int = Field(default=1000, alias="eventPages", ge=1)
+    # Consecutive epochs in which no edge produced a plan before the run stops:
+    # without plans every edge sends its load to the cloud.
+    planless_epochs: int = Field(default=5, alias="planlessEpochs", ge=1)
     schedule_setup_seconds: float = Field(
         default=90, alias="scheduleSetupSeconds", gt=0
     )

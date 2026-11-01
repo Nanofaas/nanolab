@@ -426,3 +426,100 @@ def test_stopped_collection_never_opens_network_or_writes_evidence(
         deadline=0 if reason == "expired" else None,
     ) == ([], set())
     assert list(tmp_path.iterdir()) == []
+
+
+def test_proof_lookup_reads_the_reported_node_first_and_falls_back_when_absent(
+    tmp_path, monkeypatch
+):
+    """A row costs its execution node's replicas; other nodes only without proof."""
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        topology=SimpleNamespace(
+            resources=SimpleNamespace(
+                nodes={
+                    "edge-a": SimpleNamespace(host="a"),
+                    "edge-b": SimpleNamespace(host="b"),
+                }
+            ),
+            function_settings={"work": SimpleNamespace(max_replicas=1)},
+            endpoints={"edge-a": "endpoint-a", "edge-b": "endpoint-b"},
+        ),
+    )
+    gateways = {"endpoint-a": "http://gw-a:8080", "endpoint-b": "http://gw-b:8080/"}
+    holder = {"reported": "b", "forwarded": "b", "misreported": "a"}
+    rows = [
+        {
+            "originalId": identity,
+            "event": "result",
+            "phase": "campaign",
+            "executionId": identity,
+            "terminalExecutionId": identity,
+            "function": "work",
+            "origin": "edge-a",
+            **hint,
+        }
+        for identity, hint in (
+            ("reported", {"executionNode": "edge-b"}),
+            ("forwarded", {"offloadedTarget": "http://gw-b:8080"}),
+            ("misreported", {"executionNode": "edge-b"}),
+        )
+    ]
+    queries = []
+
+    def handler(request):
+        if request.url.path.startswith("/runtime/executions/"):
+            identity = request.url.path.rsplit("/", 1)[1]
+            queries.append((request.url.host, identity))
+            if holder[identity] != request.url.host:
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                json={
+                    "executionId": identity,
+                    "incarnation": "r",
+                    "dispatchAttempt": "1",
+                    "state": "RELEASED",
+                    "handlerStarted": True,
+                },
+            )
+        if request.url.path == "/runtime/status":
+            return httpx.Response(200, json={})
+        return httpx.Response(200, text="")
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.runtime_endpoint",
+        lambda node, *_args, **_kwargs: (f"http://{node.host}", {}),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.httpx.Client",
+            lambda **_: nullcontext(http),
+        )
+        visited, released = collect_runtime_evidence(
+            run, cast(Any, SimpleNamespace(resource=gateways.__getitem__)), rows
+        )
+    assert visited == ["reported", "forwarded", "misreported"]
+    assert released == set(holder)
+    assert sorted(queries) == sorted(
+        [
+            ("b", "reported"),
+            ("b", "forwarded"),
+            ("b", "misreported"),
+            ("a", "misreported"),
+        ]
+    )
+    proofs = {
+        proof["originalId"]: proof["destination"]
+        for proof in map(
+            json.loads, (tmp_path / "physical.jsonl").read_text().splitlines()
+        )
+    }
+    assert proofs == {
+        "reported": "edge-b",
+        "forwarded": "edge-b",
+        "misreported": "edge-a",
+    }
+    summary = json.loads((tmp_path / "evidence-lookups.jsonl").read_text())
+    assert summary["runtimes"] == 2
+    assert (summary["rows"], summary["visited"]) == (3, 3)
+    assert (summary["found"], summary["notFound"], summary["error"]) == (3, 1, 0)

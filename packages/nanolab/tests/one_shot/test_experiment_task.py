@@ -321,6 +321,113 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
         assert waits[-1] == 120.0
 
 
+@pytest.mark.parametrize(
+    ("planned", "stops_after"),
+    [
+        ([False] * 6, 5),
+        ([False, False, False, False, True, False, False], None),
+    ],
+)
+def test_observation_stops_after_consecutive_epochs_without_any_plan(
+    tmp_path, monkeypatch, planned, stops_after
+):
+    from nanolab.tasks.one_shot.experiment import FreezeManifestTask
+
+    result = manifest().model_copy(update={"mode": "oracle"})
+    result.parameters["observationOnly"] = True
+    (tmp_path / "manifest.json").write_text(result.model_dump_json())
+    node = SimpleNamespace(config=SimpleNamespace(memory_capacity_mib=128))
+    freeze = cast(
+        Any,
+        SimpleNamespace(
+            run_dir=tmp_path,
+            clock="clock",
+            mode="oracle",
+            topology=SimpleNamespace(
+                endpoints={"edge-0": "endpoint"},
+                resources=SimpleNamespace(nodes={"edge-0": node}),
+            ),
+            trace=SimpleNamespace(
+                nodes=["edge-0"],
+                node_roles=None,
+                windows=[{}] * len(planned),
+                period_seconds=20,
+            ),
+            settings=SimpleNamespace(
+                experiment=SimpleNamespace(fail_load=False), protocol_version=1
+            ),
+            qualification=SimpleNamespace(margin_seconds=0.2, epsilon=0.1),
+        ),
+    )
+    calls = []
+
+    class Child:
+        returncode = None
+
+        def poll(self):
+            if len(calls) == len(planned):
+                self.returncode = 0
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def wait(self, **_):
+            return self.returncode
+
+    resources = {
+        "clock": SimpleNamespace(require_healthy=lambda: None),
+        "generator": Child(),
+        "collector": SimpleNamespace(require_healthy=lambda: None, close=lambda: None),
+        "endpoint": "http://edge",
+    }
+    inputs = cast(Any, SimpleNamespace(resource=lambda key: resources[key]))
+    plan = {
+        "flowQuantum": 1,
+        "functions": {
+            "work": {
+                "readyReplicas": 1,
+                "memoryMiB": 128,
+                "localRate": 4,
+                "forecastRate": 4,
+                "cloudRate": 0,
+                "demandSeconds": 0.1,
+                "utilization": 0.8,
+                "inbound": [],
+                "outbound": [],
+            }
+        },
+    }
+
+    def prepare(clients, **kwargs):
+        calls.append(kwargs["epoch"])
+        result = {"plan": plan} if planned[kwargs["epoch"]] else {}
+        return SimpleNamespace(
+            censored=False, ready_seconds=0.1, auction_seconds=0.1
+        ), {"nodes": {"edge-0": {"result": result}}}
+
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.prepare_parallel_epoch", prepare
+    )
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.wait_until", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.collect_runtime_evidence",
+        lambda *_args, **_kwargs: None,
+    )
+    task = RunOneShotLoadTask(
+        cast(FreezeManifestTask, freeze), "generator", "collector"
+    )
+    if stops_after is None:
+        task.run(inputs)
+        assert calls == list(range(len(planned)))
+    else:
+        with pytest.raises(RuntimeError, match="no edge produced a plan for 5"):
+            task.run(inputs)
+        assert calls == list(range(stops_after))
+
+
 def test_proxy_admission_error_is_terminal_without_an_invented_sdk_receipt():
     from nanolab.tasks.one_shot.experiment import classify_result
 

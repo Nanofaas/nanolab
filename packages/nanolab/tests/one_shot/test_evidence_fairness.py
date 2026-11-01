@@ -125,3 +125,92 @@ def test_expired_collection_slice_returns_no_fictitious_progress(tmp_path, monke
         SimpleNamespace(run_dir=tmp_path), object(), [], deadline=9
     ) == ([], set())
     assert not list(tmp_path.iterdir())
+
+
+def test_rows_past_proof_retention_leave_the_queue_without_a_lookup(
+    tmp_path, monkeypatch
+):
+    finished = experiment.time.time()
+    rows = [
+        {
+            "event": "result",
+            "phase": "campaign",
+            "originalId": identity,
+            "executionId": identity,
+            "terminalExecutionId": identity,
+            "function": "work",
+            "finishedAt": finished - age,
+        }
+        for identity, age in (
+            ("stale", experiment.PROOF_RETENTION_SECONDS + 60),
+            ("fresh", 5),
+        )
+    ]
+    (tmp_path / "generator.jsonl").write_text(
+        "".join(json.dumps({"msg": json.dumps(row)}) + "\n" for row in rows)
+    )
+    queries = []
+
+    class DormantThread:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    class Passes:
+        count = 0
+
+        def wait(self, _):
+            self.count += 1
+            return self.count > 2
+
+        def is_set(self):
+            return False
+
+    def respond(request):
+        if "/runtime/executions/" in request.url.path:
+            identity = request.url.path.rsplit("/", 1)[1]
+            queries.append(identity)
+            return httpx.Response(
+                200,
+                json={
+                    "executionId": identity,
+                    "incarnation": "replica",
+                    "dispatchAttempt": "1",
+                    "state": "RELEASED",
+                    "handlerStarted": True,
+                },
+            )
+        if request.url.path == "/runtime/status":
+            return httpx.Response(200, json={})
+        return httpx.Response(200, text="")
+
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        topology=SimpleNamespace(
+            resources=SimpleNamespace(nodes={"cloud": object()}),
+            function_settings={"work": SimpleNamespace(max_replicas=1)},
+            endpoints={"cloud": "endpoint"},
+        ),
+    )
+    inputs = SimpleNamespace(resource=lambda _: "http://gateway:8080")
+    monkeypatch.setattr(experiment, "Thread", DormantThread)
+    monkeypatch.setattr(
+        experiment, "runtime_endpoint", lambda *_args, **_kw: ("http://sdk", {})
+    )
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        monkeypatch.setattr(experiment.httpx, "Client", lambda **_: nullcontext(client))
+        collector = experiment.LiveEvidenceCollector(run, inputs)
+        monkeypatch.setattr(collector, "stop", Passes())
+        collector.collect_events = lambda: None
+        collector.loop()
+    collector.require_healthy()
+    assert queries == ["fresh"]
+    journal = [
+        json.loads(line)
+        for line in (tmp_path / "evidence-collection.jsonl").read_text().splitlines()
+    ]
+    assert journal[-1]["provenOriginals"] == 1
+    assert journal[-1]["expiredOriginals"] == 1
+    assert journal[-1]["pendingOriginals"] == 0

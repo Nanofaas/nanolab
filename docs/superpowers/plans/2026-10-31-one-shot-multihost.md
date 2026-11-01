@@ -257,6 +257,30 @@ Robustness:
     continuous unreachability (a container reported stopped or missing still
     fails at once).
 
+17. Operator memory: during the fourth phase-1 run the operator (a Proxmox
+    node whose VMs hold ~220 GB) swapped at 70-90 MB/s with swappiness 60;
+    k6 had 556 MB swapped out and 71 MB resident while measuring. Fixed by
+    hand at 14:50 (swappiness 1, swapoff/swapon). Preflight should record the
+    operator's swappiness, swap use and memory/IO pressure, and refuse a
+    scientific run while the generator can be swapped out.
+
+18. The fourth run's real failure: while the operator swapped, the epoch loop
+    woke 15-28 s late, epochs 7-8 were refused ("activation delay is smaller
+    than operational budget"), and the lapsed replica lease then failed every
+    later epoch ("replica ownership unavailable"). With no plan the edges sent
+    nearly all load to the cloud (about 82,000 cloud executions against
+    15,814 in the reference). nanoFaaS now recovers a lapsed lease
+    (ae8406cb, the runtime pin since 2026-11-01), and a run stops after
+    `planlessEpochs` (default 5) consecutive epochs without any edge plan.
+
+19. Proof collection in the fourth run: probing all 80 replicas one by one
+    took the whole 30 s pass during the swap, and the round-robin queue grew
+    to 89,000 unprovable rows, so new proofs passed the SDK's 600 s retention
+    before their turn. Rows past the retention now leave the queue
+    (`expiredOriginals`), lookups read the reported execution node first,
+    replicas are sampled in parallel, and `evidence-lookups.jsonl` records
+    each pass (runtimes, timings, found/notFound/error).
+
 Maintainability:
 
 9. Update the design spec: it still describes Loki per site and NSG rules
