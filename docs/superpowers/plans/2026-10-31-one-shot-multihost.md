@@ -281,6 +281,14 @@ Robustness:
     replicas are sampled in parallel, and `evidence-lookups.jsonl` records
     each pass (runtimes, timings, found/notFound/error).
 
+20. Warm-up took 68 minutes because every replica's warm invocation was
+    checked against `workload_checksum`, the pure-Python output oracle,
+    recomputed on the operator for each of about 80 replicas (memory 141 s,
+    mixed 50 s, arithmetic 20 s, matrix 15 s, sort 5 s on titan). The oracle
+    now runs once per function, in spawned processes while replicas start,
+    and nodes warm concurrently; the first node failure stops the others.
+    Expected warm-up: a few minutes, bounded by the memory oracle.
+
 Maintainability:
 
 9. Update the design spec: it still describes Loki per site and NSG rules
