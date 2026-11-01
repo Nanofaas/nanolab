@@ -37,10 +37,11 @@ from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_gra
 from nanolab.one_shot.vm_resources import require_resource_overhead
 from nanolab.tasks.components.bootstrap import plan_vm_provision_base
 from nanolab.tasks.one_shot.images import archive_image_ids
-from nanolab.tasks.one_shot.logging import (
-    backend_resource,
-    collector_resource,
-    site_logging_backends,
+from nanolab.tasks.one_shot.logging import backend_resource, collector_resource
+from nanolab.tasks.one_shot.operator_logging import (
+    log_routes,
+    operator_endpoint,
+    operator_loki_resource,
 )
 from nanolab.tasks.one_shot.resources import node_probe_resource
 from nanolab.tasks.one_shot.workload import WORKLOAD_NAMES
@@ -150,6 +151,7 @@ def _bootstrap(
                 operations, context=context, host=vm.host, site=node.site_host.site
             )
         run_bootstrap_operations(node.provider, operations, role=node.config.id)
+        node.reset_shared_ssh(vm)
 
     return Resource(
         title=f"Bootstrap {node.config.id} container VM",
@@ -660,14 +662,31 @@ def add_one_shot_platforms(
             for node in resources.nodes.values()
         )
         if remote:
-            routes = site_logging_backends(
-                resources,
+            operator_logging = environment.operator_logging
+            if operator_logging is None:
+                raise ValueError("a multi-site run needs the environment's logging")
+            loki = operator_loki_resource(
                 logs,
+                operator_logging,
                 root=repo_root,
                 run_dir=run_dir,
-                bootstraps=bootstraps,
+                operator=resources.generator,
                 settings=settings,
                 supervision=supervision,
+            )
+            routes = log_routes(
+                resources,
+                operator_logging,
+                loki,
+                run_dir=run_dir,
+                settings=settings,
+                supervision=supervision,
+            )
+            # Collectors push through their route; exports query the operator.
+            # A copy, not a validated model: the endpoint is the operator's
+            # loopback, which the scenario rightly refuses for VMs.
+            logs = logs.model_copy(
+                update={"endpoint": operator_endpoint(operator_logging)}
             )
         else:
             backend = backend_resource(
@@ -679,18 +698,17 @@ def add_one_shot_platforms(
                 settings=settings,
                 supervision=supervision,
             )
-            routes = dict.fromkeys(resources.nodes, (backend, None))
+            routes = dict.fromkeys(resources.nodes, backend)
         collectors = {
             key: collector_resource(
                 node,
                 logs,
                 bootstrap=bootstraps[key],
-                backend=routes[key][0],
+                backend=routes[key],
                 root=repo_root,
                 run_dir=run_dir,
                 mode="BASELINE" if baseline else forecast_provider,
                 settings=settings,
-                query_endpoint=routes[key][1],
             )
             for key, node in resources.nodes.items()
         }

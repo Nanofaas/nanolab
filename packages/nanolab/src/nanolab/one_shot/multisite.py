@@ -13,7 +13,6 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from azure_vm import AzureClient
 from sonata_tasks.vm.models import VmRequest as SonataVmRequest
@@ -38,11 +37,12 @@ from nanolab.one_shot.site_cpu import (
     validate_site_placement,
 )
 from nanolab.one_shot.sites import SiteHost, SiteVmOrchestrator
-from nanolab.tasks.vm.models import VmInfo, VmRequest
+from nanolab.tasks.vm.models import VmRequest
 
 # The cloud's NSG: the operator drives and observes it, the edges' sites
-# offload to it and measure bandwidth from its probe.
-CLOUD_OPERATOR_PORTS = (22, API_PORT, MANAGEMENT_PORT, PROBE_PORT)
+# offload to it and measure bandwidth from its probe. SSH keeps the SDK's own
+# rule.
+CLOUD_OPERATOR_PORTS = (API_PORT, MANAGEMENT_PORT, PROBE_PORT)
 CLOUD_SITE_PORTS = (API_PORT, PROBE_PORT)
 AZURE_MIN_DISK_GIB = 64
 
@@ -79,8 +79,24 @@ def egress_address(run: Callable[[list[str]], str]) -> str:
     return address.strip()
 
 
+def cloud_ingress(
+    operator: str, sites: list[str], *, extra_ports: tuple[int, ...] = ()
+) -> dict[int, tuple[str, ...]]:
+    """Return the cloud's inbound ports, each with the hosts allowed to reach it."""
+    hosts = {port: {operator} for port in (*CLOUD_OPERATOR_PORTS, *extra_ports)}
+    for port in CLOUD_SITE_PORTS:
+        hosts.setdefault(port, set()).update(sites)
+    return {
+        port: tuple(f"{address}/32" for address in sorted(addresses))
+        for port, addresses in sorted(hosts.items())
+    }
+
+
 def _azure_request(
-    namespace: str, node: OneShotNode, environment: EnvironmentConfig
+    namespace: str,
+    node: OneShotNode,
+    environment: EnvironmentConfig,
+    ingress: dict[int, tuple[str, ...]],
 ) -> VmRequest:
     azure = environment.azure
     if azure is None:
@@ -103,6 +119,8 @@ def _azure_request(
         azure_priority=azure.priority,
         azure_eviction_policy=azure.eviction_policy,
         azure_max_bid_price=azure.max_bid_price,
+        # Declared at creation: the SDK renders the rules into its NSG.
+        azure_ingress=ingress,
     )
 
 
@@ -124,9 +142,6 @@ def _validate_placement(
             raise ValueError("Azure nodes cannot have host CPU placement")
         if site != AZURE_SITE and len(pinned) != len(members):
             raise ValueError(f"every node on {site} needs host CPU placement")
-    multipass_sites = [site for site in by_site if site != AZURE_SITE]
-    if placement.logging_cpus and len(multipass_sites) > 1:
-        raise ValueError("logging CPUs are per site; one Multipass site supported")
 
 
 def build_multisite_resources(
@@ -148,10 +163,17 @@ def build_multisite_resources(
     ordinals = {node.id: index for index, node in enumerate(config.nodes, start=1)}
     facts: dict[str, Any] | None = None
     if placement is not None:
+        # The run's Loki shares the operator with the generator, on its own CPUs;
+        # the scenario's logging CPUs belonged to the single host's Loki.
+        loki = environment.operator_logging
+        if loki is not None and set(loki.cpus) & set(placement.operator_cpus):
+            raise ValueError("operator Loki CPUs overlap the generator's CPUs")
         facts = {
             "operator": host_cpu.validate_host_placement(
                 HostCpuPlacement.model_construct(
-                    nodes={}, operator_cpus=placement.operator_cpus, logging_cpus=[]
+                    nodes={},
+                    operator_cpus=placement.operator_cpus,
+                    logging_cpus=list(loki.cpus) if loki else [],
                 )
             )
         }
@@ -170,12 +192,14 @@ def build_multisite_resources(
             cpus=cpus,
             available_memory=memory,
             external_cpus=host.external_vm_cpus if scientific else None,
+            # The run's Loki is on the operator, not on any site.
+            logging_backend=False,
         )
         if placement is not None and facts is not None:
             facts[site] = validate_site_placement(
                 host,
                 {node.id: placement.nodes[node.id] for node in members},
-                placement.logging_cpus,
+                [],
             )
         provider = SiteVmOrchestrator(repo_root, host.site)
         for node in members:
@@ -205,28 +229,17 @@ def build_multisite_resources(
                 for h in hosts.values()
             }
         )
-        logs = config.observability.logs
-        # An owned Loki on the cloud VM is queried by the operator.
-        log_ports = (
-            (urlsplit(logs.endpoint).port or 80,)
-            if logs.enabled and logs.backend_owned and logs.endpoint
-            else ()
-        )
+        ingress = cloud_ingress(operator, sites)
         for node in azure_nodes:
-            provider = AzureSiteProvider(repo_root, work_dir=azure.work_dir)
-            request = _azure_request(namespace, node, environment)
             nodes[node.id] = _owned_node(
                 node,
-                request,
-                provider,
+                _azure_request(namespace, node, environment, ingress),
+                AzureSiteProvider(repo_root, work_dir=azure.work_dir),
                 config=config,
                 generator=generator,
                 target_cpus=None,
                 pin=_no_pin,
                 stop_argv=None,
-                after_ensure=_cloud_ingress(
-                    provider, request, operator, sites, extra_ports=log_ports
-                ),
                 architecture=azure.architecture,
             )
     ordered = {node.id: nodes[node.id] for node in config.nodes}
@@ -252,36 +265,6 @@ def _no_pin(_name: str, _cpus: list[int]) -> None:
     raise RuntimeError("Azure nodes are never pinned")
 
 
-def _cloud_ingress(
-    provider: AzureSiteProvider,
-    request: VmRequest,
-    operator: str,
-    sites: list[str],
-    *,
-    extra_ports: tuple[int, ...] = (),
-) -> Callable[[VmInfo], None]:
-    def restrict(_info: VmInfo) -> None:
-        # Sonata names each rule after its port, so every port must appear in
-        # exactly one call: group ports by the sources allowed to reach them.
-        shared = tuple(sorted(set(CLOUD_SITE_PORTS)))
-        operator_only = tuple(
-            sorted({*CLOUD_OPERATOR_PORTS, *extra_ports} - set(shared))
-        )
-        provider.restrict_inbound_sources(
-            request, ports=operator_only, source_cidrs=(f"{operator}/32",)
-        )
-        provider.restrict_inbound_sources(
-            request,
-            ports=shared,
-            source_cidrs=tuple(
-                sorted({f"{operator}/32", *(f"{address}/32" for address in sites)})
-            ),
-            priority_base=1100,
-        )
-
-    return restrict
-
-
 def _recheck(
     placement: HostCpuPlacement,
     hosts: dict[str, SiteHost],
@@ -300,9 +283,7 @@ def _recheck(
         for site, host in hosts.items():
             members = {node.id: placement.nodes[node.id] for node in by_site[site]}
             sites[site] = {
-                "hardware": validate_site_placement(
-                    host, members, placement.logging_cpus
-                ),
+                "hardware": validate_site_placement(host, members, []),
                 "nodes": {
                     node: inspect_site_vm(host, vm_names[node], target.cpus)
                     for node, target in members.items()

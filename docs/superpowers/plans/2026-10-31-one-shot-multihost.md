@@ -186,6 +186,32 @@ packages/nanolab`, `lint-imports` (CLAUDE.md commands). One commit per task.
   both Loki ingestion probes passed; full release verified on `.35` and Azure
   after every attempt.
 
+## Changes after the first validation attempt (2026-11-01)
+
+- The phase-1 ARI run failed while acquiring the cloud control plane: one
+  `docker compose ps` of the cloud's Loki, over a fresh SSH connection,
+  failed and the supervisor aborted. The cause was not recorded: the
+  background worker reported only "one-shot clock monitor failed". Failures of
+  background probes now carry their cause (type, exit status, stderr).
+- SSH to the cloud shares one connection (ControlMaster, keepalive,
+  connect timeout) like the sites; long-lived tunnels use their own.
+- Loki per site is replaced by one Loki on the operator: the release binary
+  (3.7.8, the compose image's version, sha256-pinned in the environment's
+  `logging` block), on the operator's loopback, pinned to its own CPUs. The
+  operator has no Docker and is reachable from the sites only on a public
+  address, so the backend stays on loopback (the scenario's private-bind rule)
+  and each site and the cloud reach it through `ssh -R`: a site publishes the
+  tunnel on its first Multipass bridge with socat (the scenario's endpoint, so
+  the edges push where they did in the reference), the cloud's collector (host
+  network) pushes to the tunnel's loopback end. A tunnel that exits is reopened
+  and recorded in `logging/tunnels.jsonl`; Fluent Bit buffers on disk with
+  unlimited retries, and per-collector delivery is still verified.
+- The cloud's NSG rules are declared at creation through
+  `VmRequest.azure_ingress` (Sonata 0.6.20, azure-vm-sdk 0.9.0) instead of
+  being rewritten afterwards; no Loki port is opened on the cloud any more.
+- The integration smoke runs under the campaign supervisor and can `--hold`,
+  so the periodic checks run as in an observation.
+
 ## Order and checkpoints
 
 1 → 2 → 3 are pure refactors with regression tests (checkpoint: full suite

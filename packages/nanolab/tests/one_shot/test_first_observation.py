@@ -385,6 +385,7 @@ def test_bootstrap_waits_for_cloud_init_before_installing_packages(
         config=SimpleNamespace(id="edge-1"),
         vm_argv=lambda vm, *argv: ("multipass", "exec", vm.name, "--", *argv),
         site_host=None,
+        reset_shared_ssh=lambda _vm: None,
     )
     vm = SimpleNamespace(
         name="owned", host="127.0.0.1", user="ubuntu", home="/home/ubuntu"

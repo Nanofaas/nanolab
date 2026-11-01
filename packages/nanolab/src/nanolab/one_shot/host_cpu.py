@@ -177,28 +177,20 @@ def pin_operator(cpus: list[int], *, proc_root: Path = Path("/proc")) -> dict:
     return original
 
 
-def _run_local(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=10)
-
-
-def pin_logging_project(
-    project: str,
-    cpus: list[int],
-    *,
-    run: Callable[[list[str]], subprocess.CompletedProcess[str]] = _run_local,
-) -> list[dict]:
-    """Pin only containers whose inspected labels match the owned project.
-
-    `run` executes Docker where the backend runs (default: this host).
-    """
-    result = run(
+def pin_logging_project(project: str, cpus: list[int]) -> list[dict]:
+    """Pin only containers whose inspected labels match the owned project."""
+    result = subprocess.run(
         [
             "docker",
             "ps",
             "-q",
             "--filter",
             "label=com.docker.compose.project=" + project,
-        ]
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     identifiers = result.stdout.split()
     if not identifiers:
@@ -210,7 +202,13 @@ def pin_logging_project(
     )
 
     def inspect():
-        result = run(["docker", "inspect", "--format=" + template, *identifiers])
+        result = subprocess.run(
+            ["docker", "inspect", "--format=" + template, *identifiers],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         if len(rows) != len(identifiers) or any(
             row["project"] != project for row in rows
@@ -220,7 +218,13 @@ def pin_logging_project(
 
     inspect()
     mask = ",".join(str(cpu) for cpu in sorted(cpus))
-    run(["docker", "update", "--cpuset-cpus", mask, *identifiers])
+    subprocess.run(
+        ["docker", "update", "--cpuset-cpus", mask, *identifiers],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     rows = inspect()
     if any(row["cpuset"] != mask for row in rows):
         raise ValueError("owned logging CPU affinity differs from placement")

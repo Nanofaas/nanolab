@@ -97,6 +97,44 @@ def test_in_vm_commands_follow_the_node_placement():
     azure = node_argv("azure")
     assert azure[-2:] == ("azureuser@20.1.2.3", "sudo true")
     assert azure[azure.index("-i") : azure.index("-i") + 2] == ("-i", "/k")
+    # Periodic checks reuse one connection to the cloud over the WAN.
+    assert "ControlMaster=auto" in azure and "ConnectTimeout=15" in azure
+
+
+def test_bootstrap_groups_reach_later_cloud_commands(monkeypatch):
+    from nanolab.one_shot import infrastructure
+    from nanolab.one_shot.infrastructure import NodeResource
+
+    calls = []
+    monkeypatch.setattr(
+        infrastructure.subprocess, "run", lambda argv, **_: calls.append(argv)
+    )
+    vm = VmInfo(name="c", host="20.1.2.3", user="azureuser", home="/h")
+    for lifecycle in ("azure", "multipass"):
+        NodeResource(
+            SimpleNamespace(id="n"),  # type: ignore[arg-type]
+            SimpleNamespace(lifecycle=lifecycle, name="c"),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(ssh_private_key_path=lambda _r: None),
+        ).reset_shared_ssh(vm)
+    (argv,) = calls
+    assert argv[-3:] == ("-O", "exit", "azureuser@20.1.2.3")
+    assert any(option.startswith("ControlPath=") for option in argv)
+
+
+def test_a_tunnel_to_the_cloud_gets_its_own_connection():
+    from nanolab.one_shot.infrastructure import NodeResource
+
+    node = NodeResource(
+        SimpleNamespace(id="cloud"),  # type: ignore[arg-type]
+        SimpleNamespace(lifecycle="azure", name="c"),  # type: ignore[arg-type]
+        SimpleNamespace(),  # type: ignore[arg-type]
+        SimpleNamespace(ssh_private_key_path=lambda _r: None),
+    )
+    vm = VmInfo(name="c", host="20.1.2.3", user="azureuser", home="/h")
+    dedicated = node.azure_ssh(vm, shared=False)
+    assert "ControlMaster=no" in dedicated and "ControlPath=none" in dedicated
+    assert not any(option.startswith("ControlPersist") for option in dedicated)
 
 
 def test_kernel_cpu_lists_are_parsed():
@@ -170,6 +208,12 @@ def test_nodes_are_owned_on_their_placed_sites(offline_site, tmp_path):
     assert cloud.request.lifecycle == "azure"
     assert cloud.request.azure_priority == "Spot"
     assert cloud.request.disk == "64G"
+    # Both egress addresses are faked to the site: the rules collapse to it.
+    assert cloud.request.azure_ingress == {
+        8080: ("149.132.179.35/32",),
+        9090: ("149.132.179.35/32",),
+        17111: ("149.132.179.35/32",),
+    }
     assert isinstance(cloud.provider, multisite.AzureSiteProvider)
     assert cloud.addresses(
         VmInfo(name="c", host="20.1.2.3", user="azureuser", home="/h")
@@ -221,27 +265,17 @@ def test_site_capacity_is_checked_against_that_site(
 
 
 def test_cloud_ingress_is_bounded_to_operator_and_sites():
-    calls = []
-    provider = SimpleNamespace(
-        restrict_inbound_sources=lambda request, **kwargs: calls.append(kwargs)
+    ingress = multisite.cloud_ingress(
+        "149.132.176.50", ["149.132.179.35", "149.132.179.175"], extra_ports=(43100,)
     )
-    restrict = multisite._cloud_ingress(
-        provider,  # type: ignore[arg-type]
-        SimpleNamespace(),  # type: ignore[arg-type]
-        "149.132.176.50",
-        ["149.132.179.35"],
-    )
-    restrict(VmInfo(name="c", host="20.1.2.3", user="azureuser", home="/h"))
-    assert calls == [
-        {"ports": (22, 9090), "source_cidrs": ("149.132.176.50/32",)},
-        {
-            "ports": (8080, 17111),
-            "source_cidrs": ("149.132.176.50/32", "149.132.179.35/32"),
-            "priority_base": 1100,
-        },
-    ]
-    ported = [port for call in calls for port in call["ports"]]
-    assert len(ported) == len(set(ported)), "a port in two calls overwrites its rule"
+    operator = ("149.132.176.50/32",)
+    everyone = ("149.132.176.50/32", "149.132.179.175/32", "149.132.179.35/32")
+    assert ingress == {
+        8080: everyone,
+        9090: operator,
+        17111: everyone,
+        43100: operator,
+    }
 
 
 def test_site_host_failures_surface(monkeypatch):
@@ -316,7 +350,7 @@ def test_probe_relays_only_read_only_runtime_requests_to_loopback(running_probe)
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *args):
+        def log_message(self, format, *args):
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Runtime)

@@ -26,7 +26,7 @@ from nanolab.config.one_shot import (
 )
 from nanolab.one_shot import host_cpu
 from nanolab.one_shot.addresses import NodeAddresses, direct, published
-from nanolab.one_shot.sites import SiteForwarders, SiteHost
+from nanolab.one_shot.sites import SiteForwarders, SiteHost, control_path
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
@@ -81,18 +81,52 @@ class NodeResource:
             return tuple(self.site_host.multipass_argv(*args))
         return ("multipass", *args)
 
+    def azure_ssh(self, vm: VmInfo, *, shared: bool = True) -> tuple[str, ...]:
+        """Return the ssh prefix reaching this Azure VM.
+
+        Commands share one connection, so the run's periodic checks over the
+        WAN do not each pay (and risk) a new handshake; `shared=False` opens a
+        dedicated one, as a long-lived tunnel needs.
+        """
+        key = self.provider.ssh_private_key_path(self.request)
+        multiplex = (
+            (
+                *("-o", "ControlMaster=auto", "-o", f"ControlPath={control_path()}"),
+                *("-o", "ControlPersist=300"),
+            )
+            if shared
+            else ("-o", "ControlMaster=no", "-o", "ControlPath=none")
+        )
+        return (
+            "ssh",
+            *("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"),
+            *("-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=15"),
+            *("-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"),
+            *multiplex,
+            *(("-i", str(key)) if key is not None else ()),
+            f"{vm.user}@{vm.host}",
+        )
+
+    def reset_shared_ssh(self, vm: VmInfo) -> None:
+        """Close the shared connection to an Azure VM; the next command reopens it.
+
+        A connection keeps the groups its login had: after bootstrap adds the
+        user to `docker`, only a new one can use Docker.
+        """
+        if self.request.lifecycle != "azure":
+            return
+        shared = self.azure_ssh(vm)
+        subprocess.run(
+            (*shared[:-1], "-O", "exit", shared[-1]),
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
     def vm_argv(self, vm: VmInfo, *argv: str) -> tuple[str, ...]:
         """Return the local argv that runs `argv` inside the VM, streaming output."""
         if self.request.lifecycle == "azure":
-            key = self.provider.ssh_private_key_path(self.request)
-            return (
-                "ssh",
-                *("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"),
-                *("-o", "UserKnownHostsFile=/dev/null", "-o", "ServerAliveInterval=15"),
-                *(("-i", str(key)) if key is not None else ()),
-                f"{vm.user}@{vm.host}",
-                shlex.join(argv),
-            )
+            return (*self.azure_ssh(vm), shlex.join(argv))
         return self.multipass_argv("exec", vm.name, "--", *argv)
 
     def command(self, argv: tuple[str, ...], *, remote_dir: str | None = None):

@@ -278,7 +278,8 @@ class SiteHost:
 
 _START_FORWARDS = r"""
 set -eu
-target=$1; shift
+target=$1; listen=$2; shift 2
+bind=${listen:+,bind=$listen}
 for pair in "$@"; do
   port=${pair%%:*}
   if ss -Hltn "sport = :$port" | grep -q .; then
@@ -287,7 +288,7 @@ for pair in "$@"; do
 done
 for pair in "$@"; do
   port=${pair%%:*}; vm_port=${pair##*:}
-  setsid socat "TCP-LISTEN:$port,fork,reuseaddr,nodelay" \
+  setsid socat "TCP-LISTEN:$port,fork,reuseaddr,nodelay$bind" \
     "TCP:$target:$vm_port,nodelay" </dev/null >/dev/null 2>&1 &
   echo $!
 done
@@ -312,13 +313,23 @@ class SiteForwarders:
         self.host = host
         self.pids: list[int] = []
 
-    def start(self, vm_address: str, forwards: tuple[tuple[int, int], ...]) -> None:
-        """Publish `(site port, VM port)` pairs and wait until all listen."""
+    def start(
+        self,
+        vm_address: str,
+        forwards: tuple[tuple[int, int], ...],
+        *,
+        listen: str = "",
+    ) -> None:
+        """Publish `(site port, VM port)` pairs and wait until all listen.
+
+        Ports listen on every site address unless `listen` names one.
+        """
         if not forwards:
             return
         pairs = [f"{published}:{vm_port}" for published, vm_port in forwards]
         started = self.host.run(
-            ("sh", "-c", _START_FORWARDS, "forward", vm_address, *pairs), timeout=60
+            ("sh", "-c", _START_FORWARDS, "forward", vm_address, listen, *pairs),
+            timeout=60,
         )
         self.pids = [int(pid) for pid in started.stdout.split()]
         ports = [str(published) for published, _ in forwards]

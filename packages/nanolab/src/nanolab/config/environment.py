@@ -121,6 +121,22 @@ class MultipassSite(BaseModel):
         return self
 
 
+class OperatorLogging(BaseModel):
+    """The single Loki a multi-site run owns on the operator.
+
+    Loki runs from a pinned release binary, listening on the operator's
+    loopback only; each site's VMs and the cloud reach it through a reverse
+    SSH tunnel. `cpus` keeps it off the generator's CPUs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    loki_binary: str = Field(alias="lokiBinary", min_length=1)
+    loki_sha256: str = Field(alias="lokiSha256", pattern=r"^[0-9a-f]{64}$")
+    port: int = Field(default=43100, ge=1024, le=65534)
+    cpus: list[int] = Field(min_length=1)
+
+
 AZURE_SITE = "azure"
 
 
@@ -144,6 +160,7 @@ class EnvironmentConfig(BaseModel):
     proxmox: ProxmoxEnvironment | None = None
     sites: dict[str, MultipassSite] = Field(default_factory=dict)
     placement: dict[str, str] = Field(default_factory=dict)
+    operator_logging: OperatorLogging | None = Field(default=None, alias="logging")
     containerd_maven_repository: Path | None = Field(
         default=None, alias="containerdMavenRepository"
     )
@@ -193,6 +210,8 @@ class EnvironmentConfig(BaseModel):
                 raise ValueError(f"placement names unknown site(s): {sorted(unknown)}")
             if AZURE_SITE in self.placement.values() and self.azure is None:
                 raise ValueError("azure configuration is required for azure placement")
+        elif self.operator_logging is not None:
+            raise ValueError("logging is only meaningful with sites and placement")
         return self
 
     @property
