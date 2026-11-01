@@ -254,3 +254,39 @@ def test_unknown_vm_ownership_fails_before_ensure_or_teardown(tmp_path) -> None:
         pass
     assert provider.ensured == []
     assert provider.destroyed == []
+
+
+def test_role_provider_owns_its_ensure_bootstrap_and_cleanup_after_failure(
+    tmp_path,
+) -> None:
+    local = FakeOrchestrator()
+    cloud = FakeOrchestrator()
+    operation = RemoteCommandOperation(
+        operation_id="cloud-bootstrap", summary="install", argv=("helm", "install")
+    )
+    with (
+        pytest.raises(RuntimeError, match="measurement failed"),
+        provision_roles(
+            local,
+            (
+                ProvisionedRole(
+                    role="stack", request=VmRequest(lifecycle="multipass", name="edge")
+                ),
+                ProvisionedRole(
+                    role="cloud",
+                    request=VmRequest(lifecycle="azure", name="cloud"),
+                    operations=(operation,),
+                ),
+            ),
+            role_providers={"cloud": cloud},
+            repo_root=tmp_path,
+            assets_root=tmp_path,
+        ),
+    ):
+        raise RuntimeError("measurement failed")
+    assert [request.name for request in local.ensured] == ["edge"]
+    assert [request.name for request in cloud.ensured] == ["cloud"]
+    assert cloud.shell.commands == [("helm", "install")]
+    assert not local.shell.commands
+    assert local.destroyed == ["edge"]
+    assert cloud.destroyed == ["cloud"]

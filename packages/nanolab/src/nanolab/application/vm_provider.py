@@ -42,7 +42,7 @@ def vm_request_for_role(
     forwarded so the stack request opens the NodePorts a load run needs, unless
     an operator CIDR already bounds the ingress.
     """
-    provider = environment.provider
+    provider = environment.role_provider(role)
     if provider == "local":
         raise ValueError("local environments do not have a VM request")
 

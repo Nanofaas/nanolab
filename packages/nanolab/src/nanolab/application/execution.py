@@ -485,19 +485,24 @@ def _provider_bindings(
             if role in ("stack", "cloud")
             else {}
         )
+        role_provider = (
+            provider_for(request, local_root)
+            if request.lifecycle != environment.provider
+            else provider
+        )
         executor = VmCommandTaskExecutor(
             _ProviderRunner(
-                provider,
+                role_provider,
                 request,
                 default_env=default_env,
                 default_dir=(
                     f"{vm_remote_home(request)}/nanofaas"
-                    if environment.provider == "multipass"
+                    if request.lifecycle == "multipass"
                     else vm_remote_home(request)
                 ),
             ),
             target_key=(
-                f"{environment.provider}:{role}:{request.name or request.host}:"
+                f"{request.lifecycle}:{role}:{request.name or request.host}:"
                 f"{request.user}"
             ),
             local_root=local_root,

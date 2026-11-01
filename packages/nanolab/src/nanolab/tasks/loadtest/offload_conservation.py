@@ -196,7 +196,7 @@ def evaluate_conservation(
             edge_metrics, "nanofaas_offload_total", {"function": control}
         ),
     )
-    if edge_offload_control > tolerance:
+    if edge_offload_control > 0:
         failures.append(
             f"edge nanofaas_offload_total for control function {control} "
             f"is {edge_offload_control}, expected 0"
@@ -208,18 +208,28 @@ def evaluate_conservation(
         )
 
     # 4. no offload failures, no retries, on the edge.
-    if "nanofaas_offload_failure_total" in edge_metrics:
-        failures.append(
-            "edge exposes nanofaas_offload_failure_total; offload calls must never fail"
-        )
     for function in (offloadable, control):
+        offload_failures = record(
+            f"edge_offload_failures_{function}",
+            lambda function=function: _sum_metric(
+                edge_metrics, "nanofaas_offload_failure_total", {"function": function}
+            ),
+        )
+        if offload_failures > 0:
+            failures.append(
+                f"edge nanofaas_offload_failure_total for {function} "
+                f"is {offload_failures}, expected 0"
+            )
         retries = record(
             f"edge_retries_{function}",
             lambda function=function: _sum_metric(
-                edge_metrics, "function_retry_total", {"function": function}
+                edge_metrics,
+                "function_retry_total",
+                {"function": function},
+                required=True,
             ),
         )
-        if retries > tolerance:
+        if retries > 0:
             failures.append(
                 f"edge function_retry_total for {function} is {retries}, expected 0"
             )

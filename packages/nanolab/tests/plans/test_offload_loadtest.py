@@ -293,6 +293,81 @@ def test_dedicated_loadgen_requires_a_fetcher(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("provider", "home"), [("external", "/home/ubuntu"), ("azure", "/home/azureuser")]
+)
+def test_remote_stack_loadgen_uses_remote_paths_and_fetches(tmp_path, provider, home):
+    payload = {
+        "provider": provider,
+        "roles": {
+            "stack": {"host": "edge.example"},
+            "cloud": {"host": "cloud.example"},
+        },
+    }
+    if provider == "azure":
+        payload["azure"] = {"resource_group": "test", "location": "westeurope"}
+    fetched = []
+
+    class Fetcher:
+        def fetch_from(self, remote, local):
+            fetched.append((remote, local))
+
+    executor = RecordingExecutor()
+    workflow = build_offload_loadtest_plan(
+        SCENARIO,
+        EnvironmentConfig.model_validate(payload),
+        _bindings(executor),
+        run_dir=tmp_path,
+        repo_root=NANOFAAS_ROOT,
+        fetcher=Fetcher(),
+    )
+    commands = _run(workflow, executor)
+    k6 = next(c for c in commands if c.argv[0] == "k6" and "run" in c.argv)
+    assert k6.role == "stack"
+    assert f"{home}/nanolab-assets/k6/offload-mixed.js" in k6.argv
+    assert fetched == [(f"{home}/nanofaas-loadtest/k6-summary.json", tmp_path)]
+
+
+def test_remote_conservation_scrapes_each_vm_and_retains_metrics_on_failure(
+    tmp_path, monkeypatch
+):
+    def no_host_fetch(*args, **kwargs):
+        raise AssertionError("remote metrics must be fetched on their VM")
+
+    monkeypatch.setattr(offload_loadtest_plan, "_fetch_text", no_host_fetch)
+
+    class Executor(RecordingExecutor):
+        def run(self, task, *, dry_run=False):
+            result = super().run(task, dry_run=dry_run)
+            if task.role == "stack":
+                return replace(result, return_code=7, stderr="connection refused")
+            return replace(result, stdout='function_success_total{function="f"} 6\n')
+
+    executor = Executor()
+    evaluator = EvaluateOffloadConservation(
+        task_id="",
+        title="Check",
+        k6_summary_path=tmp_path / "missing.json",
+        edge_metrics_url="http://edge:30081/actuator/prometheus",
+        cloud_metrics_url="http://cloud:30081/actuator/prometheus",
+        offloadable="f",
+        control="g",
+        output_path=tmp_path / "offload-report.json",
+        executor=executor,
+    )
+    with pytest.raises(RuntimeError, match="connection refused"):
+        evaluator.run()
+    assert [task.role for task in executor.seen] == ["stack", "cloud"]
+    assert all(
+        "http://127.0.0.1:30081/actuator/prometheus" in task.argv
+        for task in executor.seen
+    )
+    assert (
+        tmp_path / "metrics-cloud.prom"
+    ).read_text() == 'function_success_total{function="f"} 6\n'
+    assert "connection refused" in (tmp_path / "metrics-edge.error.txt").read_text()
+
+
 def test_evaluation_rejects_a_run_without_offloads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

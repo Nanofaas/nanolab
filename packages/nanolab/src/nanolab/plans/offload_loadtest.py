@@ -20,10 +20,13 @@ from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.execution.ports import CommandTaskExecutor
 from sonata_tasks.registry import docker_registry_resource
+from sonata_tasks.tasks.models import CommandTaskSpec
 from sonata_tasks.vm.multipass import resolve_connection_host
 
 from nanolab.application.functions import resolve_function, sonata_function
+from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.core.deployment import CONTROL_PLANE_NODE_PORT, REGISTRY_CONTAINER_NAME
@@ -42,7 +45,8 @@ from nanolab.tasks.offload_loadtest import (
     build_offload_loadtest_workflow,
 )
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
-from nanolab.tasks.vm.models import VmRequest
+from nanolab.tasks.provisioning.providers import command_provider_for
+from nanolab.tasks.vm.models import VmRequest, vm_remote_home
 from nanolab.workspace.paths import bundled_assets_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -65,7 +69,8 @@ def _role_host(environment: EnvironmentConfig, role: Role, *, dry_run: bool) -> 
     target = environment.target(role)
     if environment.provider == "local":
         return "127.0.0.1"
-    if environment.provider == "multipass":
+    provider_name = environment.role_provider(role)
+    if provider_name == "multipass":
         return resolve_connection_host(
             VmRequest(lifecycle="multipass", name=target.name),
             MultipassClient(),
@@ -73,6 +78,11 @@ def _role_host(environment: EnvironmentConfig, role: Role, *, dry_run: bool) -> 
         )
     if target.host:
         return target.host
+    if provider_name == "azure":
+        request = vm_request_for_role(environment, role)
+        if dry_run:
+            return f"{request.name}.internal"
+        return command_provider_for(request, Path.cwd()).connection_host(request)  # pyright: ignore[reportAttributeAccessIssue]
     raise ValueError(f"{environment.provider} {role} requires a host or explicit URLs")
 
 
@@ -140,6 +150,7 @@ class EvaluateOffloadConservation:
     offloadable: str
     control: str
     output_path: Path
+    executor: CommandTaskExecutor | None = None
 
     def run(self) -> dict[str, object]:
         """Evaluate conservation and write the run's offload report.
@@ -148,13 +159,54 @@ class EvaluateOffloadConservation:
         rather than returning a verdict: a run whose offloads are unaccounted
         for must not report a passing summary.
         """
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics: dict[str, str] = {}
+        failures = []
+        for label, role, url in (
+            ("edge", "stack", self.edge_metrics_url),
+            ("cloud", "cloud", self.cloud_metrics_url),
+        ):
+            try:
+                if self.executor is None:
+                    text = _fetch_text(url)
+                else:
+                    result = self.executor.run(
+                        CommandTaskSpec(
+                            task_id=f"offload.metrics.{label}",
+                            summary=f"Capture {label} metrics",
+                            argv=(
+                                "curl",
+                                "--fail",
+                                "--silent",
+                                "--show-error",
+                                "--max-time",
+                                "10",
+                                f"http://127.0.0.1:{_ACTUATOR_PORT}/actuator/prometheus",
+                            ),
+                            role=role,
+                        )
+                    )
+                    if result.return_code:
+                        raise RuntimeError(
+                            result.stderr or f"{label} metrics scrape failed"
+                        )
+                    text = result.stdout
+                (self.output_path.parent / f"metrics-{label}.prom").write_text(
+                    text, encoding="utf-8"
+                )
+                metrics[label] = text
+            except Exception as error:
+                (self.output_path.parent / f"metrics-{label}.error.txt").write_text(
+                    str(error), encoding="utf-8"
+                )
+                failures.append(f"{label}: {error}")
+        if failures:
+            raise RuntimeError("; ".join(failures))
         k6_summary = json.loads(self.k6_summary_path.read_text(encoding="utf-8"))
-        edge_metrics = _fetch_text(self.edge_metrics_url)
-        cloud_metrics = _fetch_text(self.cloud_metrics_url)
         report = evaluate_conservation(
             k6_summary=k6_summary,
-            edge_metrics=edge_metrics,
-            cloud_metrics=cloud_metrics,
+            edge_metrics=metrics["edge"],
+            cloud_metrics=metrics["cloud"],
             offloadable=self.offloadable,
             control=self.control,
         )
@@ -283,11 +335,12 @@ def _loadtest_paths(
     environment: EnvironmentConfig,
     *,
     remote: bool,
+    role: Literal["stack", "loadgen"],
     run_dir: Path,
     tool_root: Path | None,
 ) -> tuple[Path, Path]:
     if remote:
-        home = environment.target("loadgen").remote_home
+        home = vm_remote_home(vm_request_for_role(environment, role))
         return (
             Path(home) / "nanolab-assets/k6/offload-mixed.js",
             Path(home) / "nanofaas-loadtest/k6-summary.json",
@@ -365,6 +418,18 @@ def build_offload_loadtest_plan(
     """
     if config.workflow != "offload-loadtest":
         raise ValueError("offload load-test plan requires an offload-loadtest scenario")
+    if config.offload_experiment is not None:
+        from nanolab.plans.offload_experiment import build_experiment
+
+        return build_experiment(
+            config,
+            environment,
+            bindings,
+            run_dir=run_dir,
+            repo_root=repo_root or Path.cwd(),
+            fetcher=fetcher,
+            dry_run=dry_run,
+        )
     if len(config.functions) != 2:
         raise ValueError(
             "offload-loadtest requires exactly two functions: [offloadable, control]"
@@ -430,10 +495,11 @@ def build_offload_loadtest_plan(
 
     dedicated_loadgen = "loadgen" in environment.roles
     k6_role: Literal["stack", "loadgen"] = "loadgen" if dedicated_loadgen else "stack"
-    remote = dedicated_loadgen and environment.provider != "local"
+    remote = not local
     script_path, summary_path = _loadtest_paths(
         environment,
         remote=remote,
+        role=k6_role,
         run_dir=run_dir,
         tool_root=tool_root,
     )
@@ -510,6 +576,7 @@ def build_offload_loadtest_plan(
                 offloadable=offloadable.name,
                 control=control.name,
                 output_path=run_dir / "offload-report.json",
+                executor=executor if remote else None,
             )
         )
     )

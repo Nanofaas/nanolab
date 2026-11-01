@@ -555,3 +555,36 @@ def test_proxmox_loadtest_urls_use_guest_network_and_published_prometheus(
         "http://10.0.0.50:30080",
         "http://pve.example:43090",
     )
+
+
+def test_hybrid_cloud_commands_use_azure_provider(monkeypatch, tmp_path) -> None:
+    local = RecordingVmProvider()
+    cloud = RecordingVmProvider()
+    monkeypatch.setattr(execution, "provider_for", lambda request, root: cloud)
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {
+                "stack": {"name": "edge"},
+                "loadgen": {"name": "loadgen"},
+                "cloud": {"name": "cloud", "provider": "azure"},
+            },
+            "azure": {"resource_group": "rg", "location": "westeurope"},
+        }
+    )
+    bindings, _ = build_role_bindings(
+        environment, vm_provider=local, repo_root=tmp_path
+    )
+    from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
+
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    for role in ("stack", "loadgen", "cloud"):
+        executor.run(
+            CommandTaskSpec(
+                task_id=role, summary="probe", argv=("uname", "-m"), role=role
+            )
+        )
+    assert [call[0].name for call in local.exec_calls] == ["edge", "loadgen"]
+    assert [call[0].name for call in cloud.exec_calls] == ["cloud"]
+    assert cloud.exec_calls[0][0].lifecycle == "azure"
+    assert cloud.exec_calls[0][0].user == "azureuser"
