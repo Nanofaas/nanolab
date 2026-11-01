@@ -7,6 +7,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PAYLOAD = b"x" * (8 * 1024 * 1024)
+RELAYED_HEADERS = ("Content-Type", "X-Execution-Id", "X-Dispatch-Attempt")
 with open("/proc/sys/kernel/random/boot_id") as boot_identity:
     BOOT_ID = boot_identity.read().strip()
 
@@ -36,16 +37,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def do_POST(self):
+        if self.path.startswith("/relay/"):
+            self.relay()
+        else:
+            self.send_error(404)
+
     def relay(self):
         # Replicas publish dynamic ports that only the VM can reach when it is
-        # behind NAT. Relay read-only runtime requests to loopback, nothing else.
+        # behind NAT. Relay to loopback only the runtime's read-only endpoints
+        # and the direct invocation the preflight warms replicas with.
         _, _, port, rest = self.path.split("/", 3)
-        if not port.isdigit() or not 0 < int(port) < 65536 or not rest.startswith("runtime/"):
+        allowed = rest == "invoke" if self.command == "POST" else rest.startswith("runtime/")
+        if not port.isdigit() or not 0 < int(port) < 65536 or not allowed:
             self.send_error(403)
             return
+        body, headers = None, {}
+        if self.command == "POST":
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            headers = {key: self.headers[key] for key in RELAYED_HEADERS if key in self.headers}
         try:
-            connection = http.client.HTTPConnection("127.0.0.1", int(port), timeout=30)
-            connection.request("GET", "/" + rest)
+            # An invocation lasts as long as its handler: the caller bounds it.
+            connection = http.client.HTTPConnection("127.0.0.1", int(port), timeout=600)
+            connection.request(self.command, "/" + rest, body=body, headers=headers)
             response = connection.getresponse()
             data = response.read()
             status, kind = response.status, response.getheader("Content-Type")

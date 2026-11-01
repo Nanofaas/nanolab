@@ -1,5 +1,6 @@
 """Remote Multipass sites and Azure placement, without contacting any host."""
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -335,7 +336,7 @@ def running_probe():
             process.wait(timeout=10)
 
 
-def test_probe_relays_only_read_only_runtime_requests_to_loopback(running_probe):
+def test_probe_relays_runtime_reads_and_invocations_to_loopback(running_probe):
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -344,6 +345,22 @@ def test_probe_relays_only_read_only_runtime_requests_to_loopback(running_probe)
     class Runtime(BaseHTTPRequestHandler):
         def do_GET(self):
             body = b'{"path": "' + self.path.encode() + b'"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            received = self.rfile.read(int(self.headers["Content-Length"]))
+            body = json.dumps(
+                {
+                    "path": self.path,
+                    "body": received.decode(),
+                    "execution": self.headers.get("X-Execution-Id"),
+                    "attempt": self.headers.get("X-Dispatch-Attempt"),
+                }
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -365,6 +382,22 @@ def test_probe_relays_only_read_only_runtime_requests_to_loopback(running_probe)
             assert http.get(f"{running_probe}/relay/{port}/v1/x").status_code == 403
             assert http.get(f"{running_probe}/relay/0/runtime/x").status_code == 403
             assert http.get(f"{running_probe}/relay/1/runtime/x").status_code == 502
+            invoked = http.post(
+                f"{running_probe}/relay/{port}/invoke",
+                json={"input": {"n": 1}},
+                headers={"X-Execution-Id": "e-2", "X-Dispatch-Attempt": "1"},
+            )
+            assert invoked.status_code == 200
+            assert invoked.json() == {
+                "path": "/invoke",
+                "body": '{"input":{"n":1}}',
+                "execution": "e-2",
+                "attempt": "1",
+            }
+            for refused in ("runtime/status", "v1/functions/f:invoke"):
+                response = http.post(f"{running_probe}/relay/{port}/{refused}", json={})
+                assert response.status_code == 403
+            assert http.post(f"{running_probe}/clock").status_code == 404
     finally:
         server.shutdown()
 
