@@ -19,10 +19,12 @@ from nanolab.config.experiment_01 import EXPERIMENT_01_FUNCTION, Experiment01Pro
 from nanolab.config.experiment_02 import EXPERIMENT_02_FUNCTION, Experiment02Protocol
 from nanolab.config.heap_analysis import HeapAnalysisConfig
 from nanolab.config.idle_reactivation import IdleReactivationConfig
+from nanolab.config.module_cost import ModuleCostConfig
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.config.soak import RolePolicy, SoakConfig
 
 WorkflowName = Literal[
+    "module-cost",
     "idle-reactivation",
     "one-shot-calibration",
     "one-shot-qualification",
@@ -192,6 +194,7 @@ class ScenarioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow: WorkflowName
+    module_cost: ModuleCostConfig | None = Field(default=None, alias="moduleCost")
     idle_reactivation: IdleReactivationConfig | None = Field(
         default=None, alias="idleReactivation"
     )
@@ -324,6 +327,15 @@ class ScenarioConfig(BaseModel):
         the backend, the autoscaler, the concurrency governor and the load
         profile. Returns the instance unchanged once every rule holds.
         """
+        if self.workflow == "module-cost":
+            allowed = {"workflow", "backend", "build", "functions", "module_cost"}
+            if (self.module_cost is None or self.backend != "k8s"
+                    or self.build != "docker" or self.functions != ["word-stats-java"]
+                    or self.model_fields_set - allowed):
+                raise ValueError("module-cost requires its fixed Kubernetes protocol")
+            return self
+        if self.module_cost is not None:
+            raise ValueError("moduleCost requires workflow module-cost")
         if self.workflow == "idle-reactivation":
             self._validate_idle_reactivation()
             return self
