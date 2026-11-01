@@ -7,6 +7,7 @@ selected provider needs, and it validates that the two agree.
 
 from __future__ import annotations
 
+from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -72,6 +73,11 @@ class AzureEnvironment(BaseModel):
     # Native ARM64 builder (Ampere): used by the release arm64 phases.
     arm_vm_size: str = "Standard_D8ps_v5"
     arm_image_urn: str | None = None
+    # Where the OpenTofu workspace (the state a VM is deleted from) lives;
+    # the SDK default is ~/.azure-vm-sdk. Used by one-shot Azure placement.
+    work_dir: str | None = None
+    # Architecture of `vm_size`, for one-shot placement's per-architecture images.
+    architecture: Literal["arm64", "amd64"] = "amd64"
 
 
 class ProxmoxEnvironment(BaseModel):
@@ -87,12 +93,63 @@ class ProxmoxEnvironment(BaseModel):
     ssh_key_path: str | None = None
 
 
+class MultipassSite(BaseModel):
+    """A remote Multipass host that one-shot nodes can be placed on.
+
+    `ssh` is the destination the operator runs commands through; `address` is
+    the host's LAN address, on which its VMs' services are published;
+    `multipass` is the client binary on that host.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ssh: str = Field(min_length=1)
+    address: str
+    # The VMs' architecture selects which prebuilt images they receive.
+    architecture: Literal["arm64", "amd64"]
+    multipass: str = "multipass"
+    # Injected into the site's VMs; the operator reaches them through the site.
+    vm_ssh_key: str = Field(default="~/.ssh/id_ed25519_nanolab_vm", alias="vmSshKey")
+
+    @model_validator(mode="after")
+    def validate_address(self) -> MultipassSite:
+        """Require a literal address: published endpoints are built from it."""
+        try:
+            IPv4Address(self.address)
+        except ValueError as error:
+            raise ValueError("site address must be an IPv4 address") from error
+        return self
+
+
+class OperatorLogging(BaseModel):
+    """The single Loki a multi-site run owns on the operator.
+
+    Loki runs from a pinned release binary, listening on the operator's
+    loopback only; each site's VMs and the cloud reach it through a reverse
+    SSH tunnel. `cpus` keeps it off the generator's CPUs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    loki_binary: str = Field(alias="lokiBinary", min_length=1)
+    loki_sha256: str = Field(alias="lokiSha256", pattern=r"^[0-9a-f]{64}$")
+    port: int = Field(default=43100, ge=1024, le=65534)
+    cpus: list[int] = Field(min_length=1)
+
+
+AZURE_SITE = "azure"
+
+
 class EnvironmentConfig(BaseModel):
     """A parsed environment file: the provider, its roles and its settings.
 
     The validator runs at construction, so an instance that exists is one whose
     provider has everything it needs to provision: a named stack for multipass
     and external, and the matching `azure` or `proxmox` block otherwise.
+
+    `sites` and `placement` are only used by the one-shot workflows: they put
+    individual nodes on remote Multipass hosts or on Azure instead of the local
+    Multipass daemon. Without them every node stays local.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -101,6 +158,9 @@ class EnvironmentConfig(BaseModel):
     roles: dict[ExecutionRole, RoleTarget] = Field(default_factory=dict)
     azure: AzureEnvironment | None = None
     proxmox: ProxmoxEnvironment | None = None
+    sites: dict[str, MultipassSite] = Field(default_factory=dict)
+    placement: dict[str, str] = Field(default_factory=dict)
+    operator_logging: OperatorLogging | None = Field(default=None, alias="logging")
     containerd_maven_repository: Path | None = Field(
         default=None, alias="containerdMavenRepository"
     )
@@ -138,7 +198,30 @@ class EnvironmentConfig(BaseModel):
             and not self.containerd_maven_repository.is_absolute()
         ):
             raise ValueError("containerdMavenRepository must be an absolute host path")
+        if self.sites or self.placement:
+            if self.provider != "multipass":
+                raise ValueError("sites and placement require the multipass provider")
+            if AZURE_SITE in self.sites:
+                raise ValueError(f"site name {AZURE_SITE!r} is reserved")
+            if not self.sites:
+                raise ValueError("placement requires at least one of the sites")
+            unknown = set(self.placement.values()) - {*self.sites, AZURE_SITE}
+            if unknown:
+                raise ValueError(f"placement names unknown site(s): {sorted(unknown)}")
+            if AZURE_SITE in self.placement.values() and self.azure is None:
+                raise ValueError("azure configuration is required for azure placement")
+        elif self.operator_logging is not None:
+            raise ValueError("logging is only meaningful with sites and placement")
         return self
+
+    @property
+    def multisite(self) -> bool:
+        """Whether nodes are placed on remote sites rather than kept local."""
+        return bool(self.placement)
+
+    def site_of(self, node_id: str) -> str | None:
+        """Return the site a node is placed on, or None for the local daemon."""
+        return self.placement.get(node_id)
 
     def target(self, role: ExecutionRole) -> RoleTarget:
         """Return the machine a role runs on, following the fallback chain.

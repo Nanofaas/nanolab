@@ -69,6 +69,93 @@ def export_queue_events(http, url, query, start, end, limit, path) -> int:
     return count
 
 
+def verify_loki_ingestion(endpoint_url, project, directory, settings=None) -> None:
+    """Push a canary, read it back, and require no WAL disk-full write failure.
+
+    Each attempt is recorded in `directory/backend-probes.jsonl`.
+    """
+    timestamp = str(time.time_ns())
+    message = "nanolab backend probe " + timestamp
+    labels = {"nanolab_backend_probe": project}
+    row: dict[str, str | int | float | None] = {
+        "atUtc": datetime.now(UTC).isoformat(),
+        "state": "checking",
+    }
+    timeout = operational_limit(settings, "collection_http_seconds", 10)
+    with httpx.Client(trust_env=False) as http:
+        metrics = None
+        metrics_attempted = False
+        metrics_url = endpoint_url.split("/loki/api/v1/push")[0] + "/metrics"
+        try:
+            response = http.post(
+                endpoint_url,
+                json={
+                    "streams": [{"stream": labels, "values": [[timestamp, message]]}]
+                },
+                timeout=timeout,
+            )
+            row["pushStatus"] = response.status_code
+            if response.status_code != 204:
+                raise RuntimeError(
+                    f"Loki push HTTP {response.status_code}: {response.text}"
+                )
+            response = http.get(
+                query_url(endpoint_url),
+                params={
+                    "query": '{nanolab_backend_probe="' + project + '"}',
+                    "start": timestamp,
+                    "end": str(int(timestamp) + 1),
+                    "limit": 1,
+                },
+                timeout=timeout,
+            )
+            row["queryStatus"] = response.status_code
+            response.raise_for_status()
+            body = response.json()
+            if body.get("status") != "success" or not any(
+                value == [timestamp, message]
+                for stream in body.get("data", {}).get("result", [])
+                for value in stream.get("values", [])
+            ):
+                raise RuntimeError("Loki probe write is not queryable")
+            # Loki deliberately accepts ENOSPC writes into memory. A visible
+            # canary must not hide a failed WAL persistence operation.
+            metrics_attempted = True
+            metrics = http.get(metrics_url, timeout=timeout)
+            metrics.raise_for_status()
+            counters = parse_prometheus(
+                metrics.text, ("loki_ingester_wal_disk_full_failures_total",)
+            )
+            failures = counters.get("loki_ingester_wal_disk_full_failures_total")
+            if failures is None or not math.isfinite(failures) or failures < 0:
+                row["walDiskFullFailures"] = None
+                raise RuntimeError("Loki WAL failure counter unavailable or invalid")
+            row["walDiskFullFailures"] = failures
+            if failures:
+                raise RuntimeError(
+                    f"Loki WAL disk-full write failures recorded: {failures}"
+                )
+            row["state"] = "passed"
+        except Exception as error:
+            row.update(state="failed", error=str(error))
+            try:
+                if not metrics_attempted:
+                    metrics = http.get(metrics_url, timeout=timeout)
+                    metrics.raise_for_status()
+                if metrics is not None:
+                    (directory / "backend-metrics-on-failure.txt").write_text(
+                        metrics.text
+                    )
+            except Exception as metrics_error:
+                row["metricsError"] = str(metrics_error)
+            raise RuntimeError(
+                "owned Loki ingestion probe failed: " + str(error)
+            ) from error
+        finally:
+            with (directory / "backend-probes.jsonl").open("a") as stream:
+                stream.write(json.dumps(row) + "\n")
+
+
 def backend_resource(
     logs: OneShotLogs,
     *,
@@ -228,90 +315,7 @@ def backend_resource(
             ) from archive_error
 
     def verify_ingestion():
-        timestamp = str(time.time_ns())
-        message = "nanolab backend probe " + timestamp
-        labels = {"nanolab_backend_probe": project}
-        row: dict[str, str | int | float | None] = {
-            "atUtc": datetime.now(UTC).isoformat(),
-            "state": "checking",
-        }
-        timeout = operational_limit(settings, "collection_http_seconds", 10)
-        with httpx.Client(trust_env=False) as http:
-            metrics = None
-            metrics_attempted = False
-            metrics_url = endpoint_url.split("/loki/api/v1/push")[0] + "/metrics"
-            try:
-                response = http.post(
-                    endpoint_url,
-                    json={
-                        "streams": [
-                            {"stream": labels, "values": [[timestamp, message]]}
-                        ]
-                    },
-                    timeout=timeout,
-                )
-                row["pushStatus"] = response.status_code
-                if response.status_code != 204:
-                    raise RuntimeError(
-                        f"Loki push HTTP {response.status_code}: {response.text}"
-                    )
-                response = http.get(
-                    query_url(endpoint_url),
-                    params={
-                        "query": '{nanolab_backend_probe="' + project + '"}',
-                        "start": timestamp,
-                        "end": str(int(timestamp) + 1),
-                        "limit": 1,
-                    },
-                    timeout=timeout,
-                )
-                row["queryStatus"] = response.status_code
-                response.raise_for_status()
-                body = response.json()
-                if body.get("status") != "success" or not any(
-                    value == [timestamp, message]
-                    for stream in body.get("data", {}).get("result", [])
-                    for value in stream.get("values", [])
-                ):
-                    raise RuntimeError("Loki probe write is not queryable")
-                # Loki deliberately accepts ENOSPC writes into memory. A visible
-                # canary must not hide a failed WAL persistence operation.
-                metrics_attempted = True
-                metrics = http.get(metrics_url, timeout=timeout)
-                metrics.raise_for_status()
-                counters = parse_prometheus(
-                    metrics.text, ("loki_ingester_wal_disk_full_failures_total",)
-                )
-                failures = counters.get("loki_ingester_wal_disk_full_failures_total")
-                if failures is None or not math.isfinite(failures) or failures < 0:
-                    row["walDiskFullFailures"] = None
-                    raise RuntimeError(
-                        "Loki WAL failure counter unavailable or invalid"
-                    )
-                row["walDiskFullFailures"] = failures
-                if failures:
-                    raise RuntimeError(
-                        f"Loki WAL disk-full write failures recorded: {failures}"
-                    )
-                row["state"] = "passed"
-            except Exception as error:
-                row.update(state="failed", error=str(error))
-                try:
-                    if not metrics_attempted:
-                        metrics = http.get(metrics_url, timeout=timeout)
-                        metrics.raise_for_status()
-                    if metrics is not None:
-                        (directory / "backend-metrics-on-failure.txt").write_text(
-                            metrics.text
-                        )
-                except Exception as metrics_error:
-                    row["metricsError"] = str(metrics_error)
-                raise RuntimeError(
-                    "owned Loki ingestion probe failed: " + str(error)
-                ) from error
-            finally:
-                with (directory / "backend-probes.jsonl").open("a") as stream:
-                    stream.write(json.dumps(row) + "\n")
+        verify_loki_ingestion(endpoint_url, project, directory, settings)
 
     def acquire(_inputs):
         nonlocal started

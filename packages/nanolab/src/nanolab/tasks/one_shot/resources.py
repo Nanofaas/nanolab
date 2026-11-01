@@ -52,7 +52,7 @@ def node_probe_resource(node: NodeResource):
             "print(p.pid)"
         )
         pid = int(node.command(("python3", "-c", code)).stdout.strip())
-        url = f"http://{vm.host}:17111"
+        url = node.addresses(vm).probe
         deadline = time.monotonic() + 30
         with httpx.Client(trust_env=False) as http:
             while time.monotonic() < deadline:

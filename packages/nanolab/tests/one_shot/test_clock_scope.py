@@ -168,3 +168,28 @@ def test_rejected_clock_keeps_all_raw_probe_attempts(tmp_path, monkeypatch):
     assert all(row["remoteUtcSeconds"] > row["afterUtcSeconds"] for row in rows)
     assert all(row["errorType"] is None for row in rows)
     assert (tmp_path / "clock.jsonl").exists()
+
+
+def test_a_failed_background_probe_reports_its_cause():
+    import subprocess
+
+    from nanolab.tasks.one_shot.clock import ClockMonitor
+
+    calls = []
+
+    def refresh():
+        calls.append(1)
+        if len(calls) > 1:
+            raise subprocess.CalledProcessError(
+                255, ["ssh"], stderr="Connection closed by 20.1.2.3 port 22\n"
+            )
+
+    monitor = ClockMonitor(refresh, interval_seconds=0.01)
+    monitor.start()
+    while monitor._thread is not None and monitor._thread.is_alive():
+        monitor._thread.join(timeout=1)
+    with pytest.raises(RuntimeError) as failure:
+        monitor.require_healthy()
+    message = str(failure.value)
+    assert "CalledProcessError" in message and "255" in message
+    assert "Connection closed by 20.1.2.3 port 22" in message

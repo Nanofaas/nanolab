@@ -22,6 +22,7 @@ from pydantic import JsonValue, TypeAdapter
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
 from nanolab.config.one_shot import ProtocolSettings, TimingCell, operational_limit
+from nanolab.one_shot.addresses import management_url
 from nanolab.one_shot.campaign import read_campaign_binding
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import (
@@ -1230,7 +1231,7 @@ def collect_runtime_evidence(
             try:
                 url = inputs.resource(endpoint)
                 response = http.get(
-                    url.replace(":8080", ":9090") + "/actuator/prometheus",
+                    management_url(url) + "/actuator/prometheus",
                     timeout=read_timeout(),
                 )
                 response.raise_for_status()

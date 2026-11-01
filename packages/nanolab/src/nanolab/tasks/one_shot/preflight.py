@@ -145,6 +145,9 @@ class PreflightTask(Task[TopologyEvidence]):
             value=TopologyEvidence(
                 measured_at=datetime.now(UTC),
                 generator_location=self.resources.generator_location,
+                shared_physical_host=getattr(
+                    self.resources, "shared_physical_host", True
+                ),
                 nodes=self.evidence,
             )
         )
@@ -241,8 +244,8 @@ def runtime_endpoint(
     ports = observed["NetworkSettings"]["Ports"]["8080/tcp"]
     if not isinstance(ports, list) or not ports:
         raise ValueError("runtime published port missing")
-    host = inputs.resource(node.vm).host
-    return f"http://{host}:{int(ports[0]['HostPort'])}", observed
+    vm = inputs.resource(node.vm)
+    return node.replica_url(vm, int(ports[0]["HostPort"])), observed
 
 
 def runtime_inventory(
@@ -325,7 +328,7 @@ def runtime_inventory(
             (
                 name,
                 int(replica),
-                f"http://{inputs.resource(node.vm).host}:{int(ports[0]['HostPort'])}",
+                node.replica_url(inputs.resource(node.vm), int(ports[0]["HostPort"])),
                 obj,
             )
         )
@@ -357,9 +360,11 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         require_no_swap: bool = True,
         protocol_version: Literal[1, 2] = 1,
         settings=None,
+        node_distributions=None,
     ):
         """Bind explicit resource handles and expected physical identities."""
         self.settings = settings
+        self.node_distributions = node_distributions or {}
         self.collectors = collectors or {}
         self.neighbor_graph = neighbor_graph or {
             key: tuple(
@@ -416,19 +421,29 @@ class CollectTopologyTask(Task[TopologyEvidence]):
             from nanolab.one_shot.host_cpu import collect_host_placement
 
             self.observations["hostCpuPolicy"] = placement.model_dump(by_alias=True)
-            self.observations["hostCpuPlacement"] = collect_host_placement(
-                placement,
-                {
-                    node_id: inputs.resource(node.vm).name
-                    for node_id, node in self.resources.nodes.items()
-                },
+            vm_names = {
+                node_id: inputs.resource(node.vm).name
+                for node_id, node in self.resources.nodes.items()
+                if node_id in placement.nodes
+            }
+            recheck = self.resources.recheck_placement
+            self.observations["hostCpuPlacement"] = (
+                recheck(vm_names)
+                if recheck is not None
+                else collect_host_placement(placement, vm_names)
             )
-        built = inputs.resource(self.distribution)
-        expected_images = {
-            component.name: component.image.id
-            for component in built.components
-            if component.kind == "function"
-        }
+
+        def expected_images_of(node_id: str) -> dict[str, str]:
+            # Per-architecture images differ in identity between nodes.
+            built = inputs.resource(
+                self.node_distributions.get(node_id, self.distribution)
+            )
+            return {
+                component.name: component.image.id
+                for component in built.components
+                if component.kind == "function"
+            }
+
         with httpx.Client(
             trust_env=False, timeout=operational_limit(self.settings, "api_seconds", 30)
         ) as http:
@@ -575,7 +590,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     ):
                         raise ValueError("physical concurrency/release proof missing")
                     image = observed["Image"]
-                    if image != expected_images[function]:
+                    if image != expected_images_of(key)[function]:
                         raise ValueError("runtime image digest mismatch")
                     limits = observed["HostConfig"]
                     if limits["Memory"] != expected.memory_mib * 1024 * 1024 or limits[
@@ -614,7 +629,12 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     image_digests[function] = image
                 # Measure cross-VM transfer, not the operator's download path.
                 other_key = next(other for other in self.probes if other != key)
-                target = inputs.resource(self.probes[other_key])
+                downloader, source = node, other_key
+                if getattr(node.request, "lifecycle", None) == "azure":
+                    # An Azure cloud never opens a connection towards the edges'
+                    # sites; measure the same path from an edge downloading it.
+                    downloader, source = self.resources.nodes[other_key], key
+                target = inputs.resource(self.probes[source])
                 code = (
                     "import json,time,urllib.request; t=time.monotonic(); "
                     f"data=urllib.request.urlopen({json.dumps(target + '/bytes')},"
@@ -622,7 +642,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
                     "elapsed=time.monotonic()-t; "
                     "print(json.dumps({'bytes':len(data),'seconds':elapsed}))"
                 )
-                network = json.loads(node.command(("python3", "-c", code)).stdout)
+                network = json.loads(downloader.command(("python3", "-c", code)).stdout)
                 if network["bytes"] != 8 * 1024 * 1024:
                     raise ValueError("incomplete network transfer")
                 fact = NodeEvidence(
@@ -675,6 +695,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
             host_cpu_placement=self.observations.get("hostCpuPlacement"),
             measured_at=datetime.now(UTC),
             generator_location=self.resources.generator_location,
+            shared_physical_host=getattr(self.resources, "shared_physical_host", True),
             nodes=evidence,
             logging={
                 key: inputs.resource(resource).identity

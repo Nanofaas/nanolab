@@ -297,6 +297,9 @@ def test_streams_start_before_load_and_failed_cleanup_reaps_all_transports(
                 transfer_to=lambda *a, **k: SimpleNamespace(return_code=0)
             )
 
+        def vm_argv(self, _vm, *argv):
+            return ["multipass", "exec", self.request.name, "--", *argv]
+
         def command(self, argv):
             if argv[0] == "sha256sum":
                 return SimpleNamespace(
@@ -696,6 +699,9 @@ def test_pipe_only_transport_streams_before_exit_and_retains_terminal_bytes(
         provider = SimpleNamespace(
             transfer_to=lambda *args, **kwargs: SimpleNamespace(return_code=0)
         )
+
+        def vm_argv(self, _vm, *argv):
+            return ["multipass", "exec", self.request.name, "--", *argv]
 
         def command(self, argv):
             if argv[0] == "sha256sum":

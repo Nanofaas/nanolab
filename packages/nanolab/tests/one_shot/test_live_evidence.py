@@ -299,7 +299,14 @@ def test_batched_inventory_verifies_labels_identity_and_replica_uniqueness(monke
     engine = ContainerEngine("ignored")
     engine.object["Config"]["Labels"]["io.nanofaas.function"] = "owned/f0"
     engine.object["NetworkSettings"] = {"Ports": {"8080/tcp": [{"HostPort": "1234"}]}}
-    node = cast(Any, SimpleNamespace(request=SimpleNamespace(name="owned"), vm="vm"))
+    node = cast(
+        Any,
+        SimpleNamespace(
+            request=SimpleNamespace(name="owned"),
+            vm="vm",
+            replica_url=lambda vm, port: f"http://{vm.host}:{port}",
+        ),
+    )
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.preflight.NodeExecutor", lambda _: engine
     )
