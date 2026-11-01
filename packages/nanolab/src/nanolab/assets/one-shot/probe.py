@@ -45,10 +45,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def relay(self):
         # Replicas publish dynamic ports that only the VM can reach when it is
-        # behind NAT. Relay to loopback only the runtime's read-only endpoints
-        # and the direct invocation the preflight warms replicas with.
+        # behind NAT. Relay to loopback only the runtime's read-only endpoints,
+        # its metrics, and the direct invocation the preflight warms replicas with.
         _, _, port, rest = self.path.split("/", 3)
-        allowed = rest == "invoke" if self.command == "POST" else rest.startswith("runtime/")
+        if self.command == "POST":
+            allowed = rest == "invoke"
+        else:
+            allowed = rest.startswith("runtime/") or rest == "metrics"
         if not port.isdigit() or not 0 < int(port) < 65536 or not allowed:
             self.send_error(403)
             return

@@ -212,6 +212,70 @@ packages/nanolab`, `lint-imports` (CLAUDE.md commands). One commit per task.
 - The integration smoke runs under the campaign supervisor and can `--hold`,
   so the periodic checks run as in an observation.
 
+## Follow-ups (recorded 2026-11-01, third phase-1 run)
+
+Timing (a phase-1 run: provisioning ~18 min, warm-up ~50 min, load 66 min,
+collection and release ~15 min; with ten edges the serial parts double):
+
+1. Warm replicas of different nodes in parallel. `WarmInstances` walks every
+   replica of every node in turn; through the relay, NAT and WAN the 80
+   replicas took ~50 min against ~28.5 min in the single-host reference.
+   Nodes are independent, so one worker per node bounds it by the slowest node.
+2. Provision sites and the cloud in parallel. VM creation (~37 s each) and
+   per-node bootstrap, collector and control plane (~1.5 min each) run one
+   after another, and the cloud (~4 min) waits for all edges. Needs either
+   parallel acquisition in Sonata or one resource per site that starts its
+   nodes concurrently while keeping per-node release.
+
+Robustness:
+
+3. The smoke must exercise every write path of the observation. It checked
+   only reads, so the relay refusing `POST invoke` surfaced 20 minutes into a
+   real run. Run the preflight's warm-up (and the queue admission check) in
+   the smoke, not only topology collection.
+4. Recognise a Spot eviction explicitly. The design says eviction fails the
+   run, but nothing detects it: it would surface as an unreachable node. Read
+   the VM's eviction state on failure and record it as the cause.
+5. Bound the Azure session. Long runs rely on `az` refreshing the token and
+   the release needs a write; check the remaining session at launch, or use a
+   service principal for runs.
+6. Inject faults in the smoke: kill a log tunnel during `--hold` and check it
+   is reopened with no records lost (unit-tested only).
+7. Close the shared SSH masters at release instead of leaving them to
+   `ControlPersist`.
+8. Exposure: site forwarders publish API, gossip and probe (which now relays
+   invocations) on every address of the site, i.e. its campus-facing address.
+   Bind them to the address the operator and peers use and keep that list
+   minimal; without sudo there is no firewall to add.
+
+15. The VM resource sampler streams its samples over SSH only: if a stream
+    drops, the run fails ("VM telemetry stopped"). Reopen the stream (the
+    coverage accounting already records the gap) instead of failing.
+16. Done after the third run: the relay also serves replica `/metrics` (210
+    samples were refused with 403), and remote container checks record every
+    outcome in `liveness.jsonl` and fail the run only after 5 minutes of
+    continuous unreachability (a container reported stopped or missing still
+    fails at once).
+
+Maintainability:
+
+9. Update the design spec: it still describes Loki per site and NSG rules
+   rewritten after creation.
+10. Remove the `getattr(..., default)` fallbacks added for test doubles
+    (`node_distributions`, `shared_physical_host`, `request.lifecycle`) by
+    updating the doubles; they hide missing attributes in production code.
+11. Tests must not read this operator's paths (`PREBUILT = /datassd/...` in
+    `test_multisite_resources.py`): generate the archives in the test.
+12. A quiet baseline. Locally 49 tests fail before any change (Node.js
+    absent, nanoFaaS checkout contracts against a non-CI revision), which hides
+    regressions, and the suite takes ~28 min; provide Node.js to the test
+    environment, pin the contract revision, and parallelise with xdist.
+13. An operator watch command: a small script that follows a run's
+    `supervision.jsonl` and prints state changes (step, measurement phase,
+    failures, exit), instead of ad-hoc log greps.
+14. Land the work: the `one-shot-multisite` branch (4 commits) and
+    `fix-azure-min-disk` (Azure disk check) are local only; open PRs.
+
 ## Order and checkpoints
 
 1 → 2 → 3 are pure refactors with regression tests (checkpoint: full suite

@@ -379,7 +379,10 @@ def test_probe_relays_runtime_reads_and_invocations_to_loopback(running_probe):
             assert ok.status_code == 200
             assert ok.json() == {"path": "/runtime/executions/e-1"}
             assert ok.headers["content-type"] == "application/json"
+            metrics = http.get(f"{running_probe}/relay/{port}/metrics")
+            assert metrics.json() == {"path": "/metrics"}
             assert http.get(f"{running_probe}/relay/{port}/v1/x").status_code == 403
+            assert http.get(f"{running_probe}/relay/{port}/metricsx").status_code == 403
             assert http.get(f"{running_probe}/relay/0/runtime/x").status_code == 403
             assert http.get(f"{running_probe}/relay/1/runtime/x").status_code == 502
             invoked = http.post(
