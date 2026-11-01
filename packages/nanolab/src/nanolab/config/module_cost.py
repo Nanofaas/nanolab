@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from nanolab.config.environment import EnvironmentConfig
+
 ARMS = tuple(
     f"{runtime}-{composition}"
     for runtime in ("jvm", "native")
@@ -35,3 +37,20 @@ class ModuleCostConfig(BaseModel):
                 "module-cost order must contain the eight arms exactly once"
             )
         return self
+
+
+def require_module_environment(environment: EnvironmentConfig) -> None:
+    """Validate ownership before provider acquisition, also for direct plan callers."""
+    if (
+        environment.provider != "azure"
+        or not environment.azure
+        or environment.azure.priority != "Spot"
+    ):
+        raise ValueError("module-cost requires workflow-created Azure Spot machines")
+    if set(environment.roles) != {"stack", "loadgen"}:
+        raise ValueError("module-cost requires distinct stack and loadgen roles")
+    targets = [environment.target(role) for role in ("stack", "loadgen")]
+    if any(t.host or not t.name for t in targets):
+        raise ValueError("module-cost machines must be created by the workflow")
+    if targets[0].name == targets[1].name:
+        raise ValueError("module-cost requires distinct machines")

@@ -62,7 +62,7 @@ def prepare_campaign(output: Path, ssh_key: Path, seed: int) -> Path:
     token = "mc-" + uuid4().hex[:12]
     root = output / token
     order = list(ARMS)
-    random.Random(seed).shuffle(order)
+    random.Random(seed).shuffle(order)  # nosec B311: reproducible experimental order
     blocks, commands = [], []
     root.mkdir(parents=True, exist_ok=False)
     for repeat in range(3):

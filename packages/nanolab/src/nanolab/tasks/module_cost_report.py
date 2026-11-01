@@ -126,12 +126,17 @@ def read_load(
         metric(summary, "http_reqs") == len(sent), "HTTP requests differ from ledger"
     )
     # Integer-time boundary arrival can add one request; retain the actual cohort.
+    cohort_sends = [e["ts"] for e in sent.values() if e["phase"] == phase]
+    cohort_ends = [e["ts"] for e in terminal.values() if e["phase"] == phase]
+    require(bool(cohort_sends), "no emitted load cohort")
     ordered = sorted(latencies)
 
     def percentile(p):
         return ordered[max(0, math.ceil(p * len(ordered)) - 1)] if ordered else None
 
     return {
+        "first_send_ms": min(cohort_sends),
+        "last_terminal_ms": max(cohort_ends),
         "scheduled": iterations + drops,
         "emitted": iterations,
         "dropped": drops,
@@ -143,6 +148,62 @@ def read_load(
         "p99_ms": percentile(0.99),
         "latency_population": "valid whole responses, including drain",
     }
+
+
+def cohort_window(load: dict, anchors: list[dict]) -> tuple[float, float]:
+    """Map request timestamps to controller time with bounded clock uncertainty."""
+    require(len(anchors) == 2, "missing generator clock anchors")
+    offsets = []
+    for anchor in anchors:
+        sent, received, remote = (
+            float(anchor[k]) for k in ("sent", "received", "remote")
+        )
+        require(
+            all(math.isfinite(v) for v in (sent, received, remote))
+            and 0 <= received - sent <= 2,
+            "generator clock uncertainty",
+        )
+        offsets.append(remote - (sent + received) / 2)
+    require(abs(offsets[1] - offsets[0]) <= 1, "generator clock drift")
+    offset = sum(offsets) / 2
+    start, end = (
+        load["first_send_ms"] / 1000 - offset,
+        load["last_terminal_ms"] / 1000 - offset,
+    )
+    require(
+        anchors[0]["sent"] - 1 <= start < end <= anchors[1]["received"] + 1,
+        "request cohort outside clock anchors",
+    )
+    return start, end
+
+
+def concurrency_coverage(points, timestamps, start, end, shift):
+    """Require one stable sample per timestamp and bounded metric coverage."""
+    values = sorted(
+        (epoch(p["timestamp"]) - shift, float(p["value"]))
+        for p in points
+        if start <= epoch(p["timestamp"]) - shift <= end
+    )
+    require(
+        len(values) >= 2
+        and values[0][0] - start <= 5
+        and end - values[-1][0] <= 5
+        and all(0 < b[0] - a[0] <= 10 for a, b in pairwise(values)),
+        "effective concurrency coverage missing or ambiguous",
+    )
+    require(all(v == 2 for _, v in values), "effective concurrency differs")
+    scrapes = sorted(
+        (epoch(p["timestamp"]) - shift, float(p["value"]) - shift)
+        for p in timestamps
+        if start <= epoch(p["timestamp"]) - shift <= end
+    )
+    require(
+        [t for t, _ in scrapes] == [t for t, _ in values]
+        and all(
+            math.isfinite(scraped) and 0 <= t - scraped <= 10 for t, scraped in scrapes
+        ),
+        "effective concurrency stale or missing scrape timestamps",
+    )
 
 
 def cpu_window(points, pod: str, start: float, end: float, shift: float = 0) -> float:
@@ -273,15 +334,6 @@ def analyze_arm(block: Path, arm: str, protocol: dict) -> dict[str, Any]:
     snapshot = load(directory / "metrics/prometheus-snapshot.json")
     shift = epoch(snapshot["start"]) - report["start"]
     queries = snapshot["queries"]
-    concurrency = [
-        p
-        for p in queries["function_effective_concurrency"]["points"]
-        if start <= epoch(p["timestamp"]) - shift <= report["load_end"]
-    ]
-    require(
-        bool(concurrency) and all(float(p["value"]) == 2 for p in concurrency),
-        "effective concurrency differs",
-    )
     warm = read_load(directory / "warmup", block / "inputs", 60, "warmup")
     require(
         warm["valid"] == warm["emitted"] and not warm["dropped"],
@@ -289,6 +341,17 @@ def analyze_arm(block: Path, arm: str, protocol: dict) -> dict[str, Any]:
     )
     measured = read_load(
         directory / "measurement", block / "inputs", 180, "measurement"
+    )
+    warm_window = cohort_window(warm, load(directory / "warmup/clock.json"))
+    load_window = cohort_window(measured, load(directory / "measurement/clock.json"))
+    require(warm_window[1] <= report["idle_start"], "warmup overlaps idle")
+    require(tuple(report["load_window"]) == load_window, "load boundary drift")
+    concurrency_coverage(
+        queries["function_effective_concurrency"]["points"],
+        queries["function_effective_concurrency_timestamp"]["points"],
+        warm_window[0],
+        load_window[1],
+        shift,
     )
     memory = memory_window(queries, observations, start, end, FUNCTION, shift=shift)
     require(memory is not None, "memory coverage missing")
@@ -327,8 +390,8 @@ def analyze_arm(block: Path, arm: str, protocol: dict) -> dict[str, Any]:
     load_memory = memory_window(
         queries,
         observations,
-        report["load_start"],
-        report["load_end"],
+        load_window[0],
+        load_window[1],
         FUNCTION,
         shift=shift,
     )
@@ -337,8 +400,8 @@ def analyze_arm(block: Path, arm: str, protocol: dict) -> dict[str, Any]:
         component: cpu_window(
             queries[f"container_cpu_seconds@{name}"]["points"],
             first[key][0]["name"],
-            report["load_start"],
-            report["load_end"],
+            load_window[0],
+            load_window[1],
             shift,
         )
         for component, name, key in (

@@ -168,11 +168,16 @@ def build_scenario_workflow(  # NOSONAR (S3776): one branch per workflow
         from nanolab.plans.module_cost import build_module_cost_plan
 
         return build_module_cost_plan(
-            scenario, environment, bindings,
+            scenario,
+            environment,
+            bindings,
             control_plane_url=control_plane_url or "http://127.0.0.1:30080",
-            prometheus_client=HttpPrometheusClient(prometheus_url, preserve_labels=True),
+            prometheus_client=HttpPrometheusClient(
+                prometheus_url, preserve_labels=True
+            ),
             run_dir=run_dir or Path("/data/module-cost") / f"run-{uuid4().hex}",
-            repo_root=paths.nanofaas_root, fetcher=fetcher,
+            repo_root=paths.nanofaas_root,
+            fetcher=fetcher,
         )
     if scenario.workflow == "idle-reactivation":
         from nanolab.plans.idle_reactivation import build_idle_reactivation_plan

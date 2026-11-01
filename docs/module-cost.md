@@ -27,8 +27,8 @@ queue 20, no retries, NONE scaling and one replica. Control plane limits are
 
 All eight control-plane builds and the single Java function build precede any
 measurement. Gradle workers/native parallelism use the VM's CPUs; native build
-memory uses the host's physical memory, and Gradle's inherited 1 GiB heap is
-replaced by MaxRAMPercentage=100. These are upper bounds, not reservations;
+memory uses the host's physical memory, and the outer Gradle invocation replaces its inherited 1 GiB heap
+with MaxRAMPercentage=100. These are upper bounds, not reservations;
 builds and the OS still share memory. Actual commands, capacity, recipe hashes,
 source inventories, plugin reports, artifact file sizes and image identities
 are archived. Image size means uncompressed Docker image bytes; application
@@ -41,7 +41,12 @@ terminal response, including failures; no retries are added. A boundary arrival
 may add one request, explicitly retained in the observed scheduled cohort.
 The primary resource window is the final 120 seconds of idle. Working set and
 RSS are separate time-weighted signals, with CPU derived from raw counter
-changes. Function resources are reported separately. Missing coverage or
+changes. Function resources are reported separately. Loaded resources cover the first
+measured send through the final terminal response, excluding staging and
+collection. Generator/controller clock anchors bracket k6; uncertainty above
+one second or drift above one second invalidates the interval. Effective
+concurrency requires endpoint coverage and gaps of at most ten seconds
+through warmup, idle and measurement. Missing coverage or
 changed pod/host/resource identity invalidates the paired comparison.
 
 Readiness is **container running to Pod Ready**, measured from Kubernetes
@@ -59,7 +64,9 @@ python -m nanolab.tasks.module_cost_report /data/module-cost/CAMPAIGN/BLOCK/resu
 `analysis.json` retains incomplete arms and reasons; no contrasts are generated
 for an incomplete block. Complete blocks produce C−Base, S−Base, CS−Base and
 CS−C−S+Base effects separately for each runtime. The three VM blocks, not the
-requests, are the replication units. Paper scripts live in
+requests, are the replication units. Tooling content/dependency hashes, source,
+VM configuration, host architecture/kernel and build capacity must match
+across repetitions; per-block names and boot IDs must remain distinct. Paper scripts live in
 `nanofaas-paper/experiments/module-cost/analysis/` and independently confirm the
 primary integrals and counts before rendering from compressed archives.
 

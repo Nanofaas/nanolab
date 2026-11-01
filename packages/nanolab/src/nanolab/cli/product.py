@@ -395,6 +395,8 @@ def _write_run_metadata(
 def _default_run_dir(
     run_dir: Path | None, workflow: str, runs_dir: Path, *, recipe: bool = False
 ) -> Path | None:
+    if run_dir is None and workflow == "module-cost":
+        return Path("/data/module-cost") / f"run-{uuid4().hex}"
     if run_dir is None and workflow == "idle-reactivation":
         return runs_dir / f"idle-reactivation-{uuid4().hex}"
     if run_dir is None and workflow == "contract":
@@ -649,13 +651,21 @@ def execute_workflow(
         except ValueError as error:
             raise typer.BadParameter(str(error)) from None
         require_recipe_environment(scenario_config, environment_config)
+        if scenario_config.workflow == "module-cost":
+            from nanolab.plans.module_cost import require_module_inputs
+
+            require_module_inputs(paths.nanofaas_root, effective_run_dir)
         provisioning = (
             provisioning_context(scenario_config, environment_config, paths, keep)
             if provision and scenario_config.workflow != "contract"
             else nullcontext()
         )
         with provisioning, ExitStack() as forwarding:
-            if scenario_config.workflow in ("loadtest", "idle-reactivation"):
+            if scenario_config.workflow in (
+                "loadtest",
+                "idle-reactivation",
+                "module-cost",
+            ):
                 control_plane_url, prometheus_url = _forward_loadtest_urls(
                     environment_config,
                     scenario_config,
@@ -916,14 +926,21 @@ def install_product_commands(
                 prometheus_url=prometheus_url,
                 release_config=release_config,
             )
-        if scenario_config.workflow == "idle-reactivation":
+        if scenario_config.workflow in ("idle-reactivation", "module-cost"):
+            from nanolab.config.module_cost import require_module_environment
             from nanolab.plans.idle_reactivation import require_idle_environment
 
             with _bad_parameter():
-                require_idle_environment(environment_config)
+                if scenario_config.workflow == "module-cost":
+                    require_module_environment(environment_config)
+                    if control_plane_url is not None or prometheus_url is not None:
+                        raise ValueError("module-cost owns its endpoints")
+                else:
+                    require_idle_environment(environment_config)
                 if resume or keep or only or start or until or teardown:
                     raise ValueError(
-                        "idle-reactivation requires a complete uninterrupted paired run"
+                        f"{scenario_config.workflow} requires a complete uninterrupted "
+                        "paired run"
                     )
                 if run_dir is not None:
                     require_unused_run_dir(run_dir)
@@ -1200,14 +1217,20 @@ def install_product_commands(
             )
         with _bad_parameter():
             validate_cli_container_options(scenario_config, environment_config)
-        if scenario_config.workflow == "idle-reactivation":
+        if scenario_config.workflow in ("idle-reactivation", "module-cost"):
+            from nanolab.config.module_cost import require_module_environment
             from nanolab.plans.idle_reactivation import require_idle_environment
 
             with _bad_parameter():
-                require_idle_environment(environment_config)
+                if scenario_config.workflow == "module-cost":
+                    require_module_environment(environment_config)
+                    if control_plane_url is not None or prometheus_url is not None:
+                        raise ValueError("module-cost owns its endpoints")
+                else:
+                    require_idle_environment(environment_config)
                 if only or start or until:
                     raise ValueError(
-                        "idle-reactivation requires a complete uninterrupted "
+                        f"{scenario_config.workflow} requires a complete uninterrupted "
                         "paired plan"
                     )
         if scenario_config.workflow == "soak":
@@ -1244,7 +1267,7 @@ def install_product_commands(
                 raise typer.BadParameter(str(error)) from None
         with _bad_parameter():
             require_cli_endpoint(scenario_config, environment_config, control_plane_url)
-        if scenario_config.workflow in ("loadtest", "idle-reactivation"):
+        if scenario_config.workflow in ("loadtest", "idle-reactivation", "module-cost"):
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment_config,
                 backend=scenario_config.backend or "k8s",

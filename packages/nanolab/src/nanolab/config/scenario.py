@@ -329,9 +329,13 @@ class ScenarioConfig(BaseModel):
         """
         if self.workflow == "module-cost":
             allowed = {"workflow", "backend", "build", "functions", "module_cost"}
-            if (self.module_cost is None or self.backend != "k8s"
-                    or self.build != "docker" or self.functions != ["word-stats-java"]
-                    or self.model_fields_set - allowed):
+            if (
+                self.module_cost is None
+                or self.backend != "k8s"
+                or self.build != "docker"
+                or self.functions != ["word-stats-java"]
+                or self.model_fields_set - allowed
+            ):
                 raise ValueError("module-cost requires its fixed Kubernetes protocol")
             return self
         if self.module_cost is not None:

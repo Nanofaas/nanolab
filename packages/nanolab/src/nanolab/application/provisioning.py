@@ -284,7 +284,7 @@ def provision_environment(
     if scenario.backend == "containerd" and environment.target("stack").user == "root":
         raise ValueError("containerd backend requires an unprivileged VM user")
     if scenario.workflow == "module-cost":
-        from nanolab.plans.module_cost import require_module_environment
+        from nanolab.config.module_cost import require_module_environment
 
         require_module_environment(environment)
     provider = provider_for_environment(

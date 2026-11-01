@@ -49,12 +49,12 @@ Interface: `ModuleCostConfig` contains one block identity and frozen arm order;
 The preparer writes validated scenarios/environments/recipes and source hashes.
 Reuse existing recipe validation and `comparison.cells` identity helpers.
 
-- [ ] Test exact eight-cell coverage, shared base modules, distinct image identity,
+- [x] Test exact eight-cell coverage, shared base modules, distinct image identity,
       explicit 64 MiB heap settings, malformed order and ignored-option rejection.
-- [ ] Run these tests red; implement only the necessary model/catalogue/preparer.
-- [ ] Verify generated configs through actual NanoLab validators; test generated
+- [x] Run these tests red; implement only the necessary model/catalogue/preparer.
+- [x] Verify generated configs through actual NanoLab validators; test generated
       shell quoting with a fake executable, ensuring preparation never provisions.
-- [ ] Commit the independently usable preparation change.
+- [x] Commit the independently usable preparation change.
 
 ### Task 2: recipe-backed workflow and owned infrastructure
 
@@ -67,15 +67,15 @@ repo_root, fetcher, prometheus_client)` returns the composed Sonata Workflow.
 Reuse `tasks/recipes/workflow.py` distribution resources and `RecipeBinding`,
 `PlatformRequest`/`add_platform`, and the existing stack/loadgen provider lifecycle.
 
-- [ ] Test planning does not build or allocate; reject local/shared generators,
+- [x] Test planning does not build or allocate; reject local/shared generators,
       stale results, missing corpus/oracle and non-Spot managed environments.
-- [ ] Assert every registration has the same function digest, limits, queue,
+- [x] Assert every registration has the same function digest, limits, queue,
       concurrency and NONE policy; only selected adaptation modules/runtime vary.
-- [ ] Build before measurement; test no build occurs between the launch boundary
+- [x] Build before measurement; test no build occurs between the launch boundary
       and sampled phases. Use fresh processes/pods per arm and scoped cleanup.
-- [ ] Test failure paths collect available evidence before resource release;
+- [x] Test failure paths collect available evidence before resource release;
       replacement attempts preserve the original block and receipts.
-- [ ] Run focused regressions and commit.
+- [x] Run focused regressions and commit.
 
 ### Task 3: measurement and evidence contract
 
@@ -92,16 +92,16 @@ keeping B5's emitted schema/behaviour unchanged; the new script owns the fixed
 calendar, send/terminal ledger and whole-response timing. Reuse existing ledger
 reconciliation where its schema fits, not its workload-specific acceptance rules.
 
-- [ ] Tests reproduce malformed/stale corpus, invalid HTTP-200 output, interrupted
+- [x] Tests reproduce malformed/stale corpus, invalid HTTP-200 output, interrupted
       requests, missing metrics, reset counters, pod changes and changed limits.
-- [ ] Record artifact sizes, cached-image launch/readiness boundaries, warmup,
+- [x] Record artifact sizes, cached-image launch/readiness boundaries, warmup,
       drained idle interval and fixed-load cohort; keep clock domains explicit.
-- [ ] Test idle windows contain no outstanding warmup requests. Never force GC.
-- [ ] Capture positive retained-module initialization evidence and selected-module
+- [x] Test idle windows contain no outstanding warmup requests. Never force GC.
+- [x] Capture positive retained-module initialization evidence and selected-module
       reports; absent series alone cannot prove exclusion or zero CPU/memory.
-- [ ] Exercise the real k6 script against a local HTTP fixture, including failures
+- [x] Exercise the real k6 script against a local HTTP fixture, including failures
       and scheduler boundary arrivals, before claiming the parser is compatible.
-- [ ] Run B5/B6 regressions for reused helpers and commit.
+- [x] Run B5/B6 regressions for reused helpers and commit.
 
 ### Task 4: offline verification, contrasts and paper artifacts
 
@@ -113,15 +113,16 @@ Interface: `analyze_module_cost(block_dir: Path)` writes per-arm results and
 within-block/runtime contrasts from archived evidence. Paper scripts aggregate
 only compatible complete blocks and generate numerical tables/figures.
 
-- [ ] Test time-weighted RSS/working-set integrals, CPU-counter deltas, units,
+- [x] Test time-weighted RSS/working-set integrals, CPU-counter deltas, units,
       incomplete coverage and the sign of C-Base, S-Base, CS-Base, CS-C-S+Base.
-- [ ] Test mixed host/session/source identities cannot be silently paired; retain
+- [x] Test mixed host/session/source identities cannot be silently paired; retain
       measured but non-comparable attempts without manufacturing a result.
-- [ ] Independently recompute counts and resource integrals before generating
+- [x] Independently recompute counts and resource integrals before generating
       LaTeX claims. Show individual block contrasts; requests are not replicates.
-- [ ] Verify regeneration from compressed archives and their member hashes.
-- [ ] Document commands, exact boundaries and unsupported/native-eliminated cases.
-- [ ] Run focused tests, lint/types and Linux CI, then obtain independent review.
+- [x] Verify regeneration from compressed archives and their member hashes.
+- [x] Document commands, exact boundaries and unsupported/native-eliminated cases.
+- [x] Run focused tests, lint/types and Linux CI, then obtain independent review.
+      See `docs/module-cost-verification.md` for the full run and focused rechecks.
 
 ## Completion boundary
 

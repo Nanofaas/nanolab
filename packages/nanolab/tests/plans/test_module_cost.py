@@ -25,6 +25,7 @@ def test_plan_is_lazy_and_rejects_reuse(tmp_path, nanofaas_root):
     from nanolab.plans.module_cost import build_module_cost_plan
 
     config, environment = prepared(tmp_path)
+    assert config.module_cost is not None
     executor = RecordingExecutor()
     directory = tmp_path / "run"
 
@@ -52,9 +53,10 @@ def test_plan_is_lazy_and_rejects_reuse(tmp_path, nanofaas_root):
 
 @pytest.mark.parametrize("bad", ["regular", "shared", "external"])
 def test_preflight_requires_owned_spot_pair(tmp_path, bad):
-    from nanolab.plans.module_cost import require_module_environment
+    from nanolab.config.module_cost import require_module_environment
 
     _, environment = prepared(tmp_path)
+    assert environment.azure is not None
     if bad == "regular":
         environment.azure.priority = "Regular"
     elif bad == "shared":
@@ -80,11 +82,13 @@ def test_real_platform_sequence_uses_one_function_digest_and_cleans_before_next(
     from nanolab.tasks.module_cost_build import BuildModuleCost
 
     config, environment = prepared(tmp_path)
+    assert config.module_cost is not None
     executor = RecordingExecutor()
     directory = tmp_path / "results"
 
     def build(self, _inputs):
         assert not executor.seen
+        assert config.module_cost is not None
         for arm in config.module_cost.order:
             dest = directory / "build" / arm
             dest.mkdir(parents=True)

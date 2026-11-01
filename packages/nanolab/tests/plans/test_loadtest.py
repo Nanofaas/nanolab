@@ -1132,7 +1132,9 @@ def test_completion_collection_checks_management_port_before_k6(
         for unit in workflow.compile().tasks
         if unit.task.title == "Run the load test"
     )
+    assert isinstance(load, Steps)
     preflight = load._steps[0]
+    assert isinstance(preflight, Steps)
     assert preflight.title == "Check completion telemetry before load"
     scrape = preflight._steps[-1]
     with pytest.raises(RuntimeError, match="expected sample not scraped"):

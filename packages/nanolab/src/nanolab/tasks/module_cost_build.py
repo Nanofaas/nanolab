@@ -1,10 +1,12 @@
 """Remote recipe assembly using the existing Gradle/distribution contract."""
 
 import base64
+import hashlib
 import json
 import shutil
 import subprocess
 from dataclasses import dataclass
+from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -83,6 +85,7 @@ class BuildModuleCost(Task[dict[str, Any]]):
     remote_root: Path
     remote_source: Path
     executor: CommandTaskExecutor
+    environment: dict[str, Any]
     title: str = "Freeze and assemble all module-cost recipes"
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[dict[str, Any]]:
@@ -101,8 +104,33 @@ class BuildModuleCost(Task[dict[str, Any]]):
 
         for name in ("module-cost.js", "word-stats-oracle.js"):
             shutil.copyfile(bundled_assets_root() / "k6" / name, evidence / name)
+        package = Path(__file__).resolve().parents[1]
+        implementation = hashlib.sha256()
+        for path in sorted(package.rglob("*")):
+            if path.is_file() and path.suffix in (
+                ".py",
+                ".js",
+                ".yaml",
+                ".yml",
+                ".json",
+            ):
+                implementation.update(str(path.relative_to(package)).encode() + b"\0")
+                implementation.update(hashlib.sha256(path.read_bytes()).digest())
         protocol = {
             "schemaVersion": 1,
+            "environment": self.environment,
+            "tooling": {
+                "implementation_sha256": implementation.hexdigest(),
+                "dependencies": {
+                    name: version(name)
+                    for name in (
+                        "nanolab",
+                        "sonata-engine",
+                        "sonata-tasks",
+                        "azure-vm-sdk",
+                    )
+                },
+            },
             "nanolab_source": git_provenance(Path(__file__).resolve().parents[5]),
             "protocol": self.protocol.model_dump(by_alias=True),
             "source": git_provenance(self.source),

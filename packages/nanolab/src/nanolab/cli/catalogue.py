@@ -45,7 +45,7 @@ def workflow_catalog(
             environments = ("multipass",)
         if workflow == "idle-reactivation":
             environments = tuple(p for p in _ENVIRONMENT_PROVIDERS if p != "local")
-        if workflow == "release":
+        if workflow in ("release", "module-cost"):
             environments = ("azure",)
         workflows.setdefault(workflow, set()).update(environments)
         scenarios.setdefault(workflow, []).append(path.name)

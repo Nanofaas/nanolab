@@ -49,8 +49,10 @@ def test_preparation_is_unique_validated_and_has_no_cloud_effects(tmp_path):
         env = EnvironmentConfig.model_validate(
             yaml.safe_load((directory / "environment.yaml").read_text())
         )
+        assert env.azure is not None
         assert env.azure.priority == "Spot"
         assert env.roles["stack"].name != env.roles["loadgen"].name
+        assert scenario.module_cost is not None
         assert set(scenario.module_cost.order) == set(ARMS)
     assert prepare_campaign(tmp_path, Path("/controller/key.pub"), 23) != root
     with pytest.raises(

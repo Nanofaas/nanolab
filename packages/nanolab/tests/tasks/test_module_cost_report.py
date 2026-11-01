@@ -74,8 +74,7 @@ def arm_fixture(root, monkeypatch):
             "end": 420,
             "idle_start": 60,
             "idle_end": 240,
-            "load_start": 240,
-            "load_end": 420,
+            "load_window": [240, 420],
         },
     )
     items = [
@@ -139,6 +138,9 @@ def arm_fixture(root, monkeypatch):
             "points": [{"timestamp": t, "value": 2} for t in range(0, 451, 5)]
         },
     }
+    queries["function_effective_concurrency_timestamp"] = {
+        "points": [{"timestamp": t, "value": t} for t in range(0, 451, 5)]
+    }
     for metric in (
         "container_memory_bytes",
         "container_rss_bytes",
@@ -170,7 +172,29 @@ def arm_fixture(root, monkeypatch):
         lambda *a, **kw: SimpleNamespace(modules=("concurrency-control",)),
     )
     monkeypatch.setattr(
-        module, "read_load", lambda *a: {"valid": 100, "emitted": 100, "dropped": 0}
+        module,
+        "read_load",
+        lambda *a: {
+            "valid": 100,
+            "emitted": 100,
+            "dropped": 0,
+            "first_send_ms": 240000 if a[-1] == "measurement" else 0,
+            "last_terminal_ms": 420000 if a[-1] == "measurement" else 60000,
+        },
+    )
+    write(
+        arm / "warmup/clock.json",
+        [
+            {"sent": -1, "received": 1, "remote": 0},
+            {"sent": 60, "received": 62, "remote": 61},
+        ],
+    )
+    write(
+        arm / "measurement/clock.json",
+        [
+            {"sent": 239, "received": 241, "remote": 240},
+            {"sent": 420, "received": 422, "remote": 421},
+        ],
     )
     return arm, {"host": {"boot_id": "boot-1"}, "protocol": {"blockId": "test"}}
 
@@ -188,7 +212,16 @@ def test_arm_integrals_and_readiness_use_raw_evidence(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "mutation",
-    ["missing-memory", "reset-cpu", "host", "policy", "module", "pod", "limits"],
+    [
+        "missing-memory",
+        "reset-cpu",
+        "host",
+        "policy",
+        "module",
+        "pod",
+        "limits",
+        "stale-concurrency",
+    ],
 )
 def test_arm_rejects_unmatched_evidence(tmp_path, monkeypatch, mutation):
     import json
@@ -196,10 +229,14 @@ def test_arm_rejects_unmatched_evidence(tmp_path, monkeypatch, mutation):
     from nanolab.tasks.module_cost_report import analyze_arm
 
     arm, protocol = arm_fixture(tmp_path, monkeypatch)
-    if mutation in ("missing-memory", "reset-cpu"):
+    if mutation in ("missing-memory", "reset-cpu", "stale-concurrency"):
         path = arm / "metrics/prometheus-snapshot.json"
         data = json.loads(path.read_text())
-        if mutation == "missing-memory":
+        if mutation == "stale-concurrency":
+            data["queries"]["function_effective_concurrency_timestamp"] = {
+                "points": [{"timestamp": t, "value": 0} for t in range(0, 451, 5)]
+            }
+        elif mutation == "missing-memory":
             data["queries"]["container_rss_bytes@control-plane"]["points"] = []
         else:
             data["queries"]["container_cpu_seconds@control-plane"]["points"][30][
@@ -223,6 +260,38 @@ def test_arm_rejects_unmatched_evidence(tmp_path, monkeypatch, mutation):
             ] = "1"
         path.write_text("\n".join(json.dumps(row) for row in data))
     with pytest.raises(
-        ValueError, match=r"coverage|reset|host|policy|initialization|lifecycle|budget"
+        ValueError,
+        match=r"coverage|reset|host|policy|initialization|lifecycle|budget|stale",
     ):
         analyze_arm(tmp_path, "native-c", protocol)
+
+
+def test_one_concurrency_sample_cannot_qualify_whole_arm(tmp_path, monkeypatch):
+    import json
+
+    from nanolab.tasks.module_cost_report import analyze_arm
+
+    arm, protocol = arm_fixture(tmp_path, monkeypatch)
+    path = arm / "metrics/prometheus-snapshot.json"
+    snapshot = json.loads(path.read_text())
+    snapshot["queries"]["function_effective_concurrency"]["points"] = [
+        {"timestamp": 120, "value": 2}
+    ]
+    path.write_text(json.dumps(snapshot))
+    with pytest.raises(ValueError, match=r"concurrency.*coverage"):
+        analyze_arm(tmp_path, "native-c", protocol)
+
+
+def test_cohort_window_ignores_staging_and_fetch_delays():
+    from nanolab.tasks.module_cost_report import cohort_window
+
+    # Generator is 20 s ahead. Network and collection can finish much later.
+    load = {"first_send_ms": 120000, "last_terminal_ms": 300000}
+    anchors = [
+        {"sent": 98, "received": 100, "remote": 119},
+        {"sent": 350, "received": 352, "remote": 371},
+    ]
+    assert cohort_window(load, anchors) == (100, 280)
+    anchors[1]["remote"] = 381
+    with pytest.raises(ValueError, match="clock"):
+        cohort_window(load, anchors)

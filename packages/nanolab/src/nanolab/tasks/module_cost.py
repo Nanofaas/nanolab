@@ -15,8 +15,8 @@ from nanolab.comparison.cells import write_json_atomically
 from nanolab.config.module_cost import BUDGETS
 from nanolab.core.deployment import DEFAULT_NAMESPACE
 from nanolab.metrics.catalogue import container_queries, function_runtime_queries
-from nanolab.plans.diagnostics import collect_control_plane_log
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
+from nanolab.tasks.diagnostics import collect_control_plane_log
 from nanolab.tasks.idle_reactivation_runtime import LifecycleWatcher
 from nanolab.tasks.k6 import K6Task
 from nanolab.tasks.loadtest.models import K6Config, PrometheusQuery, TimeWindow
@@ -211,7 +211,7 @@ class MeasureModuleArm(Task[None]):
     fetcher: RemoteFileFetcher | None
     title: str = "Warm, idle and measure a module composition"
 
-    def load(self, phase: str, seconds: int, inputs: TaskInputs) -> None:
+    def load(self, phase: str, seconds: int, inputs: TaskInputs) -> tuple[float, float]:
         """Run the frozen corpus and recover both request and summary files."""
         remote = (
             self.load_home
@@ -243,6 +243,22 @@ class MeasureModuleArm(Task[None]):
         )
         destination = self.directory / phase
         destination.mkdir()
+
+        def sample_clock():
+            sent = time.time()
+            result = command(
+                self.executor,
+                "loadgen",
+                ("python3", "-c", "import time;print(time.time())"),
+            )
+            return {
+                "sent": sent,
+                "received": time.time(),
+                "remote": float(result.stdout),
+            }
+
+        anchors = [sample_clock()]
+        write_json_atomically(destination / "clock.json", anchors)
         try:
             result = K6Task(
                 config, executor=self.executor, role="loadgen", require_pass=True
@@ -252,6 +268,11 @@ class MeasureModuleArm(Task[None]):
             )
         finally:
             errors = []
+            try:
+                anchors.append(sample_clock())
+                write_json_atomically(destination / "clock.json", anchors)
+            except Exception as error:
+                errors.append(f"clock: {error}")
             for name in ("events.jsonl", "summary.json"):
                 try:
                     if self.fetcher:
@@ -272,9 +293,10 @@ class MeasureModuleArm(Task[None]):
                     errors.append(f"{name}: {error}")
             if errors:
                 (destination / "collection-errors.txt").write_text("\n".join(errors))
-        from nanolab.tasks.module_cost_report import read_load
+        from nanolab.tasks.module_cost_report import cohort_window, read_load
 
-        read_load(destination, self.block / "inputs", seconds, phase)
+        load = read_load(destination, self.block / "inputs", seconds, phase)
+        return cohort_window(load, anchors)
 
     def spec(self, name: str) -> None:
         """Archive the effective server-side registration."""
@@ -314,9 +336,7 @@ class MeasureModuleArm(Task[None]):
             time.sleep(180)
             report["idle_end"] = time.time()
             watcher.observe()
-            report["load_start"] = time.time()
-            self.load("measurement", 180, inputs)
-            report["load_end"] = time.time()
+            report["load_window"] = self.load("measurement", 180, inputs)
             self.spec("after")
             report["status"] = "collected"
         except BaseException as caught:
@@ -368,6 +388,11 @@ class MeasureModuleArm(Task[None]):
             PrometheusQuery(
                 "function_effective_concurrency",
                 f'function_effective_concurrency{{function="{FUNCTION}"}}',
+                True,
+            ),
+            PrometheusQuery(
+                "function_effective_concurrency_timestamp",
+                f'timestamp(function_effective_concurrency{{function="{FUNCTION}"}})',
                 True,
             ),
         )

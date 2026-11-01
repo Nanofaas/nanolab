@@ -39,7 +39,7 @@ def test_k6_exact_oracle_request_ledger_and_error_verdict(tmp_path, invalid):
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *args):
+        def log_message(self, format, *args):
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -53,10 +53,12 @@ def test_k6_exact_oracle_request_ledger_and_error_verdict(tmp_path, invalid):
         "NANOFAAS_URL": f"http://127.0.0.1:{server.server_port}",
         "K6_CONSOLE_OUTPUT": str(tmp_path / "events.jsonl"),
     }
+    executable = shutil.which("k6")
+    assert executable is not None
     try:
         run = subprocess.run(
             [
-                shutil.which("k6"),
+                executable,
                 "run",
                 "--quiet",
                 "--summary-export",
