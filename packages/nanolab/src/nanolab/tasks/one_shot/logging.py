@@ -7,8 +7,10 @@ import json
 import logging
 import math
 import os
+import shlex
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -69,6 +71,150 @@ def export_queue_events(http, url, query, start, end, limit, path) -> int:
     return count
 
 
+OBSERVABILITY_FILES = (
+    "compose.yaml",
+    "loki.yaml",
+    "grafana-datasources.yaml",
+    "fluent-bit.conf",
+    "parsers.conf",
+)
+
+
+@dataclass
+class LoggingHost:
+    """The machine an owned Loki runs on, and the URLs that reach it.
+
+    `run(argv, env, check, timeout)` executes a command there with extra
+    environment; `stage` makes local files available there and returns their
+    paths; `scratch` returns a fresh directory there and `fetch` copies one
+    into a local directory. Collectors push to `push_endpoint`; the operator
+    pushes its probes to and queries `query_endpoint`, the same Loki as seen
+    from the operator.
+    """
+
+    run: Callable[
+        [list[str], dict[str, str], bool, float], subprocess.CompletedProcess[str]
+    ]
+    stage: Callable[[dict[str, Path]], dict[str, str]]
+    scratch: Callable[[Path], str]
+    fetch: Callable[[str, Path], None]
+    push_endpoint: str
+    query_endpoint: str
+    bind: str
+    services: tuple[str, ...] = ()
+    close: Callable[[], None] = lambda: None
+    output: Callable[[list[str], float], str] | None = None
+
+    def __post_init__(self) -> None:
+        """Default `output` to the stdout of a checked `run`."""
+        if self.output is None:
+            self.output = lambda argv, timeout: self.run(argv, {}, True, timeout).stdout
+
+
+def local_logging_host(endpoint: str, bind: str) -> LoggingHost:
+    """Run Loki with the operator's own Docker, as the single-host workflows do."""
+
+    def run(argv, env, check, timeout):
+        return subprocess.run(
+            argv,
+            env=dict(os.environ, **env),
+            capture_output=True,
+            text=True,
+            check=check,
+            timeout=timeout,
+        )
+
+    return LoggingHost(
+        run=run,
+        output=lambda argv, timeout: subprocess.check_output(
+            argv, text=True, timeout=timeout
+        ),
+        stage=lambda files: {name: str(path) for name, path in files.items()},
+        scratch=str,
+        fetch=lambda _remote, _local: None,
+        push_endpoint=endpoint,
+        query_endpoint=endpoint,
+        bind=bind,
+    )
+
+
+def remote_logging_host(
+    remote: Callable[[tuple[str, ...]], tuple[str, ...]],
+    *,
+    directory: str,
+    push_endpoint: str,
+    query_endpoint: str,
+    bind: str,
+    services: tuple[str, ...] = (),
+    close: Callable[[], None] = lambda: None,
+) -> LoggingHost:
+    """Run Loki on another machine reached by `remote` (argv on that host)."""
+
+    def run(argv, env, check, timeout):
+        prefix = ("env", *(f"{key}={value}" for key, value in env.items()))
+        return subprocess.run(
+            remote((*prefix, *argv)) if env else remote(tuple(argv)),
+            capture_output=True,
+            text=True,
+            check=check,
+            timeout=timeout,
+        )
+
+    def stage(files: dict[str, Path]) -> dict[str, str]:
+        run(["mkdir", "-p", directory], {}, True, 60)
+        staged = {}
+        for name, path in files.items():
+            target = f"{directory}/{path.name}"
+            subprocess.run(
+                remote(("sh", "-c", "cat > " + shlex.quote(target))),
+                input=path.read_bytes(),
+                capture_output=True,
+                check=True,
+                timeout=120,
+            )
+            staged[name] = target
+        return staged
+
+    def scratch(local: Path) -> str:
+        path = f"{directory}/{local.name}"
+        run(["mkdir", "-p", path], {}, True, 60)
+        return path
+
+    def fetch(remote_path: str, local: Path) -> None:
+        archive = subprocess.run(
+            remote(("tar", "-C", remote_path, "-cf", "-", ".")),
+            capture_output=True,
+            check=True,
+            timeout=1800,
+        )
+        subprocess.run(
+            ("tar", "-C", str(local), "-xf", "-"),
+            input=archive.stdout,
+            capture_output=True,
+            check=True,
+            timeout=1800,
+        )
+
+    def close_all() -> None:
+        try:
+            close()
+        finally:
+            # Staged compose files and the fetched raw copy are run-owned.
+            run(["rm", "-rf", "--", directory], {}, True, 120)
+
+    return LoggingHost(
+        run=run,
+        stage=stage,
+        scratch=scratch,
+        fetch=fetch,
+        push_endpoint=push_endpoint,
+        query_endpoint=query_endpoint,
+        bind=bind,
+        services=services,
+        close=close_all,
+    )
+
+
 def backend_resource(
     logs: OneShotLogs,
     *,
@@ -78,8 +224,16 @@ def backend_resource(
     operator: Resource | None = None,
     settings=None,
     supervision=None,
+    host: Callable[[TaskInputs], LoggingHost] | None = None,
+    directory: Path | None = None,
+    requires: tuple[Resource, ...] = (),
+    label: str = "",
 ) -> Resource[str]:
-    """Preserve external endpoints and own local backends only when requested."""
+    """Preserve external endpoints and own local backends only when requested.
+
+    `host` resolves where an owned Loki runs (default: the operator's Docker);
+    each site of a multi-site run owns one, recorded under its own `directory`.
+    """
     endpoint_url = logs.endpoint
     if not endpoint_url:
         raise ValueError("logging backend endpoint is required")
@@ -90,43 +244,64 @@ def backend_resource(
             release=lambda _inputs, _value: None,
         )
     project = "nanolab-logs-" + uuid4().hex[:12]
-    endpoint = urlsplit(endpoint_url)
-    environment = dict(
-        os.environ,
-        LOKI_BIND=logs.backend_bind,
-        LOKI_LISTEN_PORT=str(endpoint.port or 80),
-        GRAFANA_PORT="0",
-    )
-    directory = run_dir / "logging"
+    directory = directory or run_dir / "logging"
     override = directory / "backend-compose.override.json"
     started = False
-    argv = [
-        "docker",
-        "compose",
-        "-p",
-        project,
-        "-f",
-        str(root / "deploy/observability/compose.yaml"),
-        "-f",
-        str(override),
-        "--profile",
-        "backend",
-    ]
+    resolved: list[LoggingHost] = []
+    paths: dict[str, str] = {}
+
+    def resolve_local() -> LoggingHost:
+        owner = local_logging_host(endpoint_url, logs.backend_bind)
+        resolved.append(owner)
+        assets = root / "deploy/observability"
+        paths.update(
+            {"compose.yaml": str(assets / "compose.yaml"), "override": str(override)}
+        )
+        return owner
+
+    def current() -> LoggingHost:
+        if not resolved:
+            raise RuntimeError("owned logging backend host is unresolved")
+        return resolved[0]
 
     def command(*args, check=True, timeout=None):
-        return subprocess.run(
+        owner = current()
+        argv = [
+            "docker",
+            "compose",
+            "-p",
+            project,
+            "-f",
+            paths["compose.yaml"],
+            "-f",
+            paths["override"],
+            "--profile",
+            "backend",
+        ]
+        return owner.run(
             argv + list(args),
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=check,
-            timeout=timeout or operational_limit(settings, "compose_seconds", 90),
+            {
+                "LOKI_BIND": owner.bind,
+                "LOKI_LISTEN_PORT": str(urlsplit(owner.push_endpoint).port or 80),
+                "GRAFANA_PORT": "0",
+            },
+            check,
+            timeout or operational_limit(settings, "compose_seconds", 90),
         )
+
+    def host_output(argv: list[str], timeout: float = 30) -> str:
+        output = current().output
+        assert output is not None  # nosec B101 - set by LoggingHost.__post_init__
+        return output(argv, timeout)
 
     def release(_inputs, _value=None):
         if not started and _value is None:
             return
-        directory = run_dir / "logging"
+        if not resolved:
+            if host is not None:
+                # A remote backend that was never resolved was never started.
+                return
+            resolve_local()
         archive_error = None
         raw_export_failed = False
         try:
@@ -140,12 +315,14 @@ def backend_resource(
                 command("stop", "loki")
                 destination = directory / "backend-data"
                 destination.mkdir(exist_ok=False)
-                subprocess.run(
-                    ["docker", "cp", containers[0] + ":/loki/.", str(destination)],
-                    check=True,
-                    capture_output=True,
-                    timeout=operational_limit(settings, "compose_seconds", 90),
+                staged = current().scratch(destination)
+                current().run(
+                    ["docker", "cp", containers[0] + ":/loki/.", staged],
+                    {},
+                    True,
+                    operational_limit(settings, "compose_seconds", 90),
                 )
+                current().fetch(staged, destination)
                 hashes = {}
                 for path in destination.rglob("*"):
                     if path.is_file():
@@ -197,18 +374,16 @@ def backend_resource(
             logging.getLogger(__name__).warning(
                 "Backend cleanup receipt failed: %s", error
             )
-        remaining = subprocess.check_output(
+        remaining = host_output(
             [
                 "docker",
                 "ps",
                 "-aq",
                 "--filter",
                 "label=com.docker.compose.project=" + project,
-            ],
-            text=True,
-            timeout=30,
+            ]
         ).strip()
-        volumes = subprocess.check_output(
+        volumes = host_output(
             [
                 "docker",
                 "volume",
@@ -216,10 +391,12 @@ def backend_resource(
                 "-q",
                 "--filter",
                 "label=com.docker.compose.project=" + project,
-            ],
-            text=True,
-            timeout=30,
+            ]
         ).strip()
+        try:
+            current().close()
+        except Exception as error:
+            archive_error = archive_error or error
         if result.returncode or remaining or (volumes and not raw_export_failed):
             raise RuntimeError("owned logging backend cleanup unconfirmed")
         if archive_error is not None:
@@ -236,13 +413,14 @@ def backend_resource(
             "state": "checking",
         }
         timeout = operational_limit(settings, "collection_http_seconds", 10)
+        reachable = current().query_endpoint
         with httpx.Client(trust_env=False) as http:
             metrics = None
             metrics_attempted = False
-            metrics_url = endpoint_url.split("/loki/api/v1/push")[0] + "/metrics"
+            metrics_url = reachable.split("/loki/api/v1/push")[0] + "/metrics"
             try:
                 response = http.post(
-                    endpoint_url,
+                    reachable,
                     json={
                         "streams": [
                             {"stream": labels, "values": [[timestamp, message]]}
@@ -256,7 +434,7 @@ def backend_resource(
                         f"Loki push HTTP {response.status_code}: {response.text}"
                     )
                 response = http.get(
-                    query_url(endpoint_url),
+                    query_url(reachable),
                     params={
                         "query": '{nanolab_backend_probe="' + project + '"}',
                         "start": timestamp,
@@ -313,9 +491,14 @@ def backend_resource(
                 with (directory / "backend-probes.jsonl").open("a") as stream:
                     stream.write(json.dumps(row) + "\n")
 
-    def acquire(_inputs):
+    def acquire(inputs):
         nonlocal started
         directory.mkdir(parents=True, exist_ok=True)
+        if host is None:
+            owner = resolve_local()
+        else:
+            owner = host(inputs)
+            resolved.append(owner)
         # Campaigns share the host filesystem with VM images. A percent-full cutoff
         # can reject every log despite ample free bytes; retain WAL and check real IO.
         override.write_text(
@@ -335,15 +518,30 @@ def backend_resource(
             )
             + "\n"
         )
+        assets = root / "deploy/observability"
+        paths.update(
+            owner.stage(
+                {
+                    **{name: assets / name for name in OBSERVABILITY_FILES},
+                    "override": override,
+                }
+            )
+        )
         started = True
-        command("up", "-d")
+        command("up", "-d", *owner.services)
         if host_cpus is not None:
             from nanolab.one_shot.host_cpu import pin_logging_project
 
-            facts = pin_logging_project(project, host_cpus)
-            (run_dir / "logging-host-placement.json").write_text(
-                json.dumps(facts, indent=2) + "\n"
+            facts = pin_logging_project(
+                project,
+                host_cpus,
+                run=lambda argv: owner.run(argv, {}, True, 10),
             )
+            # A site's backend records beside its own data; a single one keeps
+            # the historical run-level receipt.
+            (
+                (directory if label else run_dir) / "logging-host-placement.json"
+            ).write_text(json.dumps(facts, indent=2) + "\n")
         deadline = time.monotonic() + operational_limit(
             settings, "service_start_seconds", 90
         )
@@ -351,7 +549,7 @@ def backend_resource(
             while time.monotonic() < deadline:
                 try:
                     http.get(
-                        endpoint_url.split("/loki/api/v1/push")[0] + "/ready",
+                        owner.query_endpoint.split("/loki/api/v1/push")[0] + "/ready",
                         timeout=operational_limit(
                             settings, "collection_http_seconds", 2
                         ),
@@ -360,15 +558,16 @@ def backend_resource(
                     time.sleep(0.5)
                     continue
                 verify_ingestion()
-                return endpoint_url
+                return owner.push_endpoint
         raise RuntimeError("owned logging backend readiness failed")
 
     resource = compensated_resource(
-        title="Own local Loki/Grafana logging backend",
+        title="Own local Loki/Grafana logging backend"
+        + (f" on {label}" if label else ""),
         acquire=acquire,
         release=release,
         compensate=release,
-        requires=(operator,) if operator is not None else (),
+        requires=((operator,) if operator is not None else ()) + requires,
     )
     if supervision is not None:
 
@@ -393,7 +592,7 @@ def backend_resource(
 
         return supervision.service_resource(
             resource,
-            "logging-backend",
+            "logging-backend" + (f":{label}" if label else ""),
             probe,
             join_seconds=operational_limit(settings, "worker_join_seconds", 40),
         )
@@ -453,9 +652,14 @@ def collection_evidence(metrics: str) -> dict:
 
 
 def _export_collector(
-    *, node, name, run_dir, logs, session, final_metrics, archive_issue
+    *, node, name, run_dir, logs, session, final_metrics, archive_issue, query=None
 ):
-    """Export logs and bounded status without owning collector teardown."""
+    """Export logs and bounded status without owning collector teardown.
+
+    `query` is the backend's push URL as the operator reaches it; by default
+    the configured endpoint.
+    """
+    query = query or logs.endpoint
     directory = run_dir / "logging" / node.config.id
     directory.mkdir(parents=True, exist_ok=True)
     status = {
@@ -488,7 +692,7 @@ def _export_collector(
     except Exception as error:
         status["issues"].append(str(error))
     try:
-        if session is None or logs.endpoint is None:
+        if session is None or query is None:
             raise RuntimeError(
                 "collector identity or endpoint unavailable during export"
             )
@@ -502,7 +706,7 @@ def _export_collector(
             "limit": str(logs.export_limit),
         }
         with httpx.Client(trust_env=False) as http:
-            response = http.get(query_url(logs.endpoint), params=params, timeout=10)
+            response = http.get(query_url(query), params=params, timeout=10)
             response.raise_for_status()
             result = response.json()
         (directory / "loki-query.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -523,9 +727,10 @@ def _export_collector(
         status["issues"].append(str(error))
         status["exportStatus"] = "partial"
     try:
-        if session is None or logs.endpoint is None:
+        if session is None or query is None:
             raise RuntimeError("queue log export needs collector identity and endpoint")
-        query = (
+        endpoint_query = query
+        query_text = (
             '{job="nanofaas",node='
             + json.dumps(node.config.id)
             + "} | json | runId="
@@ -535,8 +740,8 @@ def _export_collector(
         with httpx.Client(trust_env=False) as http:
             count = export_queue_events(
                 http,
-                query_url(logs.endpoint),
-                query,
+                query_url(endpoint_query),
+                query_text,
                 session.started_ns,
                 time.time_ns(),
                 logs.export_limit,
@@ -590,6 +795,7 @@ def collector_resource(
     run_dir: Path,
     mode: str,
     settings=None,
+    query_endpoint: Callable[[], str | None] | None = None,
 ) -> Resource[LogSession]:
     """Own persistent buffering and export independently of SDK accounting."""
     token = uuid4().hex[:12]
@@ -691,6 +897,7 @@ def collector_resource(
                 session=session,
                 final_metrics=final_metrics,
                 archive_issue=archive_issue,
+                query=query_endpoint() if query_endpoint is not None else None,
             )
         except Exception as error:
             export_error = error
@@ -885,3 +1092,115 @@ def collector_resource(
         compensate=release,
         requires=(node.vm, bootstrap, backend),
     )
+
+
+# Port on a site's address that forwards to its Loki on the Multipass bridge.
+SITE_LOKI_PORT = 43200
+
+
+def site_logging_backends(
+    resources,
+    logs: OneShotLogs,
+    *,
+    root: Path,
+    run_dir: Path,
+    bootstraps: dict[str, Resource],
+    settings=None,
+    supervision=None,
+) -> dict[str, tuple[Resource[str], Callable[[], str | None]]]:
+    """Own one Loki per site, so collectors never push across sites.
+
+    Each Multipass site runs it with its own Docker on the bridge address its
+    VMs push to, published to the operator through a forwarder; an Azure cloud
+    runs it inside its VM. Returns, per node, its site's backend and the URL the
+    operator queries it at (known once the backend is up).
+    """
+    from nanolab.one_shot.sites import SiteForwarders, site_argv
+
+    if not logs.endpoint:
+        raise ValueError("logging backend endpoint is required")
+    port = urlsplit(logs.endpoint).port or 80
+    placement = getattr(settings, "host_cpu_placement", None)
+    routes: dict[str, tuple[Resource[str], Callable[[], str | None]]] = {}
+    sites: dict[str, tuple[Resource[str], Callable[[], str | None]]] = {}
+    for key, node in resources.nodes.items():
+        holder: dict[str, str] = {}
+        if node.site_host is not None:
+            site_host = node.site_host
+            if site_host.name in sites:
+                routes[key] = sites[site_host.name]
+                continue
+
+            def site_factory(_inputs, host=site_host, holder=holder):
+                forwarders = SiteForwarders(host)
+                forwarders.start(logs.backend_bind, ((SITE_LOKI_PORT, port),))
+                holder["query"] = (
+                    f"http://{host.site.address}:{SITE_LOKI_PORT}/loki/api/v1/push"
+                )
+                return remote_logging_host(
+                    lambda argv, host=host: tuple(site_argv(host.site, argv)),
+                    directory=f"/tmp/nanolab-logging-{run_dir.name}",  # nosec B108 - site scratch
+                    push_endpoint=str(logs.endpoint),
+                    query_endpoint=holder["query"],
+                    bind=logs.backend_bind,
+                    close=forwarders.stop,
+                )
+
+            backend = backend_resource(
+                logs,
+                root=root,
+                run_dir=run_dir,
+                host_cpus=placement.logging_cpus if placement else None,
+                operator=resources.generator if placement else None,
+                settings=settings,
+                supervision=supervision,
+                host=site_factory,
+                directory=run_dir / "logging" / f"backend-{site_host.name}",
+                label=site_host.name,
+            )
+            routes[key] = sites[site_host.name] = (
+                backend,
+                lambda holder=holder: holder.get("query"),
+            )
+        elif node.request.lifecycle == "azure":
+
+            def cloud_factory(inputs, node=node, holder=holder):
+                vm = inputs.resource(node.vm)
+                private = node.command(("hostname", "-I")).stdout.split()[0]
+                node.command(
+                    (
+                        "sudo",
+                        "env",
+                        "DEBIAN_FRONTEND=noninteractive",
+                        "apt-get",
+                        "install",
+                        "-y",
+                        "-q",
+                        "docker-compose-v2",
+                    )
+                )
+                holder["query"] = f"http://{vm.host}:{port}/loki/api/v1/push"
+                return remote_logging_host(
+                    lambda argv, node=node, vm=vm: node.vm_argv(vm, *argv),
+                    directory=f"{vm.home}/nanolab-logging-backend",
+                    push_endpoint=f"http://{private}:{port}/loki/api/v1/push",
+                    query_endpoint=holder["query"],
+                    bind=private,
+                    services=("loki",),
+                )
+
+            backend = backend_resource(
+                logs,
+                root=root,
+                run_dir=run_dir,
+                settings=settings,
+                supervision=supervision,
+                host=cloud_factory,
+                directory=run_dir / "logging" / f"backend-{node.config.id}",
+                requires=(node.vm, bootstraps[key]),
+                label=node.config.id,
+            )
+            routes[key] = (backend, lambda holder=holder: holder.get("query"))
+        else:
+            raise ValueError("multi-site logging needs every node on a site or Azure")
+    return routes

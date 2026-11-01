@@ -18,6 +18,7 @@ from sonata_engine import Task, TaskOutcome
 from sonata_engine.workflow.context import active_sink
 
 from nanolab.config.one_shot import OperationalLimits, operational_limit
+from nanolab.one_shot.addresses import management_url
 from nanolab.one_shot.capacity import comparison_replica_vectors
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import CalibrationProfile, CampaignManifest
@@ -288,7 +289,7 @@ def verify_queue_admission(http, endpoint, function, payload):
     """Refuse a campaign unless a real local invocation enters the sync queue."""
 
     def snapshot():
-        response = http.get(endpoint.replace(":8080", ":9090") + "/actuator/prometheus")
+        response = http.get(management_url(endpoint) + "/actuator/prometheus")
         response.raise_for_status()
         values = {
             (row["name"], row["labels"].get("function", "")): row["value"]
@@ -530,7 +531,14 @@ class ObservationFreeze(Task):
         run = self.run_context
         verify_files(run.frozen_dir, run.frozen)
         built = inputs.resource(run.topology.distribution)
-        images = {c.name: c.image.id for c in built.components}
+
+        per_node = getattr(run.topology, "node_distributions", {})
+
+        def images_of(node: str) -> dict[str, str]:
+            # Per-architecture images differ in identity between nodes.
+            node_built = inputs.resource(per_node.get(node, run.topology.distribution))
+            return {c.name: c.image.id for c in node_built.components}
+
         observed = json.loads((run.frozen_dir / "observations.json").read_text())
         historical = json.loads((run.frozen_dir / "statistics.json").read_text())
         profiles = {
@@ -538,7 +546,7 @@ class ObservationFreeze(Task):
                 node,
                 {fn: s.model_dump(by_alias=True) for fn, s in parameters.items()},
                 historical[node],
-                images,
+                images_of(node),
                 revision=built.source["revision"],
                 fingerprint="sha256:" + sha(run.frozen_dir / "freeze.json"),
                 physical_sha=observed["sourcePhysicalSha256"],
@@ -595,7 +603,12 @@ class ObservationFreeze(Task):
             },
             "protocol": protocol["protocol"],
             "timing": protocol,
-            "images": images,
+            "images": {c.name: c.image.id for c in built.components},
+            **(
+                {"imagesByNode": {node: images_of(node) for node in per_node}}
+                if per_node
+                else {}
+            ),
             "initialReplicaCounts": comparison_replica_vectors(
                 run.settings, run.topology.function_aliases
             ),

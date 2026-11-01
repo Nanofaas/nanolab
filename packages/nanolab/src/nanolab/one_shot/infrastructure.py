@@ -6,7 +6,9 @@ import json
 import os
 import platform
 import re
+import shlex
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,8 @@ from nanolab.config.one_shot import (
     operational_limit,
 )
 from nanolab.one_shot import host_cpu
+from nanolab.one_shot.addresses import NodeAddresses, direct, published
+from nanolab.one_shot.sites import SiteForwarders, SiteHost
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
@@ -37,6 +41,59 @@ class NodeResource:
     vm: Resource[VmInfo]
     provider: Any
     recovery: list[str] = field(default_factory=list, compare=False)
+    # Set for nodes on a remote Multipass site: the site's host, on whose
+    # address the node's services are published, and the node's 1-based
+    # position in the topology, which selects its published ports.
+    site_host: SiteHost | None = None
+    ordinal: int = 0
+    # Selects the node's prebuilt images when they are per architecture.
+    architecture: str = field(default_factory=lambda: machine_architecture())
+    # The VM's connection facts once acquired, for checks that run outside a
+    # task (supervision probes).
+    live: list[VmInfo] = field(default_factory=list, compare=False)
+
+    def live_vm(self) -> VmInfo:
+        """Return the acquired VM's connection facts."""
+        if not self.live:
+            raise RuntimeError(f"{self.config.id}: VM not acquired")
+        return self.live[-1]
+
+    def addresses(self, vm: VmInfo) -> NodeAddresses:
+        """Return where operator and peers reach this node once its VM exists."""
+        if self.site_host is not None:
+            return published(self.site_host.site.address, self.ordinal)
+        return direct(vm.host)
+
+    def replica_url(self, vm: VmInfo, host_port: int) -> str:
+        """Return the URL the operator reads a replica's runtime endpoints at.
+
+        Replica ports are dynamic; behind a site's NAT or an Azure NSG only the
+        in-VM probe can reach them, so their runtime requests go through its
+        relay.
+        """
+        if self.site_host is not None or self.request.lifecycle == "azure":
+            return f"{self.addresses(vm).probe}/relay/{host_port}"
+        return f"http://{vm.host}:{host_port}"
+
+    def multipass_argv(self, *args: str) -> tuple[str, ...]:
+        """Return the local argv running the Multipass client that owns this VM."""
+        if self.site_host is not None:
+            return tuple(self.site_host.multipass_argv(*args))
+        return ("multipass", *args)
+
+    def vm_argv(self, vm: VmInfo, *argv: str) -> tuple[str, ...]:
+        """Return the local argv that runs `argv` inside the VM, streaming output."""
+        if self.request.lifecycle == "azure":
+            key = self.provider.ssh_private_key_path(self.request)
+            return (
+                "ssh",
+                *("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"),
+                *("-o", "UserKnownHostsFile=/dev/null", "-o", "ServerAliveInterval=15"),
+                *(("-i", str(key)) if key is not None else ()),
+                f"{vm.user}@{vm.host}",
+                shlex.join(argv),
+            )
+        return self.multipass_argv("exec", vm.name, "--", *argv)
 
     def command(self, argv: tuple[str, ...], *, remote_dir: str | None = None):
         """Execute on this node and retain transport failures as failures."""
@@ -88,6 +145,11 @@ class OneShotResources:
     generator_location: str = "operator-host"
     host_cpu_placement: HostCpuPlacement | None = None
     host_cpu_facts: dict | None = None
+    # Multi-site placement rechecks each site on its own host; None means the
+    # local `host_cpu.collect_host_placement` applies.
+    recheck_placement: Callable[[dict[str, str]], dict] | None = None
+    # False when nodes run on several machines (sites, Azure).
+    shared_physical_host: bool = True
 
     @property
     def vms(self) -> tuple[Resource[VmInfo], ...]:
@@ -112,23 +174,29 @@ def host_budget(
     external_cpus: int = 0,
     reserve_cpus: float = 1,
     reserve_memory_mib: int = 1024,
+    nodes: list[OneShotNode] | None = None,
+    logging_backend: bool = True,
 ) -> dict[str, float]:
     """Require disjoint VM, operator and owned backend budgets before acquisition.
 
     MemAvailable already reflects running external VMs, so do not subtract twice.
     Collector resources fit inside each node and are validated by the config.
+    `nodes` narrows the budget to the VMs of one host (default: all of them).
     """
+    nodes = config.nodes if nodes is None else nodes
     backend = (
-        config.observability.logs.enabled and config.observability.logs.backend_owned
+        logging_backend
+        and config.observability.logs.enabled
+        and config.observability.logs.backend_owned
     )
     cpu_required = (
-        sum(node.cpus for node in config.nodes)
+        sum(node.cpus for node in nodes)
         + external_cpus
         + reserve_cpus
         + (1.5 if backend else 0)
     )
     memory_required = (
-        sum(node.memory_mib for node in config.nodes)
+        sum(node.memory_mib for node in nodes)
         + reserve_memory_mib
         + (768 if backend else 0)
     )
@@ -156,6 +224,120 @@ def external_vm_cpus() -> int:
     )
 
 
+def machine_architecture(machine: str | None = None) -> str:
+    """Return the image architecture name of a kernel machine type."""
+    machine = machine or platform.machine()
+    names = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+    if machine not in names:
+        raise ValueError(f"unsupported machine architecture: {machine}")
+    return names[machine]
+
+
+def _owned_node(
+    node: OneShotNode,
+    request: VmRequest,
+    provider: Any,
+    *,
+    config: OneShotConfig,
+    generator: Resource[str],
+    target_cpus: list[int] | None,
+    pin: Callable[[str, list[int]], object],
+    stop_argv: Callable[[str], tuple[str, ...]] | None,
+    after_ensure: Callable[[VmInfo], None] | None = None,
+    site_host: SiteHost | None = None,
+    ordinal: int = 0,
+    architecture: str | None = None,
+) -> NodeResource:
+    """Own one node's VM: refuse adoption, pin it, retain it for raw recovery."""
+    # Ownership is checked at acquire time, including partial launch compensation.
+    base = provisioned_vm(
+        title=f"Acquire {node.id} VM",
+        request=request,
+        provider=provider,
+        after_ensure=after_ensure,
+    )
+    recovery: list[str] = []
+    live: list[VmInfo] = []
+    # A node behind a site's NAT is published on the site's address for as
+    # long as its VM exists.
+    forwarders = SiteForwarders(site_host) if site_host is not None else None
+
+    def acquire(inputs):
+        if provider.vm_exists(request):
+            raise RuntimeError(f"refusing to adopt existing VM {request.name}")
+        value = base.acquire(inputs)
+        try:
+            if target_cpus is not None:
+                if request.name is None:
+                    raise ValueError("owned VM name missing for host placement")
+                pin(request.name, target_cpus)
+            if forwarders is not None and site_host is not None:
+                forwarders.start(
+                    value.host, published(site_host.site.address, ordinal).forwards()
+                )
+        except BaseException as error:
+            try:
+                if forwarders is not None:
+                    forwarders.stop()
+                base.release(inputs, value)
+            except Exception as cleanup:
+                error.add_note(f"owned VM placement compensation: {cleanup}")
+            raise
+        live.append(value)
+        return value
+
+    def release(inputs, value):
+        if forwarders is not None:
+            forwarders.stop()
+        if recovery:
+            if request.name is None:
+                raise RuntimeError("owned VM name missing for raw recovery")
+            if stop_argv is not None:
+                subprocess.run(
+                    stop_argv(request.name),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=operational_limit(config, "process_exit_seconds", 30),
+                )
+            raise RuntimeError(
+                f"owned VM {request.name} stopped and retained for raw recovery: "
+                + "; ".join(recovery)
+            )
+        base.release(inputs, value)
+
+    vm = Resource(
+        title=base.title,
+        acquire=acquire,
+        release=release,
+        requires=(*base.requires, generator)
+        if target_cpus is not None
+        else base.requires,
+        revive=base.revive,
+    )
+    return NodeResource(
+        node,
+        request,
+        vm,
+        provider,
+        recovery,
+        site_host=site_host,
+        ordinal=ordinal,
+        architecture=architecture or machine_architecture(),
+        live=live,
+    )
+
+
+def _multipass_request(namespace: str, node: OneShotNode) -> VmRequest:
+    return VmRequest(
+        lifecycle="multipass",
+        name=f"nl-os-{namespace}-{node.id}",
+        cpus=node.cpus,
+        memory=f"{node.memory_mib}M",
+        disk=f"{node.disk_gib}G",
+    )
+
+
 def build_one_shot_resources(
     config: OneShotConfig,
     environment: EnvironmentConfig,
@@ -166,30 +348,83 @@ def build_one_shot_resources(
     """Reuse Sonata's compensated VM lifecycle without adopting operator VMs."""
     if environment.provider != config.provider:
         raise ValueError("one-shot environment must use Multipass")
-    cpus, available_memory = host_capacity()
-    if config.purpose == "scientific-experiment":
-        host_budget(
-            config,
-            host_cpus=cpus,
-            available_memory_mib=available_memory,
-            external_cpus=external_vm_cpus(),
-        )
-    if sum(node.cpus for node in config.nodes) > cpus:
-        raise ValueError("one-shot VM CPU allocation exceeds host capacity")
-    if sum(node.memory_mib for node in config.nodes) > available_memory:
-        raise ValueError("one-shot VM memory allocation exceeds available host memory")
-    if config.observability.logs.enabled and config.observability.logs.backend_owned:
-        if sum(node.cpus for node in config.nodes) + 1.5 > cpus:
-            raise ValueError("owned logging backend CPU budget exceeds host capacity")
-        if sum(node.memory_mib for node in config.nodes) + 768 > available_memory:
-            raise ValueError("owned backend memory budget exceeds host capacity")
     namespace = run_id or uuid4().hex[:12]
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", namespace):
         raise ValueError("invalid one-shot run namespace")
-    nodes = {}
     root = repo_root or Path.cwd()
+    if environment.multisite:
+        from nanolab.one_shot.multisite import build_multisite_resources
+
+        return build_multisite_resources(
+            config, environment, namespace=namespace, repo_root=root
+        )
+    cpus, available_memory = host_capacity()
+    check_host_capacity(
+        config,
+        config.nodes,
+        cpus=cpus,
+        available_memory=available_memory,
+        external_cpus=external_vm_cpus
+        if config.purpose == "scientific-experiment"
+        else None,
+    )
     placement = config.host_cpu_placement
     facts = host_cpu.validate_host_placement(placement) if placement else None
+    generator = operator_generator(namespace, placement)
+    nodes = {
+        node.id: _owned_node(
+            node,
+            request,
+            provider_for(request, root),
+            config=config,
+            generator=generator,
+            target_cpus=placement.nodes[node.id].cpus if placement else None,
+            pin=host_cpu.pin_vm,
+            stop_argv=lambda name: ("multipass", "stop", name),
+        )
+        for node in config.nodes
+        for request in (_multipass_request(namespace, node),)
+    }
+    return OneShotResources(
+        nodes, generator, host_cpu_placement=placement, host_cpu_facts=facts
+    )
+
+
+def check_host_capacity(
+    config: OneShotConfig,
+    nodes: list[OneShotNode],
+    *,
+    cpus: int,
+    available_memory: int,
+    external_cpus: Callable[[], int] | None,
+    logging_backend: bool = True,
+) -> None:
+    """Refuse VMs (and an owned log backend) that do not fit one host."""
+    if external_cpus is not None:
+        host_budget(
+            config,
+            nodes=nodes,
+            host_cpus=cpus,
+            available_memory_mib=available_memory,
+            external_cpus=external_cpus(),
+            logging_backend=logging_backend,
+        )
+    if sum(node.cpus for node in nodes) > cpus:
+        raise ValueError("one-shot VM CPU allocation exceeds host capacity")
+    if sum(node.memory_mib for node in nodes) > available_memory:
+        raise ValueError("one-shot VM memory allocation exceeds available host memory")
+    logs = config.observability.logs
+    if logging_backend and logs.enabled and logs.backend_owned:
+        if sum(node.cpus for node in nodes) + 1.5 > cpus:
+            raise ValueError("owned logging backend CPU budget exceeds host capacity")
+        if sum(node.memory_mib for node in nodes) + 768 > available_memory:
+            raise ValueError("owned backend memory budget exceeds host capacity")
+
+
+def operator_generator(
+    namespace: str, placement: HostCpuPlacement | None
+) -> Resource[str]:
+    """Own the operator host's generator slot and, if placed, its CPU pinning."""
     operator_state = {}
 
     def acquire_operator(_inputs):
@@ -201,74 +436,8 @@ def build_one_shot_resources(
         if "original" in operator_state:
             host_cpu.restore_operator(operator_state.pop("original"))
 
-    generator = Resource(
+    return Resource(
         title=f"Acquire {namespace} operator-host generator",
         acquire=acquire_operator,
         release=release_operator,
-    )
-    for node in config.nodes:
-        request = VmRequest(
-            lifecycle="multipass",
-            name=f"nl-os-{namespace}-{node.id}",
-            cpus=node.cpus,
-            memory=f"{node.memory_mib}M",
-            disk=f"{node.disk_gib}G",
-        )
-        provider: Any = provider_for(request, root)
-        # Ownership is checked at acquire time, including partial launch compensation.
-        base = provisioned_vm(
-            title=f"Acquire {node.id} VM", request=request, provider=provider
-        )
-
-        target_cpus = placement.nodes[node.id].cpus if placement else None
-        recovery: list[str] = []
-
-        def acquire(
-            inputs, *, original=base, owner=provider, expected=request, cpus=target_cpus
-        ):
-            if owner.vm_exists(expected):
-                raise RuntimeError(f"refusing to adopt existing VM {expected.name}")
-            value = original.acquire(inputs)
-            try:
-                if cpus is not None:
-                    if expected.name is None:
-                        raise ValueError("owned VM name missing for host placement")
-                    host_cpu.pin_vm(expected.name, cpus)
-            except BaseException as error:
-                try:
-                    original.release(inputs, value)
-                except Exception as cleanup:
-                    error.add_note(f"owned VM placement compensation: {cleanup}")
-                raise
-            return value
-
-        def release(
-            inputs, value, *, original=base, expected=request, retained=recovery
-        ):
-            if retained:
-                if expected.name is None:
-                    raise RuntimeError("owned VM name missing for raw recovery")
-                subprocess.run(
-                    ("multipass", "stop", expected.name),
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=operational_limit(config, "process_exit_seconds", 30),
-                )
-                raise RuntimeError(
-                    f"owned VM {expected.name} stopped and retained for raw recovery: "
-                    + "; ".join(retained)
-                )
-            original.release(inputs, value)
-
-        vm = Resource(
-            title=base.title,
-            acquire=acquire,
-            release=release,
-            requires=(*base.requires, generator) if placement else base.requires,
-            revive=base.revive,
-        )
-        nodes[node.id] = NodeResource(node, request, vm, provider, recovery)
-    return OneShotResources(
-        nodes, generator, host_cpu_placement=placement, host_cpu_facts=facts
     )

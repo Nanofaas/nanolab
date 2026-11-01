@@ -24,17 +24,24 @@ from nanolab.config.one_shot import (
     resolve_node_functions,
 )
 from nanolab.functions.catalog import resolve_function_definition
+from nanolab.one_shot.addresses import advertised_arguments, seed_arguments
 from nanolab.one_shot.infrastructure import (
     NodeExecutor,
     NodeResource,
     OneShotResources,
     build_one_shot_resources,
+    machine_architecture,
 )
+from nanolab.one_shot.sites import through_site
 from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_graph
 from nanolab.one_shot.vm_resources import require_resource_overhead
 from nanolab.tasks.components.bootstrap import plan_vm_provision_base
 from nanolab.tasks.one_shot.images import archive_image_ids
-from nanolab.tasks.one_shot.logging import backend_resource, collector_resource
+from nanolab.tasks.one_shot.logging import (
+    backend_resource,
+    collector_resource,
+    site_logging_backends,
+)
 from nanolab.tasks.one_shot.resources import node_probe_resource
 from nanolab.tasks.one_shot.workload import WORKLOAD_NAMES
 from nanolab.tasks.platform import (
@@ -74,6 +81,15 @@ class OneShotTopology:
         default_factory=dict
     )
     neighbor_graph: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Each node's pinned distribution when images are per architecture;
+    # empty when every node shares `distribution`.
+    node_distributions: dict[str, Resource[RecipeDistribution]] = field(
+        default_factory=dict
+    )
+
+    def distribution_of(self, node_id: str) -> Resource[RecipeDistribution]:
+        """Return the pinned distribution a node's functions run from."""
+        return self.node_distributions.get(node_id, self.distribution)
 
     @property
     def requires(self) -> tuple[Resource[Any], ...]:
@@ -84,6 +100,7 @@ class OneShotTopology:
             *self.endpoints.values(),
             *self.probes.values(),
             self.distribution,
+            *self.node_distributions.values(),
             *self.collectors.values(),
             *(
                 function
@@ -99,17 +116,8 @@ def _bootstrap(
     def acquire(inputs: TaskInputs) -> None:
         vm = inputs.resource(node.vm)
         ready = subprocess.run(
-            (
-                "multipass",
-                "exec",
-                vm.name,
-                "--",
-                "sudo",
-                "cloud-init",
-                "status",
-                "--wait",
-                "--format",
-                "json",
+            node.vm_argv(
+                vm, "sudo", "cloud-init", "status", "--wait", "--format", "json"
             ),
             check=False,
             capture_output=True,
@@ -137,6 +145,10 @@ def _bootstrap(
         operations = retarget_cloud_operations(
             node.provider, context, plan_vm_provision_base(context)
         )
+        if node.site_host is not None:
+            operations = through_site(
+                operations, context=context, host=vm.host, site=node.site_host.site
+            )
         run_bootstrap_operations(node.provider, operations, role=node.config.id)
 
     return Resource(
@@ -166,6 +178,7 @@ def _control_plane(
     forecast_window_seconds: int = 1,
     forecast_properties: Mapping[str, str] | None = None,
     settings=None,
+    architecture: str | None = None,
 ) -> Resource[str]:
     name = "nanolab-one-shot-control-plane"
 
@@ -180,6 +193,13 @@ def _control_plane(
 
     def acquire(inputs: TaskInputs) -> str:
         vm = inputs.resource(node.vm)
+        addresses = node.addresses(vm)
+        if architecture is not None:
+            machine = node.command(("uname", "-m")).stdout.strip()
+            if machine_architecture(machine) != architecture:
+                raise ValueError(
+                    f"{node.config.id}: VM is {machine}, images are {architecture}"
+                )
         built = inputs.resource(distribution)
         image_archive = inputs.resource(archive)
         remote = f"{vm.home}/one-shot-images.tar"
@@ -310,9 +330,7 @@ def _control_plane(
             f"--nanofaas.p2p.enabled={boolean}",
             f"--nanofaas.p2p.admin.enabled={boolean}",
             f"--nanofaas.p2p.node-id={node.config.id}",
-            "--nanofaas.p2p.port=14200",
-            f"--nanofaas.p2p.external-host={vm.host}",
-            f"--nanofaas.p2p.invocation-uri=http://{vm.host}:8080",
+            *advertised_arguments(addresses),
             "--nanofaas.p2p.ping-interval=250ms",
             "--nanofaas.p2p.ping-timeout=1s",
             f"--nanofaas.forecasting.enabled={boolean}",
@@ -338,22 +356,22 @@ def _control_plane(
                 for other in topology.nodes.values()
                 if other.config.kind == "cloud"
             )
-            cloud_vm = inputs.resource(cloud.vm)
+            cloud_api = cloud.addresses(inputs.resource(cloud.vm)).api
             args.extend(
                 (
-                    f"--nanofaas.offload.target-url=http://{cloud_vm.host}:8080",
+                    f"--nanofaas.offload.target-url={cloud_api}",
                     f"--sync-queue.max-depth={baseline_depth}",
                 )
             )
         if edge:
-            peers = [
-                inputs.resource(other.vm).host
-                for other in topology.nodes.values()
-                if other.config.kind == "edge" and other is not node
-            ]
             args.extend(
-                f"--nanofaas.p2p.seeds[{index}]={host}:14200"
-                for index, host in enumerate(peers)
+                seed_arguments(
+                    [
+                        other.addresses(inputs.resource(other.vm))
+                        for other in topology.nodes.values()
+                        if other.config.kind == "edge" and other is not node
+                    ]
+                )
             )
         node.command(tuple(args))
         deadline = time.monotonic() + operational_limit(
@@ -363,18 +381,18 @@ def _control_plane(
             while time.monotonic() < deadline:
                 try:
                     http.get(
-                        f"http://{vm.host}:9090/actuator/health/readiness",
+                        f"{addresses.management}/actuator/health/readiness",
                         timeout=operational_limit(
                             settings, "collection_http_seconds", 2
                         ),
                     ).raise_for_status()
                     http.get(
-                        f"http://{vm.host}:8080/v1/functions",
+                        f"{addresses.api}/v1/functions",
                         timeout=operational_limit(
                             settings, "collection_http_seconds", 2
                         ),
                     ).raise_for_status()
-                    return f"http://{vm.host}:8080"
+                    return addresses.api
                 except httpx.HTTPError:
                     time.sleep(0.2)
         raise RuntimeError(f"{node.config.id} control-plane readiness timed out")
@@ -392,6 +410,75 @@ def _control_plane(
             *((collector,) if collector is not None else ()),
         ),
     )
+
+
+REQUIRED_MODULES = frozenset(
+    {
+        "offload",
+        "forecasting",
+        "p2p-discovery",
+        "container-deployment-provider",
+        "sync-queue",
+    }
+)
+
+
+def _architecture_images(
+    settings,
+    *,
+    recipe: Path,
+    selected,
+    run_dir: Path,
+    architectures: set[str],
+) -> tuple[dict, dict]:
+    """Reuse one verified distribution and image archive per architecture.
+
+    The archive `images-<arch>.tar` sits beside its `distribution.json`; its
+    config digests must be the distribution's image IDs, so the operator needs
+    no Docker of its own.
+    """
+    distributions: dict[str | None, Resource[RecipeDistribution]] = {}
+    archives: dict[str | None, Resource[Path]] = {}
+    for architecture in sorted(architectures):
+        reference = settings.runtime_distributions.get(architecture)
+        if reference is None:
+            raise ValueError(f"no runtime distribution for {architecture} nodes")
+        tag = str(json.loads(reference.read_verified())["tag"])
+        checked = read_distribution(
+            reference.path, recipe=recipe, tag=tag, published=False
+        )
+        require_validation_distribution(
+            checked, functions=selected, required_modules=REQUIRED_MODULES
+        )
+        distributions[architecture] = Resource(
+            title=f"Reuse immutable {architecture} one-shot runtime distribution",
+            acquire=lambda _inputs, checked=checked: checked,
+            release=lambda _inputs, _value: None,
+        )
+
+        def verify(
+            _inputs,
+            *,
+            architecture=architecture,
+            checked=checked,
+            path=reference.path.parent / f"images-{architecture}.tar",
+        ) -> Path:
+            archive_image_ids(
+                path,
+                {c.image.reference: c.image.id for c in checked.components},
+            )
+            (run_dir / f"runtime-distribution-{architecture}.json").write_bytes(
+                checked.report.read_bytes()
+            )
+            return path
+
+        archives[architecture] = Resource(
+            title=f"Verify prebuilt {architecture} one-shot runtime images",
+            acquire=verify,
+            release=lambda _inputs, _value: None,
+            requires=(distributions[architecture],),
+        )
+    return distributions, archives
 
 
 def add_one_shot_platforms(
@@ -441,100 +528,124 @@ def add_one_shot_platforms(
     executor = RoleBoundCommandTaskExecutor(
         build_role_bindings(EnvironmentConfig(provider="local"))[0]
     )
-    if settings.runtime_distribution is None:
-        staged = recipe_run_resource(
-            source=repo_root,
+    # Prebuilt images per architecture: each node gets the distribution,
+    # archive, pinned identities and function binding of its own architecture.
+    if settings.runtime_distributions:
+        distributions, archives = _architecture_images(
+            settings,
             recipe=recipe,
-            run_dir=run_dir / "build",
-            tag="one-shot-local",
-        )
-        distribution = assembled_recipe_distribution_resource(
-            run=staged,
-            executor=executor,
-            functions=selected,
-            required_modules=frozenset(
-                {
-                    "offload",
-                    "forecasting",
-                    "p2p-discovery",
-                    "container-deployment-provider",
-                    "sync-queue",
-                }
-            ),
+            selected=selected,
+            run_dir=run_dir,
+            architectures={node.architecture for node in resources.nodes.values()},
         )
     else:
-        raw = settings.runtime_distribution.read_verified()
-        tag = str(json.loads(raw)["tag"])
-        checked = read_distribution(
-            settings.runtime_distribution.path, recipe=recipe, tag=tag, published=False
-        )
-        require_validation_distribution(
-            checked,
-            functions=selected,
-            required_modules=frozenset(
-                {
-                    "offload",
-                    "forecasting",
-                    "p2p-discovery",
-                    "container-deployment-provider",
-                    "sync-queue",
-                }
-            ),
-        )
-        distribution = Resource(
-            title="Reuse immutable one-shot runtime distribution",
-            acquire=lambda _inputs: checked,
-            release=lambda _inputs, _value: None,
-        )
+        if settings.runtime_distribution is None:
+            staged = recipe_run_resource(
+                source=repo_root,
+                recipe=recipe,
+                run_dir=run_dir / "build",
+                tag="one-shot-local",
+            )
+            distribution = assembled_recipe_distribution_resource(
+                run=staged,
+                executor=executor,
+                functions=selected,
+                required_modules=frozenset(
+                    {
+                        "offload",
+                        "forecasting",
+                        "p2p-discovery",
+                        "container-deployment-provider",
+                        "sync-queue",
+                    }
+                ),
+            )
+        else:
+            raw = settings.runtime_distribution.read_verified()
+            tag = str(json.loads(raw)["tag"])
+            checked = read_distribution(
+                settings.runtime_distribution.path,
+                recipe=recipe,
+                tag=tag,
+                published=False,
+            )
+            require_validation_distribution(
+                checked,
+                functions=selected,
+                required_modules=frozenset(
+                    {
+                        "offload",
+                        "forecasting",
+                        "p2p-discovery",
+                        "container-deployment-provider",
+                        "sync-queue",
+                    }
+                ),
+            )
+            distribution = Resource(
+                title="Reuse immutable one-shot runtime distribution",
+                acquire=lambda _inputs: checked,
+                release=lambda _inputs, _value: None,
+            )
 
-    def save_images(inputs: TaskInputs) -> Path:
-        built = inputs.resource(distribution)
-        path = run_dir / "images.tar"
-        for component in built.components:
-            observed = (
+        def save_images(inputs: TaskInputs) -> Path:
+            built = inputs.resource(distribution)
+            path = run_dir / "images.tar"
+            for component in built.components:
+                observed = (
+                    subprocess.run(
+                        (
+                            "docker",
+                            "image",
+                            "inspect",
+                            "--format={{.Id}}",
+                            component.image.reference,
+                        ),
+                        check=True,
+                        capture_output=True,
+                        timeout=30,
+                    )
+                    .stdout.decode()
+                    .strip()
+                )
+                if observed != component.image.id:
+                    raise ValueError("local image changed since runtime build")
+            partial = path.with_suffix(".tar.partial")
+            try:
                 subprocess.run(
                     (
                         "docker",
-                        "image",
-                        "inspect",
-                        "--format={{.Id}}",
-                        component.image.reference,
+                        "save",
+                        "--output",
+                        str(partial),
+                        *(component.image.reference for component in built.components),
                     ),
                     check=True,
                     capture_output=True,
-                    timeout=30,
+                    timeout=1800,
                 )
-                .stdout.decode()
-                .strip()
+                partial.replace(path)
+            finally:
+                partial.unlink(missing_ok=True)
+            (run_dir / "runtime-distribution.json").write_bytes(
+                built.report.read_bytes()
             )
-            if observed != component.image.id:
-                raise ValueError("local image changed since runtime build")
-        partial = path.with_suffix(".tar.partial")
-        try:
-            subprocess.run(
-                (
-                    "docker",
-                    "save",
-                    "--output",
-                    str(partial),
-                    *(component.image.reference for component in built.components),
-                ),
-                check=True,
-                capture_output=True,
-                timeout=1800,
-            )
-            partial.replace(path)
-        finally:
-            partial.unlink(missing_ok=True)
-        (run_dir / "runtime-distribution.json").write_bytes(built.report.read_bytes())
-        return path
+            return path
 
-    archive = Resource(
-        title="Archive digest-pinned one-shot runtime images",
-        acquire=save_images,
-        release=lambda _inputs, _value: None,
-        requires=(distribution,),
-    )
+        archive = Resource(
+            title="Archive digest-pinned one-shot runtime images",
+            acquire=save_images,
+            release=lambda _inputs, _value: None,
+            requires=(distribution,),
+        )
+
+        distributions: dict[str | None, Resource[RecipeDistribution]] = {
+            None: distribution
+        }
+        archives: dict[str | None, Resource[Path]] = {None: archive}
+
+    def images_key(node: NodeResource) -> str | None:
+        return node.architecture if settings.runtime_distributions else None
 
     bootstraps = {
         key: _bootstrap(node, repo_root, run_dir=run_dir, settings=settings)
@@ -544,25 +655,42 @@ def add_one_shot_platforms(
     collectors = {}
     if logs.enabled:
         placement = settings.host_cpu_placement
-        backend = backend_resource(
-            logs,
-            root=repo_root,
-            run_dir=run_dir,
-            host_cpus=placement.logging_cpus if placement else None,
-            operator=resources.generator if placement else None,
-            settings=settings,
-            supervision=supervision,
+        remote = any(
+            node.site_host is not None or node.request.lifecycle == "azure"
+            for node in resources.nodes.values()
         )
+        if remote:
+            routes = site_logging_backends(
+                resources,
+                logs,
+                root=repo_root,
+                run_dir=run_dir,
+                bootstraps=bootstraps,
+                settings=settings,
+                supervision=supervision,
+            )
+        else:
+            backend = backend_resource(
+                logs,
+                root=repo_root,
+                run_dir=run_dir,
+                host_cpus=placement.logging_cpus if placement else None,
+                operator=resources.generator if placement else None,
+                settings=settings,
+                supervision=supervision,
+            )
+            routes = dict.fromkeys(resources.nodes, (backend, None))
         collectors = {
             key: collector_resource(
                 node,
                 logs,
                 bootstrap=bootstraps[key],
-                backend=backend,
+                backend=routes[key][0],
                 root=repo_root,
                 run_dir=run_dir,
                 mode="BASELINE" if baseline else forecast_provider,
                 settings=settings,
+                query_endpoint=routes[key][1],
             )
             for key, node in resources.nodes.items()
         }
@@ -573,16 +701,13 @@ def add_one_shot_platforms(
 
         def probe(value):
             observed = subprocess.run(
-                [
-                    "multipass",
-                    "exec",
-                    node.request.name,
-                    "--",
+                node.vm_argv(
+                    node.live_vm(),
                     "docker",
                     "inspect",
                     "--format={{.State.Running}}",
                     name_for(value),
-                ],
+                ),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -616,8 +741,9 @@ def add_one_shot_platforms(
             scientific=settings.purpose == "scientific-experiment",
             strict_memory=settings.strict_memory,
             neighbor_graph=graph if settings.neighbors is not None else None,
-            distribution=distribution,
-            archive=archive,
+            distribution=distributions[images_key(node)],
+            archive=archives[images_key(node)],
+            architecture=node.architecture if settings.runtime_distributions else None,
             run_dir=run_dir,
             forecast_provider=forecast_provider,
             forecast_max_age_seconds=forecast_max_age_seconds,
@@ -644,62 +770,75 @@ def add_one_shot_platforms(
     }
     probes = {key: node_probe_resource(node) for key, node in resources.nodes.items()}
 
-    def pin(inputs: TaskInputs) -> RecipeDistribution:
-        built = inputs.resource(distribution)
-        identities = archive_image_ids(
-            inputs.resource(archive),
-            {
-                component.image.reference: component.image.id
-                for component in built.components
-            },
-        )
-        components = []
-        for component in built.components:
-            actual_ids = {
-                node.command(
-                    (
-                        "docker",
-                        "image",
-                        "inspect",
-                        "--format={{.Id}}",
-                        component.image.reference,
-                    )
-                ).stdout.strip()
-                for node in resources.nodes.values()
-            }
-            if len(actual_ids) != 1 or not actual_ids.issubset(
-                identities[component.image.reference]
-            ):
-                raise ValueError("target image identity mismatch across nodes")
-            actual = actual_ids.pop()
-            components.append(
-                replace(
-                    component,
-                    image=replace(component.image, id=actual, reference=actual),
-                )
-            )
-        return replace(built, components=tuple(components))
+    def pinned_for(key: str | None) -> Resource[RecipeDistribution]:
+        members = [n for n in resources.nodes.values() if images_key(n) == key]
 
-    pinned = Resource(
-        title="Pin function registrations to immutable target image IDs",
-        acquire=pin,
-        release=lambda _inputs, _value: None,
-        requires=(distribution, archive, *endpoints.values()),
-    )
+        def pin(inputs: TaskInputs) -> RecipeDistribution:
+            built = inputs.resource(distributions[key])
+            identities = archive_image_ids(
+                inputs.resource(archives[key]),
+                {
+                    component.image.reference: component.image.id
+                    for component in built.components
+                },
+            )
+            components = []
+            for component in built.components:
+                actual_ids = {
+                    node.command(
+                        (
+                            "docker",
+                            "image",
+                            "inspect",
+                            "--format={{.Id}}",
+                            component.image.reference,
+                        )
+                    ).stdout.strip()
+                    for node in members
+                }
+                if len(actual_ids) != 1 or not actual_ids.issubset(
+                    identities[component.image.reference]
+                ):
+                    raise ValueError("target image identity mismatch across nodes")
+                actual = actual_ids.pop()
+                components.append(
+                    replace(
+                        component,
+                        image=replace(component.image, id=actual, reference=actual),
+                    )
+                )
+            return replace(built, components=tuple(components))
+
+        return Resource(
+            title="Pin function registrations to immutable target image IDs"
+            + (f" ({key})" if key else ""),
+            acquire=pin,
+            release=lambda _inputs, _value: None,
+            requires=(
+                distributions[key],
+                archives[key],
+                *(endpoints[n.config.id] for n in members),
+            ),
+        )
+
+    pinned_by_key = {key: pinned_for(key) for key in distributions}
     functions = {
         definition.family: settings.functions[key]
         for key, definition in definitions.items()
     }
     if len(functions) != len(definitions):
         raise ValueError("one-shot function names must be unique")
-    binding = RecipeBinding(
-        distribution=pinned,
-        functions={
-            definition.family: (definition.family, definition.runtime)
-            for definition in definitions.values()
-        },
-        run_dir=run_dir,
-    )
+    bindings = {
+        key: RecipeBinding(
+            distribution=pinned,
+            functions={
+                definition.family: (definition.family, definition.runtime)
+                for definition in definitions.values()
+            },
+            run_dir=run_dir,
+        )
+        for key, pinned in pinned_by_key.items()
+    }
     node_functions = {
         node.id: {
             definition.family: resolve_node_functions(settings, node.id)[key]
@@ -753,7 +892,10 @@ def add_one_shot_platforms(
             for name, function in node_functions[key].items()
         )
         request = PlatformRequest(
-            backend="container", functions=platform_functions, recipe=binding, label=key
+            backend="container",
+            functions=platform_functions,
+            recipe=bindings[images_key(node)],
+            label=key,
         )
         platforms[key] = add_platform(
             workflow,
@@ -762,15 +904,22 @@ def add_one_shot_platforms(
             requires=(endpoint,),
             local_endpoint="http://127.0.0.1:8080",
         )
+    primary = images_key(next(iter(resources.nodes.values())))
     return OneShotTopology(
         resources,
         platforms,
         endpoints,
         probes,
-        pinned,
+        pinned_by_key[primary],
         functions,
         {key: definition.family for key, definition in definitions.items()},
         collectors,
         node_functions,
         graph,
+        node_distributions={
+            key: pinned_by_key[images_key(node)]
+            for key, node in resources.nodes.items()
+        }
+        if settings.runtime_distributions
+        else {},
     )

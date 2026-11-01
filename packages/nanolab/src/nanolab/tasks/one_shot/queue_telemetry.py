@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from nanolab.one_shot.addresses import management_url
 from nanolab.tasks.one_shot.artifacts import append_observation
 
 # Preserve labels: the empty function label is a global series, not another function.
@@ -113,8 +114,7 @@ class QueueTelemetryCollector:
                 }
                 try:
                     response = client.get(
-                        endpoint.replace(":8080", ":9090").rstrip("/")
-                        + "/actuator/prometheus",
+                        management_url(endpoint) + "/actuator/prometheus",
                         timeout=0.8,
                     )
                     response.raise_for_status()

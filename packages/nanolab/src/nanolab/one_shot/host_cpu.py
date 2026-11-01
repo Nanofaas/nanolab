@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from nanolab.config.one_shot import HostCpuPlacement
@@ -77,14 +78,26 @@ def owned_qemu_pid(vm_name: str, *, proc_root: Path = Path("/proc")) -> int:
 
 
 def inspect_vm_placement(
-    vm_name: str, cpus: list[int], *, proc_root: Path = Path("/proc")
+    vm_name: str,
+    cpus: list[int],
+    *,
+    proc_root: Path = Path("/proc"),
+    read_affinity: Callable[[Path], list[int]] | None = None,
 ) -> dict:
-    """Check every QEMU thread; missing evidence is a failed placement check."""
+    """Check every QEMU thread; missing evidence is a failed placement check.
+
+    `read_affinity` reads a thread's mask from its /proc task directory; the
+    default asks the local kernel, which only works for local processes.
+    """
     pid = owned_qemu_pid(vm_name, proc_root=proc_root)
     try:
         threads = list((proc_root / str(pid) / "task").iterdir())
         masks = {
-            thread.name: sorted(os.sched_getaffinity(int(thread.name)))
+            thread.name: (
+                read_affinity(thread)
+                if read_affinity is not None
+                else sorted(os.sched_getaffinity(int(thread.name)))
+            )
             for thread in threads
         }
     except OSError as error:
@@ -164,20 +177,28 @@ def pin_operator(cpus: list[int], *, proc_root: Path = Path("/proc")) -> dict:
     return original
 
 
-def pin_logging_project(project: str, cpus: list[int]) -> list[dict]:
-    """Pin only containers whose inspected labels match the owned project."""
-    result = subprocess.run(
+def _run_local(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=10)
+
+
+def pin_logging_project(
+    project: str,
+    cpus: list[int],
+    *,
+    run: Callable[[list[str]], subprocess.CompletedProcess[str]] = _run_local,
+) -> list[dict]:
+    """Pin only containers whose inspected labels match the owned project.
+
+    `run` executes Docker where the backend runs (default: this host).
+    """
+    result = run(
         [
             "docker",
             "ps",
             "-q",
             "--filter",
             "label=com.docker.compose.project=" + project,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=10,
+        ]
     )
     identifiers = result.stdout.split()
     if not identifiers:
@@ -189,13 +210,7 @@ def pin_logging_project(project: str, cpus: list[int]) -> list[dict]:
     )
 
     def inspect():
-        result = subprocess.run(
-            ["docker", "inspect", "--format=" + template, *identifiers],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        result = run(["docker", "inspect", "--format=" + template, *identifiers])
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         if len(rows) != len(identifiers) or any(
             row["project"] != project for row in rows
@@ -205,13 +220,7 @@ def pin_logging_project(project: str, cpus: list[int]) -> list[dict]:
 
     inspect()
     mask = ",".join(str(cpu) for cpu in sorted(cpus))
-    subprocess.run(
-        ["docker", "update", "--cpuset-cpus", mask, *identifiers],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    run(["docker", "update", "--cpuset-cpus", mask, *identifiers])
     rows = inspect()
     if any(row["cpuset"] != mask for row in rows):
         raise ValueError("owned logging CPU affinity differs from placement")

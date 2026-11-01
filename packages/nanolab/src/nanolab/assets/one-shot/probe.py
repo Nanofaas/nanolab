@@ -1,4 +1,5 @@
 """Run-owned standard-library clock and network probe for local VM validation."""
+import http.client
 import json
 import os
 import platform
@@ -24,10 +25,37 @@ class Handler(BaseHTTPRequestHandler):
                 "hostname": platform.node()}).encode()
         elif self.path == "/bytes":
             data = PAYLOAD
+        elif self.path.startswith("/relay/"):
+            self.relay()
+            return
         else:
             self.send_error(404)
             return
         self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def relay(self):
+        # Replicas publish dynamic ports that only the VM can reach when it is
+        # behind NAT. Relay read-only runtime requests to loopback, nothing else.
+        _, _, port, rest = self.path.split("/", 3)
+        if not port.isdigit() or not 0 < int(port) < 65536 or not rest.startswith("runtime/"):
+            self.send_error(403)
+            return
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", int(port), timeout=30)
+            connection.request("GET", "/" + rest)
+            response = connection.getresponse()
+            data = response.read()
+            status, kind = response.status, response.getheader("Content-Type")
+            connection.close()
+        except OSError:
+            self.send_error(502)
+            return
+        self.send_response(status)
+        if kind:
+            self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

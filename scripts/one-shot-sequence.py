@@ -117,6 +117,21 @@ def main(argv=None):
     parser.add_argument(
         "--check", action="store_true", help="validate inputs only; no build, VM or run"
     )
+    parser.add_argument(
+        "--environment",
+        type=Path,
+        help="environment frozen with every run (multi-site placement)",
+    )
+    parser.add_argument(
+        "--only",
+        choices=RUNS,
+        action="append",
+        help="run only these observations (repeatable), keeping the sequence order",
+    )
+    parser.add_argument(
+        "--runtime-distributions",
+        help="prebuilt per-architecture images, arm64=PATH,amd64=PATH; skips the build",
+    )
     args = parser.parse_args(argv)
     config = inputs(args.config.resolve())
     output = args.output.resolve()
@@ -154,9 +169,27 @@ def main(argv=None):
     ].items():
         if digest(config["continuousTuning"] / name) != file["sha256"]:
             raise ValueError("continuous preparation hash mismatch: " + name)
+    prebuilt = (
+        dict(item.split("=", 1) for item in args.runtime_distributions.split(","))
+        if args.runtime_distributions
+        else None
+    )
+    if prebuilt is not None:
+        for architecture, path in prebuilt.items():
+            built = read_json(Path(path))
+            if built["source"]["revision"] != revision or built["source"]["dirty"]:
+                raise ValueError(f"{architecture} images are not from {revision}")
     summary = {
         "runtimeRevision": revision,
-        "order": list(RUNS),
+        **(
+            {
+                "environment": str(args.environment.resolve()),
+                "runtimeDistributions": prebuilt,
+            }
+            if args.environment is not None
+            else {}
+        ),
+        "order": [run for run in RUNS if not args.only or run in args.only],
         "decisionPeriodSeconds": 60,
         "loadSecondsPerRun": 3240,
         "warmupSecondsPerRun": 720,
@@ -176,23 +209,28 @@ def main(argv=None):
         / "packages/nanolab/src/nanolab/assets/presets/recipes/one-shot-multifunction-jvm.yaml"
     )
     distribution = output / "distribution"
-    subprocess.run(
-        [
-            str(source / "gradlew"),
-            "--max-workers=2",
-            "assembleRecipe",
-            "-Precipe=" + str(recipe),
-            "-PrecipeOutput=" + str(distribution),
-            "-PrecipeTag=sequence-"
-            + revision[:8]
-            + "-"
-            + datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
-        ],
-        cwd=source,
-        check=True,
-    )
+    if prebuilt is None:
+        subprocess.run(
+            [
+                str(source / "gradlew"),
+                "--max-workers=2",
+                "assembleRecipe",
+                "-Precipe=" + str(recipe),
+                "-PrecipeOutput=" + str(distribution),
+                "-PrecipeTag=sequence-"
+                + revision[:8]
+                + "-"
+                + datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
+            ],
+            cwd=source,
+            check=True,
+        )
+        primary = distribution / "distribution.json"
+    else:
+        # The edges' images stay the frozen primary distribution.
+        primary = Path(prebuilt["arm64"]).resolve()
     jobs = []
-    for name in RUNS:
+    for name in (run for run in RUNS if not args.only or run in args.only):
         continuous = name != "step-oracle"
         freeze = output / (name + "-freeze")
         observer["prepare"](
@@ -204,7 +242,9 @@ def main(argv=None):
                 if continuous
                 else config["stepTuning"],
                 observations=observed_path,
-                distribution=distribution / "distribution.json",
+                distribution=primary,
+                environment=args.environment,
+                runtime_distributions=args.runtime_distributions,
                 source=source,
                 output=freeze,
                 decision_period_seconds=None if continuous else 60,

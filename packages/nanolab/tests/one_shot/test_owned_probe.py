@@ -11,6 +11,7 @@ import httpx
 import pytest
 from sonata_engine import TaskInputs
 
+from nanolab.one_shot.addresses import direct
 from nanolab.tasks.one_shot.resources import node_probe_resource
 
 
@@ -77,6 +78,7 @@ def test_probe_is_staged_readied_and_released_or_reports_failed_transfer(
                 )
             ),
             command=command,
+            addresses=lambda vm: direct(vm.host),
         ),
     )
     inputs = cast(

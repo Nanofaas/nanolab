@@ -310,11 +310,8 @@ class VmTelemetrySession:
                 }
                 self.sessions.append(session)
                 process = subprocess.Popen(
-                    (
-                        "multipass",
-                        "exec",
-                        node.request.name,
-                        "--",
+                    node.vm_argv(
+                        vm,
                         "sudo",
                         "python3",
                         "-u",
