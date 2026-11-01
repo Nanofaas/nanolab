@@ -363,6 +363,22 @@ def operational_limit(settings: object | None, name: str, default: float) -> flo
     return getattr(limits, name) if limits is not None else default
 
 
+class SyncQueueLimits(BaseModel):
+    """Admission limits of the nanoFaaS sync queue; unset keeps its defaults (2 s).
+
+    nanoFaaS compares whole seconds, and a request admitted below the estimate must
+    also be allowed to wait that long in the queue, so both are whole seconds.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", allow_inf_nan=False, populate_by_name=True
+    )
+    max_estimated_wait_seconds: int = Field(
+        alias="maxEstimatedWaitSeconds", ge=1, le=60
+    )
+    max_queue_wait_seconds: int = Field(alias="maxQueueWaitSeconds", ge=1, le=60)
+
+
 class OneShotConfig(BaseModel):
     """Provider/purpose boundaries and prerequisites checked before provisioning."""
 
@@ -377,6 +393,7 @@ class OneShotConfig(BaseModel):
     )
     functions: dict[str, OneShotFunction] = Field(min_length=1)
     strict_memory: bool = Field(default=False, alias="strictMemory")
+    sync_queue: SyncQueueLimits | None = Field(default=None, alias="syncQueue")
     profile: ArtifactReference | None = None
     qualification: ArtifactReference | None = None
     runtime_distribution: ArtifactReference | None = Field(

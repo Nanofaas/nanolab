@@ -243,6 +243,17 @@ def _bootstrap(
     )
 
 
+def sync_queue_arguments(settings) -> list[str]:
+    """Override the sync-queue admission limits only when the scenario sets them."""
+    limits = getattr(settings, "sync_queue", None)
+    if limits is None:
+        return []
+    return [
+        f"--sync-queue.max-estimated-wait={limits.max_estimated_wait_seconds}s",
+        f"--sync-queue.max-queue-wait={limits.max_queue_wait_seconds}s",
+    ]
+
+
 def _control_plane(
     node: NodeResource,
     topology: OneShotResources,
@@ -401,6 +412,7 @@ def _control_plane(
                 else []
             ),
             "--nanofaas.admission.profile=SYNC_QUEUE",
+            *sync_queue_arguments(settings),
             "--nanofaas.metrics.profile=advanced",
             "--nanofaas.registry.path=/tmp/functions.json",
             "--nanofaas.container-local.runtime-adapter=docker-java",

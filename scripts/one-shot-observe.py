@@ -56,6 +56,11 @@ def parse_args(argv=None):
         "--runtime-distributions",
         help="per-architecture images, e.g. arm64=PATH,amd64=PATH (multi-site)",
     )
+    prep.add_argument(
+        "--sync-queue-wait-seconds",
+        type=int,
+        help="sync-queue admission estimate and queue wait limit (nanoFaaS: 2)",
+    )
     launch = commands.add_parser("run")
     launch.add_argument("freeze", type=Path)
     launch.add_argument("output", type=Path)
@@ -444,6 +449,13 @@ def prepare(args):
         ),
     )
     scenario["recipeProfile"] = str((args.output / "recipe.yaml").resolve())
+    wait = getattr(args, "sync_queue_wait_seconds", None)
+    if wait is not None:
+        # Admitting a longer estimate also lets the admitted request wait as long.
+        scenario["oneShot"]["syncQueue"] = {
+            "maxEstimatedWaitSeconds": wait,
+            "maxQueueWaitSeconds": wait,
+        }
     environment_file = getattr(args, "environment", None)
     if environment_file is not None:
         shutil.copyfile(environment_file, args.output / "environment.yaml")

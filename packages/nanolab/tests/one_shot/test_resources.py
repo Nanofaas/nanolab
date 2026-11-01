@@ -642,3 +642,24 @@ def test_bundled_comparison_recipe_contains_real_sync_queue_module():
         .read_text()
     )
     assert "sync-queue" in recipe["controlPlane"]["modules"]
+
+
+def test_sync_queue_limits_reach_the_control_plane_only_when_set():
+    from types import SimpleNamespace
+
+    from nanolab.config.one_shot import SyncQueueLimits
+    from nanolab.plans.one_shot_common import sync_queue_arguments
+
+    assert sync_queue_arguments(None) == []
+    assert sync_queue_arguments(SimpleNamespace(sync_queue=None)) == []
+    limits = SyncQueueLimits.model_validate(
+        {"maxEstimatedWaitSeconds": 4, "maxQueueWaitSeconds": 4}
+    )
+    assert sync_queue_arguments(SimpleNamespace(sync_queue=limits)) == [
+        "--sync-queue.max-estimated-wait=4s",
+        "--sync-queue.max-queue-wait=4s",
+    ]
+    with pytest.raises(ValueError, match="greater than or equal to 1"):
+        SyncQueueLimits.model_validate(
+            {"maxEstimatedWaitSeconds": 0, "maxQueueWaitSeconds": 4}
+        )

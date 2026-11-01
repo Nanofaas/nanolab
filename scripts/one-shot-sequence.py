@@ -132,6 +132,11 @@ def main(argv=None):
         "--runtime-distributions",
         help="prebuilt per-architecture images, arm64=PATH,amd64=PATH; skips the build",
     )
+    parser.add_argument(
+        "--sync-queue-wait-seconds",
+        type=int,
+        help="sync-queue admission estimate and queue wait limit (nanoFaaS: 2)",
+    )
     args = parser.parse_args(argv)
     config = inputs(args.config.resolve())
     output = args.output.resolve()
@@ -187,6 +192,11 @@ def main(argv=None):
                 "runtimeDistributions": prebuilt,
             }
             if args.environment is not None
+            else {}
+        ),
+        **(
+            {"syncQueueWaitSeconds": args.sync_queue_wait_seconds}
+            if args.sync_queue_wait_seconds is not None
             else {}
         ),
         "order": [run for run in RUNS if not args.only or run in args.only],
@@ -245,6 +255,7 @@ def main(argv=None):
                 distribution=primary,
                 environment=args.environment,
                 runtime_distributions=args.runtime_distributions,
+                sync_queue_wait_seconds=args.sync_queue_wait_seconds,
                 source=source,
                 output=freeze,
                 decision_period_seconds=None if continuous else 60,
