@@ -119,6 +119,7 @@ def _role_requests_and_operations(
         "offload-loadtest",
         "release",
         "idle-reactivation",
+        "module-cost",
     )
     dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
     dedicated_cloud = (
@@ -282,6 +283,10 @@ def provision_environment(
         )
     if scenario.backend == "containerd" and environment.target("stack").user == "root":
         raise ValueError("containerd backend requires an unprivileged VM user")
+    if scenario.workflow == "module-cost":
+        from nanolab.plans.module_cost import require_module_environment
+
+        require_module_environment(environment)
     provider = provider_for_environment(
         environment, repo_root, orchestrator_factory=orchestrator_factory
     )

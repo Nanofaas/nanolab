@@ -53,5 +53,42 @@ def test_preparation_is_unique_validated_and_has_no_cloud_effects(tmp_path):
         assert env.roles["stack"].name != env.roles["loadgen"].name
         assert set(scenario.module_cost.order) == set(ARMS)
     assert prepare_campaign(tmp_path, Path("/controller/key.pub"), 23) != root
-    with pytest.raises(ValueError, match="module-cost|moduleCost|pattern|Extra|absolute") :
+    with pytest.raises(
+        ValueError, match=r"module-cost|moduleCost|pattern|Extra|absolute"
+    ):
         prepare_campaign(tmp_path, Path("relative.pub"), 23)
+
+
+def test_prepared_commands_preserve_paths_with_spaces(tmp_path):
+    import json
+    import os
+    import subprocess
+
+    from nanolab.comparison.module_cost import prepare_campaign
+
+    root = prepare_campaign(
+        tmp_path / "with spaces", tmp_path / "key with spaces.pub", 7
+    )
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    executable = binary / "nanolab"
+    executable.write_text(
+        "#!/usr/bin/env python3\nimport json,os,sys\n"
+        'with open(os.environ["CALLS"],"a") as f:'
+        'f.write(json.dumps(sys.argv[1:])+"\\n")\n'
+    )
+    executable.chmod(0o755)
+    calls = tmp_path / "calls.jsonl"
+    subprocess.run(
+        ["sh", str(root / "commands.sh")],
+        check=True,
+        env=os.environ
+        | {"PATH": str(binary) + ":" + os.environ["PATH"], "CALLS": str(calls)},
+    )
+    rows = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert len(rows) == 3
+    for row in rows:
+        assert row[0] == "run" and len(row) == 6
+        assert Path(row[1]).is_file()
+        assert Path(row[3]).is_file()
+        assert Path(row[5]).parent == Path(row[1]).parent

@@ -18,7 +18,7 @@ def module_cost_cells(block: str) -> dict[str, dict]:
     cells = {}
     for key in ARMS:
         runtime, composition = key.split("-")
-        modules = list(BASE)
+        modules: list[str] = list(BASE)
         if composition in ("c", "cs"):
             modules.append("concurrency-control")
         if composition in ("s", "cs"):

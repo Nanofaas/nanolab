@@ -16,7 +16,9 @@ def config(**changes):
 def test_protocol_accepts_only_its_measured_options():
     parsed = ScenarioConfig.model_validate(config())
     assert parsed.module_cost.block_id == "block-1"
-    with pytest.raises(ValueError, match="module-cost|moduleCost|pattern|Extra|absolute") :
+    with pytest.raises(
+        ValueError, match=r"module-cost|moduleCost|pattern|Extra|absolute"
+    ):
         ScenarioConfig.model_validate(config(loadScale=2))
 
 
@@ -31,5 +33,7 @@ def test_protocol_accepts_only_its_measured_options():
     ],
 )
 def test_protocol_rejects_unmatched_configuration(change):
-    with pytest.raises(ValueError, match="module-cost|moduleCost|pattern|Extra|absolute") :
+    with pytest.raises(
+        ValueError, match=r"module-cost|moduleCost|pattern|Extra|absolute"
+    ):
         ScenarioConfig.model_validate(config(**change))
