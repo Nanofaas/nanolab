@@ -523,3 +523,69 @@ def test_proof_lookup_reads_the_reported_node_first_and_falls_back_when_absent(
     assert summary["runtimes"] == 2
     assert (summary["rows"], summary["visited"]) == (3, 3)
     assert (summary["found"], summary["notFound"], summary["error"]) == (3, 1, 0)
+
+
+def test_neighbor_observation_failure_is_recorded_and_proofs_still_collected(
+    tmp_path, monkeypatch
+):
+    """A node stalled in activation must not stop the live proof collection."""
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        topology=SimpleNamespace(
+            resources=SimpleNamespace(nodes={"edge-1": SimpleNamespace()}),
+            function_settings={"work": SimpleNamespace(max_replicas=1)},
+            endpoints={"edge-1": "endpoint"},
+            neighbor_graph={"edge-1": ()},
+        ),
+    )
+    row = {
+        "originalId": "id",
+        "event": "result",
+        "phase": "campaign",
+        "executionId": "id",
+        "terminalExecutionId": "id",
+        "function": "work",
+        "executionNode": "edge-1",
+    }
+
+    def handler(request):
+        if request.url.path == "/runtime/executions/id":
+            return httpx.Response(
+                200,
+                json={
+                    "executionId": "id",
+                    "incarnation": "r",
+                    "dispatchAttempt": "1",
+                    "state": "RELEASED",
+                    "handlerStarted": True,
+                },
+            )
+        if request.url.path == "/runtime/status":
+            return httpx.Response(200, json={})
+        return httpx.Response(200, text="")
+
+    def stalled(*_args, **_kwargs):
+        raise httpx.ReadTimeout("status timed out")
+
+    monkeypatch.setattr("nanolab.tasks.one_shot.experiment.observe_neighbors", stalled)
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.runtime_endpoint",
+        lambda *_args, **_kwargs: ("http://sdk", {}),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(
+            "nanolab.tasks.one_shot.experiment.httpx.Client",
+            lambda **_: nullcontext(http),
+        )
+        visited, released = collect_runtime_evidence(
+            run,
+            cast(Any, SimpleNamespace(resource=lambda _: "http://gateway:8080")),
+            [row],
+        )
+    assert (visited, released) == (["id"], {"id"})
+    assert not (tmp_path / "peer-graph.jsonl").exists()
+    errors = [
+        json.loads(line)
+        for line in (tmp_path / "collection-errors.jsonl").read_text().splitlines()
+    ]
+    assert errors[0]["neighbors"] == "ReadTimeout: status timed out"

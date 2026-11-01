@@ -931,8 +931,10 @@ class LiveEvidenceCollector:
     def require_healthy(self):
         """Surface failures of the independent evidence sampler."""
         if self.error is not None:
+            # The supervisor reports only the message: carry the cause in it.
             raise RuntimeError(
-                "live physical evidence collector failed"
+                "live physical evidence collector failed: "
+                f"{type(self.error).__name__}: {self.error}"
             ) from self.error
 
     def close(self):
@@ -1178,17 +1180,30 @@ def collect_runtime_evidence(
         return visited, released
     with httpx.Client(trust_env=False) as http:
         if getattr(run.topology, "neighbor_graph", None):
-            snapshot = observe_neighbors(
-                http,
-                {
-                    key: inputs.resource(run.topology.endpoints[key])
-                    for key in run.topology.neighbor_graph
-                },
-                run.topology.neighbor_graph,
-            )
-            append_observation(
-                run.run_dir / "peer-graph.jsonl", {"at": sampled_at, "nodes": snapshot}
-            )
+            # A node busy activating can stall or disagree for a moment: keep the
+            # failure as evidence and still collect this pass's proofs.
+            try:
+                snapshot = observe_neighbors(
+                    http,
+                    {
+                        key: inputs.resource(run.topology.endpoints[key])
+                        for key in run.topology.neighbor_graph
+                    },
+                    run.topology.neighbor_graph,
+                )
+            except Exception as error:
+                append_observation(
+                    run.run_dir / "collection-errors.jsonl",
+                    {
+                        "atUtc": sampled_at,
+                        "neighbors": f"{type(error).__name__}: {error}",
+                    },
+                )
+            else:
+                append_observation(
+                    run.run_dir / "peer-graph.jsonl",
+                    {"at": sampled_at, "nodes": snapshot},
+                )
 
         def discover(item):
             node_id, node = item
@@ -1221,6 +1236,8 @@ def collect_runtime_evidence(
                     result["metrics"].raise_for_status()
             except (httpx.HTTPError, ValueError, RuntimeError) as error:
                 result["error"] = error
+            except OSError as error:
+                result["error"] = httpx.ReadError(str(error))
             return result
 
         tally = Counter()
