@@ -7,6 +7,7 @@ from sonata_tasks.tasks.models import TaskResult
 from sonata_tasks.vm.models import VmRequest as SharedVmRequest
 
 from nanolab.tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.provisioning.bootstrap import OWN_STDIN
 from nanolab.tasks.provisioning.environment import ProvisionedRole, provision_roles
 from nanolab.tasks.vm.models import VmRequest
 
@@ -17,6 +18,9 @@ class RecordingShell:
     events: list[str] = field(default_factory=list)
 
     def run(self, argv: list[str], *, cwd, env, dry_run: bool) -> TaskResult:
+        # Every host command arrives behind the wrapper giving it its own stdin.
+        assert tuple(argv[: len(OWN_STDIN)]) == OWN_STDIN
+        argv = argv[len(OWN_STDIN) :]
         self.commands.append(tuple(argv))
         self.events.append(f"command:{argv[0]}")
         return TaskResult(task_id="x", status="passed", return_code=0)

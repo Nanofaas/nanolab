@@ -71,6 +71,12 @@ class OperationTask:
         return result
 
 
+# A host command gets its own /dev/null as stdin. Inherited, the run's stdin is
+# one open file shared with every concurrent ssh, which marks it non-blocking
+# while it runs; Ansible then refuses to start ("requires blocking IO").
+OWN_STDIN = ("sh", "-c", 'exec "$@" </dev/null', "sh")
+
+
 def operation_task(
     operation: RemoteCommandOperation,
     executor: HostCommandTaskExecutor,
@@ -78,10 +84,13 @@ def operation_task(
     title: str | None = None,
 ) -> OperationTask:
     """Wrap `operation` as a runnable task for a host executor."""
+    argv = tuple(operation.argv)
+    if operation.execution_target == "host":
+        argv = (*OWN_STDIN, *argv)
     spec = CommandTaskSpec(
         task_id=operation.operation_id,
         summary=operation.summary,
-        argv=tuple(operation.argv),
+        argv=argv,
         role="stack" if operation.execution_target == "vm" else "host",
         options=CommandOptions(env=dict(operation.env), remote_dir=None),
     )
