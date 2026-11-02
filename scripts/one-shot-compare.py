@@ -96,7 +96,9 @@ def node_counters(directory: Path) -> dict[str, dict[str, int]]:
 
     The baseline is the last sample at or before the campaign start (the
     first one inside it when sampling began late); only two lines per node are
-    parsed, since each sample holds every histogram bucket.
+    parsed, since each sample holds every histogram bucket. A failed sample
+    (an unreachable control plane) has no counters and is skipped, so a node
+    that stopped early counts up to its last sample.
     """
     start, end = campaign_window(directory)
     counters = {}
@@ -106,7 +108,7 @@ def node_counters(directory: Path) -> dict[str, dict[str, int]]:
         with path.open() as stream:
             for line in stream:
                 found = SAMPLE_TIME.search(line, 0, 200)
-                if found is None:
+                if found is None or '"samples":' not in line:
                     continue
                 at = datetime.fromisoformat(found.group(1)).timestamp()
                 if at <= start:

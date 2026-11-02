@@ -164,3 +164,24 @@ def test_a_counter_reset_is_refused(tmp_path):
     run_dir(tmp_path / "run", completed=80, executions=-60)
     with pytest.raises(SystemExit, match="went back"):
         compare.node_counters(tmp_path / "run")
+
+
+def test_failed_samples_are_skipped_so_a_stopped_node_keeps_its_last_count(
+    tmp_path,
+):
+    run_dir(tmp_path / "run", completed=80, executions=100)
+    samples = tmp_path / "run/queue-samples-edge-1.jsonl"
+    lines = samples.read_text().splitlines()
+    # The control plane stopped before the end: its last sample is an error.
+    failed = json.dumps(
+        {
+            "atUtc": datetime.fromtimestamp(START + 150, UTC).isoformat(),
+            "node": "edge-1",
+            "measurementComplete": False,
+            "error": "unreachable",
+        }
+    )
+    # Its last campaign sample is the error; the one at the drain's end is gone.
+    samples.write_text("\n".join([*lines[:3], failed, lines[4]]) + "\n")
+    # 50 at the start, 80 at its last good sample.
+    assert compare.node_counters(tmp_path / "run")["edge-1"]["executions"] == 30
