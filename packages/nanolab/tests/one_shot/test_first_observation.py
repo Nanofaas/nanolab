@@ -93,6 +93,90 @@ def test_adapted_native_profile_preserves_real_historical_statistics(observer):
     assert cast(dict, row["measurement"])["rawSamplesHash"] == "sha256:" + "d" * 64
 
 
+def test_a_copied_node_takes_its_source_statistics(observer, tmp_path):
+    """Edges mirrored from a calibrated one have no samples of their own."""
+    window = tmp_path / "physical-window"
+    window.mkdir()
+    rows = [
+        {
+            "originalId": f"o{index}",
+            "executionId": f"e{index}",
+            "incarnation": "r",
+            "dispatchAttempt": "1",
+            "destination": "edge-1",
+            "function": "f",
+            "emittedAt": 100.0 + index,
+            "state": "RELEASED",
+            "handlerStarted": True,
+            "statusCode": 200,
+            "responseStatus": "success",
+            "occupancySeconds": seconds,
+        }
+        for index, seconds in enumerate([1.0, 2.0, 3.0])
+    ]
+    physical = window / "physical.jsonl"
+    physical.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    cell = {"sampleCount": 3, "meanSeconds": 2.0}
+    observed = {
+        "sourceDirectory": str(tmp_path),
+        "sourcePhysicalSha256": observer.sha(physical),
+        "measurementStartUtc": "1970-01-01T00:01:40+00:00",
+        "measurementSeconds": 60,
+        "service": {"edge-1": {"f": dict(cell)}, "edge-6": {"f": dict(cell)}},
+        "mirroredFrom": {"edge-6": "edge-1"},
+    }
+    result = observer.historical_statistics(observed)
+    assert result["edge-1"]["f"]["stddevSeconds"] == 1.0
+    assert result["edge-6"] == result["edge-1"]
+    observed["service"]["edge-6"]["f"]["meanSeconds"] = 9.0
+    with pytest.raises(ValueError, match="differs from its source"):
+        observer.historical_statistics(observed)
+
+
+def test_multisite_placement_binds_each_pinned_node_to_its_site(observer):
+    from nanolab.config import EnvironmentConfig
+
+    pinned = {"cpus": [0], "maxFrequencyKHz": 2808000}
+    scenario = {
+        "oneShot": {
+            "runtimeDistribution": {"path": "d", "sha256": "0" * 64},
+            "hostCpuPlacement": {
+                "nodes": {"edge-1": pinned, "edge-6": pinned, "cloud": pinned},
+                "operatorCpus": [8],
+            },
+        }
+    }
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "one-shot"}},
+            "sites": {
+                name: {"ssh": name, "address": address, "architecture": "arm64"}
+                for name, address in (
+                    ("spark-35", "149.132.179.35"),
+                    ("spark-175", "149.132.179.175"),
+                )
+            },
+            "placement": {
+                "edge-1": "spark-35",
+                "edge-6": "spark-175",
+                "cloud": "azure",
+            },
+            "azure": {
+                "resource_group": "rg",
+                "location": "westeurope",
+                "priority": "Spot",
+                "eviction_policy": "Delete",
+                "work_dir": "/w",
+            },
+        }
+    )
+    placed = observer.place_scenario(scenario, environment, {"arm64": {}})
+    placement = placed["oneShot"]["hostCpuPlacement"]
+    assert set(placement["nodes"]) == {"edge-1", "edge-6"}
+    assert placement["hosts"] == {"edge-1": "spark-35", "edge-6": "spark-175"}
+
+
 def test_frozen_file_hash_changes_stop_before_use(observer, tmp_path):
     assert observer is not None, "first-observation script is missing"
     file = tmp_path / "input.json"

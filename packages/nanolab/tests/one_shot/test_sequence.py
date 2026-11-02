@@ -53,3 +53,52 @@ sys.exit(9 if name == FAILURE else 0)
     ] == expected
     status = json.loads((tmp_path / "sequence-status.json").read_text())
     assert status["state"] == ("failed" if failure else "complete")
+
+
+def sequence_inputs(tmp_path, *, replayed, parent):
+    """Write a minimal input set; only the shapes `inputs` reads are real."""
+    physical = tmp_path / "samples/physical-window/physical.jsonl"
+    physical.parent.mkdir(parents=True)
+    physical.write_text("{}\n")
+    module = sequence_module()
+    observations = tmp_path / "observations.json"
+    observations.write_text(
+        json.dumps({"sourcePhysicalSha256": module.digest(physical)})
+    )
+    tuning = tmp_path / "tuning"
+    tuning.mkdir()
+    minute = {"period_seconds": 60, "windows": [{}] * 54}
+    for name in ("trace.json", "selected.json", "input-context.json"):
+        (tuning / name).write_text(json.dumps(minute))
+    if replayed:
+        (tuning / "arrival-profile.json").write_text("{}")
+    (tmp_path / "parent").mkdir()
+    (tmp_path / "runtime").mkdir()
+    config = tmp_path / "inputs.json"
+    config.write_text(
+        json.dumps(
+            {
+                "runtimeSource": "runtime",
+                "stepTuning": "tuning",
+                "continuousTuning": "tuning",
+                "continuousParentFreeze": "parent" if parent else None,
+                "observations": "observations.json",
+                "physicalSamples": "samples/physical-window/physical.jsonl",
+            }
+        )
+    )
+    return module, config
+
+
+def test_a_load_tuned_in_minutes_needs_no_parent_freeze(tmp_path):
+    module, config = sequence_inputs(tmp_path, replayed=False, parent=False)
+    result = module.inputs(config)
+    assert result["continuousParentFreeze"] is None
+    assert result["continuousTuning"] == tmp_path / "tuning"
+
+
+@pytest.mark.parametrize(("replayed", "parent"), [(True, False), (False, True)])
+def test_replay_and_parent_freeze_go_together(tmp_path, replayed, parent):
+    module, config = sequence_inputs(tmp_path, replayed=replayed, parent=parent)
+    with pytest.raises(ValueError, match="parent freeze"):
+        module.inputs(config)

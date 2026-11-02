@@ -7,13 +7,26 @@ recording, and adds what a multi-site graph needs: nodes copied from the
 calibrated ones (same VM, limits and pool, so their service observations
 apply), the phases and per-node base factors read from a design file, and a
 cross-site requirement. No VM, deployment or benchmark is launched.
+
+A design with `hotspots` instead of `phases` ramps the load: each hotspot rises
+to its peak and falls back geometrically over `widthIntervals`, hotspots of
+different edges overlap, and one factor is searched for all intervals at once,
+refusing any whose edge totals change between consecutive intervals by more
+than `maxStepRatio`. The one-shot plan follows load with an epoch of delay, so
+a step makes the first epoch after it reject what a ramp lets it shed. A ramp
+design may set `periodSeconds` (one-minute intervals are the epochs the
+runtime plans) and count the intervals with a cloud request
+(`requirements.cloudIntervals`) instead of requiring one in each.
 """
 
 import argparse
 import copy
+import itertools
 import json
 import runpy
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 import yaml
@@ -34,13 +47,18 @@ WEIGHTS = {
     "one-shot-mixed": 0.95,
 }
 PERIOD_SECONDS = 360
+# Rates below this count as this in a step ratio, so that the flow quantum's
+# rounding of a near-idle function does not read as a jump.
+STEP_FLOOR_RPS = 0.5
 
 
 def expand_scenario(document, design):
     """Copy calibrated nodes onto the design's new ids and set its graph.
 
-    Host CPU placement belongs to a deployment, not to the load model: it is
-    dropped, like the runtime images, so the model only binds sizes and limits.
+    A copied node also takes its source's host CPUs, on its own site: the
+    edges' hosts are the design's sites (the observation rebinds them from the
+    environment, which must agree); the runtime
+    images are dropped, so the model only binds sizes and limits.
     """
     result = copy.deepcopy(document)
     settings = result["oneShot"]
@@ -54,7 +72,11 @@ def expand_scenario(document, design):
     edges = [node for node in settings["nodes"] if node["kind"] == "edge"]
     settings["nodes"] = [*edges, *added, *cloud]
     settings["neighbors"] = design["neighbors"]
-    settings.pop("hostCpuPlacement", None)
+    placement = settings.get("hostCpuPlacement")
+    if placement is not None:
+        for new, source in design["mirror"].items():
+            placement["nodes"][new] = copy.deepcopy(placement["nodes"][source])
+        placement["hosts"] = site_of(design)
     settings.pop("runtimeDistribution", None)
     return result
 
@@ -94,6 +116,71 @@ def candidate_rates(context, design, phase, factor):
                 capacity * scale * WEIGHTS[name], context["flowQuantum"]
             )
     return rates
+
+
+def ramp_label(design, interval):
+    """Name an interval after the hotspots peaking in it (centres may be halves)."""
+    peaks = [
+        spot["edge"]
+        for spot in design["hotspots"]
+        if abs(spot["center"] - interval) <= 0.5
+    ]
+    return f"i{interval}-" + ("-".join(peaks) if peaks else "between")
+
+
+def ramp_rates(context, design, interval, factor):
+    """The original pressure rule, ramped geometrically around each hotspot.
+
+    A function sits at its base at a hotspot's width and at the original peak
+    (factor x 1.5 for the hotspot's function, x 0.65 for the others) at its
+    centre; between them its scale is base x (peak / base) ** share, so each
+    interval multiplies it by the same ratio. Overlapping hotspots of one edge
+    take the higher scale.
+    """
+    rounded_rate = ORIGINAL["rounded_rate"]
+    width = design["profile"]["widthIntervals"]
+    rates = {}
+    for node, functions in context["parameters"].items():
+        rates[node] = {}
+        for name, params in functions.items():
+            count = context["initialReplicas"][node][name]
+            capacity = count * params["utilization"] / params["serviceSeconds"]
+            if node == context["cloud"]:
+                scale = 0.03 * (1 + interval * 0.05)
+            else:
+                base = scale = design["baseFactors"][node]
+                for spot in design["hotspots"]:
+                    if spot["edge"] != node:
+                        continue
+                    share = max(0.0, 1 - abs(interval - spot["center"]) / width)
+                    peak = (
+                        factor
+                        * spot.get("amplitude", 1)
+                        * (1.5 if spot["function"] == name else 0.65)
+                    )
+                    if peak > base:
+                        scale = max(scale, base * (peak / base) ** share)
+            rates[node][name] = rounded_rate(
+                capacity * scale * WEIGHTS[name], context["flowQuantum"]
+            )
+    return rates
+
+
+def step_ratios(windows, edges):
+    """Each edge function's largest rate change between consecutive intervals.
+
+    Per function, as the runtime forecasts; rates are floored at
+    STEP_FLOOR_RPS first.
+    """
+    ratios = {}
+    for edge in edges:
+        for name in windows[0][edge]:
+            rates = [max(window[edge][name], STEP_FLOOR_RPS) for window in windows]
+            ratios[edge + "/" + name] = max(
+                (max(a, b) / min(a, b) for a, b in itertools.pairwise(rates)),
+                default=1.0,
+            )
+    return ratios
 
 
 def cross_site(routes, sites):
@@ -149,6 +236,9 @@ def coverage(selected, design, sites):
         "intervalsWithCrossSiteOffload": sum(
             bool(row["crossSiteRoutes"]) for row in intervals
         ),
+        "intervalsWithCloudRequest": sum(
+            result["summary"]["cloudRequestedEdgeRps"] > 0 for result in selected
+        ),
     }
     if totals["intervalsWithPeerOffload"] < required["peerOffloadIntervals"]:
         raise ValueError("peer offload is missing in some interval")
@@ -156,12 +246,152 @@ def coverage(selected, design, sites):
         raise ValueError("too few intervals with a source offloading to two peers")
     if totals["intervalsWithCrossSiteOffload"] < required["crossSiteIntervals"]:
         raise ValueError("too few intervals with offload across sites")
+    if totals["intervalsWithCloudRequest"] < required.get("cloudIntervals", 0):
+        raise ValueError("too few intervals with a cloud request")
     return {
         **totals,
         "requirements": required,
         "interpretation": "predicted one-hop peer requests, not auction messages",
         "intervals": intervals,
     }
+
+
+def select_phases(solve, context, design, sites):
+    """Per phase, the first factor whose solution has the required offloads."""
+    phases = design["phases"]
+    selected, summaries = [], []
+    last = len(phases) - 1
+    for index, phase in enumerate(phases):
+        phase = {**phase, "index": index}
+        candidates = []
+        for factor in FACTORS:
+            result = solve(
+                phase["id"] + "-" + str(factor),
+                phase["id"],
+                factor,
+                candidate_rates(context, design, phase, factor),
+            )
+            candidates.append(result)
+            summaries.append(
+                {"phase": phase["id"], "factor": factor, **result["summary"]}
+            )
+        selected.append(
+            select(
+                candidates,
+                require_cloud=0 < index < last,
+                require_cross=phase.get("requireCrossSite", False),
+                sites=sites,
+            )
+        )
+    return selected, summaries, None
+
+
+def select_ramp(solve, context, design, sites, jobs=1):
+    """The first factor whose ramped intervals all meet the requirements."""
+    peer_routes = ORIGINAL["peer_routes"]
+    profile = design["profile"]
+    intervals = design["intervals"]
+    summaries, search = [], []
+    for factor in profile.get("factors", FACTORS):
+        windows = [ramp_rates(context, design, i, factor) for i in range(intervals)]
+        ratios = step_ratios(windows, context["edges"])
+        if max(ratios.values()) > profile["maxStepRatio"]:
+            # A higher factor only raises the peaks: every later one is steeper.
+            search.append({"factor": factor, "stepRatios": ratios, "steep": True})
+            break
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            results = list(
+                pool.map(
+                    lambda item, factor=factor: solve(
+                        f"{ramp_label(design, item[0])}-{factor}",
+                        ramp_label(design, item[0]),
+                        factor,
+                        item[1],
+                    ),
+                    enumerate(windows),
+                )
+            )
+        summaries += [
+            {"phase": result["id"], "factor": factor, **result["summary"]}
+            for result in results
+        ]
+        failures = []
+        for index, result in enumerate(results):
+            if not peer_routes(result):
+                failures.append(f"interval {index}: no peer offload")
+            if (
+                "cloudIntervals" not in design["requirements"]
+                and 0 < index < intervals - 1
+                and result["summary"]["cloudRequestedEdgeRps"] <= 0
+            ):
+                failures.append(f"interval {index}: no cloud request")
+        try:
+            coverage(results, design, sites)
+        except ValueError as error:
+            failures.append(str(error))
+        routes = [ORIGINAL["peer_routes"](result) for result in results]
+        search.append(
+            {
+                "factor": factor,
+                "stepRatios": ratios,
+                "failures": failures,
+                "intervalsWithPeerOffload": sum(map(bool, routes)),
+                "intervalsWithCrossSiteOffload": sum(
+                    bool(cross_site(found, sites)) for found in routes
+                ),
+                "intervalsWithCloudRequest": sum(
+                    result["summary"]["cloudRequestedEdgeRps"] > 0 for result in results
+                ),
+                "peakEdgeRps": max(
+                    result["summary"]["offeredEdgeRps"] for result in results
+                ),
+                "peakCloudRequestedRps": max(
+                    result["summary"]["cloudRequestedEdgeRps"] for result in results
+                ),
+                "edgeRequests": sum(
+                    result["summary"]["offeredEdgeRps"] for result in results
+                )
+                * design.get("periodSeconds", PERIOD_SECONDS),
+            }
+        )
+        if not failures:
+            return results, summaries, search
+    raise RampSearchError(search)
+
+
+class RampSearchError(ValueError):
+    """No factor satisfies the ramp; carries the search for the record."""
+
+    def __init__(self, search):
+        """Keep every factor's step ratios and failures."""
+        super().__init__("no factor satisfies the ramped requirements")
+        self.search = search
+
+
+def solve_case(args, context, identity, phase_id, factor, rates):
+    """Solve one candidate with the pinned original helpers."""
+    source = args.output / (identity + ".input.json")
+    destination = args.output / (identity + ".result.json")
+    write_json(
+        source,
+        {"id": phase_id, "factor": factor, "context": context, "rates": rates},
+    )
+    execute(
+        identity,
+        [
+            str(args.reference_python),
+            str(args.output / "original-source-used.py"),
+            "case",
+            "--input",
+            str(source),
+            "--reference",
+            str(args.reference),
+            "--output",
+            str(destination),
+        ],
+        args.output,
+    )
+    return json.loads(destination.read_text())
 
 
 def report(output, selected, context, sites):
@@ -199,9 +429,11 @@ def tune(args):
     from nanolab.tasks.one_shot.trace import TraceArtifact
 
     design = json.loads(args.design.read_text())
-    phases = design["phases"]
-    if len(phases) * PERIOD_SECONDS != design["plannedMeasurementSeconds"]:
-        raise ValueError("phases do not cover the planned measurement")
+    ramp = "hotspots" in design
+    intervals = design["intervals"] if ramp else len(design["phases"])
+    period = design.get("periodSeconds", PERIOD_SECONDS)
+    if intervals * period != design["plannedMeasurementSeconds"]:
+        raise ValueError("intervals do not cover the planned measurement")
     sites = site_of(design)
     args.output.mkdir(parents=True, exist_ok=False)
     try:
@@ -240,52 +472,21 @@ def tune(args):
                 "candidateFactors": FACTORS,
             },
         )
-        selected, summaries = [], []
-        last = len(phases) - 1
-        for index, phase in enumerate(phases):
-            phase = {**phase, "index": index}
-            candidates = []
-            for factor in FACTORS:
-                identity = phase["id"] + "-" + str(factor)
-                source = args.output / (identity + ".input.json")
-                destination = args.output / (identity + ".result.json")
-                write_json(
-                    source,
-                    {
-                        "id": phase["id"],
-                        "factor": factor,
-                        "context": context,
-                        "rates": candidate_rates(context, design, phase, factor),
-                    },
+        solve = partial(solve_case, args, context)
+        try:
+            if ramp:
+                selected, summaries, search = select_ramp(
+                    solve, context, design, sites, jobs=args.jobs
                 )
-                execute(
-                    identity,
-                    [
-                        str(args.reference_python),
-                        str(original_snapshot),
-                        "case",
-                        "--input",
-                        str(source),
-                        "--reference",
-                        str(args.reference),
-                        "--output",
-                        str(destination),
-                    ],
-                    args.output,
+            else:
+                selected, summaries, search = select_phases(
+                    solve, context, design, sites
                 )
-                result = json.loads(destination.read_text())
-                candidates.append(result)
-                summaries.append(
-                    {"phase": phase["id"], "factor": factor, **result["summary"]}
-                )
-            selected.append(
-                select(
-                    candidates,
-                    require_cloud=0 < index < last,
-                    require_cross=phase.get("requireCrossSite", False),
-                    sites=sites,
-                )
-            )
+        except RampSearchError as error:
+            write_json(args.output / "ramp-search.json", error.search)
+            raise
+        if search is not None:
+            write_json(args.output / "ramp-search.json", search)
         write_json(args.output / "candidate-summaries.json", summaries)
         write_json(args.output / "selected.json", selected)
         write_json(
@@ -294,7 +495,7 @@ def tune(args):
         trace = TraceArtifact(
             nodes=[*context["edges"], context["cloud"]],
             functions=context["functions"],
-            period_seconds=PERIOD_SECONDS,
+            period_seconds=period,
             flow_quantum=context["flowQuantum"],
             seed=7,
             payloads={
@@ -330,8 +531,8 @@ def tune(args):
                 "qualified": False,
                 "purpose": "multi-site-load-design",
                 "referenceCommit": ORIGINAL["REFERENCE_COMMIT"],
-                "periodSeconds": PERIOD_SECONDS,
-                "intervals": len(phases),
+                "periodSeconds": period,
+                "intervals": intervals,
                 "plannedMeasurementSeconds": design["plannedMeasurementSeconds"],
                 "files": {
                     path.name: digest(path)
@@ -361,6 +562,9 @@ def main(argv=None):
         "output",
     ]:
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument(
+        "--jobs", type=int, default=1, help="ramp cases solved concurrently"
+    )
     tune(parser.parse_args(argv))
 
 

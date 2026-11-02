@@ -142,6 +142,10 @@ def _validate_placement(
             raise ValueError("Azure nodes cannot have host CPU placement")
         if site != AZURE_SITE and len(pinned) != len(members):
             raise ValueError(f"every node on {site} needs host CPU placement")
+        if placement.hosts and any(
+            placement.hosts.get(node) != site for node in pinned
+        ):
+            raise ValueError(f"host CPU placement names another host for {site}")
 
 
 def build_multisite_resources(

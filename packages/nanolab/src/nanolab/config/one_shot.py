@@ -48,20 +48,30 @@ class HostCpuTarget(BaseModel):
 
 
 class HostCpuPlacement(BaseModel):
-    """Disjoint VM, operator and owned logging CPU reservations."""
+    """Disjoint VM, operator and owned logging CPU reservations.
+
+    `hosts` names the host of nodes placed on another machine (a multi-site
+    placement); CPU ids are disjoint per host. Unnamed nodes share the
+    operator's host with the operator and logging CPUs.
+    """
 
     model_config = ConfigDict(extra="forbid")
     nodes: dict[str, HostCpuTarget] = Field(min_length=1)
     operator_cpus: list[CpuId] = Field(alias="operatorCpus", min_length=1)
     logging_cpus: list[CpuId] = Field(default_factory=list, alias="loggingCpus")
+    hosts: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_disjoint_cpus(self) -> Self:
-        """Reject overlap within or between any declared reservations."""
-        ids = [cpu for node in self.nodes.values() for cpu in node.cpus]
-        ids.extend(self.operator_cpus)
-        ids.extend(self.logging_cpus)
-        if len(ids) != len(set(ids)):
+        """Reject overlap within or between the reservations of one host."""
+        if not set(self.hosts) <= set(self.nodes):
+            raise ValueError("host CPU placement hosts name unknown nodes")
+        by_host: dict[str | None, list[int]] = {
+            None: [*self.operator_cpus, *self.logging_cpus]
+        }
+        for node, target in self.nodes.items():
+            by_host.setdefault(self.hosts.get(node), []).extend(target.cpus)
+        if any(len(ids) != len(set(ids)) for ids in by_host.values()):
             raise ValueError("host CPU reservations overlap")
         return self
 

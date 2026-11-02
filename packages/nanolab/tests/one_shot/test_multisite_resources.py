@@ -255,6 +255,22 @@ def test_azure_nodes_must_not_have_host_cpus(offline_site, tmp_path, monkeypatch
         build_one_shot_resources(pinned, environment(), run_id="r1", repo_root=tmp_path)
 
 
+def test_a_placement_host_must_be_the_node_site(offline_site, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        multisite.host_cpu, "validate_host_placement", lambda *_a, **_k: {}
+    )
+    pinned = scenario(
+        **{
+            "edge-1": {"cpus": [0], "maxFrequencyKHz": 2808000},
+            "edge-2": {"cpus": [1], "maxFrequencyKHz": 2808000},
+        }
+    )
+    assert pinned.host_cpu_placement is not None
+    pinned.host_cpu_placement.hosts.update({"edge-1": "spark-35", "edge-2": "other"})
+    with pytest.raises(ValueError, match="names another host for spark-35"):
+        build_one_shot_resources(pinned, environment(), run_id="r1", repo_root=tmp_path)
+
+
 def test_site_capacity_is_checked_against_that_site(
     offline_site, tmp_path, monkeypatch
 ):

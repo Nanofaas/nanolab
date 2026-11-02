@@ -266,6 +266,10 @@ def place_scenario(scenario, environment, distributions):
         for node, site in environment.placement.items():
             if site == "azure":
                 placement["nodes"].pop(node, None)
+        # CPU ids are per site: two Sparks may pin their VMs to the same ids.
+        placement["hosts"] = {
+            node: environment.placement[node] for node in placement["nodes"]
+        }
     return result
 
 
@@ -288,7 +292,12 @@ def historical_statistics(observed):
                 row["occupancySeconds"]
             )
     result = copy.deepcopy(observed["service"])
+    # A node copied from a calibrated one (same VM, limits and pool) has no
+    # samples of its own: it takes its source's statistics.
+    mirrored = observed.get("mirroredFrom", {})
     for node, functions in result.items():
+        if node in mirrored:
+            continue
         for name, cell in functions.items():
             samples = values[node, name]
             if (
@@ -297,6 +306,10 @@ def historical_statistics(observed):
             ):
                 raise ValueError("historical statistics mismatch")
             cell["stddevSeconds"] = statistics.stdev(samples)
+    for node, source in mirrored.items():
+        if result[node] != observed["service"][source]:
+            raise ValueError(f"{node} service differs from its source {source}")
+        result[node] = copy.deepcopy(result[source])
     return result
 
 
@@ -406,6 +419,16 @@ def prepare(args):
         args.output / "recipe.yaml",
     )
     step_period = getattr(args, "decision_period_seconds", None)
+    # A load tuned directly in the runtime's one-minute epochs: its windows are
+    # the decisions and its requests are evenly spaced within each minute.
+    native_minute = (
+        arrival_input is None
+        and step_period is None
+        and TraceArtifact.model_validate_json(
+            (args.output / "trace.json").read_bytes()
+        ).period_seconds
+        == 60
+    )
     if step_period is not None:
         if arrival_input is not None:
             raise ValueError("decision-period override is only for uniform step load")
@@ -444,7 +467,7 @@ def prepare(args):
                     (args.output / "trace.json").read_bytes()
                 )
             }
-            if derived or step_period is not None
+            if derived or step_period is not None or native_minute
             else {}
         ),
     )
@@ -477,18 +500,10 @@ def prepare(args):
         and settings.experiment is not None
     )
     trace = TraceArtifact.model_validate_json((args.output / "trace.json").read_text())
+    minute = derived or step_period is not None or native_minute
     if (
-        (
-            not derived
-            and step_period is None
-            and (len(trace.windows) != 9 or trace.period_seconds != 360)
-        )
-        or (
-            step_period is not None
-            and (len(trace.windows) != 54 or trace.period_seconds != 60)
-        )
-        or (derived and (len(trace.windows) != 54 or trace.period_seconds != 60))
-        or len(trace.nodes) != 6
+        (len(trace.windows), trace.period_seconds) != ((54, 60) if minute else (9, 360))
+        or set(trace.nodes) != {node.id for node in settings.nodes}
         or len(trace.functions) != 5
     ):
         raise ValueError("approved trace scope required")
@@ -526,7 +541,7 @@ def prepare(args):
             )
     coverage = json.loads((args.output / "offload-coverage.json").read_text())
     if not derived and (
-        coverage["intervalsWithPeerOffload"] != 9
+        coverage["intervalsWithPeerOffload"] != len(trace.windows)
         or coverage["intervalsWithMultipleNeighbors"] < 2
     ):
         raise ValueError("offload coverage missing")

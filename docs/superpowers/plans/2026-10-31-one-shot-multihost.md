@@ -311,6 +311,27 @@ Robustness:
     decide only when both runs prove 95% of successes. The fifth run is then
     within tolerance everywhere (executions within +6.7%, handled +5.2%).
 
+23. Ten-edge load (2026-11-02). The step design (`design-10edge.json`,
+    nine six-minute phases) met its requirements but its hotspots are steps
+    (edge-5 4.8 → 31.9 req/s), and in the fifth run the first minute after a
+    step rejected 10.9% against 2.5–5% later: the plan follows load one epoch
+    late. `design-10edge-minute.json` tunes the runtime's 54 one-minute
+    epochs directly: the same nine hotspots peak mid-phase and ramp
+    geometrically over nine minutes, one factor for the whole run (3), no
+    edge function changing by more than ×1.42 between minutes (the five-edge
+    replay reached ×4.2). Requirements count minutes: peer offload 54/54,
+    two receivers ≥12 (54), cross-site ≥18 (33), cloud request ≥18 (23);
+    ~160,600 requests, cloud ≤62% modelled utilization at 7 replicas.
+    Result: `model/load-tuning-10edge-minute-03`. The workflow takes it as
+    a continuous tuning without arrival profile or parent freeze: requests
+    evenly spaced per minute, warm-up at the first minute's rates (the
+    54×60 grid no longer falls to the legacy 4 req/s), trace scope from the
+    scenario's nodes, copied nodes' service statistics from their source,
+    and CPU ids disjoint per host (`hostCpuPlacement.hosts`, bound from the
+    environment) so `.175` reuses `.35`'s pins. `environment-phase3.yaml`
+    assumes `.175` matches `.35` (Multipass client path, VM key); unverified
+    while `.175` is unreachable.
+
 Maintainability:
 
 9. Update the design spec: it still describes Loki per site and NSG rules
