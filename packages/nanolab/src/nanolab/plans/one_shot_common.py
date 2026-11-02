@@ -603,7 +603,9 @@ def add_one_shot_platforms(
         require_resource_overhead(settings)
     run_dir.mkdir(parents=True, exist_ok=True)
     graph = validate_neighbor_graph(settings)
-    resources = build_one_shot_resources(settings, environment, repo_root=repo_root)
+    resources = build_one_shot_resources(
+        settings, environment, repo_root=repo_root, run_dir=run_dir
+    )
     definitions = {
         key: resolve_function_definition(key, repo_root) for key in config.functions
     }

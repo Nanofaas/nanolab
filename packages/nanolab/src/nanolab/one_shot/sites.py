@@ -6,17 +6,26 @@ run the site's Multipass client over SSH, and commands and file transfers to a
 VM use the provider's own SSH, jumped through the site because the VM sits
 behind the site's NAT. One shared SSH connection per site keeps the many short
 commands of a run from paying a handshake each.
+
+A site whose only reachable port is SSH (`tunnel`) has its VMs' forwarded ports
+published on an operator address instead, by an operator-owned `ssh -L` per
+node that carries each port to the same port on the site's loopback.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
+import signal
+import socket
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from multipass_vm_sdk import CommandResult, MultipassClient
@@ -372,3 +381,134 @@ class SiteForwarders:
                 f"forwarders still running on {self.host.site.ssh}: {alive}"
             )
         self.pids = []
+
+
+class OperatorTunnel:
+    """An operator `ssh -L` publishing a node's site ports on an operator address.
+
+    Each port listens on `address` (an address of this operator) and is carried
+    to the same port on the site's loopback, where the node's forwarders
+    listen. The tunnel has its own SSH connection, so the site's shared command
+    connection never carries experiment traffic. A watcher reopens it whenever
+    ssh exits; opens, exits and failed reopens go to `journal`.
+    """
+
+    def __init__(
+        self,
+        site: MultipassSite,
+        address: str,
+        ports: tuple[int, ...],
+        *,
+        name: str,
+        journal: Path | None = None,
+        ready_seconds: float = 30,
+        retry_seconds: float = 5,
+    ) -> None:
+        """Store what to publish; nothing runs until `start`."""
+        self.site = site
+        self.address = address
+        self.ports = ports
+        self.name = name
+        self.journal = journal
+        self.ready_seconds = ready_seconds
+        self.retry_seconds = retry_seconds
+        self.process: subprocess.Popen | None = None
+        self._stopping = threading.Event()
+        self._watcher: threading.Thread | None = None
+
+    def argv(self) -> list[str]:
+        """Return the ssh command holding every forward of this node."""
+        forwards = [
+            option
+            for port in self.ports
+            for option in ("-L", f"{self.address}:{port}:127.0.0.1:{port}")
+        ]
+        return [
+            "ssh",
+            "-N",
+            *("-o", "BatchMode=yes", "-o", "ConnectTimeout=15"),
+            *("-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"),
+            *("-o", "ControlMaster=no", "-o", "ControlPath=none"),
+            *("-o", "ExitOnForwardFailure=yes"),
+            *forwards,
+            self.site.ssh,
+        ]
+
+    def _record(self, event: str, **fields) -> None:
+        if self.journal is None:
+            return
+        self.journal.parent.mkdir(parents=True, exist_ok=True)
+        row = {"atUtc": datetime.now(UTC).isoformat(), "tunnel": self.name}
+        with self.journal.open("a") as stream:
+            stream.write(json.dumps({**row, "event": event, **fields}) + "\n")
+
+    def _listening(self) -> bool:
+        for port in self.ports:
+            try:
+                socket.create_connection((self.address, port), timeout=1).close()
+            except OSError:
+                return False
+        return True
+
+    def _open(self) -> None:
+        self.process = subprocess.Popen(
+            self.argv(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + self.ready_seconds
+        while time.monotonic() < deadline:
+            if self.process.poll() is not None:
+                break
+            if self._listening():
+                self._record("open", pid=self.process.pid, ports=list(self.ports))
+                return
+            time.sleep(0.2)
+        self._terminate()
+        raise RuntimeError(f"tunnel {self.name} did not publish {list(self.ports)}")
+
+    def start(self) -> None:
+        """Publish the ports and keep them published until `stop`."""
+        self._stopping.clear()
+        self._open()
+        self._watcher = threading.Thread(
+            target=self._watch, name=f"tunnel-{self.name}", daemon=True
+        )
+        self._watcher.start()
+
+    def _watch(self) -> None:
+        while not self._stopping.wait(1):
+            process = self.process
+            if process is None or process.poll() is None:
+                continue
+            self._record("exited", returncode=process.returncode)
+            while not self._stopping.is_set():
+                try:
+                    self._open()
+                    break
+                except (OSError, RuntimeError) as error:
+                    self._record("reopen-failed", error=str(error))
+                    self._stopping.wait(self.retry_seconds)
+
+    def _terminate(self) -> None:
+        process, self.process = self.process, None
+        if process is None or process.poll() is not None:
+            return
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
+
+    def stop(self) -> None:
+        """Close the tunnel and its watcher; idempotent."""
+        self._stopping.set()
+        if self._watcher is not None:
+            self._watcher.join(timeout=30)
+            self._watcher = None
+        if self.process is not None:
+            self._terminate()
+            self._record("closed")

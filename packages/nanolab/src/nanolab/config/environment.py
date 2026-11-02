@@ -99,6 +99,11 @@ class MultipassSite(BaseModel):
     `ssh` is the destination the operator runs commands through; `address` is
     the host's LAN address, on which its VMs' services are published;
     `multipass` is the client binary on that host.
+
+    A host behind a NAT that forwards only SSH sets `tunnel`: `address` is then
+    an address of the operator, where operator-owned `ssh -L` tunnels publish
+    the VMs' services, and everyone (operator, peers, the site's own VMs)
+    reaches them there.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -110,6 +115,7 @@ class MultipassSite(BaseModel):
     multipass: str = "multipass"
     # Injected into the site's VMs; the operator reaches them through the site.
     vm_ssh_key: str = Field(default="~/.ssh/id_ed25519_nanolab_vm", alias="vmSshKey")
+    tunnel: bool = False
 
     @model_validator(mode="after")
     def validate_address(self) -> MultipassSite:

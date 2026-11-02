@@ -26,7 +26,12 @@ from nanolab.config.one_shot import (
 )
 from nanolab.one_shot import host_cpu
 from nanolab.one_shot.addresses import NodeAddresses, direct, published
-from nanolab.one_shot.sites import SiteForwarders, SiteHost, control_path
+from nanolab.one_shot.sites import (
+    OperatorTunnel,
+    SiteForwarders,
+    SiteHost,
+    control_path,
+)
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
@@ -281,6 +286,7 @@ def _owned_node(
     site_host: SiteHost | None = None,
     ordinal: int = 0,
     architecture: str | None = None,
+    tunnel_journal: Path | None = None,
 ) -> NodeResource:
     """Own one node's VM: refuse adoption, pin it, retain it for raw recovery."""
     # Ownership is checked at acquire time, including partial launch compensation.
@@ -295,6 +301,29 @@ def _owned_node(
     # A node behind a site's NAT is published on the site's address for as
     # long as its VM exists.
     forwarders = SiteForwarders(site_host) if site_host is not None else None
+    # Behind a NAT that forwards only SSH, the operator publishes them instead.
+    addresses = (
+        published(site_host.site.address, ordinal) if site_host is not None else None
+    )
+    tunnel = (
+        OperatorTunnel(
+            site_host.site,
+            site_host.site.address,
+            tuple(port for port, _ in addresses.forwards()),
+            name=node.id,
+            journal=tunnel_journal,
+        )
+        if site_host is not None and addresses is not None and site_host.site.tunnel
+        else None
+    )
+
+    def unpublish():
+        try:
+            if tunnel is not None:
+                tunnel.stop()
+        finally:
+            if forwarders is not None:
+                forwarders.stop()
 
     def acquire(inputs):
         if provider.vm_exists(request):
@@ -305,14 +334,13 @@ def _owned_node(
                 if request.name is None:
                     raise ValueError("owned VM name missing for host placement")
                 pin(request.name, target_cpus)
-            if forwarders is not None and site_host is not None:
-                forwarders.start(
-                    value.host, published(site_host.site.address, ordinal).forwards()
-                )
+            if forwarders is not None and addresses is not None:
+                forwarders.start(value.host, addresses.forwards())
+            if tunnel is not None:
+                tunnel.start()
         except BaseException as error:
             try:
-                if forwarders is not None:
-                    forwarders.stop()
+                unpublish()
                 base.release(inputs, value)
             except Exception as cleanup:
                 error.add_note(f"owned VM placement compensation: {cleanup}")
@@ -321,8 +349,7 @@ def _owned_node(
         return value
 
     def release(inputs, value):
-        if forwarders is not None:
-            forwarders.stop()
+        unpublish()
         if recovery:
             if request.name is None:
                 raise RuntimeError("owned VM name missing for raw recovery")
@@ -378,6 +405,7 @@ def build_one_shot_resources(
     *,
     run_id: str | None = None,
     repo_root: Path | None = None,
+    run_dir: Path | None = None,
 ) -> OneShotResources:
     """Reuse Sonata's compensated VM lifecycle without adopting operator VMs."""
     if environment.provider != config.provider:
@@ -390,7 +418,7 @@ def build_one_shot_resources(
         from nanolab.one_shot.multisite import build_multisite_resources
 
         return build_multisite_resources(
-            config, environment, namespace=namespace, repo_root=root
+            config, environment, namespace=namespace, repo_root=root, run_dir=run_dir
         )
     cpus, available_memory = host_capacity()
     check_host_capacity(

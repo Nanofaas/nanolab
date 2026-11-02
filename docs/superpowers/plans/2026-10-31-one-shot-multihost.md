@@ -332,6 +332,22 @@ Robustness:
     assumes `.175` matches `.35` (Multipass client path, VM key); unverified
     while `.175` is unreachable.
 
+24. `.175` (checked 2026-11-02): same hardware and CPU pins as `.35`, but on
+    Wi-Fi (192.168.1.111) behind a NAT that forwards only SSH, on port 2022;
+    every experiment port is filtered and a cable is not an option. A site
+    with `tunnel: true` has its VMs' published ports (API 18000+k,
+    management 19010+k, gossip 14200+k, probe 17200+k) carried by one
+    operator-owned `ssh -N -L address:P:127.0.0.1:P` per node
+    (`OperatorTunnel`), opened after the node's socat forwarders and closed
+    before them; a watcher reopens it when ssh exits and journals open,
+    exit, failed reopen and close in `tunnels.jsonl`. `address` is then
+    titan (149.132.176.50), reachable from both Sparks; `ssh` is
+    `ssh://149.132.179.175:2022`. Every path to a `.175` edge crosses its
+    Wi-Fi (ping to titan 9.6 ms mean, 19 ms max, against 0.7 ms for `.35`);
+    traffic between `.175` edges crosses it twice. Before a run: Multipass
+    (and the fixed client) and socat on `.175`, then a smoke on `.175`
+    alone; `.35` is busy with another experiment.
+
 Maintainability:
 
 9. Update the design spec: it still describes Loki per site and NSG rules
