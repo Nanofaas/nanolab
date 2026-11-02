@@ -47,6 +47,15 @@ def parse_args(argv=None):
     prep.add_argument("--holt-trend", type=float, help="Holt only; default 0.4")
     prep.add_argument("--holt-damping", type=float, help="Holt only; default 0.95")
     prep.add_argument("--ari-order", type=int, help="ARI only; default 6")
+    prep.add_argument(
+        "--environment",
+        type=Path,
+        help="environment file frozen with the run (default: local Multipass)",
+    )
+    prep.add_argument(
+        "--runtime-distributions",
+        help="per-architecture images, e.g. arm64=PATH,amd64=PATH (multi-site)",
+    )
     launch = commands.add_parser("run")
     launch.add_argument("freeze", type=Path)
     launch.add_argument("output", type=Path)
@@ -226,6 +235,32 @@ def bind_scenario(source, distribution, *, trace=None):
         "generatorVus": 512,
         "maxArrivalLatenessSeconds": 3600,
     }
+    return result
+
+
+def parse_distributions(text):
+    """Parse ``arch=path,...`` into hashed artifact references."""
+    if not text:
+        raise ValueError("multi-site placement needs --runtime-distributions")
+    references = {}
+    for item in text.split(","):
+        architecture, _, path = item.partition("=")
+        path = Path(path).resolve()
+        references[architecture.strip()] = {"path": str(path), "sha256": sha(path)}
+    return references
+
+
+def place_scenario(scenario, environment, distributions):
+    """Bind a multi-site placement: images per architecture, no Azure CPU pins."""
+    result = copy.deepcopy(scenario)
+    settings = result["oneShot"]
+    settings.pop("runtimeDistribution", None)
+    settings["runtimeDistributions"] = distributions
+    placement = settings.get("hostCpuPlacement")
+    if placement is not None:
+        for node, site in environment.placement.items():
+            if site == "azure":
+                placement["nodes"].pop(node, None)
     return result
 
 
@@ -409,6 +444,18 @@ def prepare(args):
         ),
     )
     scenario["recipeProfile"] = str((args.output / "recipe.yaml").resolve())
+    environment_file = getattr(args, "environment", None)
+    if environment_file is not None:
+        shutil.copyfile(environment_file, args.output / "environment.yaml")
+        environment = EnvironmentConfig.model_validate(
+            yaml.safe_load(environment_file.read_text())
+        )
+        if environment.multisite:
+            scenario = place_scenario(
+                scenario,
+                environment,
+                parse_distributions(getattr(args, "runtime_distributions", None)),
+            )
     with (args.output / "scenario.yaml").open("x") as stream:
         yaml.safe_dump(scenario, stream, sort_keys=False)
     settings = ScenarioConfig.model_validate(scenario).one_shot
@@ -582,6 +629,45 @@ def prepare(args):
     )
 
 
+def site_inventory(environment):
+    """List every site's Multipass VMs and the run-owned Azure VMs."""
+    from nanolab.one_shot.sites import SiteHost
+
+    value = {}
+    for name, site in environment.sites.items():
+        listed = subprocess.run(
+            SiteHost(site, name).multipass_argv("list", "--format", "json"),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        value[name] = json.loads(listed.stdout)
+    if environment.azure is not None and "azure" in environment.placement.values():
+        listed = subprocess.run(
+            [
+                "az",
+                "vm",
+                "list",
+                "-g",
+                environment.azure.resource_group,
+                "--query",
+                (
+                    "[?starts_with(name, 'nl-os-')].{name:name,"
+                    "state:provisioningState,priority:priority}"
+                ),
+                "-o",
+                "json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        value["azure"] = json.loads(listed.stdout)
+    return value
+
+
 def run_observation(args):
     """Rely on Sonata compensation; preserve raw and never retry a failed run."""
     frozen = json.loads((args.freeze / "freeze.json").read_text())
@@ -604,14 +690,24 @@ def run_observation(args):
         raise ValueError("operator dependency drift")
     args.output.mkdir(parents=True, exist_ok=False)
 
+    frozen_environment = args.freeze / "environment.yaml"
+    environment = EnvironmentConfig.model_validate(
+        yaml.safe_load(frozen_environment.read_text())
+        if frozen_environment.exists()
+        else {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
+    )
+
     def inventory(name):
-        result = subprocess.run(
-            ["multipass", "list", "--format", "json"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        value = json.loads(result.stdout)
+        if not environment.multisite:
+            result = subprocess.run(
+                ["multipass", "list", "--format", "json"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            value = json.loads(result.stdout)
+        else:
+            value = site_inventory(environment)
         save(args.output / name, value)
         return value
 
@@ -637,9 +733,7 @@ def run_observation(args):
             )
             workflow = build_one_shot_observation_plan(
                 config,
-                EnvironmentConfig.model_validate(
-                    {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
-                ),
+                environment,
                 freeze_dir=args.freeze,
                 run_dir=args.output,
                 supervision=supervision,

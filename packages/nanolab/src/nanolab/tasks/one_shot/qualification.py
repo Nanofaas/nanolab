@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier, Lock
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
@@ -21,6 +20,7 @@ from nanolab.config.one_shot import (
     operational_limit,
     resolve_node_functions,
 )
+from nanolab.one_shot.addresses import management_url
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.one_shot.models import (
     CalibrationProfile,
@@ -299,9 +299,8 @@ def scrape_metrics(
     http: httpx.Client, endpoint: str, *, timeout: float = 5
 ) -> dict[str, float]:
     """Read complete wall-time timer counters separately from parallel CPU timers."""
-    address = urlsplit(endpoint)
     response = http.get(
-        f"http://{address.hostname}:9090/actuator/prometheus", timeout=timeout
+        management_url(endpoint) + "/actuator/prometheus", timeout=timeout
     )
     response.raise_for_status()
     return parse_prometheus(response.text, (AUCTION_SUM, AUCTION_COUNT, SOLVER_SUM))

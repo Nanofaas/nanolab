@@ -226,7 +226,11 @@ def test_missing_required_conservation_counter_cannot_pass() -> None:
 def test_even_one_forbidden_event_fails(counter: str) -> None:
     report = evaluate_conservation(
         k6_summary=_k6_summary(),
-        edge_metrics=_edge_metrics(**{counter: 1}),
+        edge_metrics=_edge_metrics(
+            control_offload=int(counter == "control_offload"),
+            retry_offloadable=int(counter == "retry_offloadable"),
+            retry_control=int(counter == "retry_control"),
+        ),
         cloud_metrics=_cloud_metrics(),
         offloadable=OFFLOADABLE,
         control=CONTROL,

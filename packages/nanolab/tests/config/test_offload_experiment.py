@@ -26,6 +26,7 @@ def scenario():
 
 def test_explicit_matched_arm():
     config = ScenarioConfig.model_validate(scenario())
+    assert config.offload_experiment is not None
     assert config.offload_experiment.mode == "pressure"
     assert config.offload_experiment.rate == 100
 

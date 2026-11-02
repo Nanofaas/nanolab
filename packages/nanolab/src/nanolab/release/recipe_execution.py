@@ -205,10 +205,16 @@ def verify_release_source(
     inventory = json.loads(
         inventory_file.read_text(), object_pairs_hook=unique_json_object
     )
+    current = json.loads(current_file.read_text(), object_pairs_hook=unique_json_object)
+    verify_source_inventory(inventory, current, source)
+
+
+def verify_source_inventory(
+    inventory: dict, current_inventory: dict, source: Path
+) -> None:
+    """Compare source receipts, allowing only source-derived Gradle outputs."""
     expected = inventory["entries"]
-    current = json.loads(
-        current_file.read_text(), object_pairs_hook=unique_json_object
-    )["entries"]
+    current = current_inventory["entries"]
     writable = set(inventory["gradleCaches"])
     writable.update(
         str(Path(project) / "build") for project in inventory["gradleProjects"]

@@ -549,6 +549,16 @@ class NanofaasTUI:
         scenario_path: Path,
         keep: bool,
     ) -> Any:
+        if scenario.workflow == "module-cost":
+            from nanolab.config.module_cost import require_module_environment
+            from nanolab.plans.module_cost import require_module_inputs
+
+            require_module_environment(environment)
+            require_module_inputs(default_tool_paths().nanofaas_root, None)
+            if keep:
+                raise ValueError(
+                    "module-cost requires a complete uninterrupted owned run"
+                )
         if scenario.workflow == "soak":
             if environment.provider != "local":
                 raise ValueError(
@@ -598,7 +608,7 @@ class NanofaasTUI:
     ) -> Any:
         if scenario.workflow == "soak":
             return build_scenario_workflow(scenario, environment, dry_run=dry_run)
-        if scenario.workflow == "loadtest":
+        if scenario.workflow in ("loadtest", "module-cost"):
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment,
                 dry_run=dry_run,

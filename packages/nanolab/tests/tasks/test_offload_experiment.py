@@ -99,7 +99,11 @@ def test_k6_failure_collects_evidence_before_raising(tmp_path, monkeypatch):
         SimpleNamespace(run=execute, binding_key=lambda role: role),
         SimpleNamespace(fetch_from=fetch),
     )
-    task.logs = (SimpleNamespace(title="logs", run=lambda _: calls.append("logs")),)
+    monkeypatch.setattr(
+        task,
+        "logs",
+        (SimpleNamespace(title="logs", run=lambda _: calls.append("logs")),),
+    )
     with pytest.raises(RuntimeError, match="injected k6 crash"):
         task.run(TaskInputs.empty())
     assert calls.index("k6-events.jsonl") < calls.index("analysis")

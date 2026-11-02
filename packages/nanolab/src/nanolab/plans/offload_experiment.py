@@ -10,10 +10,10 @@ from nanolab.application.functions import resolve_function, sonata_function
 from nanolab.application.vm_provider import vm_request_for_role
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.environment import require_experiment_environment
-from nanolab.plans.diagnostics import collect_control_plane_log
 from nanolab.plans.offload_loadtest import _platform, _role_host
 from nanolab.tasks.components.bootstrap import remote_project_dir
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
+from nanolab.tasks.diagnostics import collect_control_plane_log
 from nanolab.tasks.loadtest.ports import RemoteFileFetcher
 from nanolab.tasks.offload_experiment import RunOffloadExperiment
 from nanolab.tasks.offload_loadtest import (

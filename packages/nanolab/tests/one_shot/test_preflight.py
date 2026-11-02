@@ -350,7 +350,9 @@ def test_background_clock_failure_invalidates_consumer():
     monitor.start()
     assert refreshed.wait(1)
     monitor.close()
-    with pytest.raises(RuntimeError, match="monitor failed"):
+    with pytest.raises(
+        RuntimeError, match="background probe failed: ValueError: rejected update"
+    ):
         monitor.require_healthy()
     assert len(attempts) == 2
 

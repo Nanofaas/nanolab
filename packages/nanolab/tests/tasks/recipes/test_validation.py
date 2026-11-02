@@ -181,9 +181,9 @@ def test_helm_runtime_limits_follow_the_acquired_recipe(tmp_path, mode):
     assert "controlPlane.image.repository=registry/control-plane" in args
     assert "controlPlane.image.tag=run-1" in args
     if mode == "native":
-        assert "controlPlane.resources.limits.cpu=1" in args
+        assert "controlPlane.resources.limits.cpu=4" in args
         assert "controlPlane.jvm.ioWorkerCount=" in args
-        assert "controlPlane.resources.limits.cpu=4" not in args
+        assert "controlPlane.resources.limits.cpu=1" not in args
         assert "controlPlane.jvm.ioWorkerCount=4" not in args
     else:
         assert "controlPlane.resources.limits.cpu=4" in args

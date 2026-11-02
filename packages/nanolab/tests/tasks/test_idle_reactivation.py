@@ -388,7 +388,7 @@ def test_finalization_collects_bounded_vm_logs_and_preserves_measurement_failure
     from sonata_tasks.execution.adapters import VmCommandTaskExecutor
 
     from nanolab.config.idle_reactivation import IdleReactivationConfig
-    from nanolab.plans.diagnostics import collect_control_plane_log
+    from nanolab.tasks.diagnostics import collect_control_plane_log
     from tests.cli.test_execution_bindings import _Result
     from tests.plans.test_loadtest import NoopPrometheus
 

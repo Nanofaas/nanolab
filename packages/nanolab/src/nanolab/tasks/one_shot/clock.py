@@ -57,7 +57,10 @@ class ClockMonitor:
     def require_healthy(self) -> None:
         """Fail the consumer when a refresh was rejected or could not be measured."""
         if self._error is not None:
-            raise RuntimeError("one-shot clock monitor failed") from self._error
+            # The supervisor reports only the message: carry the cause in it.
+            raise RuntimeError(
+                f"background probe failed: {_describe(self._error)}"
+            ) from self._error
 
     @property
     def stopping(self) -> bool:
@@ -71,6 +74,17 @@ class ClockMonitor:
             self._thread.join(timeout=self.join_seconds)
             if self._thread.is_alive():
                 raise RuntimeError("one-shot clock sampler failed to stop")
+
+
+def _describe(error: BaseException) -> str:
+    """Name the error and, for a failed command, its exit status and stderr."""
+    detail = f"{type(error).__name__}: {error}"
+    stderr = getattr(error, "stderr", None)
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode(errors="replace")
+    if stderr:
+        detail += f"; stderr: {stderr.strip()[-500:]}"
+    return detail
 
 
 def clock_health_resource(

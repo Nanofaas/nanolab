@@ -36,6 +36,7 @@ class NodeFunctionLimits(BaseModel):
 
 
 CpuId = Annotated[int, Field(strict=True, ge=0)]
+Architecture = Literal["arm64", "amd64"]
 
 
 class HostCpuTarget(BaseModel):
@@ -378,6 +379,11 @@ class OneShotConfig(BaseModel):
     runtime_distribution: ArtifactReference | None = Field(
         default=None, alias="runtimeDistribution"
     )
+    # Prebuilt images per architecture, for nodes that do not share the
+    # operator's architecture (edges on arm64 Sparks, an amd64 cloud).
+    runtime_distributions: dict[Architecture, ArtifactReference] | None = Field(
+        default=None, alias="runtimeDistributions", min_length=1
+    )
     flow_quantum: float = Field(default=1, alias="flowQuantum", gt=0)
     seed: int = 7
     neighbors: dict[str, list[str]] | None = None
@@ -394,12 +400,21 @@ class OneShotConfig(BaseModel):
         """Prevent aliases of a node and require a distinct terminal cloud."""
         if len({node.id for node in self.nodes}) != len(self.nodes):
             raise ValueError("node identifiers must be unique")
+        if self.runtime_distribution is not None and self.runtime_distributions:
+            raise ValueError(
+                "runtimeDistribution and runtimeDistributions are mutually exclusive"
+            )
         if self.host_cpu_placement is not None:
             placement = self.host_cpu_placement
-            if set(placement.nodes) != {node.id for node in self.nodes}:
+            every = {node.id for node in self.nodes}
+            # A cloud on a provider without host access (Azure) has no CPUs to pin.
+            clouds = {node.id for node in self.nodes if node.kind == "cloud"}
+            if set(placement.nodes) not in (every, every - clouds):
                 raise ValueError("host CPU placement node coverage must be exact")
             if any(
-                len(placement.nodes[node.id].cpus) != node.cpus for node in self.nodes
+                len(placement.nodes[node.id].cpus) != node.cpus
+                for node in self.nodes
+                if node.id in placement.nodes
             ):
                 raise ValueError("host CPU placement must match VM vCPU count")
             if (

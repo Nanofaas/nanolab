@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from nanolab.config.one_shot import HostCpuPlacement
@@ -77,14 +78,26 @@ def owned_qemu_pid(vm_name: str, *, proc_root: Path = Path("/proc")) -> int:
 
 
 def inspect_vm_placement(
-    vm_name: str, cpus: list[int], *, proc_root: Path = Path("/proc")
+    vm_name: str,
+    cpus: list[int],
+    *,
+    proc_root: Path = Path("/proc"),
+    read_affinity: Callable[[Path], list[int]] | None = None,
 ) -> dict:
-    """Check every QEMU thread; missing evidence is a failed placement check."""
+    """Check every QEMU thread; missing evidence is a failed placement check.
+
+    `read_affinity` reads a thread's mask from its /proc task directory; the
+    default asks the local kernel, which only works for local processes.
+    """
     pid = owned_qemu_pid(vm_name, proc_root=proc_root)
     try:
         threads = list((proc_root / str(pid) / "task").iterdir())
         masks = {
-            thread.name: sorted(os.sched_getaffinity(int(thread.name)))
+            thread.name: (
+                read_affinity(thread)
+                if read_affinity is not None
+                else sorted(os.sched_getaffinity(int(thread.name)))
+            )
             for thread in threads
         }
     except OSError as error:

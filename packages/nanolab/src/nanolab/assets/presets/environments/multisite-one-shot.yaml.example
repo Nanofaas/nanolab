@@ -1,0 +1,40 @@
+# One-shot nodes on remote Multipass hosts and an Azure Spot cloud.
+# The operator (this host) runs nanolab and k6; it owns no experiment VM.
+# Copy outside the installed package and adapt addresses, keys and the group.
+provider: multipass
+roles:
+  stack:
+    name: one-shot
+sites:
+  spark-35:
+    ssh: 149.132.179.35
+    address: 149.132.179.35
+    architecture: arm64
+    multipass: ~/.local/share/nanolab/multipass-fixed/bin/multipass
+    vmSshKey: ~/.ssh/id_ed25519_nanolab_vm
+placement:
+  edge-1: spark-35
+  edge-2: spark-35
+  edge-3: spark-35
+  edge-4: spark-35
+  edge-5: spark-35
+  cloud: azure
+azure:
+  resource_group: your-resource-group
+  location: westeurope
+  priority: Spot
+  eviction_policy: Delete
+  max_bid_price: -1
+  vm_size: Standard_D8s_v5
+  architecture: amd64
+  image_urn: Canonical:ubuntu-24_04-lts:server:24.04.202610210
+  ssh_key_path: ~/.ssh/id_ed25519_azure_nanolab.pub
+  work_dir: /path/outside/the/root/disk/tofu
+# The run's single Loki: a pinned release binary on this operator's loopback,
+# reached by sites and cloud through reverse SSH tunnels. Keep its CPUs apart
+# from the scenario's operatorCpus.
+logging:
+  lokiBinary: /path/to/loki-3.7.8
+  lokiSha256: <sha256 of the binary>
+  port: 43100
+  cpus: [6, 7]

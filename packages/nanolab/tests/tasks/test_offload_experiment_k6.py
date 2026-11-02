@@ -24,6 +24,8 @@ pytestmark = [
 
 
 def test_real_k6_ledger_matches_parser_and_url_header(tmp_path):
+    k6 = shutil.which("k6")
+    assert k6 is not None
     corpus = source_contract_root() / "functions/test-data/word-stats"
     fixtures = load_inputs(
         corpus / "performance-medium.json", corpus / "runtime-contract.json"
@@ -46,7 +48,7 @@ def test_real_k6_ledger_matches_parser_and_url_header(tmp_path):
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *args):
+        def log_message(self, format: str, *args: object):
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -69,7 +71,7 @@ def test_real_k6_ledger_matches_parser_and_url_header(tmp_path):
     try:
         result = subprocess.run(
             [
-                shutil.which("k6"),
+                k6,
                 "run",
                 "--quiet",
                 "--summary-export",
