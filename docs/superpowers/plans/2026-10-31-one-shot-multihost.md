@@ -302,6 +302,15 @@ Robustness:
     `retried-proofs.jsonl` and settles its row (`settledOriginals`), and
     lookups run 64 wide instead of 16.
 
+22. The comparison judged per-edge outcomes and routing from proven requests
+    only, while both the reference (44.6%) and the fifth run (42.0%) proved
+    under half of their successes, unevenly across edges. It now judges each
+    edge's executions and handled requests from nanoFaaS counters
+    (`queue-samples-<node>.jsonl` over the scheduled campaign plus 60 s),
+    and the success share from the returned responses; proof-based rows
+    decide only when both runs prove 95% of successes. The fifth run is then
+    within tolerance everywhere (executions within +6.7%, handled +5.2%).
+
 Maintainability:
 
 9. Update the design spec: it still describes Loki per site and NSG rules
