@@ -347,6 +347,15 @@ Robustness:
     traffic between `.175` edges crosses it twice. Before a run: Multipass
     (and the fixed client) and socat on `.175`, then a smoke on `.175`
     alone; `.35` is busy with another experiment.
+    Smoke `smoke175-20261102-104200` (edge-6..10 and a cloud, all on `.175`,
+    `--hold 300`): completed, no anomaly, six tunnels opened once and closed
+    once, nothing left behind. `.175` needed `NOPASSWD: /usr/bin/taskset`
+    (VM pinning). titan→VM probes through one tunnel: median 3–5 ms, p95
+    10–50 ms, worst 412 ms (Wi-Fi). Open issue: gossip RTT between `.175`
+    edges is 89–119 ms (2 ms between `.35` edges); suspected Nagle/delayed
+    ACK on the `ssh -N` connection (OpenSSH sets TCP_NODELAY only for
+    interactive sessions) or a reply on a second connection. Measure
+    VM→VM HTTP through the tunnels when `.175` is free again.
 
 Maintainability:
 
