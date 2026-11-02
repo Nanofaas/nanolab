@@ -136,7 +136,11 @@ def test_a_throughput_cloud_holds_its_replicas_and_keeps_its_direct_load():
         40,
     ]
     resized = tune.expand_observations(
-        {"settings": {"nodes": [{"id": "cloud", "memoryMiB": 4096}]}, "service": {}},
+        {
+            "settings": {"nodes": [{"id": "cloud", "memoryMiB": 4096}]},
+            "service": {},
+            "measuredReplicaCountsPerFunction": {"cloud": 7},
+        },
         sizing,
         {"oneShot": {"nodes": [cloud]}},
     )
@@ -145,3 +149,26 @@ def test_a_throughput_cloud_holds_its_replicas_and_keeps_its_direct_load():
     # The cloud's direct rate stays that of its reference size.
     rates = tune.ramp_rates(context(), {**design(), "cloud": sizing["cloud"]}, 0, 2)
     assert rates["cloud"]["one-shot-sort"] == pytest.approx(0.2)
+
+
+def test_copied_nodes_take_every_per_node_observation_of_their_source():
+    """The observation reads each node's service and measured replica count."""
+    observations = {
+        "settings": {"nodes": [{"id": "edge-1", "memoryMiB": 2048}]},
+        "service": {"edge-1": {"f": {"meanSeconds": 1.0}}},
+        "measuredReplicaCountsPerFunction": {"edge-1": 1, "cloud": 7},
+    }
+    result = tune.expand_observations(
+        observations, {"mirror": {"edge-6": "edge-1"}}, {"oneShot": {"nodes": []}}
+    )
+    assert result["service"]["edge-6"] == observations["service"]["edge-1"]
+    assert result["measuredReplicaCountsPerFunction"] == {
+        "edge-1": 1,
+        "cloud": 7,
+        "edge-6": 1,
+    }
+    assert [node["id"] for node in result["settings"]["nodes"]] == [
+        "edge-1",
+        "edge-6",
+    ]
+    assert "edge-6" not in observations["measuredReplicaCountsPerFunction"]

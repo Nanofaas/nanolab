@@ -103,9 +103,12 @@ def expand_observations(observations, design, scenario):
     """
     result = copy.deepcopy(observations)
     nodes = {node["id"]: node for node in result["settings"]["nodes"]}
+    measured = result["measuredReplicaCountsPerFunction"]
     for new, source in design["mirror"].items():
         result["settings"]["nodes"].append({**copy.deepcopy(nodes[source]), "id": new})
         result["service"][new] = copy.deepcopy(result["service"][source])
+        # The replicas its service times were measured with, read per node.
+        measured[new] = measured[source]
     result["mirroredFrom"] = design["mirror"]
     if "cloud" in design:
         for node in scenario["oneShot"]["nodes"]:
