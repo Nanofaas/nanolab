@@ -1205,6 +1205,44 @@ def test_final_inventory_failure_still_renders_offline_report(
     assert result["cause"] == ("final inventory failed" if inventory_fails else None)
 
 
+def test_the_operator_memory_recorder_stops_before_the_run_is_archived(
+    observer, tmp_path, monkeypatch
+):
+    """An appended operator-memory.jsonl once failed the archive hash check."""
+    from types import SimpleNamespace
+
+    from nanolab.one_shot import operator_memory
+
+    events = []
+
+    class Recorder:
+        def __init__(self, path, **_kwargs):
+            events.append(("created", path.name))
+
+        def start(self):
+            events.append("start")
+
+        def close(self):
+            events.append("close")
+
+    def inventory(*_a, **_k):
+        events.append("inventory")
+        return SimpleNamespace(stdout='{"list":[]}')
+
+    monkeypatch.setattr(operator_memory, "OperatorMemoryRecorder", Recorder)
+    args, _releases = offline_observation(observer, tmp_path, monkeypatch)
+    monkeypatch.setattr(observer.subprocess, "run", inventory)
+    observer.run_observation(args)
+    # Closed with the workflow, before the final inventory and the archive.
+    assert events == [
+        ("created", "operator-memory.jsonl"),
+        "start",
+        "inventory",
+        "close",
+        "inventory",
+    ]
+
+
 @pytest.mark.parametrize(
     "primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM]
 )
