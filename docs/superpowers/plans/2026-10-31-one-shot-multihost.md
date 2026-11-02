@@ -147,7 +147,14 @@ packages/nanolab`, `lint-imports` (CLAUDE.md commands). One commit per task.
 - [ ] If it matches: full sequence (step ORACLE, continuous ORACLE, continuous
       ARI). Archives to `/mnt/pve/qnap`.
 
-## 13. Phase 2 preparation
+Phases as decided on 2026-11-02: phase 1 (`.35` + Azure against the ARI
+reference) is validated by the fifth run; phase 2 (`.175` alone) is dropped,
+the tunnel smoke having checked that `.175` matches `.35`; the ten-edge run
+(called phase 2 in the spec, phase 3 in operation) is next, with the 4 s
+estimated-wait threshold and compared with the Python model, and replaces a
+separate phase-1 rerun.
+
+## 13. Phase 2 preparation (the ten-edge run)
 
 - [ ] User decision on the ten-edge load (duplicate rates vs re-tune).
 - [ ] `.175`: `socat`, patched Multipass, `sudo -n taskset`, high ports through

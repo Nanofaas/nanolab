@@ -35,7 +35,9 @@ def trace(windows=2):
     }
 
 
-def result(origin, epoch, *, executed=None, status=200, response="success"):
+def result(
+    origin, epoch, *, executed=None, status=200, response: str | None = "success"
+):
     return {
         "event": "result",
         "phase": "campaign",

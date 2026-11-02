@@ -79,6 +79,7 @@ if __name__ == "__main__":
 import yaml
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import OperationalLimits
+from nanolab.one_shot import operator_memory
 from nanolab.one_shot.supervision import (
     CampaignSupervision,
 )
@@ -715,7 +716,11 @@ def run_observation(args):
         metadata.version(n) != v for n, v in frozen["dependencies"].items()
     ):
         raise ValueError("operator dependency drift")
+    # A swapping operator wakes the epoch loop late and loses every later epoch.
+    quiet = operator_memory.sample()
+    operator_memory.require_quiet(quiet)
     args.output.mkdir(parents=True, exist_ok=False)
+    save(args.output / "operator-memory-preflight.json", quiet)
 
     frozen_environment = args.freeze / "environment.yaml"
     environment = EnvironmentConfig.model_validate(
@@ -808,7 +813,14 @@ def run_observation(args):
             raise primary
 
     args.supervised = True
-    supervision.run(execute)
+    recorder = operator_memory.OperatorMemoryRecorder(
+        args.output / "operator-memory.jsonl"
+    )
+    recorder.start()
+    try:
+        supervision.run(execute)
+    finally:
+        recorder.close()
 
 
 def main(args=None):

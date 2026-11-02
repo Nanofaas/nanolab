@@ -12,6 +12,23 @@ from sonata_engine import Workflow
 from nanolab.plans import one_shot_observation as observation_plan
 from nanolab.tasks.one_shot import observation as observation_tasks
 
+QUIET_OPERATOR = {
+    "atUtc": "2026-11-02T00:00:00+00:00",
+    "seconds": 5,
+    "swappedInPages": 0,
+    "swappedOutPages": 0,
+    "memAvailableBytes": 64 * 1024**3,
+    "swapUsedBytes": 0,
+}
+
+
+@pytest.fixture(autouse=True)
+def quiet_operator(monkeypatch):
+    """Keep runs here from waiting on, or depending on, this machine's swap."""
+    from nanolab.one_shot import operator_memory
+
+    monkeypatch.setattr(operator_memory, "sample", lambda *_a, **_k: QUIET_OPERATOR)
+
 
 @pytest.fixture
 def observer():
@@ -1350,6 +1367,26 @@ def test_changed_package_implementation_stops_before_observation_inventory(
     with pytest.raises(ValueError, match="host boot or package drift"):
         observer.run_observation(args)
     assert not attempts and not releases and not args.output.exists()
+
+
+def test_a_swapping_operator_refuses_the_run_before_any_output(
+    observer, tmp_path, monkeypatch
+):
+    """The fourth phase-1 run lost every epoch to a swapping operator."""
+    from nanolab.one_shot import operator_memory
+
+    args, releases = offline_observation(observer, tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        operator_memory,
+        "sample",
+        lambda *_a, **_k: {**QUIET_OPERATOR, "swappedOutPages": 4096},
+    )
+    monkeypatch.setattr(
+        observer.subprocess, "run", lambda *a, **k: pytest.fail("reached inventory")
+    )
+    with pytest.raises(RuntimeError, match="the operator is swapping"):
+        observer.run_observation(args)
+    assert not releases and not args.output.exists()
 
 
 @pytest.mark.parametrize("mode", ["console", "tui", "json", "none"])
