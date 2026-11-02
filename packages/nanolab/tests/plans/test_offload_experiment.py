@@ -1,6 +1,11 @@
 """Exercise the B4 builder and its evidence failure boundary."""
 
+import re
+import shutil
+import subprocess
+
 import pytest
+import yaml
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -96,3 +101,47 @@ def test_matched_arms_reuse_workflow_with_explicit_resources(
         assert "resources.limits.cpu=2" in values
         assert "resources.limits.memory=2048Mi" in values
         assert platform.additional_modules == ("offload", "sync-queue")
+
+        indices = {
+            int(match.group(1))
+            for argument in platform.helm_values
+            if (match := re.match(r"controlPlane\.extraEnv\[(\d+)\]\.name=", argument))
+        }
+        assert indices == set(range(len(indices))), (
+            "Helm extraEnv must not contain null gaps"
+        )
+        if helm := shutil.which("helm"):
+            rendered = subprocess.run(
+                [
+                    helm,
+                    "template",
+                    "nanofaas",
+                    str(source_contract_root() / "deploy/helm/nanofaas"),
+                    *platform.helm_values,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert rendered.returncode == 0, rendered.stderr
+            deployment = next(
+                document
+                for document in yaml.safe_load_all(rendered.stdout)
+                if document
+                and document.get("kind") == "Deployment"
+                and document["metadata"]["name"] == "nanofaas-control-plane"
+            )
+            environment = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+            assert all(
+                isinstance(item, dict) and item.get("name") for item in environment
+            )
+            assert len({item["name"] for item in environment}) == len(environment)
+            actual = {item["name"]: item.get("value") for item in environment}
+            assert actual["NANOFAAS_ADMISSION_PROFILE"] == "SYNC_QUEUE"
+            assert actual["SYNC_QUEUE_MAX_DEPTH"] == (
+                "20" if platform is request.edge else "100"
+            )
+            if platform is request.edge:
+                assert actual["NANOFAAS_OFFLOAD_TARGETURL"] == "http://cloud:30080"
+            else:
+                assert "NANOFAAS_OFFLOAD_TARGETURL" not in actual

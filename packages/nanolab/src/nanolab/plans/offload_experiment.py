@@ -93,7 +93,10 @@ def build_experiment(
         extra = [("NANOFAAS_ADMISSION_PROFILE", "SYNC_QUEUE")]
         if role == "stack":
             extra.append(("NANOFAAS_OFFLOAD_TARGETURL", cloud_url))
-        index = sum(k.endswith(".name") for k in values)
+        index = sum(
+            k.startswith("controlPlane.extraEnv[") and k.endswith(".name")
+            for k in values
+        )
         for name, value in extra:
             values[f"controlPlane.extraEnv[{index}].name"] = name
             values[f"controlPlane.extraEnv[{index}].value"] = value
