@@ -7,6 +7,7 @@ import yaml
 
 from nanolab.application.provisioning import provision_environment
 from nanolab.config import EnvironmentConfig, ScenarioConfig
+from nanolab.tasks.provisioning.bootstrap import OWN_STDIN
 from nanolab.workspace.paths import bundled_assets_root, discover_tool_root
 
 
@@ -25,6 +26,9 @@ class RecordingShell:
 
     def run(self, command, /, *, cwd=None, env=None, dry_run=False):
         argv = tuple(command)
+        # Every host bootstrap command arrives behind its own-stdin wrapper.
+        assert argv[: len(OWN_STDIN)] == OWN_STDIN
+        argv = argv[len(OWN_STDIN) :]
         self.events.append(("command", argv))
         if argv[0] == "rsync" and "nanolab-containerd-maven-" in argv[-1]:
             source = Path(argv[-2].removesuffix("/"))
