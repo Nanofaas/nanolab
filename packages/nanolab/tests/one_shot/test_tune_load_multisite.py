@@ -104,3 +104,44 @@ def test_copied_nodes_take_their_source_cpus_on_their_own_site():
     assert placement["nodes"]["edge-6"] == placement["nodes"]["edge-1"]
     assert placement["hosts"] == {"edge-1": "a", "edge-6": "b"}
     assert "runtimeDistribution" not in result
+
+
+def test_a_throughput_cloud_holds_its_replicas_and_keeps_its_direct_load():
+    limits = {"f": {"memoryMiB": 64, "maxReplicas": 9}, "g": {"memoryMiB": 128}}
+    scenario = {
+        "oneShot": {
+            "nodes": [
+                {"id": "edge-1", "kind": "edge"},
+                {
+                    "id": "cloud",
+                    "kind": "cloud",
+                    "memoryMiB": 4096,
+                    "memoryCapacityMiB": 1344,
+                    "functionLimits": limits,
+                },
+            ]
+        }
+    }
+    sizing = {
+        "mirror": {},
+        "neighbors": {},
+        "sites": {},
+        "cloud": {"replicas": 27, "directReplicas": 7},
+    }
+    cloud = tune.expand_scenario(scenario, sizing)["oneShot"]["nodes"][1]
+    assert cloud["memoryCapacityMiB"] == 27 * 192
+    assert cloud["memoryMiB"] == 27 * 192 + tune.CLOUD_HEADROOM_MIB
+    assert [limit["maxReplicas"] for limit in cloud["functionLimits"].values()] == [
+        81,
+        40,
+    ]
+    resized = tune.expand_observations(
+        {"settings": {"nodes": [{"id": "cloud", "memoryMiB": 4096}]}, "service": {}},
+        sizing,
+        {"oneShot": {"nodes": [cloud]}},
+    )
+    assert resized["settings"]["nodes"][0]["memoryMiB"] == cloud["memoryMiB"]
+    assert resized["resizedCloud"]["replicas"] == 27
+    # The cloud's direct rate stays that of its reference size.
+    rates = tune.ramp_rates(context(), {**design(), "cloud": sizing["cloud"]}, 0, 2)
+    assert rates["cloud"]["one-shot-sort"] == pytest.approx(0.2)

@@ -47,6 +47,8 @@ WEIGHTS = {
     "one-shot-mixed": 0.95,
 }
 PERIOD_SECONDS = 360
+# A resized cloud keeps this much memory beyond its replicas for the runtime.
+CLOUD_HEADROOM_MIB = 8192
 # Rates below this count as this in a step ratio, so that the flow quantum's
 # rounding of a near-idle function does not read as a jump.
 STEP_FLOOR_RPS = 0.5
@@ -59,6 +61,9 @@ def expand_scenario(document, design):
     edges' hosts are the design's sites (the observation rebinds them from the
     environment, which must agree); the runtime
     images are dropped, so the model only binds sizes and limits.
+
+    A design `cloud.replicas` sizes the terminal cloud for throughput: that
+    many replicas of every function, the memory pool exactly holding them.
     """
     result = copy.deepcopy(document)
     settings = result["oneShot"]
@@ -77,19 +82,48 @@ def expand_scenario(document, design):
         for new, source in design["mirror"].items():
             placement["nodes"][new] = copy.deepcopy(placement["nodes"][source])
         placement["hosts"] = site_of(design)
+    size = design.get("cloud")
+    if size is not None:
+        for node in cloud:
+            limits = node["functionLimits"].values()
+            pool = size["replicas"] * sum(limit["memoryMiB"] for limit in limits)
+            node["memoryCapacityMiB"] = pool
+            node["memoryMiB"] = max(node["memoryMiB"], pool + CLOUD_HEADROOM_MIB)
+            for limit in limits:
+                limit["maxReplicas"] = pool // limit["memoryMiB"]
     settings.pop("runtimeDistribution", None)
     return result
 
 
-def expand_observations(observations, design):
-    """Give each copied node the service observations of its source node."""
+def expand_observations(observations, design, scenario):
+    """Give each copied node the service observations of its source node.
+
+    A resized cloud keeps its observed service times (one replica's), so its
+    recorded VM size follows the scenario's.
+    """
     result = copy.deepcopy(observations)
     nodes = {node["id"]: node for node in result["settings"]["nodes"]}
     for new, source in design["mirror"].items():
         result["settings"]["nodes"].append({**copy.deepcopy(nodes[source]), "id": new})
         result["service"][new] = copy.deepcopy(result["service"][source])
     result["mirroredFrom"] = design["mirror"]
+    if "cloud" in design:
+        for node in scenario["oneShot"]["nodes"]:
+            if node["kind"] == "cloud":
+                nodes[node["id"]]["memoryMiB"] = node["memoryMiB"]
+                result["resizedCloud"] = {
+                    "node": node["id"],
+                    "memoryMiB": node["memoryMiB"],
+                    "replicas": design["cloud"]["replicas"],
+                }
     return result
+
+
+def replica_count(context, design, node, name):
+    """Replicas behind a node's rate; cloud-direct load keeps its reference size."""
+    if node == context["cloud"] and "cloud" in design:
+        return design["cloud"]["directReplicas"]
+    return context["initialReplicas"][node][name]
 
 
 def site_of(design):
@@ -105,7 +139,7 @@ def candidate_rates(context, design, phase, factor):
     for node, functions in context["parameters"].items():
         rates[node] = {}
         for name, params in functions.items():
-            count = context["initialReplicas"][node][name]
+            count = replica_count(context, design, node, name)
             capacity = count * params["utilization"] / params["serviceSeconds"]
             scale = 0.03 if node == context["cloud"] else design["baseFactors"][node]
             if node in targets:
@@ -143,7 +177,7 @@ def ramp_rates(context, design, interval, factor):
     for node, functions in context["parameters"].items():
         rates[node] = {}
         for name, params in functions.items():
-            count = context["initialReplicas"][node][name]
+            count = replica_count(context, design, node, name)
             capacity = count * params["utilization"] / params["serviceSeconds"]
             if node == context["cloud"]:
                 scale = 0.03 * (1 + interval * 0.05)
@@ -448,7 +482,7 @@ def tune(args):
         reference = ORIGINAL["verify_reference"](args.reference)
         scenario = expand_scenario(yaml.safe_load(args.scenario.read_text()), design)
         observations = expand_observations(
-            json.loads(args.observations.read_text()), design
+            json.loads(args.observations.read_text()), design, scenario
         )
         with (args.output / "model-scenario.yaml").open("x") as stream:
             yaml.safe_dump(scenario, stream, sort_keys=False)

@@ -357,6 +357,14 @@ Robustness:
     interactive sessions) or a reply on a second connection. Measure
     VM→VM HTTP through the tunnels when `.175` is free again.
 
+25. Phase-3 cloud sized for throughput (2026-11-02): 27 replicas of every
+    function on the F32as_v7, bounded by CPU (135 × 0.21 cores of 32), not
+    memory (22 GB of 128). The cloud's pool and replica caps are only how
+    nanolab derives that vector; the design's `cloud.replicas` sets them,
+    `cloud.directReplicas` (7) keeps the cloud-direct load of the reference.
+    Same trace and model routing as with 7 replicas; modelled peak cloud
+    utilization 16% (62% with 7). Result `model/load-tuning-10edge-minute-04`.
+
 Maintainability:
 
 9. Update the design spec: it still describes Loki per site and NSG rules
