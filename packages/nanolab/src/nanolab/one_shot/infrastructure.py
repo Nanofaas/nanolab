@@ -142,6 +142,51 @@ class NodeResource:
         return result
 
 
+# One upload to an Azure VM may take this long before it is retried.
+AZURE_TRANSFER_SECONDS = 600
+AZURE_TRANSFER_ATTEMPTS = 3
+
+
+def transfer_to_vm(node: NodeResource, vm: VmInfo, source: Path, destination: str):
+    """Copy a local file into a node's VM, bounding and retrying it on Azure.
+
+    The Azure provider uploads through the SDK's SFTP, which has no stall
+    bound: in the third ten-edge run one image upload sat in TCP
+    retransmission for half an hour while new connections moved 100 MB in two
+    seconds. An Azure VM therefore gets OpenSSH scp on a dedicated connection,
+    whose ServerAlive probes close a stalled one within a minute, each attempt
+    bounded and retried on a fresh connection.
+    """
+    if node.request.lifecycle != "azure":
+        result = node.provider.transfer_to(
+            node.request, source=source, destination=destination
+        )
+        if result.return_code != 0:
+            raise RuntimeError(f"{node.config.id}: transfer of {source.name} failed")
+        return
+    ssh = node.azure_ssh(vm, shared=False)
+    argv = ["scp", "-q", *ssh[1:-1], str(source), f"{ssh[-1]}:{destination}"]
+    failures = []
+    for _attempt in range(AZURE_TRANSFER_ATTEMPTS):
+        try:
+            subprocess.run(
+                argv,
+                check=True,
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=AZURE_TRANSFER_SECONDS,
+            )
+            return
+        except subprocess.TimeoutExpired:
+            failures.append(f"no completion in {AZURE_TRANSFER_SECONDS} s")
+        except subprocess.CalledProcessError as error:
+            failures.append((error.stderr or "").strip() or f"exit {error.returncode}")
+    raise RuntimeError(
+        f"{node.config.id}: transfer of {source.name} failed: " + "; ".join(failures)
+    )
+
+
 class NodeExecutor:
     """Bind reusable platform command tasks to one explicit VM."""
 

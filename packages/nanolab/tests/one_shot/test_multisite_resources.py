@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -492,3 +493,78 @@ def test_prebuilt_archives_are_verified_per_architecture(tmp_path):
             run_dir=tmp_path,
             architectures={"riscv"},
         )
+
+
+def test_an_azure_upload_is_bounded_and_retried_on_a_fresh_connection(
+    tmp_path, monkeypatch
+):
+    """A stalled SFTP upload once held a run for half an hour."""
+    from nanolab.one_shot import infrastructure
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs["timeout"]))
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if len(calls) == 2:
+            raise subprocess.CalledProcessError(1, argv, stderr="lost connection")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(infrastructure.subprocess, "run", run)
+    node = SimpleNamespace(
+        config=SimpleNamespace(id="cloud"),
+        request=SimpleNamespace(lifecycle="azure"),
+        azure_ssh=lambda vm, shared: (
+            "ssh",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            f"ControlMaster={'auto' if shared else 'no'}",
+            f"{vm.user}@{vm.host}",
+        ),
+    )
+    vm = VmInfo(name="c", host="20.1.2.3", user="azureuser", home="/home/azureuser")
+    archive = tmp_path / "images.tar"
+    infrastructure.transfer_to_vm(cast(Any, node), vm, archive, "/home/azureuser/i.tar")
+    assert len(calls) == 3
+    argv, timeout = calls[-1]
+    assert argv == [
+        "scp",
+        "-q",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ControlMaster=no",
+        str(archive),
+        "azureuser@20.1.2.3:/home/azureuser/i.tar",
+    ]
+    assert timeout == infrastructure.AZURE_TRANSFER_SECONDS
+    calls.clear()
+    monkeypatch.setattr(
+        infrastructure.subprocess,
+        "run",
+        lambda argv, **kwargs: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(1, argv, stderr="refused")
+        ),
+    )
+    with pytest.raises(RuntimeError, match=r"images\.tar failed: refused; refused"):
+        infrastructure.transfer_to_vm(cast(Any, node), vm, archive, "/x")
+
+
+def test_a_site_upload_still_goes_through_the_provider(tmp_path):
+    from nanolab.one_shot import infrastructure
+
+    sent = []
+    node = SimpleNamespace(
+        config=SimpleNamespace(id="edge-6"),
+        request=SimpleNamespace(lifecycle="multipass"),
+        provider=SimpleNamespace(
+            transfer_to=lambda request, *, source, destination: (
+                sent.append((source, destination)) or SimpleNamespace(return_code=0)
+            )
+        ),
+    )
+    vm = VmInfo(name="e", host="10.0.0.2", user="ubuntu", home="/home/ubuntu")
+    infrastructure.transfer_to_vm(cast(Any, node), vm, tmp_path / "f", "/home/ubuntu/f")
+    assert sent == [(tmp_path / "f", "/home/ubuntu/f")]
