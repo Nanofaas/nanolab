@@ -7,6 +7,7 @@ selected provider needs, and it validates that the two agree.
 
 from __future__ import annotations
 
+import ipaddress
 from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Literal
@@ -29,6 +30,7 @@ class RoleTarget(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    provider: Literal["azure"] | None = None
     name: str | None = None
     host: str | None = None
     user: str = "ubuntu"
@@ -184,6 +186,17 @@ class EnvironmentConfig(BaseModel):
         An after-validator, so it returns the instance unchanged once every
         requirement of the selected provider is satisfied.
         """
+        for role, target in self.roles.items():
+            if target.provider is None:
+                continue
+            if role != "cloud" or self.provider != "multipass":
+                raise ValueError(
+                    "only the cloud role on multipass may override provider"
+                )
+            if self.azure is None or not target.name:
+                raise ValueError(
+                    "Azure cloud requires azure configuration and a cloud name"
+                )
         if self.provider == "multipass":
             stack = self.roles.get("stack")
             if stack is None or not stack.name:
@@ -220,6 +233,10 @@ class EnvironmentConfig(BaseModel):
             raise ValueError("logging is only meaningful with sites and placement")
         return self
 
+    def role_provider(self, role: ExecutionRole) -> ProviderName:
+        """Return the role provider, including the Azure cloud override."""
+        return self.target(role).provider or self.provider
+
     @property
     def multisite(self) -> bool:
         """Whether nodes are placed on remote sites rather than kept local."""
@@ -250,3 +267,33 @@ class EnvironmentConfig(BaseModel):
         if role == "arm-builder":
             return self.roles.get("arm-builder", self.target("stack"))
         return self.roles.get("loadgen", self.target("stack"))
+
+
+def require_experiment_environment(environment: EnvironmentConfig) -> None:
+    """Reject ambiguous B4 ownership and network placement before provisioning."""
+    roles: tuple[ExecutionRole, ...] = ("stack", "cloud", "loadgen")
+    if environment.provider == "local" or any(
+        role not in environment.roles for role in roles
+    ):
+        raise ValueError("B4 needs three distinct remote roles: stack, cloud, loadgen")
+    if any(
+        not (environment.roles[role].name or environment.roles[role].host)
+        for role in roles
+    ):
+        raise ValueError("B4 needs an explicit machine identity for every role")
+    for field in ("name", "host"):
+        values = [getattr(environment.roles[role], field) for role in roles]
+        supplied = [value.casefold() for value in values if value]
+        if len(supplied) != len(set(supplied)):
+            raise ValueError("B4 needs distinct edge, cloud and generator machines")
+    if environment.role_provider("cloud") == "azure":
+        if environment.azure is None or environment.azure.priority != "Spot":
+            raise ValueError("B4 cloud must use workflow-created Azure Spot")
+        if environment.roles["cloud"].host:
+            raise ValueError("B4 cloud must be created by the workflow, not precreated")
+        source = environment.azure.operator_source_cidr
+        if (
+            source not in (None, "auto")
+            and ipaddress.ip_network(source, strict=True).prefixlen == 0
+        ):
+            raise ValueError("Azure operator source CIDR must be a restricted network")

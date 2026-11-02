@@ -48,6 +48,7 @@ def run_generator(status=200, body=None, action="invoke()", iteration=0):
     ).replace("export ", "")
     command = (
         HARNESS
+        + SCRIPT.with_name("word-stats-oracle.js").read_text().replace("export ", "")
         + source
         + "\nlet error=null;try{"
         + action

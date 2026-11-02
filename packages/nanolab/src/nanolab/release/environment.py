@@ -243,11 +243,13 @@ def secure_release_endpoints(
     provider: object,
     stack_request: VmRequest,
     loadgen_request: VmRequest | None,
+    *,
+    additional_requests: tuple[VmRequest, ...] = (),
 ) -> tuple[str, str]:
     """Restrict the stack VM's release ports and return the endpoint URLs.
 
     Inbound traffic to the control-plane, actuator and Prometheus node ports
-    is limited to this operator and, when there is one, the loadgen VM.
+    is limited to this operator, the loadgen VM, and explicitly supplied peers.
     Returns the control-plane and Prometheus URLs, reached over the SSH tunnel.
     """
     azure = environment.azure
@@ -262,15 +264,19 @@ def secure_release_endpoints(
     operator = azure.operator_source_cidr
     if operator == AUTO_OPERATOR_SOURCE:
         operator = resolve_operator_source(provider, stack_request)
+    if ipaddress.ip_network(operator, strict=True).prefixlen == 0:
+        raise ValueError("Azure operator source CIDR must be a restricted network")
     sources = (operator,)
-    if loadgen_request is not None:
-        loadgen_address = ipaddress.ip_address(
-            provider.connection_host(loadgen_request)  # type: ignore[attr-defined]
+    peers = (
+        *((loadgen_request,) if loadgen_request is not None else ()),
+        *additional_requests,
+    )
+    for peer in peers:
+        peer_address = ipaddress.ip_address(
+            provider.connection_host(peer)  # type: ignore[attr-defined]
         )
         sources = tuple(
-            dict.fromkeys(
-                (f"{loadgen_address}/{loadgen_address.max_prefixlen}", *sources)
-            )
+            dict.fromkeys((f"{peer_address}/{peer_address.max_prefixlen}", *sources))
         )
     provider.restrict_inbound_sources(  # type: ignore[attr-defined]
         stack_request,

@@ -3,6 +3,7 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -267,7 +268,9 @@ def test_b11_fixed_baselines_keep_the_common_protocol(limit):
     )
     config = ScenarioConfig.model_validate(fixed)
     assert config.fixed_concurrency == limit
-    assert concurrency_control_setup(config)["concurrencyControl"] == {"mode": "FIXED"}
+    setup = concurrency_control_setup(config)
+    assert setup is not None
+    assert setup["concurrencyControl"] == {"mode": "FIXED"}
     fixed.pop("fixedConcurrency")
     fixed["concurrencyMode"] = "ADAPTIVE_PER_POD"
     assert fixed == common
@@ -314,20 +317,30 @@ def test_fixed_task_records_a_constant_single_slot_series(monkeypatch):
     from sonata_engine import TaskInputs
 
     from nanolab.tasks.loadtest import LoadtestOutcome, ReportCoTenancyTask
-    from nanolab.tasks.loadtest.concurrency import ConcurrencySample, ConcurrencySummary
+    from nanolab.tasks.loadtest.concurrency import (
+        ConcurrencySample,
+        ConcurrencySummary,
+        ConcurrencyWatcherGroup,
+    )
+    from nanolab.tasks.loadtest.models import K6RunResult
 
     summary = ConcurrencySummary(
         function_name="fn",
         samples=(ConcurrencySample(elapsed_seconds=1, effective=1, in_flight=1),),
     )
-    outcome = LoadtestOutcome(k6=object())
+    outcome = LoadtestOutcome(k6=cast(K6RunResult, object()))
     monkeypatch.setattr(
         "nanolab.tasks.loadtest.load_outcome", lambda inputs, title: outcome
     )
     task = ReportCoTenancyTask(
-        watchers=SimpleNamespace(summaries=lambda: {"fn": summary}), fixed_concurrency=1
+        watchers=cast(
+            ConcurrencyWatcherGroup, SimpleNamespace(summaries=lambda: {"fn": summary})
+        ),
+        fixed_concurrency=1,
     )
-    assert task.run(TaskInputs.empty()).value.concurrency is summary
+    value = task.run(TaskInputs.empty()).value
+    assert value is not None
+    assert value.concurrency is summary
 
 
 @pytest.mark.parametrize(("api_port", "metrics_port"), [(8080, 8081), (30080, 30081)])
@@ -359,8 +372,9 @@ def test_concurrency_watchers_use_management_port(api_port, metrics_port):
         control_plane_url=url,
         functions=functions,
     )
-    assert watcher._probe.management_url == f"http://20.224.195.10:{metrics_port}"
-    assert all(
-        w._probe.management_url == f"http://20.224.195.10:{metrics_port}"
-        for w in group._watchers.values()
-    )
+    from nanolab.tasks.loadtest.concurrency import ScrapeConcurrencyProbe
+
+    assert watcher is not None and group is not None
+    for item in (watcher, *group._watchers.values()):
+        assert isinstance(item._probe, ScrapeConcurrencyProbe)
+        assert item._probe.management_url == f"http://20.224.195.10:{metrics_port}"

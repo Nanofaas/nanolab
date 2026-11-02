@@ -218,3 +218,59 @@ def test_missing_required_conservation_counter_cannot_pass() -> None:
     )
     assert not report.passed
     assert any("missing" in failure for failure in report.failures)
+
+
+@pytest.mark.parametrize(
+    "counter", ["control_offload", "retry_offloadable", "retry_control"]
+)
+def test_even_one_forbidden_event_fails(counter: str) -> None:
+    report = evaluate_conservation(
+        k6_summary=_k6_summary(),
+        edge_metrics=_edge_metrics(
+            control_offload=int(counter == "control_offload"),
+            retry_offloadable=int(counter == "retry_offloadable"),
+            retry_control=int(counter == "retry_control"),
+        ),
+        cloud_metrics=_cloud_metrics(),
+        offloadable=OFFLOADABLE,
+        control=CONTROL,
+    )
+    assert not report.passed
+    assert any("expected 0" in failure for failure in report.failures)
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        f'nanofaas_offload_failure_total{{function="{OFFLOADABLE}"}} 0',
+        'nanofaas_offload_failure_total{function="unrelated"} 7',
+        "# HELP nanofaas_offload_failure_total Offload failures",
+    ],
+)
+def test_only_positive_failure_samples_for_tested_functions_fail(sample: str) -> None:
+    report = evaluate_conservation(
+        k6_summary=_k6_summary(),
+        edge_metrics=_edge_metrics() + sample + "\n",
+        cloud_metrics=_cloud_metrics(),
+        offloadable=OFFLOADABLE,
+        control=CONTROL,
+    )
+    assert report.passed, report.failures
+
+
+@pytest.mark.parametrize("function", [OFFLOADABLE, CONTROL])
+def test_missing_preregistered_retry_counter_fails(function: str) -> None:
+    report = evaluate_conservation(
+        k6_summary=_k6_summary(),
+        edge_metrics=_edge_metrics().replace(
+            f'function_retry_total{{function="{function}"}} 0\n', ""
+        ),
+        cloud_metrics=_cloud_metrics(),
+        offloadable=OFFLOADABLE,
+        control=CONTROL,
+    )
+    assert not report.passed
+    assert any(
+        "missing required counter function_retry_total" in failure
+        for failure in report.failures
+    )

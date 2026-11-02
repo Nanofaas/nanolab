@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,6 +143,7 @@ def provision_roles(
     repo_root: Path,
     assets_root: Path,
     keep: bool = False,
+    role_providers: Mapping[str, object] | None = None,
     after_ensure: Callable[[str, VmRequest], None] | None = None,
 ) -> Generator[None, None, None]:
     """Ensure every role's VM, run its bootstrap operations, then tear it all down.
@@ -157,25 +158,27 @@ def provision_roles(
     try:
         resolved: list[VmRequest] = []
         for entry in roles:
+            role_provider = (role_providers or {}).get(entry.role, provider)
             if entry.request.lifecycle != "external" and not _vm_exists(
-                provider, entry.request
+                role_provider, entry.request
             ):
-                cleanup = _destroy_task(provider, entry.request, role=entry.role)
+                cleanup = _destroy_task(role_provider, entry.request, role=entry.role)
                 if cleanup is not None:
                     # Register before ensure: launch can succeed and connection
                     # discovery or provisioning can still fail afterwards.
                     cleanup_tasks.append(cleanup)
-            resolved.append(_ensure_vm(provider, entry.request, role=entry.role))
+            resolved.append(_ensure_vm(role_provider, entry.request, role=entry.role))
         for entry, _request in zip(roles, resolved, strict=False):
             if after_ensure is not None:
                 after_ensure(entry.role, entry.request)
         for entry, request in zip(roles, resolved, strict=False):
             if entry.operations:
+                role_provider = (role_providers or {}).get(entry.role, provider)
                 context = scenario_context(repo_root, request, assets_root)
                 retargeted = retarget_cloud_operations(
-                    provider, context, entry.operations
+                    role_provider, context, entry.operations
                 )
-                run_bootstrap_operations(provider, retargeted, role=entry.role)
+                run_bootstrap_operations(role_provider, retargeted, role=entry.role)
         yield
     except (
         BaseException

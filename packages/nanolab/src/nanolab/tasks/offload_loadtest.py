@@ -55,6 +55,8 @@ class EvaluateConservationTask(Task[LoadtestOutcome]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         _ = self._evaluate.run()
+        if not outcome.k6.passed:
+            raise RuntimeError("k6 load test failed; conservation report retained")
         return TaskOutcome(value=outcome)
 
 

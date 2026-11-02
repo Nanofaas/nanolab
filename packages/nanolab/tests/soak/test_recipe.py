@@ -290,6 +290,12 @@ def test_p24_recipe_preset_preserves_experiment():
     assert actual.pop("one_shot") is None
     assert actual.pop("experiment_01") is None
     assert actual.pop("experiment_02") is None
+    assert actual.pop("completion_latency") is False
+    assert actual.pop("concurrency_total_budget") is None
+    assert actual.pop("fixed_concurrency") is None
+    assert actual.pop("idle_reactivation") is None
+    assert actual.pop("module_cost") is None
+    assert actual.pop("offload_experiment") is None
     assert actual == baseline
     assert (
         config.recipe_profile

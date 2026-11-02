@@ -705,3 +705,188 @@ def test_experiment_02_provisions_a_separate_faasd_role_without_docker(tmp_path)
         pass
     assert ("ensure", ("azure", "faasd")) in orchestrator.events
     assert not any("faasd.internal," in argv for argv in _commands(orchestrator))
+
+
+def test_offload_without_loadgen_installs_k6_on_edge(tmp_path: Path) -> None:
+    orchestrator = RecordingOrchestrator()
+    with provision_environment(
+        ScenarioConfig(workflow="offload-loadtest", functions=["word-stats-java"]),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {
+                    "stack": {"name": "edge"},
+                    "cloud": {"name": "cloud"},
+                },
+            }
+        ),
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+    k6 = [
+        command
+        for command in _commands(orchestrator)
+        if command[-1].endswith("install-k6.yml")
+    ]
+    assert len(k6) == 1
+    assert "edge.internal" in " ".join(k6[0])
+
+
+@pytest.mark.parametrize("operator", ["203.0.113.42/32", None])
+def test_azure_offload_limits_cloud_ingress_to_operator_edge_and_loadgen(
+    tmp_path: Path, operator: str | None
+) -> None:
+    class AzureOrchestrator(RecordingOrchestrator):
+        def connection_host(self, request):
+            return {"edge": "10.0.0.4", "cloud": "10.0.0.5", "loadgen": "10.0.0.6"}[
+                request.name
+            ]
+
+        def exec_argv(self, request, argv):
+            return _Result(stdout="203.0.113.42")
+
+        def ensure_running(self, request):
+            assert request.azure_open_ports is None
+            return super().ensure_running(request)
+
+    orchestrator = AzureOrchestrator()
+    with provision_environment(
+        ScenarioConfig(workflow="offload-loadtest", functions=["word-stats-java"]),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "azure",
+                "roles": {
+                    "stack": {"name": "edge"},
+                    "cloud": {"name": "cloud"},
+                    "loadgen": {"name": "loadgen"},
+                },
+                "azure": {
+                    "resource_group": "rg",
+                    "location": "westeurope",
+                    "operator_source_cidr": operator,
+                },
+            }
+        ),
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+    cloud = [rule for rule in orchestrator.restrictions if rule[0] == "cloud"]
+    assert len(cloud) == 1
+    assert cloud[0][1] == (30080, 30081, 30090)
+    assert set(cloud[0][2]) == {"203.0.113.42/32", "10.0.0.4/32", "10.0.0.6/32"}
+
+
+@pytest.mark.parametrize("source", ["0.0.0.0/0", "::/0", "*", "Internet"])
+def test_secure_endpoints_never_open_unrestricted_sources(source: str) -> None:
+    from nanolab.release.environment import secure_release_endpoints
+    from nanolab.tasks.vm.models import VmRequest
+
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "azure",
+            "roles": {"stack": {}},
+            "azure": {
+                "resource_group": "rg",
+                "location": "westeurope",
+                "operator_source_cidr": source,
+            },
+        }
+    )
+    provider = RecordingOrchestrator()
+    with pytest.raises(ValueError, match=r"restricted network|does not appear"):
+        secure_release_endpoints(
+            environment, provider, VmRequest(lifecycle="azure", name="edge"), None
+        )
+    assert provider.restrictions == []
+
+
+def test_hybrid_provisions_cloud_with_azure_and_uses_dgx_nat_ingress(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class CloudProvider(RecordingOrchestrator):
+        def connection_host(self, request):
+            return "20.30.40.50"
+
+        def exec_argv(self, request, argv):
+            return _Result(stdout="203.0.113.42")
+
+    local = RecordingOrchestrator()
+    cloud = CloudProvider()
+    monkeypatch.setattr(
+        "nanolab.application.provisioning.command_provider_for",
+        lambda request, root: cloud,
+        raising=False,
+    )
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {
+                "stack": {"name": "edge"},
+                "loadgen": {"name": "loadgen"},
+                "cloud": {"name": "cloud", "provider": "azure"},
+            },
+            "azure": {
+                "resource_group": "rg",
+                "location": "westeurope",
+                "priority": "Spot",
+            },
+        }
+    )
+    with provision_environment(
+        ScenarioConfig(workflow="offload-loadtest", functions=["word-stats-java"]),
+        environment,
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: local,
+    ):
+        pass
+    assert [payload for kind, payload in local.events if kind == "ensure"] == [
+        ("multipass", "edge"),
+        ("multipass", "loadgen"),
+    ]
+    assert [payload for kind, payload in cloud.events if kind == "ensure"] == [
+        ("azure", "cloud")
+    ]
+    assert cloud.restrictions == [
+        ("cloud", (30080, 30081, 30090), ("203.0.113.42/32",))
+    ]
+    assert not local.restrictions
+    assert any(
+        "azureuser@20.30.40.50:" in " ".join(command) for command in _commands(cloud)
+    )
+    assert [payload for kind, payload in cloud.events if kind == "teardown"] == [
+        "cloud"
+    ]
+
+
+def test_experiment_topology_is_rejected_before_provider_creation(
+    tmp_path: Path,
+) -> None:
+    from tests.config.test_offload_experiment import scenario
+
+    created = []
+
+    def factory(root):
+        created.append(root)
+        return RecordingOrchestrator()
+
+    with (
+        pytest.raises(ValueError, match="three distinct remote roles"),
+        provision_environment(
+            ScenarioConfig.model_validate(scenario()),
+            EnvironmentConfig.model_validate(
+                {
+                    "provider": "multipass",
+                    "roles": {
+                        "stack": {"name": "edge"},
+                        "cloud": {"name": "cloud"},
+                    },
+                }
+            ),
+            repo_root=tmp_path,
+            orchestrator_factory=factory,
+        ),
+    ):
+        pass
+    assert created == []

@@ -264,7 +264,8 @@ def _helm_release_with_endpoint(
                 ):
                     for index, item in enumerate(values):
                         if item.startswith(key + "="):
-                            values[index] = f"{key}={value}"
+                            if key != "controlPlane.resources.limits.cpu":
+                                values[index] = f"{key}={value}"
                             break
                     else:
                         values.extend(("--set", f"{key}={value}"))

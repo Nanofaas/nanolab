@@ -1,0 +1,5 @@
+workflow: module-cost
+backend: k8s
+functions: [word-stats-java]
+moduleCost:
+  blockId: module-cost-qualification

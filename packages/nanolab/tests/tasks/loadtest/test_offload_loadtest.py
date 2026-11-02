@@ -235,3 +235,18 @@ def test_every_step_of_both_platforms_says_which_one_it_is() -> None:
         for unit in platform_ids
         if not unit.endswith(("-on-the-cloud", "-on-the-edge"))
     ]
+
+
+def test_failed_k6_preserves_conservation_report_before_failing(tmp_path: Path) -> None:
+    report = tmp_path / "conservation.json"
+
+    class PersistingEvaluator:
+        def run(self) -> object:
+            report.write_text('{"passed": true}')
+            return {"passed": True}
+
+    original = _outcome()
+    failed = replace(original, k6=replace(original.k6, passed=False))
+    with pytest.raises(RuntimeError, match="k6"):
+        EvaluateConservationTask(evaluate=PersistingEvaluator()).run(_inputs(failed))
+    assert report.read_text() == '{"passed": true}'

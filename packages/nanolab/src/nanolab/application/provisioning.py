@@ -16,7 +16,7 @@ from nanolab.application.vm_provider import (
     vm_request_for_role,
 )
 from nanolab.config import EnvironmentConfig, ScenarioConfig
-from nanolab.config.environment import ExecutionRole
+from nanolab.config.environment import ExecutionRole, require_experiment_environment
 from nanolab.release.environment import secure_release_endpoints
 from nanolab.tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
@@ -45,6 +45,7 @@ from nanolab.tasks.provisioning import (
     remote_operations,
     scenario_context,
 )
+from nanolab.tasks.provisioning.providers import command_provider_for
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.workspace.paths import ToolPaths, bundled_assets_root
 
@@ -87,9 +88,9 @@ def _stack_operations(
         )
     if scenario.backend == "containerd":
         planners.extend([plan_assets_sync_to_vm, plan_containerd_rootless_install])
-    if (scenario.workflow == "loadtest" and not dedicated_loadgen) or (
-        scenario.workflow == "validate" and scenario.backend == "k8s"
-    ):
+    if (
+        scenario.workflow in {"loadtest", "offload-loadtest"} and not dedicated_loadgen
+    ) or (scenario.workflow == "validate" and scenario.backend == "k8s"):
         planners.append(plan_loadtest_install_k6)
         if scenario.backend != "containerd":
             planners.append(plan_assets_sync_to_vm)
@@ -112,6 +113,7 @@ def _role_requests_and_operations(
     *,
     repo_root: Path,
     maven_source: Path | None = None,
+    role_providers: dict[str, Any] | None = None,
 ) -> list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]]:
     """Build the per-role (role, request, operations) triples."""
     loadtest_workflow = scenario.workflow in (
@@ -119,6 +121,7 @@ def _role_requests_and_operations(
         "offload-loadtest",
         "release",
         "idle-reactivation",
+        "module-cost",
     )
     dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
     dedicated_cloud = (
@@ -142,20 +145,23 @@ def _role_requests_and_operations(
     def retarget(
         context: ScenarioExecutionContext,
         operations: tuple[RemoteCommandOperation, ...],
+        *,
+        role: ExecutionRole = "stack",
     ) -> tuple[RemoteCommandOperation, ...]:
-        if environment.provider not in {"azure", "proxmox"}:
+        role_provider = (role_providers or {}).get(role, provider)
+        if environment.role_provider(role) not in {"azure", "proxmox"}:
             return operations
-        if isinstance(provider, (AzureVmProvider, ProxmoxVmProvider)):
+        if isinstance(role_provider, (AzureVmProvider, ProxmoxVmProvider)):
             # Real cloud providers re-retarget inside provision_roles, after
             # ensure, from the resolved request; their endpoint helpers need
             # the VM to exist, so they must not be called here.
             return operations
         request = context.vm_request
-        if environment.provider == "proxmox":
-            host, port = provider.ssh_endpoint(request)
+        if environment.role_provider(role) == "proxmox":
+            host, port = role_provider.ssh_endpoint(request)
         else:
-            host, port = provider.connection_host(request), None
-        private_key = provider.ssh_private_key_path(request)
+            host, port = role_provider.connection_host(request), None
+        private_key = role_provider.ssh_private_key_path(request)
         return tuple(
             retarget_bootstrap_operation(
                 operation,
@@ -233,6 +239,7 @@ def _role_requests_and_operations(
                         cloud_context,
                         dedicated_loadgen=True,
                     ),
+                    role="cloud",
                 ),
             )
         )
@@ -274,6 +281,8 @@ def provision_environment(
     underlying provisioning so a caller can leave the machines running or swap
     the provider for a test.
     """
+    if scenario.offload_experiment is not None:
+        require_experiment_environment(environment)
     if environment.provider == "local":
         raise ValueError("a non-local environment is required")
     if scenario.backend == "containerd" and environment.provider != "multipass":
@@ -282,6 +291,22 @@ def provision_environment(
         )
     if scenario.backend == "containerd" and environment.target("stack").user == "root":
         raise ValueError("containerd backend requires an unprivileged VM user")
+    if (
+        scenario.workflow == "offload-loadtest"
+        and environment.azure is not None
+        and environment.azure.operator_source_cidr is None
+    ):
+        environment = environment.model_copy(
+            update={
+                "azure": environment.azure.model_copy(
+                    update={"operator_source_cidr": "auto"}
+                )
+            }
+        )
+    if scenario.workflow == "module-cost":
+        from nanolab.config.module_cost import require_module_environment
+
+        require_module_environment(environment)
     provider = provider_for_environment(
         environment, repo_root, orchestrator_factory=orchestrator_factory
     )
@@ -293,6 +318,11 @@ def provision_environment(
             "containerdMavenRepository must point to an isolated host Maven repository"
         )
 
+    role_providers = {
+        role: command_provider_for(vm_request_for_role(environment, role), repo_root)
+        for role, target in environment.roles.items()
+        if target.provider is not None
+    }
     with TemporaryDirectory(prefix="nanolab-containerd-maven-") as staging:
         maven_source = None
         if scenario.backend == "containerd":
@@ -310,6 +340,7 @@ def provision_environment(
             environment,
             repo_root=repo_root,
             maven_source=maven_source,
+            role_providers=role_providers,
         ):
             roles.append(
                 ProvisionedRole(role=role, request=request, operations=operations)
@@ -319,19 +350,28 @@ def provision_environment(
             (entry.request for entry in roles if entry.role == "loadgen"), None
         )
 
+        stack_request = next(entry.request for entry in roles if entry.role == "stack")
+
         def after_ensure(role: str, request: VmRequest) -> None:
             if post_ensure_verifier is not None:
                 post_ensure_verifier(cast(ExecutionRole, role), request)
             # `azure is not None` is guaranteed by EnvironmentConfig's validation for
             # this provider; saying it here is what lets the checker follow.
             if (
-                role in {"stack", "faasd"}
-                and environment.provider == "azure"
+                role in {"stack", "faasd", "cloud"}
+                and environment.role_provider(cast(ExecutionRole, role)) == "azure"
                 and environment.azure is not None
                 and environment.azure.operator_source_cidr
             ):
                 secure_release_endpoints(
-                    environment, provider, request, loadgen_request
+                    environment,
+                    role_providers.get(role, provider),
+                    request,
+                    loadgen_request if environment.provider == "azure" else None,
+                    # Hybrid VMs share the controller's public NAT.
+                    additional_requests=(stack_request,)
+                    if role == "cloud" and environment.provider == "azure"
+                    else (),
                 )
 
         with provision_roles(
@@ -341,6 +381,7 @@ def provision_environment(
             assets_root=bundled_assets_root(),
             keep=keep,
             after_ensure=after_ensure,
+            role_providers=role_providers,
         ):
             yield
 
