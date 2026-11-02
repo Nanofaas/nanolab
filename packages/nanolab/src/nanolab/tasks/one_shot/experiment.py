@@ -780,6 +780,14 @@ def physical_attempts(path: Path) -> list[dict]:
 # not overridden for one-shot functions); an older proof can no longer be read.
 PROOF_RETENTION_SECONDS = 600
 
+# Proof reads run this wide: a pass must cover the rows finished since the last.
+LOOKUP_WORKERS = 64
+
+
+def retried_originals(path: Path) -> set[str]:
+    """Originals whose proof shows a retried dispatch, which no read can change."""
+    return {row["originalId"] for row in _observation_rows(path)}
+
 
 class LiveEvidenceCollector:
     """Capture proofs during load so an epoch transition cannot erase all history."""
@@ -792,6 +800,9 @@ class LiveEvidenceCollector:
         self.event_cursors = {}
         self.pending: dict[str, dict] = {}
         self.expired: set[str] = set()
+        # Visited once and not worth another read: refused or retried rows.
+        self.settled: set[str] = set()
+        self.visits: set[str] = set()
         self.thread = Thread(target=self.loop, name="one-shot-evidence", daemon=False)
         self.thread.start()
 
@@ -804,8 +815,11 @@ class LiveEvidenceCollector:
                     for row in physical_attempts(self.run.run_dir / "physical.jsonl")
                     if row.get("state") == "RELEASED"
                 }
+                self.settled |= retried_originals(
+                    self.run.run_dir / "retried-proofs.jsonl"
+                )
                 for identity in tuple(self.pending):
-                    if identity in seen:
+                    if identity in seen or identity in self.settled:
                         del self.pending[identity]
                 for row in generator_rows(self.run.run_dir / "generator.jsonl"):
                     if (
@@ -813,6 +827,7 @@ class LiveEvidenceCollector:
                         and row["event"] == "result"
                         and row["originalId"] not in seen
                         and row["originalId"] not in self.expired
+                        and row["originalId"] not in self.settled
                     ):
                         self.pending.setdefault(row["originalId"], row)
                 # Past the runtime retention a row cannot be proven any more;
@@ -826,6 +841,7 @@ class LiveEvidenceCollector:
                     self.run,
                     self.inputs,
                     list(self.pending.values()),
+                    revisits=self.visits,
                     stop=self.stop,
                     deadline=time.monotonic()
                     + operational_limit(
@@ -834,12 +850,21 @@ class LiveEvidenceCollector:
                 )
                 visited, released = progress or ([], set())
                 seen.update(released)
+                self.settled |= retried_originals(
+                    self.run.run_dir / "retried-proofs.jsonl"
+                )
                 # Resume past this pass's visited prefix, including failed reads.
                 # Rebuilding from generator order would starve newer proofs.
                 for identity in visited:
                     row = self.pending.pop(identity)
-                    if identity not in seen:
-                        self.pending[identity] = row
+                    self.visits.add(identity)
+                    if identity in seen or identity in self.settled:
+                        continue
+                    # A refused request ran nowhere: one complete visit settles it.
+                    if row.get("statusCode") != 200:
+                        self.settled.add(identity)
+                        continue
+                    self.pending[identity] = row
                 append_observation(
                     self.run.run_dir / "evidence-collection.jsonl",
                     {
@@ -848,6 +873,7 @@ class LiveEvidenceCollector:
                         "pendingOriginals": len(self.pending),
                         "provenOriginals": len(seen),
                         "expiredOriginals": len(self.expired),
+                        "settledOriginals": len(self.settled),
                     },
                 )
                 self.collect_events()
@@ -1035,11 +1061,15 @@ def _lookup_runtime_proofs(
     read_timeout,
     destinations=None,
     record=None,
+    revisit=False,
 ):
     """Read identity-checked physical proof, retrying one failed transport read.
 
     The reported execution node is read first; the other nodes only when it
     holds no proof, so a row costs its node's replicas rather than every one.
+    A revisited row reads its hinted node alone: the first visit already
+    searched the others. A proof of a retried dispatch is kept apart in
+    retried-proofs.jsonl, since the single-attempt contract cannot count it.
     """
     proofs = []
     if cancelled():
@@ -1077,6 +1107,8 @@ def _lookup_runtime_proofs(
     hint = _execution_hint(row, destinations or {})
     # Stable: the hinted node first, the others in their discovery order.
     candidates = sorted(candidates, key=lambda runtime: runtime[0] != hint)
+    if revisit and hint is not None:
+        candidates = [runtime for runtime in candidates if runtime[0] == hint]
     attempted = not any(name == row["function"] for _, name, _ in candidates)
     for node_id, name, url in candidates:
         if cancelled():
@@ -1119,10 +1151,18 @@ def _lookup_runtime_proofs(
                 count("notFound")
                 continue
             response.raise_for_status()
-            if not validate_proof(
-                response.json(),
-                row.get("terminalExecutionId", row.get("executionId")),
-            ):
+            execution_id = row.get("terminalExecutionId", row.get("executionId"))
+            proof = response.json()
+            if not validate_proof(proof, execution_id):
+                if proof.get("executionId") == execution_id and str(
+                    proof.get("dispatchAttempt", "")
+                ) not in {"", "1"}:
+                    append_observation(
+                        run.run_dir / "retried-proofs.jsonl",
+                        {**row, **proof, "destination": node_id, "runtimeUrl": url},
+                    )
+                    count("retried")
+                    continue
                 raise ValueError("SDK proof identity/attempt mismatch")
             proofs.append(
                 {
@@ -1152,6 +1192,7 @@ def collect_runtime_evidence(
     inputs,
     rows: list[dict],
     *,
+    revisits: set[str] | frozenset[str] = frozenset(),
     stop: Event | None = None,
     deadline: float | None = None,
 ) -> tuple[list[str], set[str]]:
@@ -1178,7 +1219,10 @@ def collect_runtime_evidence(
 
     if cancelled():
         return visited, released
-    with httpx.Client(trust_env=False) as http:
+    limits = httpx.Limits(
+        max_connections=2 * LOOKUP_WORKERS, max_keepalive_connections=LOOKUP_WORKERS
+    )
+    with httpx.Client(trust_env=False, limits=limits) as http:
         if getattr(run.topology, "neighbor_graph", None):
             # A node busy activating can stall or disagree for a moment: keep the
             # failure as evidence and still collect this pass's proofs.
@@ -1264,7 +1308,7 @@ def collect_runtime_evidence(
         # Nodes and replicas are independent: sample them together, then write
         # every observation from this thread in discovery order.
         began = time.monotonic()
-        with ThreadPoolExecutor(max_workers=16) as executor:
+        with ThreadPoolExecutor(max_workers=LOOKUP_WORKERS) as executor:
             candidates = [
                 candidate
                 for found in executor.map(
@@ -1330,12 +1374,17 @@ def collect_runtime_evidence(
                 for row in rows
                 if row["event"] == "result" and row["phase"] == "campaign"
             ]
-            for offset in range(0, len(selected), 16):
+            for offset in range(0, len(selected), LOOKUP_WORKERS):
                 if cancelled():
                     break
-                batch = selected[offset : offset + 16]
+                batch = selected[offset : offset + LOOKUP_WORKERS]
                 for row, (attempted, proofs) in zip(
-                    batch, executor.map(lookup, batch), strict=True
+                    batch,
+                    executor.map(
+                        lambda row: lookup(row, revisit=row["originalId"] in revisits),
+                        batch,
+                    ),
+                    strict=True,
                 ):
                     if attempted:
                         visited.append(row["originalId"])
@@ -1353,7 +1402,10 @@ def collect_runtime_evidence(
                     "lookupSeconds": time.monotonic() - sampled,
                     "rows": len(selected),
                     "visited": len(visited),
-                    **{key: tally[key] for key in ("found", "notFound", "error")},
+                    **{
+                        key: tally[key]
+                        for key in ("found", "notFound", "retried", "error")
+                    },
                 },
             )
         for node_id, endpoint in run.topology.endpoints.items():
@@ -1670,7 +1722,7 @@ class RunOneShotLoadTask(Task[None]):
                         row["originalId"]
                         for row in physical_attempts(run.run_dir / "physical.jsonl")
                         if row.get("state") == "RELEASED"
-                    }
+                    } | retried_originals(run.run_dir / "retried-proofs.jsonl")
                     collect_runtime_evidence(
                         run,
                         inputs,

@@ -26,6 +26,7 @@ def test_unrecoverable_prefix_does_not_starve_new_available_proofs(
             "executionId": identity,
             "terminalExecutionId": identity,
             "function": "work",
+            "statusCode": 200,
         }
         for identity in [
             *(f"old-{i}" for i in range(64)),
@@ -214,3 +215,101 @@ def test_rows_past_proof_retention_leave_the_queue_without_a_lookup(
     assert journal[-1]["provenOriginals"] == 1
     assert journal[-1]["expiredOriginals"] == 1
     assert journal[-1]["pendingOriginals"] == 0
+
+
+def test_refused_and_retried_rows_settle_after_one_visit(tmp_path, monkeypatch):
+    """Only an executed row whose proof is still missing is read again."""
+    rows = [
+        {
+            "event": "result",
+            "phase": "campaign",
+            "originalId": identity,
+            "executionId": execution,
+            "terminalExecutionId": execution,
+            "function": "work",
+            "statusCode": status,
+        }
+        for identity, execution, status in (
+            ("rejected", None, 429),
+            ("refused", "refused", 503),
+            ("retried", "retried", 200),
+            ("missing", "missing", 200),
+        )
+    ]
+    (tmp_path / "generator.jsonl").write_text(
+        "".join(json.dumps({"msg": json.dumps(row)}) + "\n" for row in rows)
+    )
+    queries = []
+
+    class DormantThread:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    class Passes:
+        count = 0
+
+        def wait(self, _):
+            self.count += 1
+            return self.count > 3
+
+        def is_set(self):
+            return False
+
+    def respond(request):
+        if "/runtime/executions/" in request.url.path:
+            identity = request.url.path.rsplit("/", 1)[1]
+            queries.append(identity)
+            if identity != "retried":
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                json={
+                    "executionId": identity,
+                    "incarnation": "replica",
+                    "dispatchAttempt": "2",
+                    "state": "RELEASED",
+                },
+            )
+        if request.url.path == "/runtime/status":
+            return httpx.Response(200, json={})
+        return httpx.Response(200, text="")
+
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        topology=SimpleNamespace(
+            resources=SimpleNamespace(nodes={"cloud": object()}),
+            function_settings={"work": SimpleNamespace(max_replicas=1)},
+            endpoints={"cloud": "endpoint"},
+        ),
+    )
+    inputs = SimpleNamespace(resource=lambda _: "http://gateway:8080")
+    monkeypatch.setattr(experiment, "Thread", DormantThread)
+    monkeypatch.setattr(
+        experiment, "runtime_endpoint", lambda *_args, **_kw: ("http://sdk", {})
+    )
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        monkeypatch.setattr(experiment.httpx, "Client", lambda **_: nullcontext(client))
+        collector = experiment.LiveEvidenceCollector(run, inputs)
+        monkeypatch.setattr(collector, "stop", Passes())
+        collector.collect_events = lambda: None
+        collector.loop()
+    collector.require_healthy()
+    assert sorted(queries) == ["missing", "missing", "missing", "refused", "retried"]
+    retried = json.loads((tmp_path / "retried-proofs.jsonl").read_text())
+    assert (retried["originalId"], retried["dispatchAttempt"]) == ("retried", "2")
+    assert not (tmp_path / "physical.jsonl").exists()
+    assert not (tmp_path / "collection-errors.jsonl").exists()
+    journal = [
+        json.loads(line)
+        for line in (tmp_path / "evidence-collection.jsonl").read_text().splitlines()
+    ]
+    assert journal[-1]["settledOriginals"] == 3
+    assert journal[-1]["pendingOriginals"] == 1
+    lookups = [
+        json.loads(line)
+        for line in (tmp_path / "evidence-lookups.jsonl").read_text().splitlines()
+    ]
+    assert lookups[0]["retried"] == 1

@@ -289,6 +289,19 @@ Robustness:
     and nodes warm concurrently; the first node failure stops the others.
     Expected warm-up: a few minutes, bounded by the memory oracle.
 
+21. Proof collection in the fifth run (phase1-ari-20261101-214203) still
+    fell behind from epoch 10: 37,098 of 88,233 executed rows proven, 760,908
+    404 reads against 37,098 found. Every unproven row was searched on every
+    node at each pass, although the hinted node held all 37,098 proofs found.
+    The queue also cycled rows no read can prove: 3,855 rejected 429s (no
+    execution id), 810 refused 503s (never proven) and 3,586 rows whose only
+    proof is a retried dispatch (`dispatchAttempt` 2, refused by the
+    single-attempt contract and logged as an identity mismatch every pass).
+    Now a revisited row reads its hinted node alone, a non-200 row settles
+    after one complete visit, a retried proof is kept in
+    `retried-proofs.jsonl` and settles its row (`settledOriginals`), and
+    lookups run 64 wide instead of 16.
+
 Maintainability:
 
 9. Update the design spec: it still describes Loki per site and NSG rules

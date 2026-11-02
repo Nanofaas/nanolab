@@ -428,8 +428,9 @@ def test_stopped_collection_never_opens_network_or_writes_evidence(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("revisits", [frozenset(), {"misreported"}])
 def test_proof_lookup_reads_the_reported_node_first_and_falls_back_when_absent(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, revisits
 ):
     """A row costs its execution node's replicas; other nodes only without proof."""
     run = SimpleNamespace(
@@ -496,8 +497,20 @@ def test_proof_lookup_reads_the_reported_node_first_and_falls_back_when_absent(
             lambda **_: nullcontext(http),
         )
         visited, released = collect_runtime_evidence(
-            run, cast(Any, SimpleNamespace(resource=gateways.__getitem__)), rows
+            run,
+            cast(Any, SimpleNamespace(resource=gateways.__getitem__)),
+            rows,
+            revisits=revisits,
         )
+    if revisits:
+        # The first visit searched every node: a revisit reads the hint alone.
+        assert released == {"reported", "forwarded"}
+        assert sorted(queries) == [
+            ("b", "forwarded"),
+            ("b", "misreported"),
+            ("b", "reported"),
+        ]
+        return
     assert visited == ["reported", "forwarded", "misreported"]
     assert released == set(holder)
     assert sorted(queries) == sorted(
@@ -523,6 +536,7 @@ def test_proof_lookup_reads_the_reported_node_first_and_falls_back_when_absent(
     assert summary["runtimes"] == 2
     assert (summary["rows"], summary["visited"]) == (3, 3)
     assert (summary["found"], summary["notFound"], summary["error"]) == (3, 1, 0)
+    assert summary["retried"] == 0
 
 
 def test_neighbor_observation_failure_is_recorded_and_proofs_still_collected(
