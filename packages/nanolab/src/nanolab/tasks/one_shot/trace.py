@@ -484,13 +484,16 @@ def warmup_trace(
     capacities: dict[str, float] | None = None,
     legacy_rate: float = 4,
 ) -> TraceArtifact:
-    """Use positive local capacity backgrounds, with a separate warmup interval."""
-    if (
-        len(trace.functions) == 5
-        and len(trace.windows) == 9
-        and trace.period_seconds == 360
+    """Use positive local capacity backgrounds, with a separate warmup interval.
+
+    The five-function 54-minute load, in six-minute steps or in its one-minute
+    epochs, warms with its first window for at least twelve minutes.
+    """
+    if len(trace.functions) == 5 and (len(trace.windows), trace.period_seconds) in (
+        (9, 360),
+        (54, 60),
     ):
-        if seconds < 2 * trace.period_seconds:
+        if seconds < 720:
             raise ValueError("scientific warmup requires at least two periods")
         rates = trace.windows[0]
     elif capacities is not None:

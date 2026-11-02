@@ -13,6 +13,7 @@ from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.provisioning.bootstrap import (
+    OWN_STDIN,
     OperationTask,
     operation_task,
     remote_operations,
@@ -65,7 +66,7 @@ def test_run_bootstrap_operations_records_each_command() -> None:
         operation_id="k3s", summary="install", argv=("helm", "install")
     )
     run_bootstrap_operations(provider, [op], role="stack")
-    assert provider.shell.seen[0].argv == ("helm", "install")
+    assert provider.shell.seen[0].argv == (*OWN_STDIN, "helm", "install")
 
 
 def test_operation_task_returns_the_concrete_operation_task() -> None:
@@ -74,6 +75,46 @@ def test_operation_task_returns_the_concrete_operation_task() -> None:
     )
     task = operation_task(operation, HostCommandTaskExecutor(SubprocessShell()))
     assert isinstance(task, OperationTask)
+    assert task.spec.argv == (*OWN_STDIN, "helm")
+
+
+def test_a_host_command_runs_on_its_own_blocking_stdin(tmp_path) -> None:
+    """A stdin made non-blocking by a concurrent ssh must not reach Ansible."""
+    import fcntl
+    import os
+    import subprocess
+    import sys
+
+    probe = (
+        "import os, sys; "
+        "print(os.get_blocking(0), os.path.realpath(f'/proc/self/fd/0'))"
+    )
+    operation = RemoteCommandOperation(
+        operation_id="probe", summary="probe", argv=(sys.executable, "-c", probe)
+    )
+    task = operation_task(operation, HostCommandTaskExecutor(SubprocessShell()))
+    read, write = os.pipe()
+    flags = fcntl.fcntl(read, fcntl.F_GETFL)
+    fcntl.fcntl(read, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    try:
+        # The parent's stdin is non-blocking, as an ssh sharing it leaves it.
+        result = subprocess.run(
+            task.spec.argv, stdin=read, capture_output=True, text=True, check=True
+        )
+    finally:
+        os.close(read)
+        os.close(write)
+    assert result.stdout.split() == ["True", "/dev/null"]
+
+
+def test_a_command_inside_the_vm_is_left_unchanged() -> None:
+    operation = RemoteCommandOperation(
+        operation_id="k3s",
+        summary="install",
+        argv=("helm",),
+        execution_target="vm",
+    )
+    task = operation_task(operation, HostCommandTaskExecutor(SubprocessShell()))
     assert task.spec.argv == ("helm",)
 
 

@@ -65,8 +65,10 @@ their sibling recipe/payload files remain ordinary operator-owned inputs.
 ## Tests and supported NanoFaaS source
 
 The CI-tested NanoFaaS source revision is
-`c0d15e3d1c132ee9691f4d3dd34b9b611b92cedd`, which includes one-shot roulette routing, per-function sync
-queue limits and the forecast snapshot fixes of Nanofaas/nanofaas#261.
+`ae8406cbc7f417862c49b45cf50abd7f53c1b06b`, which includes one-shot roulette routing, per-function sync
+queue limits, the forecast snapshot fixes of Nanofaas/nanofaas#261, the
+word-stats runtime contracts read by the B5, B6, module-cost and offload
+checkout contracts, and one-shot replica lease recovery after a skipped epoch.
 It also includes the Holt and ARI forecasters introduced by
 Nanofaas/nanofaas#259 and used by
 `one-shot-observe.py prepare --forecast holt|ari`. It builds the recipes with the
@@ -107,7 +109,7 @@ The public console command is `nanolab`.
 
 `.github/workflows/ci.yml` runs on every push and pull request against
 `main`. It checks out this repo and the pinned nanoFaaS source at
-`c0d15e3d1c132ee9691f4d3dd34b9b611b92cedd` into `.nanofaas-source`, points
+`ae8406cbc7f417862c49b45cf50abd7f53c1b06b` into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below. The gate
 validates all checked-in recipe profiles. To reproduce profile validation
 and the full container lifecycles locally, use the commands below.

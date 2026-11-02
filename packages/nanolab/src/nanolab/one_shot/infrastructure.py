@@ -26,7 +26,12 @@ from nanolab.config.one_shot import (
 )
 from nanolab.one_shot import host_cpu
 from nanolab.one_shot.addresses import NodeAddresses, direct, published
-from nanolab.one_shot.sites import SiteForwarders, SiteHost, control_path
+from nanolab.one_shot.sites import (
+    OperatorTunnel,
+    SiteForwarders,
+    SiteHost,
+    control_path,
+)
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
@@ -135,6 +140,51 @@ class NodeResource:
         if result.return_code != 0:
             raise RuntimeError(f"{self.config.id}: {result.stderr or result.stdout}")
         return result
+
+
+# One upload to an Azure VM may take this long before it is retried.
+AZURE_TRANSFER_SECONDS = 600
+AZURE_TRANSFER_ATTEMPTS = 3
+
+
+def transfer_to_vm(node: NodeResource, vm: VmInfo, source: Path, destination: str):
+    """Copy a local file into a node's VM, bounding and retrying it on Azure.
+
+    The Azure provider uploads through the SDK's SFTP, which has no stall
+    bound: in the third ten-edge run one image upload sat in TCP
+    retransmission for half an hour while new connections moved 100 MB in two
+    seconds. An Azure VM therefore gets OpenSSH scp on a dedicated connection,
+    whose ServerAlive probes close a stalled one within a minute, each attempt
+    bounded and retried on a fresh connection.
+    """
+    if node.request.lifecycle != "azure":
+        result = node.provider.transfer_to(
+            node.request, source=source, destination=destination
+        )
+        if result.return_code != 0:
+            raise RuntimeError(f"{node.config.id}: transfer of {source.name} failed")
+        return
+    ssh = node.azure_ssh(vm, shared=False)
+    argv = ["scp", "-q", *ssh[1:-1], str(source), f"{ssh[-1]}:{destination}"]
+    failures = []
+    for _attempt in range(AZURE_TRANSFER_ATTEMPTS):
+        try:
+            subprocess.run(
+                argv,
+                check=True,
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=AZURE_TRANSFER_SECONDS,
+            )
+            return
+        except subprocess.TimeoutExpired:
+            failures.append(f"no completion in {AZURE_TRANSFER_SECONDS} s")
+        except subprocess.CalledProcessError as error:
+            failures.append((error.stderr or "").strip() or f"exit {error.returncode}")
+    raise RuntimeError(
+        f"{node.config.id}: transfer of {source.name} failed: " + "; ".join(failures)
+    )
 
 
 class NodeExecutor:
@@ -281,6 +331,7 @@ def _owned_node(
     site_host: SiteHost | None = None,
     ordinal: int = 0,
     architecture: str | None = None,
+    tunnel_journal: Path | None = None,
 ) -> NodeResource:
     """Own one node's VM: refuse adoption, pin it, retain it for raw recovery."""
     # Ownership is checked at acquire time, including partial launch compensation.
@@ -295,6 +346,29 @@ def _owned_node(
     # A node behind a site's NAT is published on the site's address for as
     # long as its VM exists.
     forwarders = SiteForwarders(site_host) if site_host is not None else None
+    # Behind a NAT that forwards only SSH, the operator publishes them instead.
+    addresses = (
+        published(site_host.site.address, ordinal) if site_host is not None else None
+    )
+    tunnel = (
+        OperatorTunnel(
+            site_host.site,
+            site_host.site.address,
+            tuple(port for port, _ in addresses.forwards()),
+            name=node.id,
+            journal=tunnel_journal,
+        )
+        if site_host is not None and addresses is not None and site_host.site.tunnel
+        else None
+    )
+
+    def unpublish():
+        try:
+            if tunnel is not None:
+                tunnel.stop()
+        finally:
+            if forwarders is not None:
+                forwarders.stop()
 
     def acquire(inputs):
         if provider.vm_exists(request):
@@ -305,14 +379,13 @@ def _owned_node(
                 if request.name is None:
                     raise ValueError("owned VM name missing for host placement")
                 pin(request.name, target_cpus)
-            if forwarders is not None and site_host is not None:
-                forwarders.start(
-                    value.host, published(site_host.site.address, ordinal).forwards()
-                )
+            if forwarders is not None and addresses is not None:
+                forwarders.start(value.host, addresses.forwards())
+            if tunnel is not None:
+                tunnel.start()
         except BaseException as error:
             try:
-                if forwarders is not None:
-                    forwarders.stop()
+                unpublish()
                 base.release(inputs, value)
             except Exception as cleanup:
                 error.add_note(f"owned VM placement compensation: {cleanup}")
@@ -321,8 +394,7 @@ def _owned_node(
         return value
 
     def release(inputs, value):
-        if forwarders is not None:
-            forwarders.stop()
+        unpublish()
         if recovery:
             if request.name is None:
                 raise RuntimeError("owned VM name missing for raw recovery")
@@ -378,6 +450,7 @@ def build_one_shot_resources(
     *,
     run_id: str | None = None,
     repo_root: Path | None = None,
+    run_dir: Path | None = None,
 ) -> OneShotResources:
     """Reuse Sonata's compensated VM lifecycle without adopting operator VMs."""
     if environment.provider != config.provider:
@@ -390,7 +463,7 @@ def build_one_shot_resources(
         from nanolab.one_shot.multisite import build_multisite_resources
 
         return build_multisite_resources(
-            config, environment, namespace=namespace, repo_root=root
+            config, environment, namespace=namespace, repo_root=root, run_dir=run_dir
         )
     cpus, available_memory = host_capacity()
     check_host_capacity(

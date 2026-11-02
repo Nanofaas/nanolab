@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build once, freeze and run step ORACLE, continuous ORACLE and continuous ARI."""
+"""Build once, freeze and run step ORACLE, continuous ORACLE and continuous ARI.
+
+The continuous load is either replayed from a parent freeze (its preparation
+holds an arrival-profile.json derived from that parent's curves) or tuned
+directly in one-minute epochs, with no arrival profile and a null
+continuousParentFreeze.
+"""
 
 import argparse
 import hashlib
@@ -39,12 +45,22 @@ def inputs(path):
     if set(raw) != set(INPUTS):
         raise ValueError("config must contain exactly: " + ", ".join(INPUTS))
     result = {
-        key: (path.parent / Path(value).expanduser()).resolve()
+        key: None
+        if value is None
+        else (path.parent / Path(value).expanduser()).resolve()
         for key, value in raw.items()
     }
-    for item in result.values():
-        if not item.exists():
+    for key, item in result.items():
+        if item is None and key != "continuousParentFreeze":
+            raise ValueError("only continuousParentFreeze may be null")
+        if item is not None and not item.exists():
             raise ValueError("missing input: " + str(item))
+    replayed = (result["continuousTuning"] / "arrival-profile.json").is_file()
+    if replayed != (result["continuousParentFreeze"] is not None):
+        raise ValueError(
+            "a replayed continuous load needs its parent freeze; "
+            "a load tuned in minutes has none"
+        )
     for name in ("stepTuning", "continuousTuning"):
         for file in ("trace.json", "selected.json", "input-context.json"):
             if not (result[name] / file).is_file():
@@ -132,6 +148,11 @@ def main(argv=None):
         "--runtime-distributions",
         help="prebuilt per-architecture images, arm64=PATH,amd64=PATH; skips the build",
     )
+    parser.add_argument(
+        "--sync-queue-wait-seconds",
+        type=int,
+        help="sync-queue admission estimate and queue wait limit (nanoFaaS: 2)",
+    )
     args = parser.parse_args(argv)
     config = inputs(args.config.resolve())
     output = args.output.resolve()
@@ -139,11 +160,11 @@ def main(argv=None):
         raise ValueError("output directory already exists: " + str(output))
     lab = Path(__file__).resolve().parents[1]
     observer = runpy.run_path(str(lab / "scripts/one-shot-observe.py"))
-    arrival = config["continuousTuning"] / "arrival-profile.json"
-    profile = read_json(arrival)
-    observer["verify_parent_archive"](
-        config["continuousParentFreeze"], profile["parent"]["freezeSha256"]
-    )
+    parent = config["continuousParentFreeze"]
+    arrival = config["continuousTuning"] / "arrival-profile.json" if parent else None
+    if arrival is not None:
+        profile = read_json(arrival)
+        observer["verify_parent_archive"](parent, profile["parent"]["freezeSha256"])
     source = config["runtimeSource"]
     revision = subprocess.check_output(
         ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
@@ -156,19 +177,20 @@ def main(argv=None):
     observer["step_decision_grid"](
         step, read_json(config["stepTuning"] / "selected.json"), 60
     )
-    observer["validate_arrival_profile"](
-        profile,
-        observer["TraceArtifact"].model_validate_json(
-            (config["continuousTuning"] / "trace.json").read_bytes()
-        ),
-        trace_sha256=digest(config["continuousTuning"] / "trace.json"),
-        warmup_seconds=720,
-    )
-    for name, file in read_json(config["continuousTuning"] / "provenance.json")[
-        "files"
-    ].items():
-        if digest(config["continuousTuning"] / name) != file["sha256"]:
-            raise ValueError("continuous preparation hash mismatch: " + name)
+    if arrival is not None:
+        observer["validate_arrival_profile"](
+            profile,
+            observer["TraceArtifact"].model_validate_json(
+                (config["continuousTuning"] / "trace.json").read_bytes()
+            ),
+            trace_sha256=digest(config["continuousTuning"] / "trace.json"),
+            warmup_seconds=720,
+        )
+        for name, file in read_json(config["continuousTuning"] / "provenance.json")[
+            "files"
+        ].items():
+            if digest(config["continuousTuning"] / name) != file["sha256"]:
+                raise ValueError("continuous preparation hash mismatch: " + name)
     prebuilt = (
         dict(item.split("=", 1) for item in args.runtime_distributions.split(","))
         if args.runtime_distributions
@@ -189,11 +211,18 @@ def main(argv=None):
             if args.environment is not None
             else {}
         ),
+        **(
+            {"syncQueueWaitSeconds": args.sync_queue_wait_seconds}
+            if args.sync_queue_wait_seconds is not None
+            else {}
+        ),
         "order": [run for run in RUNS if not args.only or run in args.only],
         "decisionPeriodSeconds": 60,
         "loadSecondsPerRun": 3240,
         "warmupSecondsPerRun": 720,
-        "inputs": {key: str(value) for key, value in config.items()},
+        "inputs": {
+            key: None if value is None else str(value) for key, value in config.items()
+        },
     }
     print(json.dumps(summary, indent=2), flush=True)
     if args.check:
@@ -237,7 +266,7 @@ def main(argv=None):
             SimpleNamespace(
                 forecast="ari" if name == "continuous-ari" else "oracle",
                 arrival_profile=arrival if continuous else None,
-                parent_freeze=config["continuousParentFreeze"] if continuous else None,
+                parent_freeze=parent if continuous else None,
                 tuning=config["continuousTuning"]
                 if continuous
                 else config["stepTuning"],
@@ -245,6 +274,7 @@ def main(argv=None):
                 distribution=primary,
                 environment=args.environment,
                 runtime_distributions=args.runtime_distributions,
+                sync_queue_wait_seconds=args.sync_queue_wait_seconds,
                 source=source,
                 output=freeze,
                 decision_period_seconds=None if continuous else 60,

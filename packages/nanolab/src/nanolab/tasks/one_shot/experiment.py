@@ -7,13 +7,14 @@ import math
 import os
 import subprocess
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from importlib.metadata import version
 from importlib.resources import files
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Any, cast
 from uuid import uuid4
 
@@ -775,6 +776,19 @@ def physical_attempts(path: Path) -> list[dict]:
     return list(unique.values())
 
 
+# The SDK keeps a terminal proof this long (NANOFAAS_OCCUPANCY_RETENTION default,
+# not overridden for one-shot functions); an older proof can no longer be read.
+PROOF_RETENTION_SECONDS = 600
+
+# Proof reads run this wide: a pass must cover the rows finished since the last.
+LOOKUP_WORKERS = 64
+
+
+def retried_originals(path: Path) -> set[str]:
+    """Originals whose proof shows a retried dispatch, which no read can change."""
+    return {row["originalId"] for row in _observation_rows(path)}
+
+
 class LiveEvidenceCollector:
     """Capture proofs during load so an epoch transition cannot erase all history."""
 
@@ -785,6 +799,10 @@ class LiveEvidenceCollector:
         self.error = None
         self.event_cursors = {}
         self.pending: dict[str, dict] = {}
+        self.expired: set[str] = set()
+        # Visited once and not worth another read: refused or retried rows.
+        self.settled: set[str] = set()
+        self.visits: set[str] = set()
         self.thread = Thread(target=self.loop, name="one-shot-evidence", daemon=False)
         self.thread.start()
 
@@ -797,20 +815,33 @@ class LiveEvidenceCollector:
                     for row in physical_attempts(self.run.run_dir / "physical.jsonl")
                     if row.get("state") == "RELEASED"
                 }
+                self.settled |= retried_originals(
+                    self.run.run_dir / "retried-proofs.jsonl"
+                )
                 for identity in tuple(self.pending):
-                    if identity in seen:
+                    if identity in seen or identity in self.settled:
                         del self.pending[identity]
                 for row in generator_rows(self.run.run_dir / "generator.jsonl"):
                     if (
                         row["phase"] == "campaign"
                         and row["event"] == "result"
                         and row["originalId"] not in seen
+                        and row["originalId"] not in self.expired
+                        and row["originalId"] not in self.settled
                     ):
                         self.pending.setdefault(row["originalId"], row)
+                # Past the runtime retention a row cannot be proven any more;
+                # retrying it would only delay rows that still can.
+                cutoff = time.time() - PROOF_RETENTION_SECONDS
+                for identity, row in tuple(self.pending.items()):
+                    if (row.get("finishedAt") or math.inf) < cutoff:
+                        del self.pending[identity]
+                        self.expired.add(identity)
                 progress = collect_runtime_evidence(
                     self.run,
                     self.inputs,
                     list(self.pending.values()),
+                    revisits=self.visits,
                     stop=self.stop,
                     deadline=time.monotonic()
                     + operational_limit(
@@ -819,12 +850,21 @@ class LiveEvidenceCollector:
                 )
                 visited, released = progress or ([], set())
                 seen.update(released)
+                self.settled |= retried_originals(
+                    self.run.run_dir / "retried-proofs.jsonl"
+                )
                 # Resume past this pass's visited prefix, including failed reads.
                 # Rebuilding from generator order would starve newer proofs.
                 for identity in visited:
                     row = self.pending.pop(identity)
-                    if identity not in seen:
-                        self.pending[identity] = row
+                    self.visits.add(identity)
+                    if identity in seen or identity in self.settled:
+                        continue
+                    # A refused request ran nowhere: one complete visit settles it.
+                    if row.get("statusCode") != 200:
+                        self.settled.add(identity)
+                        continue
+                    self.pending[identity] = row
                 append_observation(
                     self.run.run_dir / "evidence-collection.jsonl",
                     {
@@ -832,6 +872,8 @@ class LiveEvidenceCollector:
                         "visitedOriginals": len(visited),
                         "pendingOriginals": len(self.pending),
                         "provenOriginals": len(seen),
+                        "expiredOriginals": len(self.expired),
+                        "settledOriginals": len(self.settled),
                     },
                 )
                 self.collect_events()
@@ -915,8 +957,10 @@ class LiveEvidenceCollector:
     def require_healthy(self):
         """Surface failures of the independent evidence sampler."""
         if self.error is not None:
+            # The supervisor reports only the message: carry the cause in it.
             raise RuntimeError(
-                "live physical evidence collector failed"
+                "live physical evidence collector failed: "
+                f"{type(self.error).__name__}: {self.error}"
             ) from self.error
 
     def close(self):
@@ -997,11 +1041,44 @@ def _runtime_candidates(run, inputs, node_id, node, functions, cancelled):
     return candidates
 
 
-def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout):
-    """Read identity-checked physical proof, retrying one failed transport read."""
+def _execution_hint(row, destinations):
+    """Name the node that the gateway reported, or that a local execution implies."""
+    if row.get("executionNode"):
+        return row["executionNode"]
+    target = row.get("offloadedTarget")
+    if target:
+        return destinations.get(target.rstrip("/"))
+    return row.get("origin")
+
+
+def _lookup_runtime_proofs(
+    row,
+    *,
+    run,
+    http,
+    runtimes,
+    cancelled,
+    read_timeout,
+    destinations=None,
+    record=None,
+    revisit=False,
+):
+    """Read identity-checked physical proof, retrying one failed transport read.
+
+    The reported execution node is read first; the other nodes only when it
+    holds no proof, so a row costs its node's replicas rather than every one.
+    A revisited row reads its hinted node alone: the first visit already
+    searched the others. A proof of a retried dispatch is kept apart in
+    retried-proofs.jsonl, since the single-attempt contract cannot count it.
+    """
     proofs = []
     if cancelled():
         return False, proofs
+
+    def count(outcome):
+        if record is not None:
+            record(outcome)
+
     if not row.get("terminalExecutionId", row.get("executionId")):
         return True, proofs
     targets = getattr(run, "sdk_request_targets", {})
@@ -1027,12 +1104,19 @@ def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout)
             for runtime in runtimes
             if runtime == (node_id, name, target_url.removesuffix("/invoke"))
         ]
+    hint = _execution_hint(row, destinations or {})
+    # Stable: the hinted node first, the others in their discovery order.
+    candidates = sorted(candidates, key=lambda runtime: runtime[0] != hint)
+    if revisit and hint is not None:
+        candidates = [runtime for runtime in candidates if runtime[0] == hint]
     attempted = not any(name == row["function"] for _, name, _ in candidates)
     for node_id, name, url in candidates:
         if cancelled():
             break
         if name != row["function"]:
             continue
+        if hint is not None and proofs and node_id != hint:
+            break
         attempted = True
         read_attempt = 1
         try:
@@ -1064,12 +1148,21 @@ def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout)
                 except OSError as error:
                     raise httpx.ReadError(str(error)) from error
             if response.status_code == 404:
+                count("notFound")
                 continue
             response.raise_for_status()
-            if not validate_proof(
-                response.json(),
-                row.get("terminalExecutionId", row.get("executionId")),
-            ):
+            execution_id = row.get("terminalExecutionId", row.get("executionId"))
+            proof = response.json()
+            if not validate_proof(proof, execution_id):
+                if proof.get("executionId") == execution_id and str(
+                    proof.get("dispatchAttempt", "")
+                ) not in {"", "1"}:
+                    append_observation(
+                        run.run_dir / "retried-proofs.jsonl",
+                        {**row, **proof, "destination": node_id, "runtimeUrl": url},
+                    )
+                    count("retried")
+                    continue
                 raise ValueError("SDK proof identity/attempt mismatch")
             proofs.append(
                 {
@@ -1079,7 +1172,9 @@ def _lookup_runtime_proofs(row, *, run, http, runtimes, cancelled, read_timeout)
                     "runtimeUrl": url,
                 }
             )
+            count("found")
         except (httpx.HTTPError, ValueError, RuntimeError) as error:
+            count("error")
             append_observation(
                 run.run_dir / "collection-errors.jsonl",
                 {
@@ -1097,6 +1192,7 @@ def collect_runtime_evidence(
     inputs,
     rows: list[dict],
     *,
+    revisits: set[str] | frozenset[str] = frozenset(),
     stop: Event | None = None,
     deadline: float | None = None,
 ) -> tuple[list[str], set[str]]:
@@ -1123,37 +1219,115 @@ def collect_runtime_evidence(
 
     if cancelled():
         return visited, released
-    with httpx.Client(trust_env=False) as http:
+    limits = httpx.Limits(
+        max_connections=2 * LOOKUP_WORKERS, max_keepalive_connections=LOOKUP_WORKERS
+    )
+    with httpx.Client(trust_env=False, limits=limits) as http:
         if getattr(run.topology, "neighbor_graph", None):
-            snapshot = observe_neighbors(
-                http,
-                {
-                    key: inputs.resource(run.topology.endpoints[key])
-                    for key in run.topology.neighbor_graph
-                },
-                run.topology.neighbor_graph,
-            )
-            append_observation(
-                run.run_dir / "peer-graph.jsonl", {"at": sampled_at, "nodes": snapshot}
-            )
-        for node_id, node in run.topology.resources.nodes.items():
+            # A node busy activating can stall or disagree for a moment: keep the
+            # failure as evidence and still collect this pass's proofs.
+            try:
+                snapshot = observe_neighbors(
+                    http,
+                    {
+                        key: inputs.resource(run.topology.endpoints[key])
+                        for key in run.topology.neighbor_graph
+                    },
+                    run.topology.neighbor_graph,
+                )
+            except Exception as error:
+                append_observation(
+                    run.run_dir / "collection-errors.jsonl",
+                    {
+                        "atUtc": sampled_at,
+                        "neighbors": f"{type(error).__name__}: {error}",
+                    },
+                )
+            else:
+                append_observation(
+                    run.run_dir / "peer-graph.jsonl",
+                    {"at": sampled_at, "nodes": snapshot},
+                )
+
+        def discover(item):
+            node_id, node = item
             if cancelled():
-                break
+                return []
             functions = getattr(run.topology, "node_function_settings", {}).get(
                 node_id, run.topology.function_settings
             )
-            candidates = _runtime_candidates(
-                run, inputs, node_id, node, functions, cancelled
-            )
-            for name, replica, url, container in candidates:
-                if cancelled():
-                    break
-                try:
-                    status = http.get(
-                        url + "/runtime/status",
-                        timeout=read_timeout(),
+            return [
+                (node_id, *candidate)
+                for candidate in _runtime_candidates(
+                    run, inputs, node_id, node, functions, cancelled
+                )
+            ]
+
+        def sample(candidate):
+            url = candidate[3]
+            result: dict[str, Any] = {"status": None, "metrics": None, "error": None}
+            if cancelled():
+                return result
+            try:
+                result["status"] = http.get(
+                    url + "/runtime/status", timeout=read_timeout()
+                )
+                result["status"].raise_for_status()
+                if not cancelled():
+                    result["metrics"] = http.get(
+                        url + "/metrics", timeout=read_timeout()
                     )
-                    status.raise_for_status()
+                    result["metrics"].raise_for_status()
+            except (httpx.HTTPError, ValueError, RuntimeError) as error:
+                result["error"] = error
+            except OSError as error:
+                result["error"] = httpx.ReadError(str(error))
+            return result
+
+        tally = Counter()
+        tally_lock = Lock()
+
+        def record(outcome):
+            with tally_lock:
+                tally[outcome] += 1
+
+        destinations = {
+            inputs.resource(endpoint).rstrip("/"): node_id
+            for node_id, endpoint in run.topology.endpoints.items()
+        }
+        lookup = partial(
+            _lookup_runtime_proofs,
+            run=run,
+            http=http,
+            runtimes=runtimes,
+            cancelled=cancelled,
+            read_timeout=read_timeout,
+            destinations=destinations,
+            record=record,
+        )
+        # Nodes and replicas are independent: sample them together, then write
+        # every observation from this thread in discovery order.
+        began = time.monotonic()
+        with ThreadPoolExecutor(max_workers=LOOKUP_WORKERS) as executor:
+            candidates = [
+                candidate
+                for found in executor.map(
+                    discover, run.topology.resources.nodes.items()
+                )
+                for candidate in found
+            ]
+            for candidate, result in zip(
+                candidates, executor.map(sample, candidates), strict=True
+            ):
+                node_id, name, replica, url, container = candidate
+                status, metrics = result["status"], result["metrics"]
+                try:
+                    if result["error"] is not None and (
+                        status is None or not status.is_success
+                    ):
+                        raise result["error"]
+                    if status is None:
+                        continue
                     runtimes.append((node_id, name, url))
                     append_observation(
                         run.run_dir / "runtime-inventory.jsonl",
@@ -1167,13 +1341,10 @@ def collect_runtime_evidence(
                             "status": status.json(),
                         },
                     )
-                    if cancelled():
-                        break
-                    metrics = http.get(
-                        url + "/metrics",
-                        timeout=read_timeout(),
-                    )
-                    metrics.raise_for_status()
+                    if result["error"] is not None:
+                        raise result["error"]
+                    if metrics is None:
+                        continue
                     append_observation(
                         run.run_dir / "metrics.jsonl",
                         {
@@ -1197,27 +1368,23 @@ def collect_runtime_evidence(
                             "error": str(error),
                         },
                     )
-
-        lookup = partial(
-            _lookup_runtime_proofs,
-            run=run,
-            http=http,
-            runtimes=runtimes,
-            cancelled=cancelled,
-            read_timeout=read_timeout,
-        )
-
-        with ThreadPoolExecutor(max_workers=16) as executor:
-            for offset in range(0, len(rows), 16):
+            sampled = time.monotonic()
+            selected = [
+                row
+                for row in rows
+                if row["event"] == "result" and row["phase"] == "campaign"
+            ]
+            for offset in range(0, len(selected), LOOKUP_WORKERS):
                 if cancelled():
                     break
-                batch = [
-                    row
-                    for row in rows[offset : offset + 16]
-                    if row["event"] == "result" and row["phase"] == "campaign"
-                ]
+                batch = selected[offset : offset + LOOKUP_WORKERS]
                 for row, (attempted, proofs) in zip(
-                    batch, executor.map(lookup, batch), strict=True
+                    batch,
+                    executor.map(
+                        lambda row: lookup(row, revisit=row["originalId"] in revisits),
+                        batch,
+                    ),
+                    strict=True,
                 ):
                     if attempted:
                         visited.append(row["originalId"])
@@ -1225,6 +1392,22 @@ def collect_runtime_evidence(
                         append_observation(run.run_dir / "physical.jsonl", proof)
                         if proof.get("state") == "RELEASED":
                             released.add(proof["originalId"])
+        if rows:
+            append_observation(
+                run.run_dir / "evidence-lookups.jsonl",
+                {
+                    "atUtc": datetime.now(UTC).isoformat(),
+                    "runtimes": len(runtimes),
+                    "sampleSeconds": sampled - began,
+                    "lookupSeconds": time.monotonic() - sampled,
+                    "rows": len(selected),
+                    "visited": len(visited),
+                    **{
+                        key: tally[key]
+                        for key in ("found", "notFound", "retried", "error")
+                    },
+                },
+            )
         for node_id, endpoint in run.topology.endpoints.items():
             if cancelled():
                 break
@@ -1316,6 +1499,7 @@ class RunOneShotLoadTask(Task[None]):
                     if not getattr(run.trace, "node_roles", None)
                     or run.trace.node_roles[key] == "edge"
                 }
+                planless = 0
                 for epoch in range(len(run.trace.windows)):
                     start = anchor + timedelta(seconds=epoch * run.trace.period_seconds)
                     activation_at = mono_anchor + epoch * manifest.period_seconds
@@ -1424,6 +1608,17 @@ class RunOneShotLoadTask(Task[None]):
                                     ),
                                 },
                             )
+                        # Without any plan every edge sends its load to the cloud:
+                        # tolerate a recovery, not a run that measures nothing.
+                        planless = 0 if plans else planless + 1
+                        tolerated = int(
+                            operational_limit(run.settings, "planless_epochs", 5)
+                        )
+                        if planless >= tolerated:
+                            raise RuntimeError(
+                                f"no edge produced a plan for {planless} "
+                                "consecutive epochs"
+                            )
                         if not observation_only and (
                             sample.censored
                             or sample.ready_seconds is None
@@ -1527,7 +1722,7 @@ class RunOneShotLoadTask(Task[None]):
                         row["originalId"]
                         for row in physical_attempts(run.run_dir / "physical.jsonl")
                         if row.get("state") == "RELEASED"
-                    }
+                    } | retried_originals(run.run_dir / "retried-proofs.jsonl")
                     collect_runtime_evidence(
                         run,
                         inputs,

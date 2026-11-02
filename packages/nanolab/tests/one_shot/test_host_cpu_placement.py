@@ -71,6 +71,27 @@ def test_vm_and_host_reservations_do_not_overlap(section):
         OneShotConfig.model_validate(data)
 
 
+def test_nodes_on_different_hosts_may_share_cpu_ids():
+    """Two identical sites pin their VMs to the same CPU ids."""
+    data = configuration()
+    placement = data["hostCpuPlacement"]
+    placement["nodes"]["edge-1"]["cpus"] = [0]
+    placement["hosts"] = {"edge-0": "site-a", "edge-1": "site-b"}
+    config = OneShotConfig.model_validate(data)
+    assert config.host_cpu_placement is not None
+    assert config.host_cpu_placement.hosts["edge-1"] == "site-b"
+    placement["hosts"] = {"edge-0": "site-a", "edge-1": "site-a"}
+    with pytest.raises(ValueError, match="overlap"):
+        OneShotConfig.model_validate(data)
+
+
+def test_a_host_names_only_placed_nodes():
+    data = configuration()
+    data["hostCpuPlacement"]["hosts"] = {"edge-9": "site-a"}
+    with pytest.raises(ValueError, match="unknown nodes"):
+        OneShotConfig.model_validate(data)
+
+
 def cpu_tree(root: Path):
     for cpu in range(8):
         directory = root / f"cpu{cpu}" / "cpufreq"

@@ -13,6 +13,24 @@ from nanolab.config.one_shot import OperationalLimits
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.tasks.one_shot import experiment, qualification
 
+QUIET_OPERATOR = {
+    "atUtc": "2026-11-02T00:00:00+00:00",
+    "seconds": 5,
+    "swappedInPages": 0,
+    "swappedOutPages": 0,
+    "memAvailableBytes": 64 * 1024**3,
+    "swapUsedBytes": 0,
+}
+
+
+@pytest.fixture(autouse=True)
+def quiet_operator(monkeypatch):
+    """Keep runs here from waiting on, or depending on, this machine's swap."""
+    from nanolab.one_shot import operator_memory
+
+    monkeypatch.setattr(operator_memory, "sample", lambda *_a, **_k: QUIET_OPERATOR)
+
+
 pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
 
 

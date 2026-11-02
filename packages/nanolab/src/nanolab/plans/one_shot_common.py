@@ -33,6 +33,7 @@ from nanolab.one_shot.infrastructure import (
     OneShotResources,
     build_one_shot_resources,
     machine_architecture,
+    transfer_to_vm,
 )
 from nanolab.one_shot.sites import through_site
 from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_graph
@@ -243,6 +244,17 @@ def _bootstrap(
     )
 
 
+def sync_queue_arguments(settings) -> list[str]:
+    """Override the sync-queue admission limits only when the scenario sets them."""
+    limits = getattr(settings, "sync_queue", None)
+    if limits is None:
+        return []
+    return [
+        f"--sync-queue.max-estimated-wait={limits.max_estimated_wait_seconds}s",
+        f"--sync-queue.max-queue-wait={limits.max_queue_wait_seconds}s",
+    ]
+
+
 def _control_plane(
     node: NodeResource,
     topology: OneShotResources,
@@ -287,11 +299,7 @@ def _control_plane(
         built = inputs.resource(distribution)
         image_archive = inputs.resource(archive)
         remote = f"{vm.home}/one-shot-images.tar"
-        transferred = node.provider.transfer_to(
-            node.request, source=image_archive, destination=remote
-        )
-        if transferred.return_code != 0:
-            raise RuntimeError("one-shot image transfer failed")
+        transfer_to_vm(node, vm, image_archive, remote)
         node.command(("docker", "load", "--input", remote))
         identities = archive_image_ids(
             image_archive,
@@ -341,13 +349,7 @@ def _control_plane(
             )
             remote_dir = f"{vm.home}/one-shot-p2p"
             node.command(("mkdir", "-p", remote_dir))
-            transfer = node.provider.transfer_to(
-                node.request,
-                source=operator_file,
-                destination=remote_dir + "/peers.yaml",
-            )
-            if transfer.return_code != 0:
-                raise RuntimeError("operator peer configuration transfer failed")
+            transfer_to_vm(node, vm, operator_file, remote_dir + "/peers.yaml")
             # The nonroot platform must atomically replace its state file; this
             # directory exists only inside the run-owned VM.
             node.command(("chmod", "777", remote_dir))
@@ -401,6 +403,7 @@ def _control_plane(
                 else []
             ),
             "--nanofaas.admission.profile=SYNC_QUEUE",
+            *sync_queue_arguments(settings),
             "--nanofaas.metrics.profile=advanced",
             "--nanofaas.registry.path=/tmp/functions.json",
             "--nanofaas.container-local.runtime-adapter=docker-java",
@@ -591,7 +594,9 @@ def add_one_shot_platforms(
         require_resource_overhead(settings)
     run_dir.mkdir(parents=True, exist_ok=True)
     graph = validate_neighbor_graph(settings)
-    resources = build_one_shot_resources(settings, environment, repo_root=repo_root)
+    resources = build_one_shot_resources(
+        settings, environment, repo_root=repo_root, run_dir=run_dir
+    )
     definitions = {
         key: resolve_function_definition(key, repo_root) for key in config.functions
     }

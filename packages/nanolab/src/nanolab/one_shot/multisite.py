@@ -142,6 +142,10 @@ def _validate_placement(
             raise ValueError("Azure nodes cannot have host CPU placement")
         if site != AZURE_SITE and len(pinned) != len(members):
             raise ValueError(f"every node on {site} needs host CPU placement")
+        if placement.hosts and any(
+            placement.hosts.get(node) != site for node in pinned
+        ):
+            raise ValueError(f"host CPU placement names another host for {site}")
 
 
 def build_multisite_resources(
@@ -150,8 +154,12 @@ def build_multisite_resources(
     *,
     namespace: str,
     repo_root: Path,
+    run_dir: Path | None = None,
 ) -> OneShotResources:
-    """Own every node on its placed site; check each site against its own host."""
+    """Own every node on its placed site; check each site against its own host.
+
+    Tunnelled sites journal their operator tunnels in `run_dir`/tunnels.jsonl.
+    """
     by_site: dict[str, list[OneShotNode]] = {}
     for node in config.nodes:
         site = environment.site_of(node.id)
@@ -217,6 +225,7 @@ def build_multisite_resources(
                 site_host=host,
                 ordinal=ordinals[node.id],
                 architecture=host.site.architecture,
+                tunnel_journal=run_dir / "tunnels.jsonl" if run_dir else None,
             )
     azure_nodes = by_site.get(AZURE_SITE, [])
     if azure_nodes:

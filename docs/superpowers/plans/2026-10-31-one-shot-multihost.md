@@ -147,7 +147,14 @@ packages/nanolab`, `lint-imports` (CLAUDE.md commands). One commit per task.
 - [ ] If it matches: full sequence (step ORACLE, continuous ORACLE, continuous
       ARI). Archives to `/mnt/pve/qnap`.
 
-## 13. Phase 2 preparation
+Phases as decided on 2026-11-02: phase 1 (`.35` + Azure against the ARI
+reference) is validated by the fifth run; phase 2 (`.175` alone) is dropped,
+the tunnel smoke having checked that `.175` matches `.35`; the ten-edge run
+(called phase 2 in the spec, phase 3 in operation) is next, with the 4 s
+estimated-wait threshold and compared with the Python model, and replaces a
+separate phase-1 rerun.
+
+## 13. Phase 2 preparation (the ten-edge run)
 
 - [ ] User decision on the ten-edge load (duplicate rates vs re-tune).
 - [ ] `.175`: `socat`, patched Multipass, `sudo -n taskset`, high ports through
@@ -256,6 +263,114 @@ Robustness:
     outcome in `liveness.jsonl` and fail the run only after 5 minutes of
     continuous unreachability (a container reported stopped or missing still
     fails at once).
+
+17. Operator memory: during the fourth phase-1 run the operator (a Proxmox
+    node whose VMs hold ~220 GB) swapped at 70-90 MB/s with swappiness 60;
+    k6 had 556 MB swapped out and 71 MB resident while measuring. Fixed by
+    hand at 14:50 (swappiness 1, swapoff/swapon). Preflight should record the
+    operator's swappiness, swap use and memory/IO pressure, and refuse a
+    scientific run while the generator can be swapped out.
+
+18. The fourth run's real failure: while the operator swapped, the epoch loop
+    woke 15-28 s late, epochs 7-8 were refused ("activation delay is smaller
+    than operational budget"), and the lapsed replica lease then failed every
+    later epoch ("replica ownership unavailable"). With no plan the edges sent
+    nearly all load to the cloud (about 82,000 cloud executions against
+    15,814 in the reference). nanoFaaS now recovers a lapsed lease
+    (ae8406cb, the runtime pin since 2026-11-01), and a run stops after
+    `planlessEpochs` (default 5) consecutive epochs without any edge plan.
+
+19. Proof collection in the fourth run: probing all 80 replicas one by one
+    took the whole 30 s pass during the swap, and the round-robin queue grew
+    to 89,000 unprovable rows, so new proofs passed the SDK's 600 s retention
+    before their turn. Rows past the retention now leave the queue
+    (`expiredOriginals`), lookups read the reported execution node first,
+    replicas are sampled in parallel, and `evidence-lookups.jsonl` records
+    each pass (runtimes, timings, found/notFound/error).
+
+20. Warm-up took 68 minutes because every replica's warm invocation was
+    checked against `workload_checksum`, the pure-Python output oracle,
+    recomputed on the operator for each of about 80 replicas (memory 141 s,
+    mixed 50 s, arithmetic 20 s, matrix 15 s, sort 5 s on titan). The oracle
+    now runs once per function, in spawned processes while replicas start,
+    and nodes warm concurrently; the first node failure stops the others.
+    Expected warm-up: a few minutes, bounded by the memory oracle.
+
+21. Proof collection in the fifth run (phase1-ari-20261101-214203) still
+    fell behind from epoch 10: 37,098 of 88,233 executed rows proven, 760,908
+    404 reads against 37,098 found. Every unproven row was searched on every
+    node at each pass, although the hinted node held all 37,098 proofs found.
+    The queue also cycled rows no read can prove: 3,855 rejected 429s (no
+    execution id), 810 refused 503s (never proven) and 3,586 rows whose only
+    proof is a retried dispatch (`dispatchAttempt` 2, refused by the
+    single-attempt contract and logged as an identity mismatch every pass).
+    Now a revisited row reads its hinted node alone, a non-200 row settles
+    after one complete visit, a retried proof is kept in
+    `retried-proofs.jsonl` and settles its row (`settledOriginals`), and
+    lookups run 64 wide instead of 16.
+
+22. The comparison judged per-edge outcomes and routing from proven requests
+    only, while both the reference (44.6%) and the fifth run (42.0%) proved
+    under half of their successes, unevenly across edges. It now judges each
+    edge's executions and handled requests from nanoFaaS counters
+    (`queue-samples-<node>.jsonl` over the scheduled campaign plus 60 s),
+    and the success share from the returned responses; proof-based rows
+    decide only when both runs prove 95% of successes. The fifth run is then
+    within tolerance everywhere (executions within +6.7%, handled +5.2%).
+
+23. Ten-edge load (2026-11-02). The step design (`design-10edge.json`,
+    nine six-minute phases) met its requirements but its hotspots are steps
+    (edge-5 4.8 → 31.9 req/s), and in the fifth run the first minute after a
+    step rejected 10.9% against 2.5–5% later: the plan follows load one epoch
+    late. `design-10edge-minute.json` tunes the runtime's 54 one-minute
+    epochs directly: the same nine hotspots peak mid-phase and ramp
+    geometrically over nine minutes, one factor for the whole run (3), no
+    edge function changing by more than ×1.42 between minutes (the five-edge
+    replay reached ×4.2). Requirements count minutes: peer offload 54/54,
+    two receivers ≥12 (54), cross-site ≥18 (33), cloud request ≥18 (23);
+    ~160,600 requests, cloud ≤62% modelled utilization at 7 replicas.
+    Result: `model/load-tuning-10edge-minute-03`. The workflow takes it as
+    a continuous tuning without arrival profile or parent freeze: requests
+    evenly spaced per minute, warm-up at the first minute's rates (the
+    54×60 grid no longer falls to the legacy 4 req/s), trace scope from the
+    scenario's nodes, copied nodes' service statistics from their source,
+    and CPU ids disjoint per host (`hostCpuPlacement.hosts`, bound from the
+    environment) so `.175` reuses `.35`'s pins. `environment-phase3.yaml`
+    assumes `.175` matches `.35` (Multipass client path, VM key); unverified
+    while `.175` is unreachable.
+
+24. `.175` (checked 2026-11-02): same hardware and CPU pins as `.35`, but on
+    Wi-Fi (192.168.1.111) behind a NAT that forwards only SSH, on port 2022;
+    every experiment port is filtered and a cable is not an option. A site
+    with `tunnel: true` has its VMs' published ports (API 18000+k,
+    management 19010+k, gossip 14200+k, probe 17200+k) carried by one
+    operator-owned `ssh -N -L address:P:127.0.0.1:P` per node
+    (`OperatorTunnel`), opened after the node's socat forwarders and closed
+    before them; a watcher reopens it when ssh exits and journals open,
+    exit, failed reopen and close in `tunnels.jsonl`. `address` is then
+    titan (149.132.176.50), reachable from both Sparks; `ssh` is
+    `ssh://149.132.179.175:2022`. Every path to a `.175` edge crosses its
+    Wi-Fi (ping to titan 9.6 ms mean, 19 ms max, against 0.7 ms for `.35`);
+    traffic between `.175` edges crosses it twice. Before a run: Multipass
+    (and the fixed client) and socat on `.175`, then a smoke on `.175`
+    alone; `.35` is busy with another experiment.
+    Smoke `smoke175-20261102-104200` (edge-6..10 and a cloud, all on `.175`,
+    `--hold 300`): completed, no anomaly, six tunnels opened once and closed
+    once, nothing left behind. `.175` needed `NOPASSWD: /usr/bin/taskset`
+    (VM pinning). titan→VM probes through one tunnel: median 3–5 ms, p95
+    10–50 ms, worst 412 ms (Wi-Fi). Open issue: gossip RTT between `.175`
+    edges is 89–119 ms (2 ms between `.35` edges); suspected Nagle/delayed
+    ACK on the `ssh -N` connection (OpenSSH sets TCP_NODELAY only for
+    interactive sessions) or a reply on a second connection. Measure
+    VM→VM HTTP through the tunnels when `.175` is free again.
+
+25. Phase-3 cloud sized for throughput (2026-11-02): 27 replicas of every
+    function on the F32as_v7, bounded by CPU (135 × 0.21 cores of 32), not
+    memory (22 GB of 128). The cloud's pool and replica caps are only how
+    nanolab derives that vector; the design's `cloud.replicas` sets them,
+    `cloud.directReplicas` (7) keeps the cloud-direct load of the reference.
+    Same trace and model routing as with 7 replicas; modelled peak cloud
+    utilization 16% (62% with 7). Result `model/load-tuning-10edge-minute-04`.
 
 Maintainability:
 

@@ -6,7 +6,7 @@ roles:
     name: nanofaas-azure-loadgen
     cpus: 2
     memory: 2G
-    disk: 10G
+    disk: 30G
 azure:
   resource_group: nanofaas-rg
   location: westeurope

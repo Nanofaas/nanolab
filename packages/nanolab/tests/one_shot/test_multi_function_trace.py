@@ -64,6 +64,30 @@ def test_warmup_covers_two_six_minute_periods_at_control_rates():
         warmup_trace(trace, seconds=600)
 
 
+def test_minute_load_warms_with_its_first_minute_not_the_legacy_rate():
+    """A load tuned in one-minute epochs keeps its own background warm-up."""
+    from nanolab.tasks.one_shot.trace import TraceArtifact, warmup_trace
+
+    names = [f"f{i}" for i in range(5)]
+    windows = [
+        {node: dict.fromkeys(names, 0.05 * (minute + 1)) for node in ("e", "c")}
+        for minute in range(54)
+    ]
+    trace = TraceArtifact(
+        nodes=["e", "c"],
+        functions=names,
+        period_seconds=60,
+        flow_quantum=0.05,
+        seed=7,
+        payloads={name: {} for name in names},
+        windows=windows,
+    )
+    warm = warmup_trace(trace, seconds=720)
+    assert warm.period_seconds == 720 and warm.windows == [windows[0]]
+    with pytest.raises(ValueError, match="two periods"):
+        warmup_trace(trace, seconds=600)
+
+
 def inputs():
     names = [f"f{i}" for i in range(5)]
     nodes = []

@@ -48,20 +48,30 @@ class HostCpuTarget(BaseModel):
 
 
 class HostCpuPlacement(BaseModel):
-    """Disjoint VM, operator and owned logging CPU reservations."""
+    """Disjoint VM, operator and owned logging CPU reservations.
+
+    `hosts` names the host of nodes placed on another machine (a multi-site
+    placement); CPU ids are disjoint per host. Unnamed nodes share the
+    operator's host with the operator and logging CPUs.
+    """
 
     model_config = ConfigDict(extra="forbid")
     nodes: dict[str, HostCpuTarget] = Field(min_length=1)
     operator_cpus: list[CpuId] = Field(alias="operatorCpus", min_length=1)
     logging_cpus: list[CpuId] = Field(default_factory=list, alias="loggingCpus")
+    hosts: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_disjoint_cpus(self) -> Self:
-        """Reject overlap within or between any declared reservations."""
-        ids = [cpu for node in self.nodes.values() for cpu in node.cpus]
-        ids.extend(self.operator_cpus)
-        ids.extend(self.logging_cpus)
-        if len(ids) != len(set(ids)):
+        """Reject overlap within or between the reservations of one host."""
+        if not set(self.hosts) <= set(self.nodes):
+            raise ValueError("host CPU placement hosts name unknown nodes")
+        by_host: dict[str | None, list[int]] = {
+            None: [*self.operator_cpus, *self.logging_cpus]
+        }
+        for node, target in self.nodes.items():
+            by_host.setdefault(self.hosts.get(node), []).extend(target.cpus)
+        if any(len(ids) != len(set(ids)) for ids in by_host.values()):
             raise ValueError("host CPU reservations overlap")
         return self
 
@@ -349,6 +359,9 @@ class OperationalLimits(BaseModel):
     process_drain_seconds: float = Field(default=30, alias="processDrainSeconds", gt=0)
     process_exit_seconds: float = Field(default=30, alias="processExitSeconds", gt=0)
     event_pages: int = Field(default=1000, alias="eventPages", ge=1)
+    # Consecutive epochs in which no edge produced a plan before the run stops:
+    # without plans every edge sends its load to the cloud.
+    planless_epochs: int = Field(default=5, alias="planlessEpochs", ge=1)
     schedule_setup_seconds: float = Field(
         default=90, alias="scheduleSetupSeconds", gt=0
     )
@@ -358,6 +371,22 @@ def operational_limit(settings: object | None, name: str, default: float) -> flo
     """Use frozen observation limits while preserving explicit legacy defaults."""
     limits = getattr(settings, "operational_limits", None)
     return getattr(limits, name) if limits is not None else default
+
+
+class SyncQueueLimits(BaseModel):
+    """Admission limits of the nanoFaaS sync queue; unset keeps its defaults (2 s).
+
+    nanoFaaS compares whole seconds, and a request admitted below the estimate must
+    also be allowed to wait that long in the queue, so both are whole seconds.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", allow_inf_nan=False, populate_by_name=True
+    )
+    max_estimated_wait_seconds: int = Field(
+        alias="maxEstimatedWaitSeconds", ge=1, le=60
+    )
+    max_queue_wait_seconds: int = Field(alias="maxQueueWaitSeconds", ge=1, le=60)
 
 
 class OneShotConfig(BaseModel):
@@ -374,6 +403,7 @@ class OneShotConfig(BaseModel):
     )
     functions: dict[str, OneShotFunction] = Field(min_length=1)
     strict_memory: bool = Field(default=False, alias="strictMemory")
+    sync_queue: SyncQueueLimits | None = Field(default=None, alias="syncQueue")
     profile: ArtifactReference | None = None
     qualification: ArtifactReference | None = None
     runtime_distribution: ArtifactReference | None = Field(

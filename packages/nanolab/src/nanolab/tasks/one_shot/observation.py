@@ -3,11 +3,20 @@
 import hashlib
 import json
 import math
+import multiprocessing
+import os
 import statistics
 import subprocess
 import time
+from concurrent.futures import (
+    FIRST_EXCEPTION,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait,
+)
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from typing import cast
 from uuid import uuid4
@@ -339,86 +348,136 @@ class WarmInstances(Task):
         """Execute this observation stage on the owned resources."""
         run = self.run_context
         counts = comparison_replica_vectors(run.settings, run.topology.function_aliases)
-        with httpx.Client(
-            trust_env=False, timeout=operational_limit(run.settings, "api_seconds", 30)
-        ) as http:
+        # The pure-Python output oracle depends only on the function and its
+        # input, identical on every node: compute each once, in processes, while
+        # the replicas start. Nodes are independent and warm concurrently.
+        with (
+            ProcessPoolExecutor(
+                max_workers=min(8, os.cpu_count() or 1),
+                mp_context=multiprocessing.get_context("spawn"),
+            ) as oracle,
+            httpx.Client(
+                trust_env=False,
+                timeout=operational_limit(run.settings, "api_seconds", 30),
+            ) as http,
+            ThreadPoolExecutor(max_workers=max(1, len(counts))) as nodes,
+        ):
+            outputs = {}
+            expected = {}
             for node, vector in counts.items():
-                endpoint = inputs.resource(run.topology.endpoints[node])
-                for name, count in vector.items():
-                    fn = run.topology.node_function_settings[node][name]
-                    http.put(
-                        endpoint + f"/v1/functions/{name}/replicas",
-                        json={"replicas": count},
-                    ).raise_for_status()
-                    for replica in range(1, count + 1):
-                        deadline = time.monotonic() + operational_limit(
-                            run.settings, "replica_start_seconds", 120
+                expected[node] = {}
+                for name in vector:
+                    payload = run.topology.node_function_settings[node][name].input
+                    key = (name, canonical_bytes(payload))
+                    if key not in outputs:
+                        outputs[key] = oracle.submit(
+                            workload_checksum, payload, function=name
                         )
-                        while True:
-                            try:
-                                url, container = runtime_endpoint(
-                                    run.topology.resources.nodes[node],
-                                    name,
-                                    inputs=inputs,
-                                    replica=replica,
-                                )
-                                status = http.get(url + "/runtime/status")
-                                status.raise_for_status()
-                                if (
-                                    status.json().get("physicalReleaseProof")
-                                    is not True
-                                    or status.json().get("maxConcurrentHandlers") != 1
-                                ):
-                                    raise ValueError("SDK release proof / c1 missing")
-                                break
-                            except (httpx.HTTPError, RuntimeError):
-                                if time.monotonic() >= deadline:
-                                    raise
-                                time.sleep(0.2)
-                        result = measure_invocation(
-                            http,
-                            url,
-                            payload=fn.input,
-                            execution_id=f"bootstrap:{node}:{name}:{replica}",
-                            expected_output=workload_checksum(fn.input, function=name),
-                            timeout_seconds=operational_limit(
-                                run.settings, "bootstrap_invocation_seconds", 30
-                            ),
-                            release_timeout_seconds=operational_limit(
-                                run.settings, "bootstrap_invocation_seconds", 30
-                            ),
-                        )
-                        if result["state"] != "complete":
-                            raise RuntimeError("physical warm invocation incomplete")
-                        cgroup = collect_container_cgroup(
-                            run.topology.resources.nodes[node], container
-                        )
-                        validate_strict_cgroup(
-                            cgroup,
-                            memory_mib=fn.memory_mib,
-                            cpu=fn.cpu,
-                            require_no_swap=False,
-                        )
-                        save(
-                            run.run_dir / f"{node}-{name}-r{replica}-warm.json",
-                            {"invocation": result, "cgroup": cgroup},
-                        )
-                function = next(iter(vector))
-                queue = verify_queue_admission(
+                    expected[node][name] = outputs[key]
+            stop = Event()
+            warming = [
+                nodes.submit(
+                    self.warm_node,
+                    run,
+                    inputs,
                     http,
-                    endpoint,
-                    function,
-                    run.topology.node_function_settings[node][function].input,
+                    node,
+                    vector,
+                    expected[node],
+                    stop,
                 )
-                save(run.run_dir / f"{node}-queue-preflight.json", queue)
-                event(run.run_dir, "queue-admission-verified", node=node, **queue)
-                event(
-                    run.run_dir,
-                    "instances-warm",
-                    node=node,
-                    replicas=sum(vector.values()),
-                )
+                for node, vector in counts.items()
+            ]
+            done, _ = wait(warming, return_when=FIRST_EXCEPTION)
+            failed = [
+                future for future in warming if future in done and future.exception()
+            ]
+            if failed:
+                # The other nodes stop at their next replica; pending oracles drop.
+                stop.set()
+                oracle.shutdown(wait=False, cancel_futures=True)
+                raise cast(BaseException, failed[0].exception())
         return TaskOutcome()
+
+    @staticmethod
+    def warm_node(run, inputs, http, node, vector, expected, stop):
+        """Warm one node's replicas in order, then verify its queue admission."""
+        endpoint = inputs.resource(run.topology.endpoints[node])
+        for name, count in vector.items():
+            fn = run.topology.node_function_settings[node][name]
+            http.put(
+                endpoint + f"/v1/functions/{name}/replicas",
+                json={"replicas": count},
+            ).raise_for_status()
+            for replica in range(1, count + 1):
+                if stop.is_set():
+                    raise RuntimeError("warm-up stopped: another node failed")
+                deadline = time.monotonic() + operational_limit(
+                    run.settings, "replica_start_seconds", 120
+                )
+                while True:
+                    try:
+                        url, container = runtime_endpoint(
+                            run.topology.resources.nodes[node],
+                            name,
+                            inputs=inputs,
+                            replica=replica,
+                        )
+                        status = http.get(url + "/runtime/status")
+                        status.raise_for_status()
+                        if (
+                            status.json().get("physicalReleaseProof") is not True
+                            or status.json().get("maxConcurrentHandlers") != 1
+                        ):
+                            raise ValueError("SDK release proof / c1 missing")
+                        break
+                    except (httpx.HTTPError, RuntimeError):
+                        if time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.2)
+                result = measure_invocation(
+                    http,
+                    url,
+                    payload=fn.input,
+                    execution_id=f"bootstrap:{node}:{name}:{replica}",
+                    expected_output=expected[name].result(),
+                    timeout_seconds=operational_limit(
+                        run.settings, "bootstrap_invocation_seconds", 30
+                    ),
+                    release_timeout_seconds=operational_limit(
+                        run.settings, "bootstrap_invocation_seconds", 30
+                    ),
+                )
+                if result["state"] != "complete":
+                    raise RuntimeError("physical warm invocation incomplete")
+                cgroup = collect_container_cgroup(
+                    run.topology.resources.nodes[node], container
+                )
+                validate_strict_cgroup(
+                    cgroup,
+                    memory_mib=fn.memory_mib,
+                    cpu=fn.cpu,
+                    require_no_swap=False,
+                )
+                save(
+                    run.run_dir / f"{node}-{name}-r{replica}-warm.json",
+                    {"invocation": result, "cgroup": cgroup},
+                )
+        function = next(iter(vector))
+        queue = verify_queue_admission(
+            http,
+            endpoint,
+            function,
+            run.topology.node_function_settings[node][function].input,
+        )
+        save(run.run_dir / f"{node}-queue-preflight.json", queue)
+        event(run.run_dir, "queue-admission-verified", node=node, **queue)
+        event(
+            run.run_dir,
+            "instances-warm",
+            node=node,
+            replicas=sum(vector.values()),
+        )
 
 
 class ObserverPrecheck(Task):

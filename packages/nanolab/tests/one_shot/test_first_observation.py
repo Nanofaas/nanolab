@@ -12,6 +12,23 @@ from sonata_engine import Workflow
 from nanolab.plans import one_shot_observation as observation_plan
 from nanolab.tasks.one_shot import observation as observation_tasks
 
+QUIET_OPERATOR = {
+    "atUtc": "2026-11-02T00:00:00+00:00",
+    "seconds": 5,
+    "swappedInPages": 0,
+    "swappedOutPages": 0,
+    "memAvailableBytes": 64 * 1024**3,
+    "swapUsedBytes": 0,
+}
+
+
+@pytest.fixture(autouse=True)
+def quiet_operator(monkeypatch):
+    """Keep runs here from waiting on, or depending on, this machine's swap."""
+    from nanolab.one_shot import operator_memory
+
+    monkeypatch.setattr(operator_memory, "sample", lambda *_a, **_k: QUIET_OPERATOR)
+
 
 @pytest.fixture
 def observer():
@@ -91,6 +108,90 @@ def test_adapted_native_profile_preserves_real_historical_statistics(observer):
     assert row["statistics"] == statistics["f"]
     assert row["memoryMiB"] == 128 and row["replicas"] == 2
     assert cast(dict, row["measurement"])["rawSamplesHash"] == "sha256:" + "d" * 64
+
+
+def test_a_copied_node_takes_its_source_statistics(observer, tmp_path):
+    """Edges mirrored from a calibrated one have no samples of their own."""
+    window = tmp_path / "physical-window"
+    window.mkdir()
+    rows = [
+        {
+            "originalId": f"o{index}",
+            "executionId": f"e{index}",
+            "incarnation": "r",
+            "dispatchAttempt": "1",
+            "destination": "edge-1",
+            "function": "f",
+            "emittedAt": 100.0 + index,
+            "state": "RELEASED",
+            "handlerStarted": True,
+            "statusCode": 200,
+            "responseStatus": "success",
+            "occupancySeconds": seconds,
+        }
+        for index, seconds in enumerate([1.0, 2.0, 3.0])
+    ]
+    physical = window / "physical.jsonl"
+    physical.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    cell = {"sampleCount": 3, "meanSeconds": 2.0}
+    observed = {
+        "sourceDirectory": str(tmp_path),
+        "sourcePhysicalSha256": observer.sha(physical),
+        "measurementStartUtc": "1970-01-01T00:01:40+00:00",
+        "measurementSeconds": 60,
+        "service": {"edge-1": {"f": dict(cell)}, "edge-6": {"f": dict(cell)}},
+        "mirroredFrom": {"edge-6": "edge-1"},
+    }
+    result = observer.historical_statistics(observed)
+    assert result["edge-1"]["f"]["stddevSeconds"] == 1.0
+    assert result["edge-6"] == result["edge-1"]
+    observed["service"]["edge-6"]["f"]["meanSeconds"] = 9.0
+    with pytest.raises(ValueError, match="differs from its source"):
+        observer.historical_statistics(observed)
+
+
+def test_multisite_placement_binds_each_pinned_node_to_its_site(observer):
+    from nanolab.config import EnvironmentConfig
+
+    pinned = {"cpus": [0], "maxFrequencyKHz": 2808000}
+    scenario = {
+        "oneShot": {
+            "runtimeDistribution": {"path": "d", "sha256": "0" * 64},
+            "hostCpuPlacement": {
+                "nodes": {"edge-1": pinned, "edge-6": pinned, "cloud": pinned},
+                "operatorCpus": [8],
+            },
+        }
+    }
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "one-shot"}},
+            "sites": {
+                name: {"ssh": name, "address": address, "architecture": "arm64"}
+                for name, address in (
+                    ("spark-35", "149.132.179.35"),
+                    ("spark-175", "149.132.179.175"),
+                )
+            },
+            "placement": {
+                "edge-1": "spark-35",
+                "edge-6": "spark-175",
+                "cloud": "azure",
+            },
+            "azure": {
+                "resource_group": "rg",
+                "location": "westeurope",
+                "priority": "Spot",
+                "eviction_policy": "Delete",
+                "work_dir": "/w",
+            },
+        }
+    )
+    placed = observer.place_scenario(scenario, environment, {"arm64": {}})
+    placement = placed["oneShot"]["hostCpuPlacement"]
+    assert set(placement["nodes"]) == {"edge-1", "edge-6"}
+    assert placement["hosts"] == {"edge-1": "spark-35", "edge-6": "spark-175"}
 
 
 def test_frozen_file_hash_changes_stop_before_use(observer, tmp_path):
@@ -1104,6 +1205,44 @@ def test_final_inventory_failure_still_renders_offline_report(
     assert result["cause"] == ("final inventory failed" if inventory_fails else None)
 
 
+def test_the_operator_memory_recorder_stops_before_the_run_is_archived(
+    observer, tmp_path, monkeypatch
+):
+    """An appended operator-memory.jsonl once failed the archive hash check."""
+    from types import SimpleNamespace
+
+    from nanolab.one_shot import operator_memory
+
+    events = []
+
+    class Recorder:
+        def __init__(self, path, **_kwargs):
+            events.append(("created", path.name))
+
+        def start(self):
+            events.append("start")
+
+        def close(self):
+            events.append("close")
+
+    def inventory(*_a, **_k):
+        events.append("inventory")
+        return SimpleNamespace(stdout='{"list":[]}')
+
+    monkeypatch.setattr(operator_memory, "OperatorMemoryRecorder", Recorder)
+    args, _releases = offline_observation(observer, tmp_path, monkeypatch)
+    monkeypatch.setattr(observer.subprocess, "run", inventory)
+    observer.run_observation(args)
+    # Closed with the workflow, before the final inventory and the archive.
+    assert events == [
+        ("created", "operator-memory.jsonl"),
+        "start",
+        "inventory",
+        "close",
+        "inventory",
+    ]
+
+
 @pytest.mark.parametrize(
     "primary", [None, "workflow failed", signal.SIGINT, signal.SIGTERM]
 )
@@ -1266,6 +1405,26 @@ def test_changed_package_implementation_stops_before_observation_inventory(
     with pytest.raises(ValueError, match="host boot or package drift"):
         observer.run_observation(args)
     assert not attempts and not releases and not args.output.exists()
+
+
+def test_a_swapping_operator_refuses_the_run_before_any_output(
+    observer, tmp_path, monkeypatch
+):
+    """The fourth phase-1 run lost every epoch to a swapping operator."""
+    from nanolab.one_shot import operator_memory
+
+    args, releases = offline_observation(observer, tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        operator_memory,
+        "sample",
+        lambda *_a, **_k: {**QUIET_OPERATOR, "swappedOutPages": 4096},
+    )
+    monkeypatch.setattr(
+        observer.subprocess, "run", lambda *a, **k: pytest.fail("reached inventory")
+    )
+    with pytest.raises(RuntimeError, match="the operator is swapping"):
+        observer.run_observation(args)
+    assert not releases and not args.output.exists()
 
 
 @pytest.mark.parametrize("mode", ["console", "tui", "json", "none"])
