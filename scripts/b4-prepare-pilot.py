@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare nine B4 pilot arms; the normal nanolab workflow owns all VM lifecycles."""
+"""Prepare matched B4 pilot arms; the normal nanolab workflow owns all VM lifecycles."""
 
 import argparse
 import json
@@ -13,16 +13,24 @@ from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.environment import require_experiment_environment
 
 
-def prepare(output_root: Path, ssh_key: Path) -> Path:
+def prepare(
+    output_root: Path, ssh_key: Path, *, rates: tuple[int, ...] = (20, 100, 300)
+) -> Path:
     """Write unique, validated inputs and commands without accessing cloud services."""
     if not output_root.is_absolute() or not ssh_key.is_absolute():
         raise ValueError("output root and controller SSH key path must be absolute")
+    if (
+        not rates
+        or any(type(rate) is not int or rate <= 0 for rate in rates)
+        or len(set(rates)) != len(rates)
+    ):
+        raise ValueError("rates must be distinct positive integers")
     token = uuid4().hex[:10]
     created = datetime.now(UTC)
     root = output_root.resolve() / f"pilot-{created:%Y%m%dT%H%M%SZ}-{token}"
     arms = []
     configurations = []
-    for rate_index, rate in enumerate((20, 100, 300)):
+    for rate_index, rate in enumerate(rates):
         modes = ("disabled", "pressure", "cloud")
         if rate_index % 2:
             modes = ("pressure", "disabled", "cloud")
@@ -160,9 +168,10 @@ def main() -> None:
         required=True,
         help="Absolute Azure SSH public-key path on the DGX controller",
     )
+    parser.add_argument("--rates", type=int, nargs="+", default=[20, 100, 300])
     args = parser.parse_args()
     try:
-        output = prepare(args.output_root, args.ssh_key)
+        output = prepare(args.output_root, args.ssh_key, rates=tuple(args.rates))
     except ValueError as error:
         parser.error(str(error))
     print(output)

@@ -585,6 +585,23 @@ def analyze_experiment(run_dir: Path) -> dict[str, Any]:
         "Offloaded is an observed response marker. Edge success already "
         "includes cloud success. No physical exactly-once or RAM claim.",
     ]
+    markdown += [
+        "",
+        "Offload counter observations (before / after; null means unavailable)",
+        "",
+        "NanoFaaS creates offload meters on their first event. An absent baseline "
+        "does not erase a measured final value, but prevents a measured delta. "
+        "An absent failure meter is not a measured zero.",
+    ]
+    for node, diagnostic in report.get("diagnostics", {}).items():
+        markdown += [
+            "",
+            node,
+            "",
+            "```json",
+            json.dumps(diagnostic.get("counter_observations", {}), indent=2),
+            "```",
+        ]
     if errors:
         markdown += ["", "Evidence failures:", "", *[f"- {e}" for e in errors]]
     (run_dir / "report.md").write_text("\n".join(markdown) + "\n")

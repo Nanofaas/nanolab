@@ -14,9 +14,9 @@ from nanolab.application.inputs import load_environment, load_scenario
 from nanolab.config.environment import require_experiment_environment
 
 
-def prepare(output_root: Path, ssh_key: Path) -> Path:
+def prepare(output_root: Path, ssh_key: Path, **kwargs) -> Path:
     script = Path(__file__).parents[4] / "scripts/b4-prepare-pilot.py"
-    return runpy.run_path(str(script))["prepare"](output_root, ssh_key)
+    return runpy.run_path(str(script))["prepare"](output_root, ssh_key, **kwargs)
 
 
 def test_pilot_configs_use_distinct_hybrid_roles_and_matched_work(tmp_path):
@@ -122,3 +122,25 @@ def test_relative_key_is_rejected_before_writing_preparation(tmp_path):
     with pytest.raises(ValueError, match="absolute"):
         prepare(output, Path("azure.pub"))
     assert not output.exists()
+
+
+def test_explicit_rates_keep_matched_modes_and_alternate_order(tmp_path):
+    root = prepare(tmp_path, Path("/keys/azure.pub"), rates=(400, 500))
+    arms = json.loads((root / "manifest.json").read_text())["arms"]
+    assert [(a["rate"], a["mode"]) for a in arms] == [
+        (400, "disabled"),
+        (400, "pressure"),
+        (400, "cloud"),
+        (500, "pressure"),
+        (500, "disabled"),
+        (500, "cloud"),
+    ]
+    assert len({a["id"] for a in arms}) == 6
+
+
+@pytest.mark.parametrize("rates", [(), (0,), (-1,), (400, 400), (True,), (1.5,)])
+def test_invalid_rates_rejected_before_writing(tmp_path, rates):
+    root = tmp_path / "campaign"
+    with pytest.raises(ValueError, match="rates"):
+        prepare(root, Path("/keys/azure.pub"), rates=rates)
+    assert not root.exists()

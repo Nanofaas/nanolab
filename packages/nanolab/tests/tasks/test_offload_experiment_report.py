@@ -562,3 +562,16 @@ def test_boundary_drop_is_counted_in_actual_scheduled_denominator(run):
     assert report["counts"]["measurement"]["dropped"] == 1
     assert report["counts"]["measurement"]["missing"] == 0
     assert report["completion_probability_scheduled"] == 0.8
+
+
+def test_markdown_exposes_initial_and_final_offload_counters(run):
+    report = analyze_experiment(run)
+    text = (run / "report.md").read_text()
+    assert (
+        "Offload counter observations (before / after; null means unavailable)" in text
+    )
+    for node in ("stack", "cloud"):
+        assert (
+            json.dumps(report["diagnostics"][node]["counter_observations"], indent=2)
+            in text
+        )

@@ -148,3 +148,16 @@ This regenerates `report.json`, `report.md` and `measured-requests.csv` from the
 archived evidence. A nonzero exit signals invalid or incomplete evidence; it
 does not discard it. Raw Prometheus history is retained for resource diagnostics;
 the current report makes no RAM estimate.
+
+## Follow-up grid and lazy counters
+
+Use `--rates 400 500` to prepare six matched arms while preserving the workload,
+resource budgets, alternating pair order and direct-cloud diagnostic. Values must
+be distinct positive integers. Preparation creates inputs only, never VMs.
+
+Offload metrics are registered at the first corresponding event. Retain the raw
+before and after samples separately: a missing initial sample does not mean a
+missing final counter, and neither an absent baseline nor an absent failure
+series is a measured zero. The Markdown report now exposes both samples, as the
+JSON already did. In the initial pilot the pressure-300 final counter was 12;
+its baseline was absent. This is a reporting clarification, not a runtime fix.
