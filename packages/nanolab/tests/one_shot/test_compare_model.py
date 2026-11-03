@@ -121,3 +121,21 @@ def test_percent_difference_is_symmetric_bounded_and_defined_at_zero(
     assert compare.percent_difference(model, run) == (
         expected if expected is None else pytest.approx(expected)
     )
+
+
+def test_load_shares_sum_to_zero_across_destinations(tmp_path):
+    selected = [minute(10.0, 8.0, 0.0)] * 2
+    rows = [
+        result("a", 0, executed="b"),
+        result("a", 1, executed="a"),
+        result("a", 0, executed="cloud"),
+    ]
+    document = compare.compare(selected, trace(windows=2), rows)
+    row = next(r for r in document["origins"] if r["origin"] == "a")
+    total = sum(row[k]["loadShareDifference"] for k in ("local", "peer", "cloud"))
+    total += row["notServedShare"]
+    assert row["load"] == 3
+    assert total == pytest.approx(
+        (3 - sum(row[k]["model"] for k in ("local", "peer", "cloud"))) / 3
+    )
+    assert compare.points(0.0099) == "+0.99 pp"

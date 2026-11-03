@@ -99,6 +99,11 @@ def percent_difference(model: float, run: float) -> float | None:
     return None if mean == 0 else (run - model) / mean
 
 
+def share(requests: float, load: float) -> float | None:
+    """Return requests as a fraction of the offered load; None without load."""
+    return None if load == 0 else requests / load
+
+
 def correlation(model: list[float], run: list[float]) -> float | None:
     """Pearson correlation of two minute series; None when one is constant."""
     try:
@@ -138,6 +143,15 @@ def compare(selected: list[dict], trace: dict, rows: list[dict]) -> dict:
             }
         row["rejected"] = total(run_split, origin, "rejected")
         row["failed"] = total(run_split, origin, "failed")
+        # Every original from the origin, served or not: the base of the shares.
+        row["load"] = (
+            sum(row[kind]["run"] for kind in KINDS) + row["rejected"] + row["failed"]
+        )
+        for kind in KINDS:
+            row[kind]["loadShareDifference"] = share(
+                row[kind]["run"] - row[kind]["model"], row["load"]
+            )
+        row["notServedShare"] = share(row["rejected"] + row["failed"], row["load"])
         origins.append(row)
     pairs = sorted(
         {pair for minute in model_routes for pair in minute}
@@ -178,8 +192,10 @@ def compare(selected: list[dict], trace: dict, rows: list[dict]) -> dict:
         series[kind]["meanAbsoluteError"] = statistics.fmean(
             abs(a - b) for a, b in zip(model, run, strict=True)
         )
+    load = sum(row["load"] for row in origins)
     return {
         "minutes": minutes,
+        "load": load,
         "periodSeconds": trace["period_seconds"],
         "edges": edges,
         "cloud": cloud,
@@ -193,10 +209,18 @@ def compare(selected: list[dict], trace: dict, rows: list[dict]) -> dict:
                 "relativePercentDifference": percent_difference(
                     sum(series[kind]["model"]), sum(series[kind]["run"])
                 ),
+                "loadShareDifference": share(
+                    sum(series[kind]["run"]) - sum(series[kind]["model"]), load
+                ),
             }
             for kind in KINDS
         }
-        | {"notServed": {"run": sum(series["notServed"]["run"])}},
+        | {
+            "notServed": {
+                "run": sum(series["notServed"]["run"]),
+                "loadShare": share(sum(series["notServed"]["run"]), load),
+            }
+        },
         "origins": origins,
         "routes": routes,
         "series": series,
@@ -208,6 +232,11 @@ def delta(model: float, run: float) -> str:
     if model == 0:
         return "" if run == 0 else "model 0"
     return f"{(run - model) / model:+.1%}"
+
+
+def points(fraction: float | None) -> str:
+    """Format a fraction of the load in signed percentage points."""
+    return "" if fraction is None else f"{fraction * 100:+.2f} pp"
 
 
 def rpd(model: float, run: float) -> str:
@@ -230,13 +259,19 @@ def markdown(document: dict, *, run: Path, selected: Path) -> str:
             "run's rejected and failed originals have no model counterpart. "
             "Δ is relative to the model; RPD is the symmetric relative percent "
             "difference, (run − model) / mean(run, model), within ±200% and "
-            "defined where the model has nothing."
+            "defined where the model has nothing. Δ load is the difference in "
+            "percentage points of the offered load (every original from the "
+            "edges, or from the origin): across local, peer, cloud and not "
+            "served it sums to zero."
         ),
         "",
         "## System",
         "",
-        "| Kind | Model | Run | Δ | RPD | Minute correlation | Mean abs. error/min |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        (
+            "| Kind | Model | Run | Δ | RPD | Δ load | Minute correlation "
+            "| Mean abs. error/min |"
+        ),
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for kind in KINDS:
         row, series = document["system"][kind], document["series"][kind]
@@ -245,11 +280,13 @@ def markdown(document: dict, *, run: Path, selected: Path) -> str:
             f"| {kind} | {row['model']:.0f} | {row['run']} | "
             f"{delta(row['model'], row['run'])} | "
             f"{rpd(row['model'], row['run'])} | "
+            f"{points(row['loadShareDifference'])} | "
             f"{'' if r is None else f'{r:.2f}'} | "
             f"{series['meanAbsoluteError']:.1f} |"
         )
+    served = document["system"]["notServed"]
     lines.append(
-        f"| not served | — | {document['system']['notServed']['run']} | | | | |"
+        f"| not served | — | {served['run']} | | | {points(served['loadShare'])} | | |"
     )
     lines += [
         "",
@@ -272,6 +309,20 @@ def markdown(document: dict, *, run: Path, selected: Path) -> str:
             f"| {row['origin']} | "
             + " | ".join(cells)
             + f" | {row['rejected']} | {row['failed']} |"
+        )
+    lines += [
+        "",
+        "## Per origin, in points of the origin's load",
+        "",
+        "| Origin | Load | Local | Peer | Cloud | Not served |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for row in document["origins"]:
+        cells = [points(row[k]["loadShareDifference"]) for k in KINDS]
+        lines.append(
+            f"| {row['origin']} | {row['load']} | "
+            + " | ".join(cells)
+            + f" | {points(row['notServedShare'])} |"
         )
     lines += [
         "",
