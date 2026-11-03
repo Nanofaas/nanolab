@@ -103,7 +103,8 @@ def test_script_preserves_existing_output_instead_of_overwriting_a_run(tmp_path)
 
 
 def test_script_rejects_larger_pool_that_leaves_insufficient_vm_ram(tmp_path):
-    _original, output, result = configure(tmp_path, memory_mib=1536)
+    # Pool 832 + control plane 768 + OS 128 fits; the 64-MiB collector does not.
+    _original, output, result = configure(tmp_path, memory_mib=1792)
     assert result.returncode != 0
     assert "collector memory reservation leaves no platform memory" in result.stderr
     assert not output.exists()

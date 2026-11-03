@@ -502,7 +502,7 @@ class OneShotConfig(BaseModel):
             collector = self.observability.logs
             for node in self.nodes:
                 reserved_memory = (
-                    640
+                    SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB + SCIENTIFIC_OS_MEMORY_MIB
                     if self.strict_memory and self.purpose == "scientific-experiment"
                     else 0
                 )
