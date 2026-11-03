@@ -1112,7 +1112,7 @@ def test_derived_scenario_changes_grid_but_keeps_resources_and_timeouts(
     assert len(scenario["oneShot"]["experiment"]["windows"]) == 54
     assert scenario["oneShot"]["timing"]["periodCandidatesSeconds"] == [60]
     protocol = scenario["oneShot"]["timing"]["protocol"]
-    assert (protocol["auctionSeconds"], protocol["preparationSeconds"]) == (8, 9.5)
+    assert (protocol["auctionSeconds"], protocol["preparationSeconds"]) == (5, 9.5)
     assert (protocol["peerSeconds"], protocol["solverSeconds"]) == (5, 5)
     assert scenario["oneShot"]["operationalLimits"]["leadSeconds"] == 10
     six_minute = observer.bind_scenario(source, distribution)

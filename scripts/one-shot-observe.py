@@ -240,8 +240,11 @@ def bind_scenario(source, distribution, *, trace=None):
         # activates, within a budget NanoFaaS keeps shorter than the lead. On 3
         # November auctions took at most 3.7 s and activations 10.9 s (one or
         # two per run beyond 9.5 s); a 10 s lead lets the forecast use data 20 s
-        # fresher than 30 s.
-        settings["timing"]["protocol"].update(auctionSeconds=8, preparationSeconds=9.5)
+        # fresher than 30 s. Each node refuses an epoch whose remaining delay is
+        # below the auction budget, and the operator triggered preparations up
+        # to about 3 s late: a 5 s budget leaves 5 s for that, where 8 s lost
+        # every epoch triggered 1.9 s late.
+        settings["timing"]["protocol"].update(auctionSeconds=5, preparationSeconds=9.5)
         settings["operationalLimits"]["leadSeconds"] = 10
     settings["experiment"] = {
         "windows": [{**row, "epochs": 1} for row in settings["timing"]["matrix"]],
