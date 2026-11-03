@@ -117,6 +117,34 @@ def test_ready_assignments_require_matching_peer_confirmation():
         verify_epoch_flows(plans)
 
 
+def test_rounded_forecasts_may_plan_up_to_half_a_quantum_beyond_the_forecast():
+    import pytest
+
+    from nanolab.tasks.one_shot.verification import verify_epoch_flows
+
+    def plans(forecast, local, cloud):
+        function = {
+            "forecastRate": forecast,
+            "localRate": local,
+            "cloudRate": cloud,
+            "outbound": [],
+            "inbound": [],
+        }
+        return {"edge-0": {"flowQuantum": 0.05, "functions": {"work": function}}}
+
+    # 0.24 req/s rounds to five 0.05 units: everything local, nothing to the cloud.
+    verify_epoch_flows(plans(0.24, 0.25, 0.0))
+    # 0.21 rounds to four units; the remaining 0.01 goes to the cloud.
+    verify_epoch_flows(plans(0.21, 0.2, 0.01))
+    for forecast, local, cloud in [
+        (0.21, 0.2, 0.0),
+        (0.24, 0.3, 0.0),
+        (0.24, 0.25, 0.01),
+    ]:
+        with pytest.raises(ValueError, match="conserve flow"):
+            verify_epoch_flows(plans(forecast, local, cloud))
+
+
 def test_realized_utility_uses_originals_and_declared_coefficients():
     from nanolab.tasks.one_shot.verification import realized_utility
 

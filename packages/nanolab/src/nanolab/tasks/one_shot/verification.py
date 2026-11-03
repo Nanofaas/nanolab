@@ -141,7 +141,12 @@ def verify_runtime_inventory(rows, *, functions, nodes, node_functions=None):
 def verify_epoch_flows(
     plans: dict, *, neighbor_graph=None, observation_only=False, unavailable_nodes=None
 ) -> list[dict]:
-    """Match acknowledged one-hop peer assignments and conserve forecast rates."""
+    """Match acknowledged one-hop peer assignments and conserve forecast rates.
+
+    The cloud takes what the plan leaves of the forecast. From
+    Nanofaas/nanofaas#262 a forecast is rounded to the nearest flow quantum, so
+    local and peer work may exceed it by up to half a quantum, leaving no cloud.
+    """
     diagnostics = []
     for node, plan in plans.items():
         for name, function in plan["functions"].items():
@@ -150,14 +155,13 @@ def verify_epoch_flows(
                 for row in function["outbound"]
                 if row["readyConfirmed"]
             )
+            planned = function["localRate"] + outbound
             if (
                 abs(
-                    function["forecastRate"]
-                    - function["localRate"]
-                    - function["cloudRate"]
-                    - outbound
+                    function["cloudRate"] - max(0.0, function["forecastRate"] - planned)
                 )
                 > 1e-8
+                or planned > function["forecastRate"] + plan["flowQuantum"] / 2 + 1e-8
             ):
                 raise ValueError("ready forecast allocation does not conserve flow")
             for direction, counterpart in [
