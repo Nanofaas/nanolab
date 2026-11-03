@@ -1064,16 +1064,25 @@ def test_minute_timing_follows_the_native_configuration_checks(
 
 
 @pytest.mark.parametrize(
-    ("lead", "auction", "valid"), [(10, 8, True), (10, 10, True), (10, 11, False)]
+    ("lead", "auction", "preparation", "valid"),
+    [
+        (10, 8, 9.5, True),
+        (10, 10, 9.5, True),
+        (10, 11, 9.5, False),
+        # NanoFaaS's OneShotSettings keeps the preparation budget below the lead.
+        (10, 8, 10, False),
+    ],
 )
-def test_a_logical_lead_covers_the_auction_alone(observer, lead, auction, valid):
+def test_a_logical_lead_covers_the_auction_alone(
+    observer, lead, auction, preparation, valid
+):
     protocol = {
         "maxOperationalFraction": 1,
         "maxAuctionFraction": 1,
         "periodSeconds": 60,
         "leadSeconds": lead,
         "protocolVersion": 2,
-        "protocol": {"auctionSeconds": auction, "preparationSeconds": 10},
+        "protocol": {"auctionSeconds": auction, "preparationSeconds": preparation},
     }
     if valid:
         observer.validate_operator_protocol(protocol)
@@ -1103,7 +1112,7 @@ def test_derived_scenario_changes_grid_but_keeps_resources_and_timeouts(
     assert len(scenario["oneShot"]["experiment"]["windows"]) == 54
     assert scenario["oneShot"]["timing"]["periodCandidatesSeconds"] == [60]
     protocol = scenario["oneShot"]["timing"]["protocol"]
-    assert (protocol["auctionSeconds"], protocol["preparationSeconds"]) == (8, 10)
+    assert (protocol["auctionSeconds"], protocol["preparationSeconds"]) == (8, 9.5)
     assert (protocol["peerSeconds"], protocol["solverSeconds"]) == (5, 5)
     assert scenario["oneShot"]["operationalLimits"]["leadSeconds"] == 10
     six_minute = observer.bind_scenario(source, distribution)

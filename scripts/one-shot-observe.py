@@ -141,13 +141,13 @@ def validate_operator_protocol(protocol):
     # The checks NanoFaaS makes when the nodes are configured, before any VM.
     # Logical (protocol 2) epochs change their allocation only once activated,
     # so since NanoFaaS 8616a783 their lead covers the auction alone; freezes
-    # without a protocol version keep the whole-budget rule.
+    # without a protocol version keep the whole-budget rule. Every version
+    # keeps the preparation budget shorter than the lead (OneShotSettings).
     logical = protocol.get("protocolVersion") == 2
     if (
         budget > period * protocol["maxOperationalFraction"]
         or (auction if logical else budget) > lead
-        or not lead < period
-        or (not logical and not preparation < lead)
+        or not preparation < lead < period
     ):
         raise ValueError(
             "native operational budget must fit the period fraction and lead time, "
@@ -237,9 +237,11 @@ def bind_scenario(source, distribution, *, trace=None):
         settings["timing"]["maxTraceResolutionSeconds"] = trace.period_seconds
         # One-minute decisions: the lead must be shorter than the period and,
         # for logical epochs, cover the auction; preparation runs once the epoch
-        # activates. On 3 November auctions took at most 3.7 s and activations
-        # 10.9 s; a 10 s lead lets the forecast use data 20 s fresher than 30 s.
-        settings["timing"]["protocol"].update(auctionSeconds=8, preparationSeconds=10)
+        # activates, within a budget NanoFaaS keeps shorter than the lead. On 3
+        # November auctions took at most 3.7 s and activations 10.9 s (one or
+        # two per run beyond 9.5 s); a 10 s lead lets the forecast use data 20 s
+        # fresher than 30 s.
+        settings["timing"]["protocol"].update(auctionSeconds=8, preparationSeconds=9.5)
         settings["operationalLimits"]["leadSeconds"] = 10
     settings["experiment"] = {
         "windows": [{**row, "epochs": 1} for row in settings["timing"]["matrix"]],
