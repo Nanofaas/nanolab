@@ -605,13 +605,19 @@ class QualifyTimingTask(Task[TimingQualification]):
             built,
         )
         budget = timing.protocol.auction_seconds + timing.protocol.preparation_seconds
+        # Logical epochs prepare once activated: their lead covers the auction alone.
+        before_activation = (
+            timing.protocol.auction_seconds
+            if self.settings.protocol_version == 2
+            else budget
+        )
         preliminary = [
             candidate
             for candidate in timing.period_candidates
             if budget <= timing.epsilon * candidate
             and timing.lead_seconds < candidate
             and candidate <= timing.max_trace_resolution
-            and budget < timing.lead_seconds
+            and before_activation < timing.lead_seconds
         ]
         if not preliminary:
             raise ValueError(

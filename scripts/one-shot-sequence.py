@@ -153,9 +153,7 @@ def main(argv=None):
         type=int,
         help="sync-queue admission estimate and queue wait limit (nanoFaaS: 2)",
     )
-    parser.add_argument(
-        "--ari-order", type=int, help="continuous-ARI only; default 6"
-    )
+    parser.add_argument("--ari-order", type=int, help="continuous-ARI only; default 6")
     args = parser.parse_args(argv)
     config = inputs(args.config.resolve())
     output = args.output.resolve()

@@ -135,12 +135,19 @@ def validate_operator_protocol(protocol):
             "maxAuctionFraction must match the shared configuration epsilon"
         )
     period, lead = protocol["periodSeconds"], protocol["leadSeconds"]
+    auction = protocol["protocol"]["auctionSeconds"]
     preparation = protocol["protocol"]["preparationSeconds"]
-    budget = protocol["protocol"]["auctionSeconds"] + preparation
+    budget = auction + preparation
     # The checks NanoFaaS makes when the nodes are configured, before any VM.
+    # Logical (protocol 2) epochs change their allocation only once activated,
+    # so since NanoFaaS 8616a783 their lead covers the auction alone; freezes
+    # without a protocol version keep the whole-budget rule.
+    logical = protocol.get("protocolVersion") == 2
     if (
-        budget > min(lead, period * protocol["maxOperationalFraction"])
-        or not preparation < lead < period
+        budget > period * protocol["maxOperationalFraction"]
+        or (auction if logical else budget) > lead
+        or not lead < period
+        or (not logical and not preparation < lead)
     ):
         raise ValueError(
             "native operational budget must fit the period fraction and lead time, "
@@ -228,11 +235,12 @@ def bind_scenario(source, distribution, *, trace=None):
         ]
         settings["timing"]["periodCandidatesSeconds"] = [trace.period_seconds]
         settings["timing"]["maxTraceResolutionSeconds"] = trace.period_seconds
-        # One-minute decisions: NanoFaaS wants the lead shorter than the period
-        # and auction plus preparation within both. On 14 October negotiation
-        # took at most 1.4 s and activation 4.8 s.
-        settings["timing"]["protocol"].update(auctionSeconds=10, preparationSeconds=10)
-        settings["operationalLimits"]["leadSeconds"] = 30
+        # One-minute decisions: the lead must be shorter than the period and,
+        # for logical epochs, cover the auction; preparation runs once the epoch
+        # activates. On 3 November auctions took at most 3.7 s and activations
+        # 10.9 s; a 10 s lead lets the forecast use data 20 s fresher than 30 s.
+        settings["timing"]["protocol"].update(auctionSeconds=8, preparationSeconds=10)
+        settings["operationalLimits"]["leadSeconds"] = 10
     settings["experiment"] = {
         "windows": [{**row, "epochs": 1} for row in settings["timing"]["matrix"]],
         "repetitions": 1,
@@ -569,6 +577,7 @@ def prepare(args):
         "purpose": "operator-declared-protocol-not-timing-qualification",
         "periodSeconds": trace.period_seconds,
         "leadSeconds": settings.operational_limits.lead_seconds,
+        "protocolVersion": settings.protocol_version,
         "operationalLimits": settings.operational_limits.model_dump(by_alias=True),
         "maxOperationalFraction": NATIVE_MAX_TIMING_FRACTION,
         "maxAuctionFraction": NATIVE_MAX_TIMING_FRACTION,
