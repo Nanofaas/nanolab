@@ -89,6 +89,16 @@ def relative(model: float, run: float) -> float | None:
     return None if model == 0 else (run - model) / model
 
 
+def percent_difference(model: float, run: float) -> float | None:
+    """Return the symmetric relative difference, (run - model) / their mean.
+
+    It stays within ±2 and is defined when only one side is zero, so a small
+    model count does not inflate it; None when both are zero.
+    """
+    mean = (model + run) / 2
+    return None if mean == 0 else (run - model) / mean
+
+
 def correlation(model: list[float], run: list[float]) -> float | None:
     """Pearson correlation of two minute series; None when one is constant."""
     try:
@@ -124,6 +134,7 @@ def compare(selected: list[dict], trace: dict, rows: list[dict]) -> dict:
                 "model": round(model, 2),
                 "run": run,
                 "relativeDifference": relative(model, run),
+                "relativePercentDifference": percent_difference(model, run),
             }
         row["rejected"] = total(run_split, origin, "rejected")
         row["failed"] = total(run_split, origin, "failed")
@@ -132,15 +143,19 @@ def compare(selected: list[dict], trace: dict, rows: list[dict]) -> dict:
         {pair for minute in model_routes for pair in minute}
         | {pair for minute in run_routes for pair in minute}
     )
-    routes = [
-        {
-            "origin": origin,
-            "destination": destination,
-            "model": round(sum(m[origin, destination] for m in model_routes), 2),
-            "run": sum(m[origin, destination] for m in run_routes),
-        }
-        for origin, destination in pairs
-    ]
+    routes = []
+    for origin, destination in pairs:
+        model = sum(m[origin, destination] for m in model_routes)
+        run = sum(m[origin, destination] for m in run_routes)
+        routes.append(
+            {
+                "origin": origin,
+                "destination": destination,
+                "model": round(model, 2),
+                "run": run,
+                "relativePercentDifference": percent_difference(model, run),
+            }
+        )
     series = {
         kind: {
             "model": [
@@ -175,6 +190,9 @@ def compare(selected: list[dict], trace: dict, rows: list[dict]) -> dict:
                 "relativeDifference": relative(
                     sum(series[kind]["model"]), sum(series[kind]["run"])
                 ),
+                "relativePercentDifference": percent_difference(
+                    sum(series[kind]["model"]), sum(series[kind]["run"])
+                ),
             }
             for kind in KINDS
         }
@@ -192,6 +210,12 @@ def delta(model: float, run: float) -> str:
     return f"{(run - model) / model:+.1%}"
 
 
+def rpd(model: float, run: float) -> str:
+    """Format the symmetric relative percent difference."""
+    value = percent_difference(model, run)
+    return "" if value is None else f"{value:+.1%}"
+
+
 def markdown(document: dict, *, run: Path, selected: Path) -> str:
     """Render the comparison for review."""
     lines = [
@@ -203,13 +227,16 @@ def markdown(document: dict, *, run: Path, selected: Path) -> str:
         (
             "Requests over the measurement, originals from the edges. The model "
             "plans on the trace's exact rates, the run on its forecasts; the "
-            "run's rejected and failed originals have no model counterpart."
+            "run's rejected and failed originals have no model counterpart. "
+            "Δ is relative to the model; RPD is the symmetric relative percent "
+            "difference, (run − model) / mean(run, model), within ±200% and "
+            "defined where the model has nothing."
         ),
         "",
         "## System",
         "",
-        "| Kind | Model | Run | Δ | Minute correlation | Mean abs. error/min |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Kind | Model | Run | Δ | RPD | Minute correlation | Mean abs. error/min |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for kind in KINDS:
         row, series = document["system"][kind], document["series"][kind]
@@ -217,24 +244,28 @@ def markdown(document: dict, *, run: Path, selected: Path) -> str:
         lines.append(
             f"| {kind} | {row['model']:.0f} | {row['run']} | "
             f"{delta(row['model'], row['run'])} | "
+            f"{rpd(row['model'], row['run'])} | "
             f"{'' if r is None else f'{r:.2f}'} | "
             f"{series['meanAbsoluteError']:.1f} |"
         )
-    lines.append(f"| not served | — | {document['system']['notServed']['run']} | | | |")
+    lines.append(
+        f"| not served | — | {document['system']['notServed']['run']} | | | | |"
+    )
     lines += [
         "",
         "## Per origin",
         "",
         (
-            "| Origin | Local model | Local run | Δ | Peer model | Peer run | Δ "
-            "| Cloud model | Cloud run | Δ | Rejected | Failed |"
+            "| Origin | Local model | Local run | Δ | RPD | Peer model | Peer run "
+            "| Δ | RPD | Cloud model | Cloud run | Δ | RPD | Rejected | Failed |"
         ),
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|" + "---:|" * 14,
     ]
     for row in document["origins"]:
         cells = [
             f"{row[k]['model']:.0f} | {row[k]['run']} | "
-            f"{delta(row[k]['model'], row[k]['run'])}"
+            f"{delta(row[k]['model'], row[k]['run'])} | "
+            f"{rpd(row[k]['model'], row[k]['run'])}"
             for k in KINDS
         ]
         lines.append(
@@ -246,13 +277,14 @@ def markdown(document: dict, *, run: Path, selected: Path) -> str:
         "",
         "## Routes between edges",
         "",
-        "| Origin → destination | Model | Run | Δ |",
-        "|---|---:|---:|---:|",
+        "| Origin → destination | Model | Run | Δ | RPD |",
+        "|---|---:|---:|---:|---:|",
     ]
     for route in document["routes"]:
         lines.append(
             f"| {route['origin']} → {route['destination']} | {route['model']:.0f} "
-            f"| {route['run']} | {delta(route['model'], route['run'])} |"
+            f"| {route['run']} | {delta(route['model'], route['run'])} "
+            f"| {rpd(route['model'], route['run'])} |"
         )
     lines += [
         "",

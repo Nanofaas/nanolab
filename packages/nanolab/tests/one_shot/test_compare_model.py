@@ -71,7 +71,13 @@ def test_routing_is_counted_where_originals_executed():
     assert a["cloud"]["model"] == 6 and a["cloud"]["run"] == 1
     assert (a["rejected"], a["failed"]) == (1, 2)
     assert document["routes"] == [
-        {"origin": "a", "destination": "b", "model": 24.0, "run": 2}
+        {
+            "origin": "a",
+            "destination": "b",
+            "model": 24.0,
+            "run": 2,
+            "relativePercentDifference": pytest.approx((2 - 24) / 13),
+        }
     ]
     assert document["series"]["peer"]["model"] == [24.0, 0.0]
     assert document["series"]["peer"]["run"] == [2, 0]
@@ -101,4 +107,17 @@ def test_files_are_written_and_a_constant_series_has_no_correlation(tmp_path):
     assert document["series"]["cloud"]["correlation"] is None
     assert document["system"]["cloud"]["relativeDifference"] is None
     text = (tmp_path / "out/model-comparison.md").read_text()
-    assert "| a → b | 48 | 1 | -97.9% |" in text
+    # RPD: (1 - 48) / 24.5.
+    assert "| a → b | 48 | 1 | -97.9% | -191.8% |" in text
+
+
+@pytest.mark.parametrize(
+    ("model", "run", "expected"),
+    [(100, 150, 0.4), (150, 100, -0.4), (0, 22, 2.0), (22, 0, -2.0), (0, 0, None)],
+)
+def test_percent_difference_is_symmetric_bounded_and_defined_at_zero(
+    model, run, expected
+):
+    assert compare.percent_difference(model, run) == (
+        expected if expected is None else pytest.approx(expected)
+    )
