@@ -59,15 +59,15 @@ wheels = [
 
 [[package]]
 name = "azure-vm-sdk"
-version = "0.9.1"
+version = "0.9.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "paramiko" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/0b/4c02651ff47d7afb1e37157b383506a544d1d842d62faa87af998badc4a4/azure_vm_sdk-0.9.1.tar.gz", hash = "sha256:2e34e19b68679f954489725b9e87e977d013a9def2f9654bb18670bf31ac164d", size = 158066, upload-time = "2026-11-02T14:19:20.151Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/3e/3c0ae2831668c032ae0e239b2f601975230d4c8d09f284d4db519a1b8d7e/azure_vm_sdk-0.9.3.tar.gz", hash = "sha256:addc539b208a650533e20c682e8896da3685e5303fcac8801f8fcbdbd925ce50", size = 163994, upload-time = "2026-11-03T06:21:01.211Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/e1/396491feea59dfa81ec0eb81c92efb6fe30358f97d6e9e142dff3bea78b5/azure_vm_sdk-0.9.1-py3-none-any.whl", hash = "sha256:a5e56597c84f23de53b603002a1db9552f32ef452c7d9b2653deb3edba763bb2", size = 46372, upload-time = "2026-11-02T14:19:18.944Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/d1/5e38b2df9f57f9c7ad932a6bad4b260e06ef72b4cefe9e90f3c07046ad23/azure_vm_sdk-0.9.3-py3-none-any.whl", hash = "sha256:02892fbdcf2db41f266dfc3450342b5a2c21d58321f8a5473dd9c3e0e364b704", size = 49490, upload-time = "2026-11-03T06:20:59.627Z" },
 ]
 
 [[package]]
@@ -746,7 +746,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-vm-sdk", specifier = "==0.9.1" },
+    { name = "azure-vm-sdk", specifier = "==0.9.3" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "multipass-vm-sdk", specifier = "==0.6.0" },

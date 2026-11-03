@@ -539,7 +539,9 @@ def test_release_bootstrap_refreshes_cached_azure_login_groups(
             pass
 
     vm = AzureVM("release", tmp_path, FakeBackend())
-    monkeypatch.setattr(vm, "_connect_ssh", SshSession)
+    # azure-vm-sdk >= 0.9.2 returns the session, its keepalive watchdog (none
+    # for this fake) and the host it reached.
+    monkeypatch.setattr(vm, "_connect_ssh", lambda: (SshSession(), None, "20.0.0.10"))
     provider = AzureVmProvider(tmp_path)
     monkeypatch.setattr(provider, "_vm", lambda _request: vm)
     request = vm_request_for_role(_environment(), role)
