@@ -21,6 +21,8 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from nanolab.application.execution import build_role_bindings
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import (
+    SCIENTIFIC_CONTROL_PLANE_CPUS,
+    SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB,
     OneShotFunction,
     operational_limit,
     resolve_node_functions,
@@ -384,7 +386,16 @@ def _control_plane(
                 if collector is not None
                 else []
             ),
-            *(["--cpus", "0.35", "--memory", "512m"] if scientific else []),
+            *(
+                [
+                    "--cpus",
+                    str(SCIENTIFIC_CONTROL_PLANE_CPUS),
+                    "--memory",
+                    f"{SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB}m",
+                ]
+                if scientific
+                else []
+            ),
             *peer_mount,
             loaded_ids[built.control_plane().image.reference],
             *(

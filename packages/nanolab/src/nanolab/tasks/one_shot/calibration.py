@@ -14,7 +14,12 @@ from uuid import uuid4
 import httpx
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
-from nanolab.config.one_shot import OneShotConfig, resolve_node_functions
+from nanolab.config.one_shot import (
+    SCIENTIFIC_CONTROL_PLANE_CPUS,
+    SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB,
+    OneShotConfig,
+    resolve_node_functions,
+)
 from nanolab.one_shot.capacity import (
     CAPACITY_FACTORS,
     capacity_configurations,
@@ -241,7 +246,10 @@ def environment_identity(
         }
     if settings.purpose == "scientific-experiment":
         identity["nanolabPackageSha256"] = package_fingerprint()
-        identity["controlPlaneLimits"] = {"cpu": 0.35, "memoryMiB": 512}
+        identity["controlPlaneLimits"] = {
+            "cpu": SCIENTIFIC_CONTROL_PLANE_CPUS,
+            "memoryMiB": SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB,
+        }
     if settings.neighbors is not None:
         identity["neighbors"] = settings.neighbors
     if settings.observability.logs.enabled:

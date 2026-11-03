@@ -153,6 +153,9 @@ def main(argv=None):
         type=int,
         help="sync-queue admission estimate and queue wait limit (nanoFaaS: 2)",
     )
+    parser.add_argument(
+        "--ari-order", type=int, help="continuous-ARI only; default 6"
+    )
     args = parser.parse_args(argv)
     config = inputs(args.config.resolve())
     output = args.output.resolve()
@@ -265,6 +268,7 @@ def main(argv=None):
         observer["prepare"](
             SimpleNamespace(
                 forecast="ari" if name == "continuous-ari" else "oracle",
+                ari_order=args.ari_order if name == "continuous-ari" else None,
                 arrival_profile=arrival if continuous else None,
                 parent_freeze=parent if continuous else None,
                 tuning=config["continuousTuning"]

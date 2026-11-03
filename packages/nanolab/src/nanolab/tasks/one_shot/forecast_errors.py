@@ -6,7 +6,7 @@ import math
 import statistics
 from collections import Counter
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import cast
 
@@ -35,17 +35,21 @@ COLUMNS = (
 DEFINITION = (
     "error = predictedRate - actualRate, in requests/s: positive overestimates, "
     "negative underestimates. predictedRate is the forecastRate of the node's "
-    "activated plan, the rate its auction used; solverRate is that rate floored "
-    "to the flow quantum, as the solver received it. actualRate counts the "
+    "activated plan, the rate its auction used; solverRate is that rate rounded "
+    "to the nearest flow quantum, as the solver received it (NanoFaaS before "
+    "Nanofaas/nanofaas#262 floored it). actualRate counts the "
     "requests the generator emitted from the node for the function during the "
     "interval, divided by its length; oracleRate is the frozen trace rate."
 )
 
 
 def solver_rate(rate: float, quantum: float) -> float:
-    """Floor a non-oracle rate to the quantum grid, as NanoFaaS FlowUnits does."""
+    """Round a non-oracle rate to the nearest quantum, half up, as FlowUnits does.
+
+    NanoFaaS floored it before Nanofaas/nanofaas#262.
+    """
     load, step = Decimal(repr(rate)), Decimal(repr(quantum))
-    return float((load // step) * step)
+    return float((load / step).quantize(Decimal(1), rounding=ROUND_HALF_UP) * step)
 
 
 def forecast_error_rows(

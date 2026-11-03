@@ -162,8 +162,17 @@ def test_results_are_never_overwritten(run_dir):
 
 
 @pytest.mark.parametrize(
-    ("rate", "expected"), [(0.123, 0.1), (0.15, 0.15), (0.049, 0.0), (1.0, 1.0)]
+    ("rate", "expected"),
+    [
+        (0.123, 0.1),
+        (0.15, 0.15),
+        (0.049, 0.05),
+        (0.024, 0.0),
+        (0.025, 0.05),
+        (0.24, 0.25),
+        (1.0, 1.0),
+    ],
 )
-def test_solver_rate_floors_on_the_decimal_grid(rate, expected):
-    # Binary floating point would floor 0.15 / 0.05 to 2.
+def test_solver_rate_rounds_to_the_nearest_quantum_on_the_decimal_grid(rate, expected):
+    # Binary floating point would put 0.15 / 0.05 just below 3.
     assert solver_rate(rate, 0.05) == expected

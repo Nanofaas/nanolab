@@ -498,7 +498,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
         launch = next(argv for argv in calls if argv[:2] == ("docker", "run"))
         if scientific:
             assert launch[launch.index("--cpus") + 1] == "0.35"
-            assert launch[launch.index("--memory") + 1] == "512m"
+            assert launch[launch.index("--memory") + 1] == "768m"
         else:
             assert "--cpus" not in launch
         assert "--group-add" in launch

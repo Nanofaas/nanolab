@@ -10,6 +10,14 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+# A scientific run caps each control plane's container. It was 512 MiB until
+# the ten-edge run of 2 November 2026, where the control plane grew by about
+# 3.5 MiB a minute on every node and edge-10's was OOM-killed near the end.
+SCIENTIFIC_CONTROL_PLANE_CPUS = 0.35
+SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB = 768
+# Memory left to the guest OS, Docker and forwarders besides pool and control plane.
+SCIENTIFIC_OS_MEMORY_MIB = 128
+
 
 class ArtifactReference(BaseModel):
     """An immutable prerequisite whose bytes must match the recorded hash."""
@@ -474,7 +482,10 @@ class OneShotConfig(BaseModel):
             if (
                 self.strict_memory
                 and self.purpose == "scientific-experiment"
-                and node.memory_capacity_mib + 512 + 128 >= node.memory_mib
+                and node.memory_capacity_mib
+                + SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB
+                + SCIENTIFIC_OS_MEMORY_MIB
+                >= node.memory_mib
             ):
                 raise ValueError(
                     "platform/OS memory reservation exceeds node memory budget"
