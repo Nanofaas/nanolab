@@ -32,6 +32,7 @@ from nanolab.config.environment import OperatorLogging
 from nanolab.config.one_shot import OneShotLogs, operational_limit
 from nanolab.one_shot.sites import SiteForwarders, SiteHost
 from nanolab.tasks.one_shot.logging import verify_loki_ingestion
+from nanolab.tasks.resource_tasks import call, release_call
 
 PUSH_PATH = "/loki/api/v1/push"
 # Multipass names its bridges mpqemubr* (one per zone on recent releases);
@@ -174,11 +175,12 @@ def operator_loki_resource(
         if not graceful:
             raise RuntimeError("operator Loki ignored SIGTERM and was killed")
 
+    title = "Own operator Loki logging backend"
     resource = compensated_resource(
-        title="Own operator Loki logging backend",
-        acquire=acquire,
-        release=release,
-        compensate=release,
+        title=title,
+        acquire=call(title, acquire),
+        release=release_call(title, release),
+        compensate=call(f"Compensate {title}", release),
         requires=(operator,) if operator is not None else (),
     )
     if supervision is None:
@@ -356,12 +358,13 @@ def log_routes(
                 acquire, release, tunnel = _site_route(
                     node.site_host, logging, directory
                 )
+                title = f"Route {name} logs to the operator"
                 sites[name] = _supervised(
                     compensated_resource(
-                        title=f"Route {name} logs to the operator",
-                        acquire=acquire,
-                        release=release,
-                        compensate=release,
+                        title=title,
+                        acquire=call(title, acquire),
+                        release=release_call(title, release),
+                        compensate=call(f"Compensate {title}", release),
                         requires=(loki,),
                     ),
                     f"log-route:{name}",
@@ -414,12 +417,13 @@ def _cloud_route(node, logging, loki, directory, settings, supervision):
             raise RuntimeError("cloud log tunnel is not open")
         tunnel.ensure()
 
+    title = f"Route {node.config.id} logs to the operator"
     return _supervised(
         compensated_resource(
-            title=f"Route {node.config.id} logs to the operator",
-            acquire=acquire,
-            release=release,
-            compensate=release,
+            title=title,
+            acquire=call(title, acquire),
+            release=release_call(title, release),
+            compensate=call(f"Compensate {title}", release),
             requires=(loki, node.vm),
         ),
         f"log-route:{node.config.id}",

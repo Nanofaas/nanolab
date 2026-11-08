@@ -3,6 +3,7 @@ import pytest
 
 from nanolab.tasks.one_shot.calibration import measure_invocation, workload_checksum
 from nanolab.tasks.one_shot.statistics import summarize_service
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def transport(proof, *, timeout=False, output=42):
@@ -120,7 +121,7 @@ def test_measurement_failure_keeps_raw_samples_and_releases_resources(
 ):
     from types import SimpleNamespace
 
-    from sonata_engine import Resource, Steps, Task, TaskOutcome, Workflow
+    from sonata_engine import Steps, Task, TaskOutcome, Workflow
 
     from nanolab.config.one_shot import OneShotConfig
     from nanolab.tasks.one_shot.calibration import MeasureServiceTask
@@ -140,10 +141,10 @@ def test_measurement_failure_keeps_raw_samples_and_releases_resources(
         }
     )
     released = []
-    clock = Resource(
-        title="Owned clock",
-        acquire=lambda _: ClockMonitor(lambda: None, interval_seconds=10),
-        release=lambda *_: released.append(True),
+    clock = resource_of(
+        "Owned clock",
+        lambda _: ClockMonitor(lambda: None, interval_seconds=10),
+        lambda *_: released.append(True),
     )
     http = transport(None)
     monkeypatch.setattr(

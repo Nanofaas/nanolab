@@ -65,6 +65,20 @@ def resource_of[T](
     )
 
 
+class _WithUpstream:
+    """Delegate to duck-typed inputs, adding the released value."""
+
+    def __init__(self, inputs: Any, value: object) -> None:
+        self._inputs = inputs
+        self._value = value
+
+    def upstream(self) -> object:
+        return self._value
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inputs, name)
+
+
 def acquire_now[T](resource: Resource[T], inputs: TaskInputs) -> T:
     """Acquire a resource by hand, outside a workflow."""
     return cast("T", resource.acquire.run(inputs).value)
@@ -74,4 +88,8 @@ def release_now[T](resource: Resource[T], inputs: TaskInputs, value: T) -> None:
     """Release a resource by hand, handing the release task ``value``."""
     # ponytail: Sonata has no public "release by hand"; one place reads the
     # private _upstream field
-    resource.release.run(dataclasses.replace(inputs, _upstream=value))
+    if dataclasses.is_dataclass(inputs):
+        inputs = dataclasses.replace(inputs, _upstream=value)
+    else:  # test doubles standing in for TaskInputs
+        inputs = _WithUpstream(inputs, value)
+    resource.release.run(inputs)

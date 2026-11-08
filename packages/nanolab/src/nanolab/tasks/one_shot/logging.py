@@ -24,6 +24,7 @@ from nanolab.one_shot.infrastructure import NodeResource
 from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import append_observation
 from nanolab.tasks.one_shot.queue_telemetry import queue_timings
+from nanolab.tasks.resource_tasks import call, release_call, resource_of
 
 
 def query_url(endpoint: str) -> str:
@@ -171,10 +172,10 @@ def backend_resource(
     if not endpoint_url:
         raise ValueError("logging backend endpoint is required")
     if not logs.backend_owned:
-        return Resource(
-            title="Use external logging backend",
-            acquire=lambda _: endpoint_url,
-            release=lambda _inputs, _value: None,
+        return resource_of(
+            "Use external logging backend",
+            lambda _: endpoint_url,
+            lambda _inputs, _value: None,
         )
     project = "nanolab-logs-" + uuid4().hex[:12]
     endpoint = urlsplit(endpoint_url)
@@ -367,11 +368,12 @@ def backend_resource(
                 return endpoint_url
         raise RuntimeError("owned logging backend readiness failed")
 
+    title = "Own local Loki/Grafana logging backend"
     resource = compensated_resource(
-        title="Own local Loki/Grafana logging backend",
-        acquire=acquire,
-        release=release,
-        compensate=release,
+        title=title,
+        acquire=call(title, acquire),
+        release=release_call(title, release),
+        compensate=call(f"Compensate {title}", release),
         requires=(operator,) if operator is not None else (),
     )
     if supervision is not None:
@@ -882,10 +884,11 @@ def collector_resource(
             time.sleep(0.5)
         raise RuntimeError("collector readiness failed")
 
+    title = "Own " + node.config.id + " Fluent Bit collector"
     return compensated_resource(
-        title="Own " + node.config.id + " Fluent Bit collector",
-        acquire=acquire,
-        release=release,
-        compensate=release,
+        title=title,
+        acquire=call(title, acquire),
+        release=release_call(title, release),
+        compensate=call(f"Compensate {title}", release),
         requires=(node.vm, bootstrap, backend),
     )

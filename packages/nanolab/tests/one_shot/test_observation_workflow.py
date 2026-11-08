@@ -13,7 +13,6 @@ from typing import cast
 import httpx
 import pytest
 from pydantic import JsonValue
-from sonata_engine import Resource
 
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.one_shot import OneShotConfig, OperationalLimits
@@ -33,6 +32,7 @@ from nanolab.tasks.one_shot.trace import (
     request_schedule,
     warmup_trace,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from tests.one_shot.test_preflight import strict_cgroup_sample
 
 
@@ -360,10 +360,10 @@ def run_observation_workflow(
             acquired.append(name)
             return value
 
-        return Resource(
-            title=name,
-            acquire=acquire,
-            release=lambda _inputs, _value: released.append(name),
+        return resource_of(
+            name,
+            acquire,
+            lambda _inputs, _value: released.append(name),
             requires=requires,
         )
 
@@ -694,10 +694,10 @@ def run_observation_workflow(
     monkeypatch.setattr(observation, "VmTelemetrySession", Sampler)
 
     def telemetry(run, *, clock):
-        return Resource(
-            title="sampler",
-            acquire=lambda inputs: Sampler(run, inputs),
-            release=lambda _, s: s.close(),
+        return resource_of(
+            "sampler",
+            lambda inputs: Sampler(run, inputs),
+            lambda _, s: s.close(),
             requires=() if failure == "dependency" else (*topology.requires, clock),
         )
 

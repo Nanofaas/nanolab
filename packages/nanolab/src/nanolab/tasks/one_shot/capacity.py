@@ -21,6 +21,7 @@ from nanolab.tasks.one_shot.artifacts import (
     write_immutable_artifact,
 )
 from nanolab.tasks.one_shot.trace import TraceArtifact, request_schedule
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 
 
 def _capacity_vectors(topology, settings, functions, replicas, rates, window_seconds):
@@ -343,8 +344,8 @@ def _run_capacity_trial(
                     run, inputs, terminal_probe=monitor.refresh if monitor else None
                 )
                 stack.callback(compensate, telemetry.close)
-            process = resource.acquire(inputs)
-            stack.callback(compensate, resource.release, inputs, process)
+            process = acquire_now(resource, inputs)
+            stack.callback(compensate, release_now, resource, inputs, process)
             collector = LiveEvidenceCollector(run, inputs)
             stack.callback(compensate, collector.close)
             deadline = time.monotonic() + window_seconds + 60 + extra_budget

@@ -18,6 +18,7 @@ from nanolab.tasks.one_shot.operator_logging import (
     loki_config,
     operator_loki_resource,
 )
+from nanolab.tasks.resource_tasks import acquire_now
 
 TEMPLATE = """\
 auth_enabled: false
@@ -81,7 +82,7 @@ def test_a_loki_binary_with_another_digest_never_starts(tmp_path):
         run_dir=tmp_path / "run",
     )
     with pytest.raises(ValueError, match="does not match its sha256"):
-        resource.acquire(None)  # type: ignore[arg-type]
+        acquire_now(resource, None)  # type: ignore[arg-type]
     assert not (tmp_path / "run/logging/backend/backend-data").exists()
 
 

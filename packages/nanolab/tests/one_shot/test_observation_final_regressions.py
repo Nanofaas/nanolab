@@ -12,6 +12,7 @@ import pytest
 from nanolab.config.one_shot import OperationalLimits
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.tasks.one_shot import experiment, qualification
+from nanolab.tasks.resource_tasks import release_now
 
 QUIET_OPERATOR = {
     "atUtc": "2026-11-02T00:00:00+00:00",
@@ -112,7 +113,7 @@ def test_failed_backend_copy_retains_sole_copy_volume(tmp_path, monkeypatch):
     resource = backend_resource(logs, root=tmp_path, run_dir=tmp_path)
     assert logs.endpoint is not None
     with pytest.raises(RuntimeError, match="archive"):
-        resource.release(TaskInputs._for_resources({}, set()), logs.endpoint)
+        release_now(resource, TaskInputs._for_resources({}, set()), logs.endpoint)
     assert any("down" in argv for argv in calls)
     assert not any("down" in argv and "-v" in argv for argv in calls)
     assert (tmp_path / "logging/backend-recovery.json").exists()

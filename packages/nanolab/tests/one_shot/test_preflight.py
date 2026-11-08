@@ -5,6 +5,7 @@ from typing import Any, cast
 import pytest
 
 from nanolab.tasks.one_shot.preflight import NodeEvidence, validate_node
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 
 pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
 
@@ -136,7 +137,7 @@ def test_collection_validates_measured_facts_and_preserves_failures(
     )
 
     def resource(title):
-        return Resource(title=title, acquire=lambda _: None, release=lambda *args: None)
+        return resource_of(title, lambda _: None, lambda *args: None)
 
     endpoints = {key: resource(key + "endpoint") for key in resources.nodes}
     probes = {key: resource(key + "probe") for key in resources.nodes}
@@ -363,12 +364,12 @@ def test_clock_resource_bounds_api_time_and_retains_real_measurement(
     from datetime import UTC, datetime
     from types import SimpleNamespace
 
-    from sonata_engine import Resource, TaskInputs
+    from sonata_engine import TaskInputs
 
     from nanolab.tasks.one_shot.clock import clock_health_resource
 
-    endpoint = Resource(title="edge", acquire=lambda _: "", release=lambda *_: None)
-    probe = Resource(title="probe", acquire=lambda _: "", release=lambda *_: None)
+    endpoint = resource_of("edge", lambda _: "", lambda *_: None)
+    probe = resource_of("probe", lambda _: "", lambda *_: None)
     seen = []
 
     def client(url, *, http, timeout_seconds):
@@ -389,7 +390,7 @@ def test_clock_resource_bounds_api_time_and_retains_real_measurement(
     )
     values = {endpoint: "http://edge", probe: "http://probe"}
     inputs = TaskInputs._for_resources(values, set(values))
-    monitor = owned.acquire(inputs)
+    monitor = acquire_now(owned, inputs)
     monitor.close()
     assert seen == [2]
     assert '"offsetSeconds": 0.002' in (tmp_path / "clock.jsonl").read_text()
@@ -398,14 +399,12 @@ def test_clock_resource_bounds_api_time_and_retains_real_measurement(
 def test_preflight_task_requires_all_declared_nodes_under_resource_ownership():
     from types import SimpleNamespace
 
-    from sonata_engine import Resource, TaskInputs
+    from sonata_engine import TaskInputs
 
     from nanolab.tasks.one_shot.preflight import PreflightTask
 
     nodes = {
-        name: SimpleNamespace(
-            vm=Resource(title=name, acquire=lambda _: None, release=lambda *_: None)
-        )
+        name: SimpleNamespace(vm=resource_of(name, lambda _: None, lambda *_: None))
         for name in ["edge-0", "edge-1", "cloud"]
     }
     rows = [

@@ -24,6 +24,7 @@ from nanolab.tasks.one_shot.artifacts import (
     package_fingerprint,
     write_immutable_artifact,
 )
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def telemetry_policy() -> dict:
@@ -563,16 +564,16 @@ class VmTelemetrySession:
 
 def vm_telemetry_resource(run, *, clock: Resource | None = None) -> Resource:
     """Reuse the owned topology lifetime and preserve legacy non-Multipass runs."""
-    return Resource(
-        title="Own continuous whole-VM and container telemetry",
-        acquire=lambda inputs: VmTelemetrySession(
+    return resource_of(
+        "Own continuous whole-VM and container telemetry",
+        lambda inputs: VmTelemetrySession(
             run,
             inputs,
             terminal_probe=inputs.resource(clock).refresh
             if clock is not None
             else None,
         ),
-        release=lambda _inputs, session: session.close(),
+        lambda _inputs, session: session.close(),
         requires=(*run.topology.requires, *((clock,) if clock is not None else ())),
     )
 

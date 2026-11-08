@@ -13,6 +13,7 @@ from sonata_engine import TaskInputs
 
 from nanolab.one_shot.addresses import direct
 from nanolab.tasks.one_shot.resources import node_probe_resource
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 
 
 def test_actual_probe_disables_nagle_on_persistent_clock_connection(monkeypatch):
@@ -94,9 +95,9 @@ def test_probe_is_staged_readied_and_released_or_reports_failed_transfer(
         monkeypatch.setattr("httpx.Client", lambda **_: nullcontext(http))
         if transfer_fails:
             with pytest.raises(RuntimeError, match="stage"):
-                owned.acquire(inputs)
+                acquire_now(owned, inputs)
         else:
-            url = owned.acquire(inputs)
+            url = acquire_now(owned, inputs)
             assert url == "http://10.0.0.1:17111"
-            owned.release(inputs, url)
+            release_now(owned, inputs, url)
             assert commands[-1] == ("kill", "1234")

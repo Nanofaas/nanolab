@@ -13,6 +13,7 @@ from nanolab.config.environment import MultipassSite
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.one_shot import multisite, site_cpu, sites
 from nanolab.one_shot.infrastructure import build_one_shot_resources
+from nanolab.tasks.resource_tasks import acquire_now
 from nanolab.tasks.vm.models import VmInfo
 
 SITE = MultipassSite(
@@ -479,11 +480,14 @@ def test_prebuilt_archives_are_verified_per_architecture(tmp_path):
         architectures={"arm64", "amd64"},
     )
     for arch in ("arm64", "amd64"):
-        built = distributions[arch].acquire(TaskInputs._for_resources({}, set()))
+        built = acquire_now(distributions[arch], TaskInputs._for_resources({}, set()))
         inputs = TaskInputs._for_resources(
             {distributions[arch]: built}, {distributions[arch]}
         )
-        assert archives[arch].acquire(inputs) == PREBUILT / arch / f"images-{arch}.tar"
+        assert (
+            acquire_now(archives[arch], inputs)
+            == PREBUILT / arch / f"images-{arch}.tar"
+        )
         assert (tmp_path / f"runtime-distribution-{arch}.json").exists()
     with pytest.raises(ValueError, match="no runtime distribution for riscv"):
         _architecture_images(

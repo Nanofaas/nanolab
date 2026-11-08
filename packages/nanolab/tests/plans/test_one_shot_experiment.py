@@ -2,6 +2,7 @@ import pytest
 
 from nanolab.config.one_shot import ArtifactReference
 from nanolab.tasks.one_shot.experiment import read_qualification
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def test_changed_timing_artifact_is_refused_before_load(tmp_path):
@@ -23,7 +24,7 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
     from types import SimpleNamespace
     from typing import Any, cast
 
-    from sonata_engine import Resource, Task, TaskOutcome
+    from sonata_engine import Task, TaskOutcome
 
     from nanolab.plans.one_shot_experiment import build_one_shot_experiment_plan
 
@@ -31,7 +32,7 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
     calls = []
     active = set()
     order = []
-    resource = Resource(title="fake", acquire=lambda _: None, release=lambda *_: None)
+    resource = resource_of("fake", lambda _: None, lambda *_: None)
     settings = SimpleNamespace(
         provider="multipass",
         protocol_version=1,
@@ -154,11 +155,7 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
                 return name
 
             leases.append(
-                Resource(
-                    title=name,
-                    acquire=acquire,
-                    release=lambda _inputs, name: active.remove(name),
-                )
+                resource_of(name, acquire, lambda _inputs, name: active.remove(name))
             )
         return SimpleNamespace(
             requires=(resource, *leases),

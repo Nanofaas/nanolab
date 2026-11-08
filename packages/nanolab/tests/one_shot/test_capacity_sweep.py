@@ -4,6 +4,8 @@ from importlib import import_module
 
 import pytest
 
+from nanolab.tasks.resource_tasks import resource_of
+
 
 def trials():
     return [
@@ -234,7 +236,7 @@ def test_open_loop_trial_requires_sdk_release_and_preserves_generator_failure(
     process = SimpleNamespace(
         poll=lambda: 0, returncode=1 if outcome == "generator-error" else 0
     )
-    generator = SimpleNamespace(acquire=lambda _: process, release=lambda *_: None)
+    generator = resource_of("generator", lambda _: process, lambda *_: None)
     monkeypatch.setattr(experiment, "generator_resource", lambda **_: generator)
     monkeypatch.setattr(
         experiment,

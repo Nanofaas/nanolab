@@ -67,6 +67,7 @@ from nanolab.tasks.one_shot.verification import (
     verify_runtime_inventory,
     verify_warmup,
 )
+from nanolab.tasks.resource_tasks import resource_of
 
 GENERATOR_DRAIN_SECONDS = 60
 
@@ -724,10 +725,10 @@ def generator_resource(
         for stream in streams:
             stream.close()
 
-    return Resource(
-        title="Own bounded one-shot k6 generator",
-        acquire=acquire,
-        release=release,
+    return resource_of(
+        "Own bounded one-shot k6 generator",
+        acquire,
+        release,
         requires=(telemetry,) if telemetry is not None else (),
     )
 
@@ -979,9 +980,9 @@ class LiveEvidenceCollector:
 
 def evidence_collector_resource(run, generator) -> Resource[LiveEvidenceCollector]:
     """Keep evidence collection alive exactly through the owned load task."""
-    queues = Resource(
-        title="Sample per-function queues every second",
-        acquire=lambda inputs: QueueTelemetryCollector(
+    queues = resource_of(
+        "Sample per-function queues every second",
+        lambda inputs: QueueTelemetryCollector(
             run.run_dir,
             CampaignManifest.model_validate_json(
                 (run.run_dir / "manifest.json").read_bytes()
@@ -991,13 +992,13 @@ def evidence_collector_resource(run, generator) -> Resource[LiveEvidenceCollecto
                 for node, endpoint in run.topology.endpoints.items()
             },
         ),
-        release=lambda _inputs, collector: collector.close(),
+        lambda _inputs, collector: collector.close(),
         requires=run.topology.requires,
     )
-    return Resource(
-        title="Own live physical evidence collector",
-        acquire=lambda inputs: LiveEvidenceCollector(run, inputs),
-        release=lambda _inputs, collector: collector.close(),
+    return resource_of(
+        "Own live physical evidence collector",
+        lambda inputs: LiveEvidenceCollector(run, inputs),
+        lambda _inputs, collector: collector.close(),
         requires=(*run.topology.requires, generator, queues),
     )
 

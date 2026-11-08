@@ -25,6 +25,7 @@ from nanolab.one_shot.presentation import SinkCampaignPresentation
 from nanolab.one_shot.recording import CampaignRecorder
 from nanolab.one_shot.report import finalize_operational_outcome
 from nanolab.tasks.one_shot.clock import ClockMonitor
+from nanolab.tasks.resource_tasks import acquire_now, call, release_call, release_now
 
 _INHERIT = object()
 
@@ -266,12 +267,12 @@ class CampaignSupervision:
         """Wrap ownership callbacks while preserving all declared dependencies."""
 
         def acquire(inputs):
-            value = resource.acquire(inputs)
+            value = acquire_now(resource, inputs)
             try:
                 self.watch(name, lambda: check(value), writer=value)
             except BaseException as error:
                 try:
-                    resource.release(inputs, value)
+                    release_now(resource, inputs, value)
                 except Exception as cleanup:
                     error.add_note("registration cleanup: " + str(cleanup))
                 raise
@@ -281,11 +282,18 @@ class CampaignSupervision:
             try:
                 self.unwatch(name)
             finally:
-                if resource.release is not None:
-                    resource.release(inputs, value)
+                release_now(resource, inputs, value)
             return
 
-        return replace(resource, acquire=acquire, release=release)
+        return replace(
+            resource,
+            acquire=call(
+                resource.acquire.title,
+                acquire,
+                idempotent=resource.acquire.idempotent,
+            ),
+            release=release_call(resource.release.title, release),
+        )
 
     @staticmethod
     def check_process(
@@ -315,7 +323,7 @@ class CampaignSupervision:
 
         def acquire(inputs):
             nonlocal worker
-            value = resource.acquire(inputs)
+            value = acquire_now(resource, inputs)
             worker = ClockMonitor(
                 lambda: probe(value),
                 interval_seconds=interval_seconds,
@@ -330,8 +338,7 @@ class CampaignSupervision:
                 except BaseException as cleanup:
                     error.add_note("worker cleanup: " + str(cleanup))
                 try:
-                    if resource.release is not None:
-                        resource.release(inputs, value)
+                    release_now(resource, inputs, value)
                 except BaseException as cleanup:
                     error.add_note("service cleanup: " + str(cleanup))
                 raise
@@ -352,8 +359,7 @@ class CampaignSupervision:
                 else:
                     primary.add_note("worker cleanup: " + str(error))
             try:
-                if resource.release is not None:
-                    resource.release(inputs, value)
+                release_now(resource, inputs, value)
             except BaseException as error:
                 if primary is None:
                     primary = error
@@ -362,7 +368,15 @@ class CampaignSupervision:
             if primary is not None:
                 raise primary
 
-        return replace(resource, acquire=acquire, release=release)
+        return replace(
+            resource,
+            acquire=call(
+                resource.acquire.title,
+                acquire,
+                idempotent=resource.acquire.idempotent,
+            ),
+            release=release_call(resource.release.title, release),
+        )
 
     def _monitor(self):
         started = time.monotonic()

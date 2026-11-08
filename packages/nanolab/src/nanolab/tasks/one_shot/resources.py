@@ -14,6 +14,7 @@ from nanolab.one_shot.infrastructure import (
     OneShotResources,
     build_one_shot_resources,
 )
+from nanolab.tasks.resource_tasks import call, release_call
 
 __all__ = [
     "NodeExecutor",
@@ -63,10 +64,11 @@ def node_probe_resource(node: NodeResource):
                     time.sleep(0.1)
         raise RuntimeError("clock probe readiness timed out")
 
+    title = f"Acquire {node.config.id} clock/network probe"
     return compensated_resource(
-        title=f"Acquire {node.config.id} clock/network probe",
-        acquire=acquire,
-        release=stop,
-        compensate=stop,
+        title=title,
+        acquire=call(title, acquire),
+        release=release_call(title, stop),
+        compensate=call(f"Compensate {title}", stop),
         requires=(node.vm,),
     )

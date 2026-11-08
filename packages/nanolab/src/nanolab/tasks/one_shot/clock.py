@@ -16,6 +16,7 @@ from sonata_engine import Resource, TaskInputs
 from nanolab.config.one_shot import operational_limit
 from nanolab.one_shot.client import NanoFaasOneShotClient
 from nanolab.tasks.one_shot.preflight import measure_http_clock
+from nanolab.tasks.resource_tasks import resource_of
 
 
 class ClockMonitor:
@@ -185,10 +186,10 @@ def clock_health_resource(
         monitor.start()
         return monitor
 
-    return Resource(
-        title="Acquire measured periodic one-shot clock health",
-        acquire=acquire,
-        release=lambda _inputs, monitor: monitor.close(),
+    return resource_of(
+        "Acquire measured periodic one-shot clock health",
+        acquire,
+        lambda _inputs, monitor: monitor.close(),
         requires=(*endpoints.values(), *probes.values()),
         always_release=True,
     )

@@ -1,5 +1,7 @@
 import pytest
 
+from nanolab.tasks.resource_tasks import resource_of
+
 
 def test_qualification_load_requires_actual_emission_and_sdk_occupancy():
     from nanolab.tasks.one_shot.qualification_load import audit_load
@@ -75,7 +77,7 @@ def test_owned_load_compensates_generator_and_collector_on_failure(
         if failure == "cleanup":
             raise OSError("release failed")
 
-    resource = SimpleNamespace(acquire=acquire, release=release)
+    resource = resource_of("generator", acquire, release)
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.experiment.generator_resource",
         lambda **kwargs: resource,

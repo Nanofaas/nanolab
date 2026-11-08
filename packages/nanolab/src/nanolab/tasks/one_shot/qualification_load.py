@@ -13,6 +13,7 @@ from nanolab.one_shot.vm_resources import capacity_telemetry_enabled
 from nanolab.tasks.one_shot.artifacts import canonical_bytes, write_immutable_artifact
 from nanolab.tasks.one_shot.trace import TraceArtifact, request_schedule
 from nanolab.tasks.one_shot.verification import validate_proof
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 
 
 def audit_load(*, schedule, rows, proofs, cutoff, max_lateness):
@@ -199,8 +200,8 @@ class QualificationLoad:
                 vus=64,
                 duration=self.duration + (45 if self.use_telemetry else 0),
             )
-            self.process = resource.acquire(self.inputs)
-            self.stack.callback(resource.release, self.inputs, self.process)
+            self.process = acquire_now(resource, self.inputs)
+            self.stack.callback(release_now, resource, self.inputs, self.process)
             self.collector = LiveEvidenceCollector(self.run, self.inputs)
             self.stack.callback(self.collector.close)
             deadline = time.monotonic() + (75 if self.use_telemetry else 30)

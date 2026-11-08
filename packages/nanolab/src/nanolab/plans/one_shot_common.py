@@ -69,6 +69,7 @@ from nanolab.tasks.recipes.workflow import (
     recipe_run_resource,
     require_validation_distribution,
 )
+from nanolab.tasks.resource_tasks import call, release_call, resource_of
 
 
 @dataclass(frozen=True)
@@ -238,10 +239,10 @@ def _bootstrap(
         run_bootstrap_operations(node.provider, operations, role=node.config.id)
         node.reset_shared_ssh(vm)
 
-    return Resource(
-        title=f"Bootstrap {node.config.id} container VM",
-        acquire=acquire,
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        f"Bootstrap {node.config.id} container VM",
+        acquire,
+        lambda _inputs, _value: None,
         requires=(node.vm,),
     )
 
@@ -495,11 +496,12 @@ def _control_plane(
                     time.sleep(0.2)
         raise RuntimeError(f"{node.config.id} control-plane readiness timed out")
 
+    title = f"Acquire {node.config.id} control plane"
     return compensated_resource(
-        title=f"Acquire {node.config.id} control plane",
-        acquire=acquire,
-        release=release,
-        compensate=release,
+        title=title,
+        acquire=call(title, acquire),
+        release=release_call(title, release),
+        compensate=call(f"Compensate {title}", release),
         requires=(
             bootstrap,
             distribution,
@@ -548,10 +550,10 @@ def _architecture_images(
         require_validation_distribution(
             checked, functions=selected, required_modules=REQUIRED_MODULES
         )
-        distributions[architecture] = Resource(
-            title=f"Reuse immutable {architecture} one-shot runtime distribution",
-            acquire=lambda _inputs, checked=checked: checked,
-            release=lambda _inputs, _value: None,
+        distributions[architecture] = resource_of(
+            f"Reuse immutable {architecture} one-shot runtime distribution",
+            lambda _inputs, checked=checked: checked,
+            lambda _inputs, _value: None,
         )
 
         def verify(
@@ -570,10 +572,10 @@ def _architecture_images(
             )
             return path
 
-        archives[architecture] = Resource(
-            title=f"Verify prebuilt {architecture} one-shot runtime images",
-            acquire=verify,
-            release=lambda _inputs, _value: None,
+        archives[architecture] = resource_of(
+            f"Verify prebuilt {architecture} one-shot runtime images",
+            verify,
+            lambda _inputs, _value: None,
             requires=(distributions[architecture],),
         )
     return distributions, archives
@@ -682,10 +684,10 @@ def add_one_shot_platforms(
                     }
                 ),
             )
-            distribution = Resource(
-                title="Reuse immutable one-shot runtime distribution",
-                acquire=lambda _inputs: checked,
-                release=lambda _inputs, _value: None,
+            distribution = resource_of(
+                "Reuse immutable one-shot runtime distribution",
+                lambda _inputs: checked,
+                lambda _inputs, _value: None,
             )
 
         def save_images(inputs: TaskInputs) -> Path:
@@ -732,10 +734,10 @@ def add_one_shot_platforms(
             )
             return path
 
-        archive = Resource(
-            title="Archive digest-pinned one-shot runtime images",
-            acquire=save_images,
-            release=lambda _inputs, _value: None,
+        archive = resource_of(
+            "Archive digest-pinned one-shot runtime images",
+            save_images,
+            lambda _inputs, _value: None,
             requires=(distribution,),
         )
 
@@ -927,11 +929,11 @@ def add_one_shot_platforms(
                 )
             return replace(built, components=tuple(components))
 
-        return Resource(
-            title="Pin function registrations to immutable target image IDs"
+        return resource_of(
+            "Pin function registrations to immutable target image IDs"
             + (f" ({key})" if key else ""),
-            acquire=pin,
-            release=lambda _inputs, _value: None,
+            pin,
+            lambda _inputs, _value: None,
             requires=(
                 distributions[key],
                 archives[key],

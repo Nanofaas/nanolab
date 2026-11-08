@@ -8,6 +8,7 @@ import pytest
 from sonata_engine import Task, TaskOutcome, Workflow
 
 from nanolab.tasks.one_shot import experiment
+from nanolab.tasks.resource_tasks import acquire_now
 
 
 @pytest.mark.skipif(
@@ -76,4 +77,4 @@ def test_generator_captures_invocation_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr(experiment.subprocess, "Popen", launch)
     with pytest.raises(OSError, match="intentional launch stop"):
-        resource.acquire(TaskInputs._for_resources({}, set()))
+        acquire_now(resource, TaskInputs._for_resources({}, set()))

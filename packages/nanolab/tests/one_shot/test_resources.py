@@ -9,6 +9,7 @@ from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 from nanolab.config import EnvironmentConfig
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.one_shot.infrastructure import build_one_shot_resources
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 
 pytestmark = pytest.mark.usefixtures("simulated_one_shot_host")
 
@@ -283,7 +284,7 @@ def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
         },
         {node.vm},
     )
-    resource.acquire(inputs)
+    acquire_now(resource, inputs)
     assert cloud_init_calls[0][:3] == ("multipass", "exec", node.request.name)
     assert observed[0].argv[-1] == "10.0.0.9,"
 
@@ -364,12 +365,12 @@ def test_image_archive_keeps_all_named_images_for_oci_import(
     inputs = TaskInputs._for_resources({original: built}, {original})
     if fault:
         with pytest.raises(subprocess.TimeoutExpired):
-            archive.acquire(inputs)
+            acquire_now(archive, inputs)
         assert not (tmp_path / "images.tar").exists()
         assert not (tmp_path / "images.tar.partial").exists()
         assert not (tmp_path / "runtime-distribution.json").exists()
         return
-    assert archive.acquire(inputs).read_bytes() == b"saved-images"
+    assert acquire_now(archive, inputs).read_bytes() == b"saved-images"
     saved = next(argv for argv in calls if argv[:2] == ("docker", "save"))
     assert saved[-2:] == ("cp:tag", "fn:tag")
 
@@ -428,15 +429,11 @@ def test_control_plane_namespace_and_compensated_cleanup(
         return Result(stdout=stdout)
 
     monkeypatch.setattr("nanolab.one_shot.infrastructure.NodeResource.command", command)
-    bootstrap = Resource(
-        title="bootstrap", acquire=lambda _: None, release=lambda *args: None
+    bootstrap = resource_of("bootstrap", lambda _: None, lambda *args: None)
+    distribution: Resource[Any] = resource_of(
+        "distribution", lambda _: None, lambda *args: None
     )
-    distribution: Resource[Any] = Resource(
-        title="distribution", acquire=lambda _: None, release=lambda *args: None
-    )
-    archive: Resource[Any] = Resource(
-        title="archive", acquire=lambda _: None, release=lambda *args: None
-    )
+    archive: Resource[Any] = resource_of("archive", lambda _: None, lambda *args: None)
     image = SimpleNamespace(id="sha256:" + "a" * 64, reference="cp:tag")
     monkeypatch.setattr(
         "nanolab.plans.one_shot_common.archive_image_ids",
@@ -492,9 +489,9 @@ def test_control_plane_namespace_and_compensated_cleanup(
     inputs = TaskInputs._for_resources(values, set(values))
     if failure:
         with pytest.raises((RuntimeError, ValueError), match=r"transfer|image|socket"):
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
     else:
-        url = resource.acquire(inputs)
+        url = acquire_now(resource, inputs)
         launch = next(argv for argv in calls if argv[:2] == ("docker", "run"))
         if scientific:
             assert launch[launch.index("--cpus") + 1] == "0.35"
@@ -542,7 +539,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
         if baseline and node_id != "cloud":
             assert "--nanofaas.offload.target-url=http://10.0.0.1:8080" in launch
             assert "--sync-queue.max-depth=2" in launch
-        resource.release(inputs, url)
+        release_now(resource, inputs, url)
     assert (
         tmp_path / f"{node.config.id}-control-plane.log"
     ).read_text() == "retained control-plane log"

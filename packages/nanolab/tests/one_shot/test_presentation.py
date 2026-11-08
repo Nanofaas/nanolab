@@ -8,11 +8,12 @@ from contextlib import contextmanager
 from threading import Thread
 
 import pytest
-from sonata_engine import Resource, Workflow, bind_workflow_sink
+from sonata_engine import Workflow, bind_workflow_sink
 from sonata_engine.workflow.context import active_sink
 from sonata_engine.workflow.reporting import status, subtask, workflow_log
 
 from nanolab.one_shot.supervision import CampaignSupervision
+from nanolab.tasks.resource_tasks import resource_of
 from tests.one_shot.test_supervision import Action
 
 
@@ -49,11 +50,7 @@ def test_outer_view_receives_real_events_once_and_binding_is_restored(
         else CampaignSupervision(tmp_path)
     )
     releases = []
-    resource = Resource(
-        title="Owned VM",
-        acquire=lambda _: "vm",
-        release=lambda _, v: releases.append(v),
-    )
+    resource = resource_of("Owned VM", lambda _: "vm", lambda _, v: releases.append(v))
     workflow = Workflow("composed")
 
     def action(_):
@@ -110,9 +107,7 @@ def test_headless_does_not_print_and_still_records_and_checks(tmp_path, monkeypa
     supervisor = CampaignSupervision(tmp_path, cadence=0.001)
     checks, releases = [], []
     resource = supervisor.resource(
-        Resource(
-            title="VM", acquire=lambda _: "vm", release=lambda _, v: releases.append(v)
-        ),
+        resource_of("VM", lambda _: "vm", lambda _, v: releases.append(v)),
         "vm",
         lambda _: checks.append(1),
     )
@@ -138,9 +133,7 @@ def test_display_failure_interrupts_wait_disables_view_and_preserves_cleanup(
     view = Broken()
     supervisor = CampaignSupervision(tmp_path, presentation=view, cadence=100)
     released, workers, continued = [], [], []
-    resource = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    resource = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
     workflow = Workflow("display-fault")
 
     def fail():
@@ -187,10 +180,10 @@ def test_standard_sink_adapter_preserves_skipped_resource_events(tmp_path):
             yield
 
     sink: WorkflowSink = Standard()
-    resource = Resource(
-        title="Retained fixture",
-        acquire=lambda _: "value",
-        release=lambda *_: pytest.fail("retained resource released"),
+    resource = resource_of(
+        "Retained fixture",
+        lambda _: "value",
+        lambda *_: pytest.fail("retained resource released"),
     )
     workflow = Workflow("retained", keep=True)
     workflow.add(Action(lambda _: None), requires=(resource,))
@@ -212,9 +205,7 @@ def test_first_view_failure_during_release_does_not_skip_cleanup(tmp_path, kind)
             super().emit(event)
 
     released = []
-    resource = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    resource = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
     workflow = Workflow("release-display")
     workflow.add(Action(lambda _: None), requires=(resource,))
     with pytest.raises(OSError, match="release display failed"):
@@ -340,9 +331,7 @@ def test_tui_lifecycle_failures_have_failed_receipts_and_owned_archive(
         ),
     )
     released = []
-    resource = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    resource = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
     workflow = Workflow("lifecycle")
 
     def action(_):
@@ -412,9 +401,7 @@ def test_tui_background_refresh_fault_wakes_wait_and_does_not_redraw_broken_view
             "tui", console=Console(file=StringIO()), on_failure=fail
         ),
     )
-    resource = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    resource = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
     workflow = Workflow("refresh-background")
 
     def action(_):
@@ -482,9 +469,7 @@ def test_background_recording_failure_interrupts_active_wait(
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", write_failure)
-    resource = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    resource = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
     workflow = Workflow("recorder-worker")
 
     def action(_):
@@ -553,10 +538,10 @@ def test_operational_results_and_event_order_agree_across_views(
         for name in ("VM", "service", "generator", "collector"):
             resources.append(
                 supervisor.resource(
-                    Resource(
-                        title=name,
-                        acquire=lambda _, name=name: name,
-                        release=lambda _, v, released=released: released.append(v),
+                    resource_of(
+                        name,
+                        lambda _, name=name: name,
+                        lambda _, v, released=released: released.append(v),
                         requires=tuple(resources[-1:]),
                     ),
                     name,
@@ -689,10 +674,8 @@ def test_selected_real_view_output_fault_stops_generator(
         else (lambda fail: select_presentation(mode, on_failure=fail))
     )
     supervisor = CampaignSupervision(tmp_path, presentation_factory=factory)
-    resource = Resource(
-        title="generator",
-        acquire=lambda _: "generator",
-        release=lambda _, v: released.append(v),
+    resource = resource_of(
+        "generator", lambda _: "generator", lambda _, v: released.append(v)
     )
     workflow = Workflow("broken-output")
 
@@ -807,7 +790,7 @@ def test_release_body_logging_failure_never_interrupts_owned_cleanup(tmp_path):
         workflow_log("Stopping resource")
         released.append(value)
 
-    resource = Resource(title="VM", acquire=lambda _: "vm", release=release)
+    resource = resource_of("VM", lambda _: "vm", release)
     workflow = Workflow("release-logging")
     workflow.add(Action(lambda _: None), requires=(resource,))
     with pytest.raises(OSError, match="release log display failed"):
@@ -839,9 +822,7 @@ def test_status_final_diagnostic_failure_preserves_body_cause(
     monkeypatch.setattr(Path, "open", fail_write)
     supervisor = CampaignSupervision(tmp_path, presentation=Broken())
     released = []
-    resource = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    resource = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
     workflow = Workflow("status-final")
 
     def action(_):
@@ -906,9 +887,7 @@ def test_rendering_stop_prevents_action_continuation_and_later_tasks(
         workflow_log("refresh TUI now")
         continued.append("measurement continued")
 
-    resource = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    resource = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
     flow = Workflow("rendering-stop")
     action = Action(measurement)
     action.title = "Run measurement"
@@ -980,15 +959,8 @@ def test_stop_during_release_finishes_owned_cleanup_before_stopping_later_work(
         released.append(value)
         order.append("release-end")
 
-    vm = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
-    collector = Resource(
-        title="Collector",
-        acquire=lambda _: "collector",
-        release=release,
-        requires=(vm,),
-    )
+    vm = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
+    collector = resource_of("Collector", lambda _: "collector", release, requires=(vm,))
 
     def action(_):
         (tmp_path / "raw.jsonl").write_text('{"statusCode":503}\n')
@@ -1056,18 +1028,14 @@ def test_release_signal_remains_primary_when_cleanup_then_fails(
         archive=archive if archived else None,
         presentation=ConsoleCampaignPresentation(write=write, log_lines=True),
     )
-    vm = Resource(
-        title="VM", acquire=lambda _: "vm", release=lambda _, v: released.append(v)
-    )
+    vm = resource_of("VM", lambda _: "vm", lambda _, v: released.append(v))
 
     def release(_, value):
         workflow_log("stop child")
         released.append(value)
         raise OSError("cleanup command failed after signal")
 
-    child = Resource(
-        title="Child", acquire=lambda _: "child", release=release, requires=(vm,)
-    )
+    child = resource_of("Child", lambda _: "child", release, requires=(vm,))
     flow = Workflow("release-signal-cleanup-failure")
     flow.add(Action(lambda _: None), requires=(vm, child))
     flow.add(Action(lambda _: later_tasks.append("later")), requires=(vm,))

@@ -11,6 +11,7 @@ import pytest
 from sonata_engine import TaskInputs
 
 from nanolab.tasks.one_shot.logging import backend_resource
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 from tests.one_shot.test_logging import settings
 
 
@@ -97,7 +98,7 @@ def test_ready_but_unwritable_or_unreadable_backend_stops_and_compensates(
         visible=fault != "invisible",
     )
     with pytest.raises(RuntimeError, match=r"Loki.*(ingestion|probe)"):
-        resource.acquire(inputs)
+        acquire_now(resource, inputs)
     assert len(writes) == 1  # no automatic write retry after readiness succeeded
     assert any("down" in row for row in calls)
     assert (tmp_path / "logging/backend-data/wal").read_text() == "retained"
@@ -113,8 +114,8 @@ def test_owned_backend_explicitly_keeps_wal_without_shared_disk_percentage_gate(
     tmp_path, monkeypatch
 ):
     resource, inputs, calls, writes = fake_backend(tmp_path, monkeypatch)
-    value = resource.acquire(inputs)
-    resource.release(inputs, value)
+    value = acquire_now(resource, inputs)
+    release_now(resource, inputs, value)
     override = tmp_path / "logging/backend-compose.override.json"
     command = json.loads(override.read_text())["services"]["loki"]["command"]
     assert "-ingester.wal-disk-full-threshold=0" in command
@@ -138,12 +139,12 @@ def test_running_backend_with_ingestion_fault_is_detected_by_service_probe(
     resource, inputs, _, writes = fake_backend(
         tmp_path, monkeypatch, push_status=lambda: status[0], supervision=Supervision()
     )
-    value = resource.acquire(inputs)
+    value = acquire_now(resource, inputs)
     status[0] = 500
     assert probes
     with pytest.raises(RuntimeError, match=r"Loki.*(ingestion|probe)"):
         probes[0](value)
-    resource.release(inputs, value)
+    release_now(resource, inputs, value)
     assert len(writes) == 2
 
 
@@ -205,7 +206,7 @@ def test_override_write_failure_creates_no_backend_resources(tmp_path, monkeypat
 
     monkeypatch.setattr(Path, "write_text", disk_full)
     with pytest.raises(OSError, match="configuration disk full"):
-        resource.acquire(inputs)
+        acquire_now(resource, inputs)
     assert calls == []
 
 
@@ -217,7 +218,7 @@ def test_queryable_memory_only_or_unknown_wal_is_not_healthy(
         tmp_path, monkeypatch, wal_metric=wal_metric
     )
     with pytest.raises(RuntimeError, match=r"Loki.*WAL"):
-        resource.acquire(inputs)
+        acquire_now(resource, inputs)
     assert len(writes) == 1
     assert any("down" in argv for argv in calls)
     assert (tmp_path / "logging/backend-data/wal").read_text() == "retained"

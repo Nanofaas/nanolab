@@ -7,6 +7,7 @@ import pytest
 from sonata_engine import TaskInputs
 
 from nanolab.tasks.one_shot.experiment import LiveEvidenceCollector, generator_resource
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -47,10 +48,10 @@ def test_generator_child_is_reaped_and_streams_close_even_if_launch_fails(
     inputs = TaskInputs._for_resources({}, set())
     if fails:
         with pytest.raises(OSError, match="launch refused"):
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
     else:
-        child = resource.acquire(inputs)
-        resource.release(inputs, child)
+        child = acquire_now(resource, inputs)
+        release_now(resource, inputs, child)
         assert actions == ["terminate", "kill"]
     assert all(stream.closed for stream in streams)
 
@@ -106,7 +107,7 @@ def test_generator_partial_acquisition_closes_streams(tmp_path, monkeypatch, fai
         settings=SimpleNamespace(operational_limits=object()),
     )
     with pytest.raises(OSError, match=r"disk full|manifest\.json"):
-        resource.acquire(TaskInputs._for_resources({}, set()))
+        acquire_now(resource, TaskInputs._for_resources({}, set()))
     assert streams and all(stream.closed for stream in streams)
 
 

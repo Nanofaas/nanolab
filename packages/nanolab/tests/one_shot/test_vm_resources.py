@@ -17,6 +17,7 @@ from nanolab.one_shot.vm_sampler import (
     cpu_delta,
     memory_values,
 )
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def test_cpu_excludes_guest_double_count_and_distinguishes_iowait_steal():
@@ -452,9 +453,10 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
 
     monkeypatch.setattr("nanolab.one_shot.vm_resources.VmTelemetrySession", Sampler)
     child = SimpleNamespace(poll=lambda: None)
-    resource = SimpleNamespace(
-        acquire=lambda _: actions.append("generator-start") or child,
-        release=lambda *_: actions.append("generator-stop"),
+    resource = resource_of(
+        "generator",
+        lambda _: actions.append("generator-start") or child,
+        lambda *_: actions.append("generator-stop"),
     )
     monkeypatch.setattr(
         "nanolab.tasks.one_shot.experiment.generator_resource", lambda **_: resource

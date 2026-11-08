@@ -14,6 +14,7 @@ from nanolab.config.environment import MultipassSite
 from nanolab.config.one_shot import OneShotNode
 from nanolab.one_shot import infrastructure
 from nanolab.one_shot.sites import OperatorTunnel, SiteHost
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 
 SITE = MultipassSite(
@@ -129,12 +130,10 @@ def test_a_site_node_is_published_and_unpublished_in_order(
             events.append("close")
 
     vm = VmInfo(name="nl-os-r-edge-6", host="10.0.0.5", user="ubuntu", home="/h")
-    base = SimpleNamespace(
-        title="Acquire edge-6 VM",
-        requires=(),
-        revive=None,
-        acquire=lambda _inputs: vm,
-        release=lambda _inputs, _value: events.append("release"),
+    base = resource_of(
+        "Acquire edge-6 VM",
+        lambda _inputs: vm,
+        lambda _inputs, _value: events.append("release"),
     )
     monkeypatch.setattr(infrastructure, "SiteForwarders", Forwarders)
     monkeypatch.setattr(infrastructure, "OperatorTunnel", Tunnel)
@@ -153,8 +152,8 @@ def test_a_site_node_is_published_and_unpublished_in_order(
         ordinal=6,
         tunnel_journal=tmp_path / "tunnels.jsonl",
     )
-    acquired = node.vm.acquire(cast(Any, None))
-    node.vm.release(cast(Any, None), acquired)
+    acquired = acquire_now(node.vm, cast(Any, None))
+    release_now(node.vm, cast(Any, None), acquired)
     forwards = ((18006, 8080), (19016, 9090), (14206, 14206), (17206, 17111))
     published = [("forward", "10.0.0.5", forwards)]
     if tunnelled:

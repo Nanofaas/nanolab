@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from nanolab.tasks.one_shot.clock import clock_health_resource
+from nanolab.tasks.resource_tasks import acquire_now
 from tests.one_shot.test_clock_scope import resources
 
 
@@ -33,7 +34,7 @@ def test_v2_clock_diagnostics_keep_all_nodes_without_rejecting_load(
         protocol_version=2,
         interval_seconds=3600,
     )
-    monitor = owned.acquire(inputs)
+    monitor = acquire_now(owned, inputs)
     try:
         monitor.require_healthy()
         assert monitor.probe_directory == tmp_path
@@ -68,4 +69,4 @@ def test_v2_clock_evidence_write_failure_still_invalidates_collection(
         protocol_version=2,
     )
     with pytest.raises(FileNotFoundError):
-        owned.acquire(inputs)
+        acquire_now(owned, inputs)

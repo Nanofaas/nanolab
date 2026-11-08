@@ -11,6 +11,7 @@ from sonata_engine import Workflow
 
 from nanolab.plans import one_shot_observation as observation_plan
 from nanolab.tasks.one_shot import observation as observation_tasks
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 
 QUIET_OPERATOR = {
     "atUtc": "2026-11-02T00:00:00+00:00",
@@ -518,11 +519,11 @@ def test_bootstrap_waits_for_cloud_init_before_installing_packages(
     resource = _bootstrap(cast(Any, node), tmp_path)
     inputs = SimpleNamespace(resource=lambda _: vm)
     if ready:
-        resource.acquire(cast(Any, inputs))
+        acquire_now(resource, cast(Any, inputs))
         assert calls == ["cloud-init", "install"]
     else:
         with pytest.raises(RuntimeError, match="cloud-init"):
-            resource.acquire(cast(Any, inputs))
+            acquire_now(resource, cast(Any, inputs))
         assert calls == ["cloud-init"]
 
 
@@ -711,7 +712,7 @@ def test_real_observation_preparation_and_workflow_compile_without_acquiring_vms
     def compile_only(workflow):
         compiled = workflow.compile()
         if execute_load:
-            from sonata_engine import Resource, Workflow
+            from sonata_engine import Workflow
 
             from tests.one_shot.test_experiment_task import manifest
 
@@ -746,10 +747,10 @@ def test_real_observation_preparation_and_workflow_compile_without_acquiring_vms
                     return self.returncode
 
             def resource(title, value, requires=()):
-                return Resource(
-                    title=title,
-                    acquire=lambda _: value,
-                    release=lambda *_: actions.append(title + "-released"),
+                return resource_of(
+                    title,
+                    lambda _: value,
+                    lambda *_: actions.append(title + "-released"),
                     requires=requires,
                 )
 
@@ -1145,8 +1146,6 @@ def offline_observation(observer, tmp_path, monkeypatch, *, primary=None):
     import shutil
     from types import SimpleNamespace
 
-    from sonata_engine import Resource
-
     from tests.one_shot.test_report import manifest
     from tests.one_shot.test_supervision import Action
 
@@ -1179,10 +1178,10 @@ def offline_observation(observer, tmp_path, monkeypatch, *, primary=None):
     )
     shutil.copyfile(preset, freeze / "scenario.yaml")
     releases = []
-    resource = Resource(
-        title="Simulated observation VM",
-        acquire=lambda _: "vm",
-        release=lambda _, value: releases.append(value),
+    resource = resource_of(
+        "Simulated observation VM",
+        lambda _: "vm",
+        lambda _, value: releases.append(value),
     )
 
     def action(inputs):

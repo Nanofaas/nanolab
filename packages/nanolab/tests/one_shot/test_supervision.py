@@ -9,10 +9,11 @@ import time
 from typing import Any, cast
 
 import pytest
-from sonata_engine import Resource, Task, TaskOutcome, Workflow
+from sonata_engine import Task, TaskOutcome, Workflow
 
 from nanolab.one_shot.supervision import CampaignSupervision
 from nanolab.one_shot.views import JsonCampaignPresentation
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def json_supervision(*args, **kwargs):
@@ -36,16 +37,16 @@ def test_success_dependencies_progress_and_archive(tmp_path, capsys):
     output.mkdir()
     supervisor = json_supervision(output, archive=archive, cadence=0.01)
     releases = []
-    base = Resource(
-        title="Owned simulated VM",
-        acquire=lambda _inputs: "vm",
-        release=lambda _inputs, value: releases.append(value),
+    base = resource_of(
+        "Owned simulated VM",
+        lambda _inputs: "vm",
+        lambda _inputs, value: releases.append(value),
     )
     worker = supervisor.resource(
-        Resource(
-            title="Owned collector",
-            acquire=lambda inputs: inputs.resource(base),
-            release=lambda _inputs, value: releases.append("collector:" + value),
+        resource_of(
+            "Owned collector",
+            lambda inputs: inputs.resource(base),
+            lambda _inputs, value: releases.append("collector:" + value),
             requires=(base,),
         ),
         "collector",
@@ -95,16 +96,16 @@ def test_process_failure_interrupts_wait_and_cleans_owned_resources(tmp_path):
         released.append(True)
 
     child_resource = supervisor.resource(
-        Resource(
-            title="Owned short-lived generator",
-            acquire=lambda _inputs: subprocess.Popen(
+        resource_of(
+            "Owned short-lived generator",
+            lambda _inputs: subprocess.Popen(
                 [
                     sys.executable,
                     "-c",
                     "import time; time.sleep(.05); raise SystemExit(7)",
                 ]
             ),
-            release=release,
+            release,
         ),
         "generator",
         lambda child: supervisor.check_process(child, expected_end=float("inf")),
@@ -128,10 +129,8 @@ def test_interruption_preserves_raw_and_cleanup(tmp_path, signum):
     supervisor = json_supervision(tmp_path, cadence=0.01)
     released = []
     previous = signal.getsignal(signum)
-    resource = Resource(
-        title="Owned VM",
-        acquire=lambda _: object(),
-        release=lambda _, value: released.append(value),
+    resource = resource_of(
+        "Owned VM", lambda _: object(), lambda _, value: released.append(value)
     )
     workflow = Workflow("interrupted")
 
@@ -159,7 +158,7 @@ def test_first_fault_preserved_when_cleanup_fails(tmp_path):
     def fail(_inputs):
         raise RuntimeError("initial operational fault")
 
-    resource = Resource(title="Owned VM", acquire=lambda _: True, release=release)
+    resource = resource_of("Owned VM", lambda _: True, release)
     workflow = Workflow("failed-cleanup")
     workflow.add(Action(fail), requires=(resource,))
     with pytest.raises(RuntimeError, match="initial operational fault"):
@@ -171,13 +170,9 @@ def test_first_fault_preserved_when_cleanup_fails(tmp_path):
 
 def test_dependency_is_not_inferred_by_supervision(tmp_path):
     supervisor = json_supervision(tmp_path, cadence=0.01)
-    base = Resource(title="Sampler", acquire=lambda _: True, release=lambda *_: None)
+    base = resource_of("Sampler", lambda _: True, lambda *_: None)
     child = supervisor.resource(
-        Resource(
-            title="Generator",
-            acquire=lambda inputs: inputs.resource(base),
-            release=lambda *_: None,
-        ),
+        resource_of("Generator", lambda inputs: inputs.resource(base), lambda *_: None),
         "generator",
         lambda _: None,
     )
@@ -268,11 +263,7 @@ def test_background_thread_exit_without_reported_error_is_fault():
 def test_all_campaign_phases_and_nine_intervals_use_sonata_events(tmp_path):
     supervisor = json_supervision(tmp_path, cadence=0.01)
     releases = []
-    resource = Resource(
-        title="Owned VM",
-        acquire=lambda _: True,
-        release=lambda *_: releases.append(True),
-    )
+    resource = resource_of("Owned VM", lambda _: True, lambda *_: releases.append(True))
     workflow = Workflow("all-phases")
     phases = [
         "Provision",
@@ -327,10 +318,10 @@ def test_archive_waits_for_owned_writer_cleanup(tmp_path):
     archive = tmp_path.parent / "unsafe-archive"
     supervisor = json_supervision(tmp_path, archive=archive, cadence=0.01)
     resource = supervisor.resource(
-        Resource(
-            title="Broken collector cleanup",
-            acquire=lambda _: SimpleNamespace(thread=thread),
-            release=lambda *_: None,
+        resource_of(
+            "Broken collector cleanup",
+            lambda _: SimpleNamespace(thread=thread),
+            lambda *_: None,
         ),
         "collector",
         lambda _: None,
@@ -372,11 +363,7 @@ def test_late_health_signal_still_archives_and_retains_first_fault(
         raise RuntimeError("late health fault")
 
     resource = supervisor.resource(
-        Resource(
-            title="Worker",
-            acquire=lambda _: True,
-            release=lambda *_: releases.append(True),
-        ),
+        resource_of("Worker", lambda _: True, lambda *_: releases.append(True)),
         "worker",
         unhealthy,
     )
@@ -478,10 +465,10 @@ def test_status_io_failure_interrupts_real_workflow_and_preserves_cleanup(
     released = []
     completed = []
     resource = supervisor.resource(
-        Resource(
-            title="Owned resource during status failure",
-            acquire=lambda _: "owned",
-            release=lambda _, value: released.append(value),
+        resource_of(
+            "Owned resource during status failure",
+            lambda _: "owned",
+            lambda _, value: released.append(value),
         ),
         "owned",
         lambda _: None,
@@ -518,10 +505,8 @@ def test_service_watch_covers_resource_lifetime_before_sampler(tmp_path):
         if len(calls) > 1:
             raise RuntimeError("owned service exited")
 
-    base = Resource(
-        title="Owned service",
-        acquire=lambda _: "service",
-        release=lambda _, value: released.append(value),
+    base = resource_of(
+        "Owned service", lambda _: "service", lambda _, value: released.append(value)
     )
     watched = supervisor.service_resource(
         base, "control-plane", probe, interval_seconds=0.01
@@ -541,10 +526,8 @@ def test_reporting_io_failure_never_prevents_sonata_release(
     supervisor = json_supervision(tmp_path, cadence=0.005)
     released = []
     resource = supervisor.resource(
-        Resource(
-            title="Owned VM",
-            acquire=lambda _: "vm",
-            release=lambda _, value: released.append(value),
+        resource_of(
+            "Owned VM", lambda _: "vm", lambda _, value: released.append(value)
         ),
         "vm",
         lambda _: None,
@@ -679,7 +662,7 @@ def test_service_initial_probe_failure_survives_cleanup_errors(
 
     monkeypatch.setattr(ClockMonitor, "close", failing_close)
     watched = supervisor.service_resource(
-        Resource(title="Service", acquire=lambda _: "service", release=release),
+        resource_of("Service", lambda _: "service", release),
         "service",
         probe,
     )
@@ -708,15 +691,15 @@ def test_service_cleanup_preserves_interruption_and_dependencies(
 
     supervisor = json_supervision(tmp_path, cadence=100)
     calls = []
-    base = Resource(
-        title="VM",
-        acquire=lambda _: calls.append("acquire vm") or "vm",
-        release=lambda _, value: calls.append("release " + value),
+    base = resource_of(
+        "VM",
+        lambda _: calls.append("acquire vm") or "vm",
+        lambda _, value: calls.append("release " + value),
     )
-    unused = Resource(
-        title="Unacquired",
-        acquire=lambda _: pytest.fail("unused"),
-        release=lambda *_: pytest.fail("unowned release"),
+    unused = resource_of(
+        "Unacquired",
+        lambda _: pytest.fail("unused"),
+        lambda *_: pytest.fail("unowned release"),
     )
     close = ClockMonitor.close
 
@@ -738,7 +721,7 @@ def test_service_cleanup_preserves_interruption_and_dependencies(
 
     monkeypatch.setattr(ClockMonitor, "close", failing_close)
     service = supervisor.service_resource(
-        Resource(title="Service", acquire=acquire, release=release, requires=(base,)),
+        resource_of("Service", acquire, release, requires=(base,)),
         "service",
         interrupt,
     )
@@ -775,7 +758,7 @@ def test_service_normal_release_retains_first_cleanup_error(tmp_path, monkeypatc
 
     monkeypatch.setattr(ClockMonitor, "close", failing_close)
     service = supervisor.service_resource(
-        Resource(title="Service", acquire=lambda _: "service", release=release),
+        resource_of("Service", lambda _: "service", release),
         "service",
         lambda _: None,
     )
@@ -1064,10 +1047,8 @@ def test_signal_during_report_finalization_updates_saved_outcomes(
     raw.mkdir()
     supervisor = json_supervision(raw, archive=archive, cadence=100)
     releases, delivered = [], []
-    resource = Resource(
-        title="Simulated owned VM",
-        acquire=lambda _: "vm",
-        release=lambda _, value: releases.append(value),
+    resource = resource_of(
+        "Simulated owned VM", lambda _: "vm", lambda _, value: releases.append(value)
     )
 
     def action(inputs):
@@ -1149,10 +1130,8 @@ def test_archive_report_failure_updates_writable_outcomes(
     supervisor = json_supervision(raw, archive=archive, cadence=100)
     write = Path.write_text
     armed, releases = [], []
-    resource = Resource(
-        title="Owned fake resource",
-        acquire=lambda _: "vm",
-        release=lambda _, value: releases.append(value),
+    resource = resource_of(
+        "Owned fake resource", lambda _: "vm", lambda _, value: releases.append(value)
     )
 
     def reject_late_write(path, data, *args, **kwargs):
@@ -1307,10 +1286,8 @@ def test_signal_during_receipt_write_persists_changed_snapshot(
             writing.pop()
 
     monkeypatch.setattr(supervisor, "_write_result", persist_receipts)
-    resource = Resource(
-        title="Owned fake VM",
-        acquire=lambda _: "vm",
-        release=lambda _, value: releases.append(value),
+    resource = resource_of(
+        "Owned fake VM", lambda _: "vm", lambda _, value: releases.append(value)
     )
 
     def interrupt_write(path, data, *a, **kw):

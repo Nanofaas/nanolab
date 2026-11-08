@@ -4,6 +4,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any, cast
 
+from nanolab.tasks.resource_tasks import acquire_now, release_now
+
 
 def test_observation_binding_centralizes_limits_without_changing_hardware(tmp_path):
     path = Path(__file__).parents[4] / "scripts/one-shot-observe.py"
@@ -83,6 +85,6 @@ def test_generator_duration_uses_remaining_frozen_horizon(tmp_path, monkeypatch)
         settings=SimpleNamespace(operational_limits=OperationalLimits()),
     )
     inputs = TaskInputs._for_resources({}, set())
-    resource.acquire(inputs)
-    resource.release(inputs, cast(Any, child))
+    acquire_now(resource, inputs)
+    release_now(resource, inputs, cast(Any, child))
     assert environments[0]["ONE_SHOT_DURATION"] == "3520s"

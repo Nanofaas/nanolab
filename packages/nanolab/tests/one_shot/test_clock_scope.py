@@ -6,20 +6,19 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 
 from nanolab.tasks.one_shot.clock import clock_health_resource
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 
 
 def resources():
     endpoints = {
-        node: Resource(title=node, acquire=lambda _: "", release=lambda *_: None)
+        node: resource_of(node, lambda _: "", lambda *_: None)
         for node in ("edge", "cloud")
     }
     probes = {
-        node: Resource(
-            title=node + " probe", acquire=lambda _: "", release=lambda *_: None
-        )
+        node: resource_of(node + " probe", lambda _: "", lambda *_: None)
         for node in endpoints
     }
     values = {value: "http://" + node for node, value in endpoints.items()}
@@ -56,7 +55,7 @@ def test_all_nodes_measured_but_only_configured_nodes_receive_health(
         reporting_nodes=reporting_nodes,
         interval_seconds=3600,
     )
-    monitor = owned.acquire(inputs)
+    monitor = acquire_now(owned, inputs)
     monitor.close()
     rows = [
         json.loads(line) for line in (tmp_path / "clock.jsonl").read_text().splitlines()
@@ -91,7 +90,7 @@ def test_nonreporting_cloud_still_fails_an_unhealthy_clock(
         reporting_nodes={"edge"},
     )
     with pytest.raises(ValueError, match="unhealthy or too uncertain"):
-        owned.acquire(inputs)
+        acquire_now(owned, inputs)
     assert "cloud" in (tmp_path / "clock.jsonl").read_text()
 
 
@@ -121,7 +120,7 @@ def test_enabled_edge_http_failure_is_not_ignored(tmp_path, monkeypatch):
         reporting_nodes={"edge"},
     )
     with pytest.raises(httpx.HTTPStatusError):
-        owned.acquire(inputs)
+        acquire_now(owned, inputs)
 
 
 def test_unknown_reporting_node_fails_before_acquisition(tmp_path):
@@ -157,7 +156,7 @@ def test_rejected_clock_keeps_all_raw_probe_attempts(tmp_path, monkeypatch):
         reporting_nodes=set(),
     )
     with pytest.raises(ValueError, match="unhealthy or too uncertain"):
-        owned.acquire(inputs)
+        acquire_now(owned, inputs)
     rows = [
         json.loads(line)
         for line in (tmp_path / "clock-probes.jsonl").read_text().splitlines()

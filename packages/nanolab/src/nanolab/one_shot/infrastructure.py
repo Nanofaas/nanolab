@@ -34,6 +34,7 @@ from nanolab.one_shot.sites import (
 )
 from nanolab.tasks.provisioning.providers import provider_for
 from nanolab.tasks.provisioning.resources import provisioned_vm
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 
 
@@ -373,7 +374,7 @@ def _owned_node(
     def acquire(inputs):
         if provider.vm_exists(request):
             raise RuntimeError(f"refusing to adopt existing VM {request.name}")
-        value = base.acquire(inputs)
+        value = acquire_now(base, inputs)
         try:
             if target_cpus is not None:
                 if request.name is None:
@@ -386,7 +387,7 @@ def _owned_node(
         except BaseException as error:
             try:
                 unpublish()
-                base.release(inputs, value)
+                release_now(base, inputs, value)
             except Exception as cleanup:
                 error.add_note(f"owned VM placement compensation: {cleanup}")
             raise
@@ -410,16 +411,17 @@ def _owned_node(
                 f"owned VM {request.name} stopped and retained for raw recovery: "
                 + "; ".join(recovery)
             )
-        base.release(inputs, value)
+        release_now(base, inputs, value)
 
-    vm = Resource(
-        title=base.title,
-        acquire=acquire,
-        release=release,
+    vm = resource_of(
+        base.title,
+        acquire,
+        release,
         requires=(*base.requires, generator)
         if target_cpus is not None
         else base.requires,
         revive=base.revive,
+        idempotent=base.acquire.idempotent,
     )
     return NodeResource(
         node,
@@ -543,8 +545,8 @@ def operator_generator(
         if "original" in operator_state:
             host_cpu.restore_operator(operator_state.pop("original"))
 
-    return Resource(
-        title=f"Acquire {namespace} operator-host generator",
-        acquire=acquire_operator,
-        release=release_operator,
+    return resource_of(
+        f"Acquire {namespace} operator-host generator",
+        acquire_operator,
+        release_operator,
     )

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from nanolab.config.one_shot import OneShotConfig
 from nanolab.one_shot.infrastructure import NodeResource
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 
 
 def settings(logs=None):
@@ -96,8 +97,8 @@ def test_external_backend_is_never_mutated(tmp_path, monkeypatch):
     ).observability.logs
     resource = backend_resource(logs, root=tmp_path, run_dir=tmp_path)
     inputs = TaskInputs._for_resources({}, set())
-    endpoint = resource.acquire(inputs)
-    resource.release(inputs, endpoint)
+    endpoint = acquire_now(resource, inputs)
+    release_now(resource, inputs, endpoint)
     assert endpoint == logs.endpoint
 
 
@@ -114,7 +115,7 @@ def fake_collector(
     import json
     from types import SimpleNamespace
 
-    from sonata_engine import Resource, TaskInputs
+    from sonata_engine import TaskInputs
 
     from nanolab.tasks.one_shot.logging import collector_resource
 
@@ -133,10 +134,8 @@ def fake_collector(
 
         config = SimpleNamespace(id="edge-0", kind="edge")
         request = object()
-        vm = Resource(
-            title="vm",
-            acquire=lambda _: SimpleNamespace(home="/home/ubuntu"),
-            release=lambda *_: None,
+        vm = resource_of(
+            "vm", lambda _: SimpleNamespace(home="/home/ubuntu"), lambda *_: None
         )
 
         def command(self, argv):
@@ -202,11 +201,9 @@ def fake_collector(
 
     node = Node()
     node.provider = node
-    bootstrap = Resource(title="boot", acquire=lambda _: None, release=lambda *_: None)
-    backend = Resource(
-        title="external",
-        acquire=lambda _: "http://10.0.0.1:3100/loki/api/v1/push",
-        release=lambda *_: None,
+    bootstrap = resource_of("boot", lambda _: None, lambda *_: None)
+    backend = resource_of(
+        "external", lambda _: "http://10.0.0.1:3100/loki/api/v1/push", lambda *_: None
     )
     logs = settings(
         {"enabled": True, "endpoint": "http://10.0.0.1:3100/loki/api/v1/push"}
@@ -271,8 +268,8 @@ def test_successful_query_is_not_proof_of_complete_collection(
 
     resource, inputs, commands = fake_collector(tmp_path, monkeypatch, metrics=metrics)
     successful_query(monkeypatch)
-    value = resource.acquire(inputs)
-    resource.release(inputs, value)
+    value = acquire_now(resource, inputs)
+    release_now(resource, inputs, value)
     directory = tmp_path / "run/logging/edge-0"
     status = json.loads((directory / "status.json").read_text())
     assert status["status"] == "partial"
@@ -289,7 +286,7 @@ def test_existing_metrics_endpoint_cannot_hide_a_dead_owned_agent(
 ):
     resource, inputs, _ = fake_collector(tmp_path, monkeypatch, running=False)
     with pytest.raises(RuntimeError, match=r"collector.*running"):
-        resource.acquire(inputs)
+        acquire_now(resource, inputs)
 
 
 def test_export_failure_is_partial_and_owned_cleanup_still_runs(tmp_path, monkeypatch):
@@ -305,8 +302,8 @@ def test_export_failure_is_partial_and_owned_cleanup_still_runs(tmp_path, monkey
         raise httpx.ConnectError("backend down")
 
     monkeypatch.setattr("nanolab.tasks.one_shot.logging.httpx.Client.get", fail)
-    value = resource.acquire(inputs)
-    resource.release(inputs, value)
+    value = acquire_now(resource, inputs)
+    release_now(resource, inputs, value)
     status = json.loads((tmp_path / "run/logging/edge-0/status.json").read_text())
     assert status["status"] == "partial"
     assert (tmp_path / "run/logging/edge-0/collector-state.tar.gz").exists()
@@ -327,8 +324,8 @@ def test_drained_collection_requires_delivery_counters_and_verified_archive(
     )
     resource, inputs, commands = fake_collector(tmp_path, monkeypatch, metrics=metrics)
     successful_query(monkeypatch)
-    value = resource.acquire(inputs)
-    resource.release(inputs, value)
+    value = acquire_now(resource, inputs)
+    release_now(resource, inputs, value)
     status = json.loads((tmp_path / "run/logging/edge-0/status.json").read_text())
     assert status["status"] == "complete"
     assert status["collection"]["status"] == "drained"
@@ -404,14 +401,14 @@ def test_export_disk_error_does_not_skip_owned_cleanup(tmp_path, monkeypatch):
     resource, inputs, commands = fake_collector(
         tmp_path, monkeypatch, archive_error=True
     )
-    value = resource.acquire(inputs)
+    value = acquire_now(resource, inputs)
 
     def disk_full(*args, **kwargs):
         raise OSError("export disk full")
 
     monkeypatch.setattr(Path, "write_text", disk_full)
     with pytest.raises(RuntimeError, match="state archive"):
-        resource.release(inputs, value)
+        release_now(resource, inputs, value)
     assert any(argv[:3] == ("docker", "rm", "-f") for argv in commands)
     assert not any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
 
@@ -423,11 +420,11 @@ def test_compensation_does_not_repeat_completed_cleanup_after_archive_failure(
         tmp_path, monkeypatch, archive_error=True
     )
     successful_query(monkeypatch)
-    value = resource.acquire(inputs)
+    value = acquire_now(resource, inputs)
     with pytest.raises(RuntimeError, match="state archive"):
-        resource.release(inputs, value)
+        release_now(resource, inputs, value)
     count = len(commands)
-    resource.release(inputs, value)
+    release_now(resource, inputs, value)
     assert len(commands) == count
 
 
@@ -466,7 +463,7 @@ def test_backend_export_disk_error_does_not_skip_owned_cleanup(tmp_path, monkeyp
     assert logs.endpoint is not None
     assert logs.endpoint is not None
     with pytest.raises(RuntimeError, match="archive"):
-        resource.release(TaskInputs._for_resources({}, set()), logs.endpoint)
+        release_now(resource, TaskInputs._for_resources({}, set()), logs.endpoint)
     assert any("down" in argv for argv in commands)
 
 
@@ -541,7 +538,7 @@ def test_backend_raw_is_stopped_and_archived_before_volume_removal(
     )
     resource = backend_resource(logs, root=tmp_path, run_dir=tmp_path)
     assert logs.endpoint is not None
-    resource.release(TaskInputs._for_resources({}, set()), logs.endpoint)
+    release_now(resource, TaskInputs._for_resources({}, set()), logs.endpoint)
     assert (
         tmp_path / "logging/backend-data/chunk"
     ).read_bytes() == b"preserved Loki data"
@@ -559,7 +556,7 @@ def test_collector_export_disk_failure_is_operational_after_cleanup(
 
     resource, inputs, commands = fake_collector(tmp_path, monkeypatch)
     successful_query(monkeypatch)
-    value = resource.acquire(inputs)
+    value = acquire_now(resource, inputs)
     original = Path.write_text
 
     def disk_full(path, *args, **kwargs):
@@ -569,7 +566,7 @@ def test_collector_export_disk_failure_is_operational_after_cleanup(
 
     monkeypatch.setattr(Path, "write_text", disk_full)
     with pytest.raises(RuntimeError, match="export"):
-        resource.release(inputs, value)
+        release_now(resource, inputs, value)
     assert any(argv[:3] == ("docker", "rm", "-f") for argv in commands)
     assert any(argv[:3] == ("docker", "volume", "rm") for argv in commands)
 
@@ -590,8 +587,8 @@ def test_malformed_successful_log_query_keeps_partial_status_and_archives_state(
             json={"data": {"result": [{}]}},
         ),
     )
-    value = resource.acquire(inputs)
-    resource.release(inputs, value)
+    value = acquire_now(resource, inputs)
+    release_now(resource, inputs, value)
     directory = tmp_path / "run/logging/edge-0"
     status = json.loads((directory / "status.json").read_text())
     assert status["exportStatus"] == status["status"] == "partial"

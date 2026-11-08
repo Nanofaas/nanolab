@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from nanolab.config.one_shot import OneShotConfig
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def multi_settings(cpu=0.1, pool=320):
@@ -196,9 +197,10 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             "long-telemetry-off",
         }:
             assert kwargs["duration"] == warmup_seconds + measurement_seconds + 45
-        return SimpleNamespace(
-            acquire=lambda _: telemetry_actions.append("generator") or process,
-            release=lambda *args: released.append(True),
+        return resource_of(
+            "generator",
+            lambda _: telemetry_actions.append("generator") or process,
+            lambda *args: released.append(True),
         )
 
     monkeypatch.setattr(experiment, "generator_resource", generator)
