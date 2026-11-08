@@ -84,12 +84,13 @@ def acquire_now[T](resource: Resource[T], inputs: TaskInputs) -> T:
     return cast("T", resource.acquire.run(inputs).value)
 
 
-def release_now[T](resource: Resource[T], inputs: TaskInputs, value: T) -> None:
+def release_now[T](resource: Resource[T], inputs: TaskInputs | Any, value: T) -> None:
     """Release a resource by hand, handing the release task ``value``."""
     # ponytail: Sonata has no public "release by hand"; one place reads the
-    # private _upstream field
-    if dataclasses.is_dataclass(inputs):
+    # private _upstream field. The _WithUpstream proxy exists for hand-built
+    # test doubles and goes away with the workbench rewrite.
+    if isinstance(inputs, TaskInputs):
         inputs = dataclasses.replace(inputs, _upstream=value)
-    else:  # test doubles standing in for TaskInputs
+    else:
         inputs = _WithUpstream(inputs, value)
     resource.release.run(inputs)

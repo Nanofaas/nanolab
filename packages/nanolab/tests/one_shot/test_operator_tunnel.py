@@ -173,3 +173,37 @@ def test_a_site_node_is_published_and_unpublished_in_order(
         ]
     else:
         assert events == [*published, "unforward", "release"]
+
+
+def test_an_owned_node_keeps_the_base_vm_shape(monkeypatch):
+    vm = VmInfo(name="nl-os-r-edge-6", host="10.0.0.5", user="ubuntu", home="/h")
+    dep = resource_of("Acquire dep", lambda _i: 1, lambda _i, _v: None)
+
+    def revive(raw):
+        return raw
+
+    base = resource_of(
+        "Acquire edge-6 VM",
+        lambda _i: vm,
+        lambda _i, _v: None,
+        requires=(dep,),
+        revive=revive,
+        idempotent=True,
+    )
+    generator = resource_of("Acquire gen", lambda _i: "g", lambda _i, _v: None)
+    monkeypatch.setattr(infrastructure, "provisioned_vm", lambda **_kwargs: base)
+    for cpus, expected in ((None, (dep,)), ([1], (dep, generator))):
+        node = infrastructure._owned_node(
+            OneShotNode(id="edge-6", kind="edge"),
+            VmRequest(lifecycle="multipass", name="nl-os-r-edge-6"),
+            SimpleNamespace(vm_exists=lambda _request: False),
+            config=cast(Any, None),
+            generator=generator,
+            target_cpus=cpus,
+            pin=lambda *_args: None,
+            stop_argv=None,
+        )
+        assert node.vm.title == base.title
+        assert node.vm.requires == expected
+        assert node.vm.revive is revive
+        assert node.vm.acquire.idempotent is True

@@ -1381,3 +1381,32 @@ def test_primary_failure_retains_both_report_channel_limitations(
     ):
         assert "report.html unavailable" in str(outcome["notes"])
         assert "report.json unavailable" in str(outcome["notes"])
+
+
+@pytest.mark.parametrize("kind", ["resource", "service_resource"])
+def test_supervision_wrappers_keep_the_wrapped_resource_shape(tmp_path, kind):
+    supervisor = json_supervision(tmp_path / "raw", cadence=0.01)
+    dep = resource_of("Acquire dep", lambda _i: 1, lambda _i, _v: None)
+
+    def revive(raw):
+        return raw
+
+    base = resource_of(
+        "Acquire thing",
+        lambda _i: 1,
+        lambda _i, _v: None,
+        requires=(dep,),
+        always_release=True,
+        revive=revive,
+        idempotent=True,
+    )
+    if kind == "resource":
+        wrapped = supervisor.resource(base, "thing", lambda: None)
+    else:
+        wrapped = supervisor.service_resource(base, "thing", lambda _v: None)
+    assert wrapped.requires == (dep,)
+    assert wrapped.always_release is True
+    assert wrapped.revive is revive
+    assert wrapped.acquire.idempotent is True
+    assert wrapped.acquire.title == base.acquire.title
+    assert wrapped.release.title == base.release.title

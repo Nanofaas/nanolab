@@ -188,3 +188,57 @@ def test_unknown_failed_acquisition_preserves_cp_and_blocks_standalone(tmp_path)
     with pytest.raises(ValueError, match="invalid owned function record fields"):
         teardown(tmp_path, events, lambda *args: pytest.fail("unexpected HTTP"))
     assert "down" not in events
+
+
+def _dep_and_base(tmp_path, **kw):
+    dep = resource_of("Acquire dep", lambda _i: 1, lambda _i, _v: None)
+    path = tmp_path / "compose.yaml"
+    path.write_text("services: {}\n")
+    project = DockerComposeProject(PROJECT, path, "http://127.0.0.1:18081", build=False)
+    base = resource_of(
+        "Acquire Compose",
+        lambda _i: project,
+        lambda _i, _v: None,
+        requires=(dep,),
+        **kw,
+    )
+    return dep, base, project
+
+
+def test_journaled_compose_keeps_the_wrapped_resource_shape(tmp_path):
+    dep, base, project = _dep_and_base(
+        tmp_path, always_release=True, idempotent=True, revive=int
+    )
+    wrapped = journaled_compose_resource(
+        base,
+        project=project,
+        cwd=tmp_path,
+        cleanup_state=CleanupState(JournalConfig(path=tmp_path / "cleanup.jsonl")),
+        command=command([]),
+    )
+    assert wrapped.title == base.title
+    assert wrapped.requires == (dep,)
+    assert wrapped.always_release is True
+    assert wrapped.acquire.idempotent is True
+
+
+def test_journaled_function_keeps_requires_and_never_always_releases(tmp_path):
+    dep, base, _project = _dep_and_base(tmp_path, always_release=True, idempotent=True)
+    wrapped = journaled_function_resource(
+        base,
+        ownership=FunctionOwnership(
+            "fn",
+            "http://127.0.0.1:18080",
+            IMAGE,
+            PROJECT,
+            str(tmp_path),
+            "c" * 64,
+            START,
+        ),
+        cleanup_state=CleanupState(JournalConfig(path=tmp_path / "cleanup.jsonl")),
+        verify_owner=lambda _o: None,
+    )
+    assert wrapped.title == base.title
+    assert wrapped.requires == (dep,)
+    assert wrapped.always_release is False
+    assert wrapped.acquire.idempotent is False
