@@ -11,7 +11,6 @@ from uuid import uuid4
 
 from sonata_engine import (
     JournalConfig,
-    Resource,
     Task,
     TaskInputs,
     TaskOutcome,
@@ -21,6 +20,7 @@ from sonata_engine import (
 from sonata_tasks.execution.models import CommandOptions, CommandTaskSpec
 
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
 from nanolab.tasks.soak.owned_functions import FunctionOwnership, delete_owned_function
 from nanolab.tasks.soak.retention import CLEANUP_JOURNAL, compose_file_fingerprint
@@ -446,10 +446,8 @@ class TeardownSoakTask(Task[tuple[str, ...]]):
                     failures.append(error)
                     raise
 
-            resources[title] = Resource(
-                title=title,
-                acquire=lambda _inputs: None,
-                release=release_function,
+            resources[title] = resource_of(
+                title, lambda _inputs: None, release_function
             )
 
         def release_compose(_inputs, value):
@@ -473,10 +471,8 @@ class TeardownSoakTask(Task[tuple[str, ...]]):
                 project.env,
             )
 
-        resources[compose_record["resource"]] = Resource(
-            title=compose_record["resource"],
-            acquire=lambda _inputs: None,
-            release=release_compose,
+        resources[compose_record["resource"]] = resource_of(
+            compose_record["resource"], lambda _inputs: None, release_compose
         )
         return TaskOutcome(value=release_retained(resources, journal))
 

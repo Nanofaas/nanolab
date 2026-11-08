@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, override
 from uuid import uuid4
 
-from sonata_engine import Resource, Workflow
+from sonata_engine import Workflow
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
@@ -18,6 +18,7 @@ from nanolab.core.deployment import (
     LOCAL_REGISTRY,
     REGISTRY_CONTAINER_NAME,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.composition import (
     compose_frozen_soak_workflow as compose_frozen_soak_workflow,
 )
@@ -126,10 +127,10 @@ def build_soak_plan(
             return
 
         recipe_requires = (
-            Resource(
-                title="Check recipe soak daemon support",
-                acquire=preflight,
-                release=lambda inputs, value: None,
+            resource_of(
+                "Check recipe soak daemon support",
+                preflight,
+                lambda inputs, value: None,
             ),
         )
         executor = _RecipeBuilderExecutor(bindings)

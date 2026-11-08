@@ -5,13 +5,13 @@ from dataclasses import replace
 import pytest
 from sonata_engine import (
     JournalConfig,
-    Resource,
     Task,
     TaskOutcome,
     Workflow,
     release_retained,
 )
 
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.owned_functions import (
     FunctionOwnership,
     delete_owned_function,
@@ -102,10 +102,10 @@ class Consume(Task):
 
 def adapter(tmp_path, state, request, acquire=lambda inputs: None, owner=None):
     return journaled_function_resource(
-        Resource(
-            title="Acquire owned function",
-            acquire=acquire,
-            release=lambda *args: pytest.fail("permissive release must not run"),
+        resource_of(
+            "Acquire owned function",
+            acquire,
+            lambda *args: pytest.fail("permissive release must not run"),
         ),
         ownership=owner or ownership(tmp_path),
         cleanup_state=state,

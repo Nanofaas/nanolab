@@ -3,17 +3,18 @@
 from types import SimpleNamespace
 
 import pytest
-from sonata_engine import Resource, Workflow
+from sonata_engine import Workflow
 
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.builds import BuildImagesTask
 
 
 def test_build_resolves_declared_snapshot_before_materialization(tmp_path, monkeypatch):
     snapshot_value = SimpleNamespace(fingerprint="snapshot-fingerprint")
-    snapshot = Resource(
-        title="Acquire source snapshot",
-        acquire=lambda _inputs: snapshot_value,
-        release=lambda _inputs, _value: None,
+    snapshot = resource_of(
+        "Acquire source snapshot",
+        lambda _inputs: snapshot_value,
+        lambda _inputs, _value: None,
     )
     received = []
 

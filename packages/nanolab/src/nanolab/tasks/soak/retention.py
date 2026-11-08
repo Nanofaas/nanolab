@@ -15,6 +15,7 @@ from sonata_engine import JournalConfig, Resource, TaskInputs
 from yaml.tokens import AliasToken, AnchorToken, TagToken
 
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 
 CLEANUP_JOURNAL = "cleanup.jsonl"
 
@@ -405,7 +406,7 @@ def journaled_compose_resource(
         digest = compose_file_fingerprint(project, cwd)
         cleanup_state.prepare()
         try:
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
         except BaseException as error:
             cleanup_state.unknown_acquisition(resource.title, error)
             raise
@@ -430,11 +431,11 @@ def journaled_compose_resource(
             cleanup_state.failed = True
             raise
 
-    return Resource(
-        title=resource.title,
-        acquire=acquire,
-        release=release,
+    return resource_of(
+        resource.title,
+        acquire,
+        release,
         requires=resource.requires,
         always_release=resource.always_release,
-        acquire_idempotent=resource.acquire_idempotent,
+        idempotent=resource.acquire.idempotent,
     )

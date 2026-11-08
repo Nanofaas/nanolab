@@ -4,9 +4,10 @@ import json
 from functools import partial
 
 import pytest
-from sonata_engine import JournalConfig, Resource, Task, TaskOutcome, Workflow
+from sonata_engine import JournalConfig, Task, TaskOutcome, Workflow
 
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.owned_functions import (
     FunctionOwnership,
     delete_owned_function,
@@ -75,10 +76,10 @@ def build(tmp_path, events, request, *, keep=False, fail=False, acquire_error=Fa
     path.write_text("services: {}\n")
     project = DockerComposeProject(PROJECT, path, "http://127.0.0.1:18081", build=False)
     compose = journaled_compose_resource(
-        Resource(
-            title="Acquire Compose",
-            acquire=lambda inputs: project,
-            release=lambda *args: events.append("down"),
+        resource_of(
+            "Acquire Compose",
+            lambda inputs: project,
+            lambda *args: events.append("down"),
         ),
         project=project,
         cwd=tmp_path,
@@ -92,10 +93,10 @@ def build(tmp_path, events, request, *, keep=False, fail=False, acquire_error=Fa
         events.append("registered")
 
     function = journaled_function_resource(
-        Resource(
-            title="Acquire function",
-            acquire=acquire,
-            release=lambda *args: None,
+        resource_of(
+            "Acquire function",
+            acquire,
+            lambda *args: None,
             requires=(compose,),
         ),
         ownership=lambda: FunctionOwnership(

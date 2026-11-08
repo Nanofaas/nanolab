@@ -9,6 +9,7 @@ from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskEx
 
 from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resource
 from nanolab.tasks.platform import PlatformRequest, add_platform
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.owned_functions import journaled_function_resource
 from nanolab.tasks.soak.retention import CleanupState, journaled_compose_resource
 from nanolab.tasks.soak.teardown import LocalCleanupCommands
@@ -111,12 +112,10 @@ def compose_frozen_soak_workflow(
             request.functions, platform.functions, strict=True
         )
     )
-    observer = Resource(
-        title="Own continuous soak observer",
-        acquire=lambda inputs: cast(_MeasurementControl, measurement).observer,
-        release=lambda inputs, value: cast(
-            _MeasurementControl, measurement
-        ).stop_observer(),
+    observer = resource_of(
+        "Own continuous soak observer",
+        lambda inputs: cast(_MeasurementControl, measurement).observer,
+        lambda inputs, value: cast(_MeasurementControl, measurement).stop_observer(),
         requires=(*platform.resources, *functions),
         always_release=True,
     )

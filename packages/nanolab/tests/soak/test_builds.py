@@ -7,8 +7,9 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from sonata_engine import Resource, Workflow
+from sonata_engine import Workflow
 
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.builds import BuildImagesTask, ObservedBuild
 from nanolab.tasks.soak.images import BuildRecipe, freeze_build_receipt
 
@@ -52,10 +53,10 @@ def synthetic_build(
         manifest,
         hashlib.sha256(manifest.read_bytes()).hexdigest(),
     )
-    snapshot = Resource(
-        title="Synthetic snapshot",
-        acquire=lambda _: source,
-        release=lambda _inputs, _value: None,
+    snapshot = resource_of(
+        "Synthetic snapshot",
+        lambda _: source,
+        lambda _inputs, _value: None,
     )
     digest, child, base = ("sha256:" + char * 64 for char in "abc")
     base_name = "node" if variant == "default" else "oraclelinux"
@@ -283,10 +284,10 @@ def test_build_executor_rejects_prebuilt_fallback(tmp_path):
         "recipe",
         "receipt",
     )
-    snapshot = Resource(
-        title="Snapshot",
-        acquire=lambda inputs: None,
-        release=lambda inputs, value: None,
+    snapshot = resource_of(
+        "Snapshot",
+        lambda inputs: None,
+        lambda inputs, value: None,
     )
     with pytest.raises(ValueError, match=r"build execution requires build"):
         BuildImagesTask(

@@ -29,6 +29,7 @@ from nanolab.config.soak import SoakConfig
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.manifest import FunctionManifest
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.adapters import RoleBinding, RoleBoundProbe, SubprocessTransport
 from nanolab.tasks.soak.artifacts import (
     describe_artifact,
@@ -1293,10 +1294,10 @@ def create_local_deployment(
             "ports": ports,
         }
 
-    owner = Resource(
-        title="Own exclusive soak endpoint allocation",
-        acquire=acquire,
-        release=lambda inputs, value: _close_all(leases),
+    owner = resource_of(
+        "Own exclusive soak endpoint allocation",
+        acquire,
+        lambda inputs, value: _close_all(leases),
         always_release=True,
     )
 

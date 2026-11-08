@@ -5,7 +5,6 @@ import json
 import pytest
 from sonata_engine import (
     JournalConfig,
-    Resource,
     Task,
     TaskOutcome,
     Workflow,
@@ -13,6 +12,7 @@ from sonata_engine import (
 )
 
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.retention import (
     CleanupState,
     compose_file_fingerprint,
@@ -42,7 +42,7 @@ def resource(tmp_path, events, state, name="owned-soak"):
         events.append("release")
 
     return journaled_compose_resource(
-        Resource(title="Own frozen Compose", acquire=acquire, release=release),
+        resource_of("Own frozen Compose", acquire, release),
         project=project,
         cwd=tmp_path,
         cleanup_state=state,

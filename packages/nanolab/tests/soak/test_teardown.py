@@ -4,9 +4,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from sonata_engine import JournalConfig, Resource, Task, TaskOutcome, Workflow
+from sonata_engine import JournalConfig, Task, TaskOutcome, Workflow
 
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.owned_functions import (
     FunctionOwnership,
     journaled_function_resource,
@@ -36,10 +37,10 @@ def retained(tmp_path):
         build=False,
     )
     compose = journaled_compose_resource(
-        Resource(
-            title="Acquire owned Compose",
-            acquire=lambda inputs: project,
-            release=lambda *args: pytest.fail("unexpected early release"),
+        resource_of(
+            "Acquire owned Compose",
+            lambda inputs: project,
+            lambda *args: pytest.fail("unexpected early release"),
         ),
         project=project,
         cwd=tmp_path,
@@ -56,10 +57,10 @@ def retained(tmp_path):
         control_plane_started_at="2026-09-13T10:00:00.000000000Z",
     )
     function = journaled_function_resource(
-        Resource(
-            title="Acquire owned function",
-            acquire=lambda inputs: None,
-            release=lambda *args: None,
+        resource_of(
+            "Acquire owned function",
+            lambda inputs: None,
+            lambda *args: None,
             requires=(compose,),
         ),
         ownership=owner,

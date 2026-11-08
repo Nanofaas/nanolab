@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from sonata_engine import Resource, Task, TaskOutcome
+from sonata_engine import Task, TaskOutcome
 from sonata_tasks.execution.bindings import RoleBindings
 
 from nanolab.config.environment import EnvironmentConfig
@@ -15,6 +15,7 @@ from nanolab.plans.soak import (
 )
 from nanolab.tasks.compose import DockerComposeProject
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.containerd_runtime import (
     BuildExecutionRecorder,
     ContainerdSoakRun,
@@ -79,10 +80,10 @@ def test_compiled_platform_resources_outlive_measurement(tmp_path, monkeypatch):
         def run(self, inputs):
             return TaskOutcome(value=None)
 
-    ownership = Resource(
-        title="Own endpoint",
-        acquire=lambda inputs: None,
-        release=lambda inputs, value: None,
+    ownership = resource_of(
+        "Own endpoint",
+        lambda inputs: None,
+        lambda inputs, value: None,
     )
     workflow = compose_frozen_soak_workflow(
         request,
@@ -132,10 +133,10 @@ def test_function_registration_uses_api_not_management_readiness(tmp_path, monke
         build_control_plane=False,
         control_plane_image=digest,
     )
-    ownership = Resource(
-        title="Own endpoint",
-        acquire=lambda inputs: None,
-        release=lambda inputs, value: None,
+    ownership = resource_of(
+        "Own endpoint",
+        lambda inputs: None,
+        lambda inputs, value: None,
     )
     observed = {}
 

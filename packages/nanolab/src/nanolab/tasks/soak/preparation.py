@@ -11,10 +11,11 @@ from pathlib import Path
 from threading import Event
 from uuid import uuid4
 
-from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 
 from nanolab.config.soak import SoakConfig
 from nanolab.core.deployment import LOCAL_NANOFAAS_REPOSITORY
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.build_executor import OwnedBuildCommandExecutor
 from nanolab.tasks.soak.build_provenance import BuildProvenanceCollector
@@ -255,12 +256,12 @@ def prepare_soak(
     writer.write_json("config.json", resolved)
     writer.write_json("payloads.json", payloads)
     result: list[PreparedSoak] = []
-    snapshot = Resource(
-        title="Capture one source snapshot for all soak roles",
-        acquire=lambda inputs: capture_source_snapshot(
+    snapshot = resource_of(
+        "Capture one source snapshot for all soak roles",
+        lambda inputs: capture_source_snapshot(
             repo_root, evidence / "source", max_bytes=options.source_limit_bytes
         ),
-        release=lambda inputs, value: None,
+        lambda inputs, value: None,
         always_release=True,
     )
 

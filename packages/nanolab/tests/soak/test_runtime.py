@@ -17,6 +17,7 @@ from sonata_tasks.execution.ports import CommandTaskExecutor
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.config.soak import SchedulerSwitchPolicy, SoakConfig
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.images import BuildReceipt, BuildRecipe
 from nanolab.tasks.soak.models import Target
@@ -209,7 +210,7 @@ def test_local_compose_uses_only_frozen_images_and_private_network(
         not in document["services"]["function-2"]["environment"]
     )
     assert deployment.ownership.always_release
-    deployment.ownership.acquire(TaskInputs.empty())
+    acquire_now(deployment.ownership, TaskInputs.empty())
     assert all(lease.closed for lease in leases)
     assert all(
         function.manifest().body()["executionMode"] == "EXTERNAL"
@@ -736,7 +737,7 @@ def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
 def test_public_terminal_is_published_only_after_cleanup(
     tmp_path, monkeypatch, cleanup_fails, writer_close_fails
 ):
-    from sonata_engine import Resource, Task, TaskOutcome
+    from sonata_engine import Task, TaskOutcome
 
     import nanolab.tasks.soak.composition as plans
     import nanolab.tasks.soak.runtime as module
@@ -782,10 +783,10 @@ def test_public_terminal_is_published_only_after_cleanup(
         if cleanup_fails:
             raise RuntimeError("cleanup is unconfirmed")
 
-    owner = Resource(
-        title="Synthetic owner",
-        acquire=lambda inputs: None,
-        release=release,
+    owner = resource_of(
+        "Synthetic owner",
+        lambda inputs: None,
+        release,
         always_release=True,
     )
 
@@ -1411,7 +1412,7 @@ def test_owned_diagnostic_compose_and_controller_are_frozen_before_acquire(
             assert service["cap_drop"] == ["ALL"]
             assert shared[0]["volume"] == {"nocopy": True}
     assert value.config.model_dump(mode="json") == original
-    deployment.ownership.acquire(TaskInputs.empty())
+    acquire_now(deployment.ownership, TaskInputs.empty())
     value.writer.close()
 
 

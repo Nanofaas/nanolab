@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from sonata_engine import Resource, TaskInputs
 
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 from nanolab.tasks.soak.retention import CleanupState
 
 SCHEMA = "nanolab-soak-owned-function-v2"
@@ -172,7 +173,7 @@ def journaled_function_resource(
         cleanup_state.prepare()
         try:
             verify_owner(identity)
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
         except BaseException as error:
             cleanup_state.unknown_acquisition(resource.title, error)
             raise
@@ -196,10 +197,10 @@ def journaled_function_resource(
             cleanup_state.failed = True
             raise
 
-    return Resource(
-        title=resource.title,
-        acquire=acquire,
-        release=release,
+    return resource_of(
+        resource.title,
+        acquire,
+        release,
         requires=resource.requires,
         always_release=False,
     )
