@@ -8,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from sonata_engine import (
-    Resource,
     Task,
     TaskInputs,
     TaskOutcome,
@@ -25,6 +24,7 @@ from nanolab.release.environment import release_lock_path, release_run_lock
 from nanolab.release.evidence import RECEIPT_KINDS
 from nanolab.release.model import GitState
 from nanolab.release.versioning import read_project_version
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmInfo
 from nanolab.workspace.paths import ToolPaths, discover_tool_root
 from tests.conftest import (
@@ -189,9 +189,9 @@ def release_cli_harness(
     def build(request, *, provider=None):
         state.built.append((request, provider))
         workflow = _SpyWorkflow(workflow_id="release-test")
-        resource = Resource(
-            title="Acquire release stack VM",
-            acquire=lambda _inputs: (
+        resource = resource_of(
+            "Acquire release stack VM",
+            lambda _inputs: (
                 state.events.append("acquire")
                 or VmInfo(
                     name="nanofaas-azure-release",
@@ -200,7 +200,7 @@ def release_cli_harness(
                     home="/home/azureuser",
                 )
             ),
-            release=lambda _inputs, _value: state.events.append("release"),
+            lambda _inputs, _value: state.events.append("release"),
         )
         workflow.add(_Phase(state.events, state.failure), requires=(resource,))
         state.workflows.append(workflow)

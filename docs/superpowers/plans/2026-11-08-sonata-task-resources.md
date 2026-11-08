@@ -46,8 +46,8 @@
   @dataclass(frozen=True, slots=True, eq=False)
   class Resource[T]:
       title: str
-      acquire: Task[T]                 # its `idempotent` replaces acquire_idempotent
-      release: Task[None]              # reads the value via inputs.upstream()
+      acquire: Task[T]  # its `idempotent` replaces acquire_idempotent
+      release: Task[None]  # reads the value via inputs.upstream()
       requires: tuple[Resource[Any], ...] = ()
       always_release: bool = False
       revive: Callable[[Any], T] | None = None
@@ -108,7 +108,8 @@ git commit -m "feat!: resources are pairs of tasks; callable resources removed"
 - Produces:
   ```python
   class Members(dict[str, object]):
-      def of[T](self, resource: Resource[T]) -> T: ...   # KeyError names the title
+      def of[T](self, resource: Resource[T]) -> T: ...  # KeyError names the title
+
 
   def compose(
       title: str,

@@ -26,6 +26,7 @@ from nanolab.functions.contracts import (
     same_json,
     strict_json,
 )
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 from nanolab.tasks.validation.contract_resources import (
     ContractExecutor,
     ContractImage,
@@ -565,7 +566,7 @@ class FunctionContractsTask(Task[ContractEvidence]):
             executor=self.executor,
             run_dir=self.run_dir,
         )
-        container_id = resource.acquire(inputs)
+        container_id = acquire_now(resource, inputs)
         try:
             if mode != "one-shot":
                 self._ready(inputs, "http://artifact:8080/health")
@@ -599,7 +600,7 @@ class FunctionContractsTask(Task[ContractEvidence]):
                     stream.write(logs)
                 check_contract_logs(logs, limit=self.settings.log_bytes)
             finally:
-                resource.release(inputs, container_id)
+                release_now(resource, inputs, container_id)
         time.sleep(self.settings.quiet_seconds)
         self._snapshot(inputs, final=True)
 

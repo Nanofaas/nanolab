@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from sonata_engine import Resource, Workflow
+from sonata_engine import Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.application.vm_provider import vm_request_for_role
@@ -13,6 +13,7 @@ from nanolab.tasks.components.bootstrap import remote_project_dir
 from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 from nanolab.tasks.module_cost import AnalyzeModuleBlock, RunModuleArm
 from nanolab.tasks.module_cost_build import BuildModuleCost
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def require_module_inputs(repo_root: Path, run_dir: Path | None) -> None:
@@ -59,10 +60,10 @@ def build_module_cost_plan(
         executor,
         environment.model_dump(mode="json", by_alias=True),
     )
-    images = Resource(
-        title="Assemble all module-cost images",
-        acquire=lambda inputs: build.run(inputs).value,
-        release=lambda _inputs, _value: None,
+    images = resource_of(
+        "Assemble all module-cost images",
+        lambda inputs: build.run(inputs).value,
+        lambda _inputs, _value: None,
     )
     workflow = Workflow("Matched module cost")
     for arm in config.module_cost.order:

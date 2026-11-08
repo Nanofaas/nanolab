@@ -45,6 +45,7 @@ from nanolab.tasks.recipes.kubernetes import (
 )
 from nanolab.tasks.recipes.validation import RecipeMetadataCheckTask
 from nanolab.tasks.recipes.workflow import RecipeDistribution
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 from nanolab.workspace.paths import bundled_assets_root
 
 QUOTA_ENV = "NANOFAAS_INVOCATION_CAPACITY_EXECUTIONS_PER_FUNCTION"
@@ -370,8 +371,8 @@ class NativeKubernetesLifecycleTask(Task[None]):
         if not isinstance(self.endpoint, Resource):
             raise RuntimeError("native local lifecycle requires an owned API forward")
         previous = inputs.resource(self.endpoint)
-        self.endpoint.release(inputs, previous)
-        current = self.endpoint.acquire(inputs)
+        release_now(self.endpoint, inputs, previous)
+        current = acquire_now(self.endpoint, inputs)
         self.endpoint_overrides[previous] = current
         return current
 

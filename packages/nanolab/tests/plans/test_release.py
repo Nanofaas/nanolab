@@ -35,6 +35,7 @@ from nanolab.release.publish import PublishPlan, build_publish_plan
 from nanolab.release.recipe import ReleaseRecipeGroup
 from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmInfo
 from nanolab.workspace.paths import discover_tool_root
 from tests.conftest import (
@@ -499,24 +500,24 @@ def _arm_failure_workflow(
 
     def infrastructure(_environment, _root, _provider, *, requires=()):
         def vm(title: str, name: str) -> Resource[VmInfo]:
-            return Resource(
-                title=title,
-                acquire=lambda _inputs: VmInfo(
+            return resource_of(
+                title,
+                lambda _inputs: VmInfo(
                     name=name, host="10.0.0.1", user="azureuser", home="/home/azureuser"
                 ),
-                release=lambda _inputs, _value: None,
+                lambda _inputs, _value: None,
                 requires=requires,
             )
 
         stack = vm("Acquire release stack VM", "release-stack")
         loadgen = vm("Acquire release loadgen VM", "release-loadgen")
         arm_builder = vm("Acquire release ARM builder VM", "release-arm")
-        endpoints = Resource(
-            title="Acquire release endpoints",
-            acquire=lambda _inputs: release_resources.ReleaseEndpoints(
+        endpoints = resource_of(
+            "Acquire release endpoints",
+            lambda _inputs: release_resources.ReleaseEndpoints(
                 "http://stack", "http://prom"
             ),
-            release=lambda _inputs, _value: None,
+            lambda _inputs, _value: None,
             requires=(stack, loadgen),
         )
         return release_resources.ReleaseResources(

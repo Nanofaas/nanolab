@@ -15,6 +15,7 @@ from nanolab.release.resources import (
     cosign_credentials_resource,
     ghcr_credentials_resource,
 )
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 
 
 def _environment() -> EnvironmentConfig:
@@ -55,10 +56,10 @@ def test_execution_guard_validates_metadata_before_cloud_resource(
     guard = release_resources.release_execution_guard(
         Credentials(), repo_roots=(tmp_path / "tool", tmp_path / "source")
     )
-    cloud = Resource(
-        title="Acquire cloud",
-        acquire=lambda _inputs: events.append("cloud"),
-        release=lambda _inputs, _value: None,
+    cloud = resource_of(
+        "Acquire cloud",
+        lambda _inputs: events.append("cloud"),
+        lambda _inputs, _value: None,
         requires=(guard,),
     )
 
@@ -264,16 +265,16 @@ def test_keep_retains_what_did_not_ask_to_be_released(
     provider = FakeProvider()
     workflow, resources = _workflow(provider, monkeypatch)
     released: list[str] = []
-    staged = Resource(
-        title="Acquire staged input",
-        acquire=lambda _inputs: "input",
-        release=lambda _inputs, _value: released.append("staged"),
+    staged = resource_of(
+        "Acquire staged input",
+        lambda _inputs: "input",
+        lambda _inputs, _value: released.append("staged"),
         requires=(resources.endpoints,),
     )
-    secret = Resource(
-        title="Acquire staged secret",
-        acquire=lambda _inputs: "secret",
-        release=lambda _inputs, _value: released.append("secret"),
+    secret = resource_of(
+        "Acquire staged secret",
+        lambda _inputs: "secret",
+        lambda _inputs, _value: released.append("secret"),
         requires=(resources.endpoints,),
         always_release=True,
     )
@@ -347,10 +348,10 @@ def test_source_archive_is_created_once_and_checksum_verified_on_stack_and_arm(
         for resource in (resources.local, resources.stack, resources.arm)
     )
     # Acquire/release directly keeps the contract test independent of a dummy task.
-    local = resources.local.acquire(TaskInputs.empty())
+    local = acquire_now(resources.local, TaskInputs.empty())
     inputs = TaskInputs._for_resources({resources.local: local}, {resources.local})
-    resources.stack.acquire(inputs)
-    resources.arm.acquire(inputs)
+    acquire_now(resources.stack, inputs)
+    acquire_now(resources.arm, inputs)
 
     assert staged == [
         (stack, "/home/user/nanofaas-release/v1/source"),
@@ -426,12 +427,12 @@ def test_source_resource_normal_release_propagates_remote_cleanup_failure(
         stack_request=object(),
         arm_request=object(),
     )
-    local = resources.local.acquire(TaskInputs.empty())
+    local = acquire_now(resources.local, TaskInputs.empty())
     inputs = TaskInputs._for_resources({resources.local: local}, {resources.local})
-    state = resources.stack.acquire(inputs)
+    state = acquire_now(resources.stack, inputs)
 
     with pytest.raises(RuntimeError, match="cleanup failed"):
-        resources.stack.release(inputs, state)
+        release_now(resources.stack, inputs, state)
 
 
 @pytest.mark.parametrize("alteration", ["changed", "missing"])
@@ -484,7 +485,7 @@ def test_source_resource_preflight_failure_preserves_remote_contents(
         stack_request=object(),
         arm_request=object(),
     )
-    evidence = resources.local.acquire(TaskInputs.empty())
+    evidence = acquire_now(resources.local, TaskInputs.empty())
     archive = Path(evidence.reference)
     if alteration == "changed":
         archive.write_bytes(b"changed after local acquisition")
@@ -494,7 +495,7 @@ def test_source_resource_preflight_failure_preserves_remote_contents(
         error, message = FileNotFoundError, "source.tar"
     inputs = TaskInputs._for_resources({resources.local: evidence}, {resources.local})
     with pytest.raises(error, match=message):
-        resources.stack.acquire(inputs)
+        acquire_now(resources.stack, inputs)
     assert not calls
     assert (remote / "source" / "previous").read_bytes() == b"previous application"
     assert (remote / "source.tar").read_bytes() == b"previous archive"

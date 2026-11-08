@@ -3,6 +3,7 @@ from typer.testing import CliRunner
 
 import nanolab.cli.product as product
 from nanolab.app.main import app
+from nanolab.tasks.resource_tasks import resource_of
 
 
 @pytest.mark.parametrize(
@@ -55,7 +56,7 @@ def test_installed_contract_preset_resolution(name):
 def test_contract_skips_control_plane_provisioning_and_finalizes_after_release(
     tmp_path, monkeypatch, failure
 ):
-    from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
+    from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 
     from nanolab.workspace.paths import ToolPaths, discover_tool_root
 
@@ -82,9 +83,7 @@ def test_contract_skips_control_plane_provisioning_and_finalizes_after_release(
         if failure:
             raise RuntimeError("release failed")
 
-    resource = Resource(
-        title="owned test resource", acquire=lambda inputs: None, release=release
-    )
+    resource = resource_of("owned test resource", lambda inputs: None, release)
 
     class Invoke(Task[None]):
         title = "Invoke packaged contracts"

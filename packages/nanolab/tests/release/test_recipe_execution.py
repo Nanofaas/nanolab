@@ -20,6 +20,7 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from nanolab.images.plan import ImageArchitecture, build_image_plan
 from nanolab.release import recipe_execution as execution
 from nanolab.release.resources import release_recipe_inputs_resource
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 
 from .test_recipe import _groups, _report
 
@@ -1150,10 +1151,10 @@ def test_arm_cleanup_preserves_amd64_inputs_and_diagnostics(tmp_path):
         request=object(),
         architecture="arm64",
     )
-    value = resource.acquire(cast(TaskInputs, object()))
+    value = acquire_now(resource, cast(TaskInputs, object()))
     assert value.name == "buildkitd-arm64.toml"
     (root / "recipe-output/arm64/native").mkdir(parents=True)
-    resource.release(cast(TaskInputs, object()), value)
+    release_now(resource, cast(TaskInputs, object()), value)
     assert not (root / "recipe-inputs/arm64").exists()
     assert not (root / "recipe-output/arm64").exists()
     assert all(path.read_text() == "retained" for path in kept)
@@ -1179,8 +1180,8 @@ def test_arm_reacquisition_does_not_repair_retained_evidence(tmp_path, deleted):
         architecture="arm64",
     )
     for _ in range(2):
-        value = resource.acquire(cast(TaskInputs, object()))
-        resource.release(cast(TaskInputs, object()), value)
+        value = acquire_now(resource, cast(TaskInputs, object()))
+        release_now(resource, cast(TaskInputs, object()), value)
     assert not retained.exists() if deleted else retained.read_text() == "tampered"
 
 

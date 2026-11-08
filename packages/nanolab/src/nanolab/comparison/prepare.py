@@ -40,6 +40,7 @@ from nanolab.tasks.recipes.workflow import (
     read_distribution,
     recipe_command,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
@@ -392,10 +393,10 @@ def prepare_comparison(
             distributions[key] = result
             return result
 
-        resource = Resource(
-            title=f"Publish comparison recipe {variant}",
-            acquire=acquire,
-            release=lambda _inputs, _value: None,
+        resource = resource_of(
+            f"Publish comparison recipe {variant}",
+            acquire,
+            lambda _inputs, _value: None,
             requires=tuple(resources[-1:]),
         )
         resources.append(resource)

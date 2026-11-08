@@ -55,6 +55,7 @@ from nanolab.tasks.provisioning import (
     scenario_context,
 )
 from nanolab.tasks.provisioning.resources import provisioned_vm
+from nanolab.tasks.resource_tasks import acquire_now, call, release_now, resource_of
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 from nanolab.workspace.paths import bundled_assets_root
 
@@ -132,12 +133,12 @@ def release_execution_guard(
         for root in repo_roots:
             validate(repo_root=root)
 
-    return Resource(
-        title="Acquire validated release execution credentials",
-        acquire=acquire,
+    return resource_of(
+        "Acquire validated release execution credentials",
+        acquire,
         # No always_release: its release does nothing, so retaining it is a no-op.
         # The declaration belongs to resources that actually stage a secret.
-        release=lambda _inputs, _value: None,
+        lambda _inputs, _value: None,
     )
 
 
@@ -150,10 +151,10 @@ def _credential_resource[T](
         context = manager()
         return CredentialLease(context.__enter__(), context)
 
-    return Resource(
-        title=title,
-        acquire=acquire,
-        release=lambda _inputs, lease: lease.close(),
+    return resource_of(
+        title,
+        acquire,
+        lambda _inputs, lease: lease.close(),
         requires=requires,
         always_release=True,
     )
@@ -336,10 +337,10 @@ def build_release_resources(
             prometheus=_release_endpoint(stack_info.host, PROMETHEUS_NODE_PORT),
         )
 
-    endpoints = Resource(
-        title="Acquire release endpoints",
-        acquire=acquire_endpoints,
-        release=lambda _inputs, _value: None,
+    endpoints = resource_of(
+        "Acquire release endpoints",
+        acquire_endpoints,
+        lambda _inputs, _value: None,
         requires=(stack, loadgen),
     )
     return ReleaseResources(stack, loadgen, arm_builder, endpoints)
@@ -384,10 +385,10 @@ def build_release_source_resources(
             raise ValueError("Retained source archive changed")
         return ArtifactEvidence("local", str(archive), digest_path(archive))
 
-    local = Resource(
-        title="Acquire immutable release source archive",
-        acquire=acquire_local,
-        release=lambda _inputs, _value: (
+    local = resource_of(
+        "Acquire immutable release source archive",
+        acquire_local,
+        lambda _inputs, _value: (
             archive.unlink(missing_ok=True) if source_archive is None else None
         ),
         always_release=True,
@@ -415,10 +416,10 @@ def build_release_source_resources(
             return remote_source_dir
 
         name = getattr(request, "name", "release VM")
-        return Resource(
-            title=f"Acquire verified source on {name}",
-            acquire=acquire,
-            release=lambda _inputs, _value: cleanup(),
+        return resource_of(
+            f"Acquire verified source on {name}",
+            acquire,
+            lambda _inputs, _value: cleanup(),
             requires=(local, *requires),
             always_release=True,
         )
@@ -496,10 +497,10 @@ def release_recipe_inputs_resource(
             raise
         return config
 
-    return Resource(
-        title=f"Acquire {architecture.upper()} recipe and BuildKit inputs",
-        acquire=acquire,
-        release=lambda _inputs, _value: cleanup(),
+    return resource_of(
+        f"Acquire {architecture.upper()} recipe and BuildKit inputs",
+        acquire,
+        lambda _inputs, _value: cleanup(),
         requires=requires,
         always_release=True,
     )
@@ -545,7 +546,7 @@ def preserve_release_builder_selection(
                 _require_remote_success(result, "restore selected release builder")
 
         try:
-            value = builder.acquire(inputs)
+            value = acquire_now(builder, inputs)
         except BaseException as error:
             best_effort(
                 error, restore, what="restore selected builder after failed acquire"
@@ -556,16 +557,16 @@ def preserve_release_builder_selection(
         except BaseException as error:
             best_effort(
                 error,
-                lambda: builder.release(inputs, value),
+                lambda: release_now(builder, inputs, value),
                 what="cleanup unowned builder after failed restore",
             )
             raise
         return value
 
     return Resource(
-        title=builder.title,
-        acquire=acquire,
-        release=builder.release,
+        builder.title,
+        call(builder.title, acquire),
+        builder.release,
         requires=builder.requires,
         always_release=builder.always_release,
     )

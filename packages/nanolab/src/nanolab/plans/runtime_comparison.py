@@ -62,6 +62,7 @@ from nanolab.tasks.platform import Platform
 from nanolab.tasks.recipes.kubernetes import RecipeKubernetesImageCheckTask
 from nanolab.tasks.recipes.validation import RecipeMetadataCheckTask
 from nanolab.tasks.recipes.workflow import RecipeDistribution
+from nanolab.tasks.resource_tasks import resource_of
 
 SCRIPT_NAME = "runtime-comparison.js"
 
@@ -399,15 +400,15 @@ def _prepared_checks(
 ) -> Callable[[Platform], Resource[None]]:
     def before_load(platform: Platform) -> Resource[None]:
         executor = RoleBoundCommandTaskExecutor(bindings)
-        selected_resource = Resource(
-            title="Prepared selected comparison distribution",
-            acquire=lambda _inputs: selected,
-            release=lambda _inputs, _value: None,
+        selected_resource = resource_of(
+            "Prepared selected comparison distribution",
+            lambda _inputs: selected,
+            lambda _inputs, _value: None,
         )
-        baseline_resource = Resource(
-            title="Prepared shared comparison distribution",
-            acquire=lambda _inputs: baseline,
-            release=lambda _inputs, _value: None,
+        baseline_resource = resource_of(
+            "Prepared shared comparison distribution",
+            lambda _inputs: baseline,
+            lambda _inputs, _value: None,
         )
 
         def acquire(inputs: TaskInputs) -> None:
@@ -430,10 +431,10 @@ def _prepared_checks(
                 run_dir=run_dir,
             )
 
-        return Resource(
-            title="Verify prepared comparison before load",
-            acquire=acquire,
-            release=lambda _inputs, _value: None,
+        return resource_of(
+            "Verify prepared comparison before load",
+            acquire,
+            lambda _inputs, _value: None,
             requires=(
                 *platform.resources,
                 *platform.functions,
@@ -486,10 +487,10 @@ def _experiment_01_plan(
     def before_load(platform: Platform) -> Resource[None]:
         executor = RoleBoundCommandTaskExecutor(bindings)
         resources = {
-            name: Resource(
-                title=f"Prepared experiment-01 distribution ({name})",
-                acquire=lambda _inputs, value=value: value,
-                release=lambda _inputs, _value: None,
+            name: resource_of(
+                f"Prepared experiment-01 distribution ({name})",
+                lambda _inputs, value=value: value,
+                lambda _inputs, _value: None,
             )
             for name, value in (("selected", selected), ("shared", shared))
         }
@@ -537,10 +538,10 @@ def _experiment_01_plan(
                 raise RuntimeError("experiment-01 pod listing failed before load")
             mark_load_started(run_dir)
 
-        return Resource(
-            title="Verify experiment-01 cell before load",
-            acquire=acquire,
-            release=lambda _inputs, _value: None,
+        return resource_of(
+            "Verify experiment-01 cell before load",
+            acquire,
+            lambda _inputs, _value: None,
             requires=(
                 *platform.resources,
                 *platform.functions,

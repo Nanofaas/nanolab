@@ -28,6 +28,7 @@ from nanolab.tasks.heap_analysis.runtime import (
     deployment_protocol,
     workload_outcome,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.soak.artifacts import ArtifactWriter
 from nanolab.tasks.soak.models import Target
 from nanolab.tasks.soak.preparation import PreparedSoak
@@ -260,11 +261,8 @@ class Harness:
             self.held = False
             self.events.append("release-deployment")
 
-        return Resource(
-            title="Own fake heap-analysis deployment",
-            acquire=acquire,
-            release=release,
-            always_release=True,
+        return resource_of(
+            "Own fake heap-analysis deployment", acquire, release, always_release=True
         )
 
     def compose(self, measurement: Task[Any]) -> Workflow:

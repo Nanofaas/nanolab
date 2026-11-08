@@ -26,6 +26,7 @@ from nanolab.tasks.http_function import (
     HttpFunctionSetReplicasTask,
 )
 from nanolab.tasks.kubectl import KubectlTask
+from nanolab.tasks.resource_tasks import call
 
 
 def _result(outcome: TaskOutcome[TaskResult], title: str) -> TaskResult:
@@ -138,10 +139,11 @@ def managed_container_cleanup_resource(
 ) -> Resource[None]:
     """Wrap the cleanup task as a resource, so the compiler places it."""
     cleanup = RemoveManagedContainersTask(names, executor=executor, role=role, cwd=cwd)
+    title = cleanup.title
     return compensated_resource(
-        title=cleanup.title,
-        acquire=lambda inputs: cleanup.run(inputs).value,
-        compensate=lambda _inputs: None,
+        title=title,
+        acquire=call(title, lambda inputs: cleanup.run(inputs).value),
+        compensate=call(f"Compensate {title}", lambda _inputs: None),
         requires=requires,
     )
 

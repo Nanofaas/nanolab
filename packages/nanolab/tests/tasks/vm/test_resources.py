@@ -4,6 +4,7 @@ import pytest
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.vm import vm_resource
 
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 from nanolab.tasks.vm.models import VmConfig, VmInfo
 
 
@@ -48,7 +49,7 @@ def _resource(
 def test_acquire_returns_the_exact_info_from_ensure_running() -> None:
     lifecycle = FakeLifecycle(_info())
 
-    acquired = _resource(lifecycle).acquire(TaskInputs.empty())
+    acquired = acquire_now(_resource(lifecycle), TaskInputs.empty())
 
     assert acquired is lifecycle.result
     assert lifecycle.configs == [VmConfig(name="target")]
@@ -57,10 +58,10 @@ def test_acquire_returns_the_exact_info_from_ensure_running() -> None:
 def test_release_destroys_the_exact_acquired_value_without_mutable_state() -> None:
     lifecycle = FakeLifecycle(_info())
     resource = _resource(lifecycle)
-    acquired = resource.acquire(TaskInputs.empty())
+    acquired = acquire_now(resource, TaskInputs.empty())
     another_info = _info("another")
 
-    resource.release(TaskInputs.empty(), another_info)
+    release_now(resource, TaskInputs.empty(), another_info)
 
     assert acquired is lifecycle.result
     assert lifecycle.destroyed == [another_info]
@@ -70,7 +71,7 @@ def test_external_vm_is_not_destroyed() -> None:
     lifecycle = FakeLifecycle(_info())
     resource = _resource(lifecycle, external=True)
 
-    resource.release(TaskInputs.empty(), _info())
+    release_now(resource, TaskInputs.empty(), _info())
 
     assert lifecycle.destroyed == []
 
@@ -81,7 +82,7 @@ def test_failed_acquire_compensates_by_destroying_fallback_info() -> None:
     fallback = _info("fallback")
 
     with pytest.raises(RuntimeError, match="ensure failed"):
-        _resource(lifecycle, fallback_info=fallback).acquire(TaskInputs.empty())
+        acquire_now(_resource(lifecycle, fallback_info=fallback), TaskInputs.empty())
 
     assert lifecycle.destroyed == [fallback]
 
@@ -92,7 +93,7 @@ def test_failed_compensation_is_noted_without_masking_acquire_failure() -> None:
     lifecycle.destroy_error = RuntimeError("destroy failed")
 
     with pytest.raises(RuntimeError, match="ensure failed") as caught:
-        _resource(lifecycle).acquire(TaskInputs.empty())
+        acquire_now(_resource(lifecycle), TaskInputs.empty())
 
     assert "destroy failed" in "\n".join(caught.value.__notes__)
 

@@ -24,6 +24,7 @@ from nanolab.config.contract import ContractConfig
 from nanolab.functions.contracts import JsonValue, resolve_contract_matrix
 from nanolab.images.bake import render_bake
 from nanolab.images.plan import ImageArchitecture, ImageCell, ImagePlan
+from nanolab.tasks.resource_tasks import acquire_now, call, release_call, release_now
 from nanolab.workspace.recipe import RecipeRun
 
 OWNER_LABEL = "nanolab.contract.owner"
@@ -317,7 +318,7 @@ def contract_images_resource(
             _release_all(bounded, inputs, receipts, run_dir)
         finally:
             if builder_value is not None:
-                builder.release(inputs, builder_value)
+                release_now(builder, inputs, builder_value)
                 builder_value = None
                 result = contract_command(
                     bounded,
@@ -357,7 +358,7 @@ def contract_images_resource(
         )
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text('[worker.oci]\n  runtime = "runc"\n')
-        builder_value = builder.acquire(inputs)
+        builder_value = acquire_now(builder, inputs)
         limits = inspect_contract_object(
             bounded, inputs, "container", f"buildx_buildkit_{node}"
         )
@@ -500,11 +501,12 @@ def contract_images_resource(
             )
         return tuple(images)
 
+    title = "Build frozen contract artifacts"
     return compensated_resource(
-        title="Build frozen contract artifacts",
-        acquire=acquire,
-        compensate=cleanup,
-        release=lambda inputs, _: cleanup(inputs),
+        title=title,
+        acquire=call(title, acquire),
+        compensate=call(f"Compensate {title}", cleanup),
+        release=release_call(title, lambda inputs, _: cleanup(inputs)),
         requires=(source,),
     )
 
@@ -575,11 +577,12 @@ def artifact_container_resource(
         contract_command(bounded, inputs, ("docker", "start", identity))
         return identity
 
+    title = f"Owned {mode} artifact"
     return compensated_resource(
-        title=f"Owned {mode} artifact",
-        acquire=acquire,
-        compensate=cleanup,
-        release=lambda inputs, _: cleanup(inputs),
+        title=title,
+        acquire=call(title, acquire),
+        compensate=call(f"Compensate {title}", cleanup),
+        release=release_call(title, lambda inputs, _: cleanup(inputs)),
     )
 
 
@@ -688,11 +691,17 @@ def contract_runtime_resource(
         write_receipt(run_dir / "capture-image.json", helper_identity)
         return ContractRuntime(network, capture, helper, tag)
 
+    title = "Owned contract capture network"
     return compensated_resource(
-        title="Owned contract capture network",
-        acquire=acquire,
-        compensate=lambda inputs: _release_all(bounded, inputs, receipts, run_dir),
-        release=lambda inputs, _: _release_all(bounded, inputs, receipts, run_dir),
+        title=title,
+        acquire=call(title, acquire),
+        compensate=call(
+            f"Compensate {title}",
+            lambda inputs: _release_all(bounded, inputs, receipts, run_dir),
+        ),
+        release=release_call(
+            title, lambda inputs, _: _release_all(bounded, inputs, receipts, run_dir)
+        ),
         requires=requires,
     )
 

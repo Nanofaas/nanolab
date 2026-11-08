@@ -12,6 +12,7 @@ from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 
 from nanolab.release.resources import ghcr_credentials_resource
 from nanolab.release.secrets import _run, validate_secret_file
+from nanolab.tasks.resource_tasks import acquire_now, release_now
 
 
 @dataclass
@@ -121,7 +122,7 @@ def test_ghcr_resource_validates_before_remote_action_and_always_releases(
 
     assert resource.always_release is True
     with pytest.raises(PermissionError, match="deny group and world"):
-        resource.acquire(TaskInputs.empty())
+        acquire_now(resource, TaskInputs.empty())
     assert provider.exec_calls == []
     assert provider.transfer_calls == []
 
@@ -138,9 +139,9 @@ def test_ghcr_resource_releases_staged_credentials(tmp_path: Path) -> None:
         token_file=token,
     )
 
-    lease = resource.acquire(TaskInputs.empty())
+    lease = acquire_now(resource, TaskInputs.empty())
     assert lease.value.docker_config.endswith("/docker")
-    resource.release(TaskInputs.empty(), lease)
+    release_now(resource, TaskInputs.empty(), lease)
 
     assert provider.exec_calls[-1][0] == (
         "rm",

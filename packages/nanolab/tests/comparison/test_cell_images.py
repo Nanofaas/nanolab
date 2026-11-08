@@ -11,6 +11,7 @@ from nanolab.comparison.evidence import (
     require_comparison_scheduler,
     verify_comparison_scheduler,
 )
+from nanolab.tasks.resource_tasks import resource_of
 
 
 @pytest.mark.parametrize(
@@ -91,7 +92,7 @@ def test_scheduler_strategy_mismatch_retains_response(tmp_path, code):
 def test_prepared_cell_verifies_all_identities_before_k6(tmp_path, failure):
     import json
 
-    from sonata_engine import Resource, Workflow
+    from sonata_engine import Workflow
     from sonata_tasks.command import CommandTask
     from sonata_tasks.execution.bindings import RoleBindings
 
@@ -293,10 +294,10 @@ def test_prepared_cell_verifies_all_identities_before_k6(tmp_path, failure):
             return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
     executor = Executor()
-    ready = Resource(
-        title="Ready platform",
-        acquire=lambda inputs: events.append("ready"),
-        release=lambda inputs, value: events.append("released"),
+    ready = resource_of(
+        "Ready platform",
+        lambda inputs: events.append("ready"),
+        lambda inputs, value: events.append("released"),
     )
     platform = Platform(
         endpoint="http://10.43.0.7:8080", resources=(ready,), functions=()
