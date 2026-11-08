@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
@@ -13,6 +13,7 @@ from nanolab.tasks.recipes.workflow import (
     RecipeDistribution,
     RecipeImage,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.resources import ContainerResourceCheckTask
 from nanolab.tasks.validation.workflow import (
     ValidateFunction,
@@ -122,10 +123,10 @@ def check(consumer: str, engine: ContainerEngine, tmp_path: Path) -> None:
             modules=(),
             components=(component,),
         )
-        resource = Resource(
-            title="distribution",
-            acquire=lambda _inputs: value,
-            release=lambda _inputs, _value: None,
+        resource = resource_of(
+            "distribution",
+            lambda _inputs: value,
+            lambda _inputs, _value: None,
         )
         RecipeImageCheckTask(
             resource,

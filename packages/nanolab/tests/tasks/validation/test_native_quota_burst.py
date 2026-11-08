@@ -7,6 +7,8 @@ from threading import Lock, Thread
 
 import pytest
 
+from nanolab.tasks.resource_tasks import resource_of
+
 
 @pytest.fixture
 def quota_server():
@@ -91,7 +93,7 @@ def test_quota_gate_requires_a_real_quota_response(quota_server, tmp_path, mode)
 
 
 def test_quota_task_uses_an_acquired_endpoint(quota_server, tmp_path):
-    from sonata_engine import Resource, TaskInputs
+    from sonata_engine import TaskInputs
     from sonata_tasks.execution.local import LocalCommandTaskExecutor
 
     from nanolab.tasks.platform import PlatformFunction
@@ -99,18 +101,16 @@ def test_quota_task_uses_an_acquired_endpoint(quota_server, tmp_path):
     from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
 
     url, _ = quota_server
-    endpoint = Resource(
-        title="Acquired endpoint",
-        acquire=lambda _inputs: url,
-        release=lambda *_args: None,
+    endpoint = resource_of(
+        "Acquired endpoint",
+        lambda _inputs: url,
+        lambda *_args: None,
     )
 
     def unused_distribution(_inputs) -> RecipeDistribution:
         raise AssertionError("Quota subtask does not read the distribution")
 
-    unused = Resource(
-        title="Distribution", acquire=unused_distribution, release=lambda *_args: None
-    )
+    unused = resource_of("Distribution", unused_distribution, lambda *_args: None)
     task = NativeKubernetesLifecycleTask(
         unused,
         namespace="owned",
@@ -130,7 +130,7 @@ def test_quota_task_uses_an_acquired_endpoint(quota_server, tmp_path):
 def test_remote_quota_retry_retains_the_current_burst(quota_server, tmp_path):
     from pathlib import PurePosixPath
 
-    from sonata_engine import Resource, TaskInputs
+    from sonata_engine import TaskInputs
     from sonata_tasks.execution.local import LocalCommandTaskExecutor
 
     from nanolab.tasks.platform import PlatformFunction
@@ -148,9 +148,7 @@ def test_remote_quota_retry_retains_the_current_burst(quota_server, tmp_path):
     def unused_distribution(_inputs) -> RecipeDistribution:
         raise AssertionError("Quota subtask does not read the distribution")
 
-    distribution = Resource(
-        title="Distribution", acquire=unused_distribution, release=lambda *_args: None
-    )
+    distribution = resource_of("Distribution", unused_distribution, lambda *_args: None)
     # Execute the shipped remote command and receipt-copy boundary in a separate
     # owned directory, with real HTTP responses and exclusive receipt creation.
     task = NativeKubernetesLifecycleTask(

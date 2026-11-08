@@ -15,6 +15,7 @@ from nanolab.tasks.offload import (
     OffloadWorkflowRequest,
     build_offload_workflow,
 )
+from nanolab.tasks.resource_tasks import resource_of
 
 OFFLOADED = (
     "HTTP/1.1 200 OK\r\n"
@@ -243,10 +244,10 @@ def _request(**changes: object) -> OffloadWorkflowRequest:
 
 def _plane(name: str):  # pyright: ignore[reportMissingParameterType]
     def factory() -> Resource[None]:
-        return Resource(
-            title=f"Acquire {name} control plane",
-            acquire=lambda _inputs: None,
-            release=lambda _inputs, _value: None,
+        return resource_of(
+            f"Acquire {name} control plane",
+            lambda _inputs: None,
+            lambda _inputs, _value: None,
         )
 
     return factory
@@ -380,10 +381,10 @@ def test_a_failed_check_still_deregisters_both_sides_and_stops_both_planes() -> 
     stopped: list[str] = []
 
     def plane(name: str):  # pyright: ignore[reportMissingParameterType]
-        return lambda: Resource(
-            title=f"Acquire {name} control plane",
-            acquire=lambda _inputs: None,
-            release=lambda _inputs, _value: stopped.append(name),
+        return lambda: resource_of(
+            f"Acquire {name} control plane",
+            lambda _inputs: None,
+            lambda _inputs, _value: stopped.append(name),
         )
 
     class NeverOffloads(WorkflowExecutor):

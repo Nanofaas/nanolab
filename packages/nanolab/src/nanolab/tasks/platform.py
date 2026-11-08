@@ -43,6 +43,7 @@ from nanolab.tasks.recipes.kubernetes import (
 )
 from nanolab.tasks.recipes.validation import RecipeFunctionRegisterTask
 from nanolab.tasks.recipes.workflow import RecipeBinding
+from nanolab.tasks.resource_tasks import call
 
 Backend = Literal["container", "containerd", "k8s"]
 Build = Literal["docker", "buildpack"]
@@ -303,17 +304,21 @@ def _helm_release_with_endpoint(
                 raise RuntimeError("Recipe control-plane Service has no ClusterIP")
             return f"http://{address}:{CONTROL_PLANE_PORT}"
 
+        title = request.titled(
+            f"Acquire Helm release {request.helm_release} from recipe"
+        )
         return compensated_resource(
-            title=request.titled(
-                f"Acquire Helm release {request.helm_release} from recipe"
+            title=title,
+            acquire=call(title, acquire_recipe),
+            compensate=call(
+                f"Compensate {title}",
+                lambda inputs: HelmUninstallTask(
+                    resolved_spec(inputs),
+                    executor=executor,
+                    role=request.role,
+                    options=CommandOptions(cwd=cwd),
+                ).run(inputs),
             ),
-            acquire=acquire_recipe,
-            compensate=lambda inputs: HelmUninstallTask(
-                resolved_spec(inputs),
-                executor=executor,
-                role=request.role,
-                options=CommandOptions(cwd=cwd),
-            ).run(inputs),
             requires=(*requires, distribution),
         )
 
@@ -355,10 +360,11 @@ def _helm_release_with_endpoint(
         ),
     )
 
+    title = request.titled(f"Acquire Helm release {spec.release}")
     return compensated_resource(
-        title=request.titled(f"Acquire Helm release {spec.release}"),
-        acquire=lambda inputs: cast(str, acquire.run(inputs).value),
-        compensate=uninstall.run,
+        title=title,
+        acquire=call(title, lambda inputs: cast(str, acquire.run(inputs).value)),
+        compensate=call(f"Compensate {title}", uninstall.run),
         requires=requires,
     )
 

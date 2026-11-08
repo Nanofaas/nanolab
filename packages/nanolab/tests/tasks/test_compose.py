@@ -3,10 +3,11 @@ from pathlib import Path
 from typing import override
 
 import pytest
-from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks.compose import DockerComposeProject, isolated_compose_resource
+from nanolab.tasks.resource_tasks import resource_of
 
 
 @dataclass
@@ -42,10 +43,10 @@ def test_isolated_compose_keeps_consumer_policy_value_and_dependency_lifecycle(
         env={"IMAGE": "application:trial"},
     )
     events: list[str] = []
-    dependency = Resource(
-        title="Prepare",
-        acquire=lambda _inputs: events.append("prepare"),
-        release=lambda _inputs, _value: events.append("release"),
+    dependency = resource_of(
+        "Prepare",
+        lambda _inputs: events.append("prepare"),
+        lambda _inputs, _value: events.append("release"),
     )
     resource = isolated_compose_resource(
         project,

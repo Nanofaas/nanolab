@@ -8,6 +8,8 @@ import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
+
 REGISTRATION = "enabled\ninterpreter /usr/bin/qemu-x86_64\nflags: F\n"
 
 
@@ -105,7 +107,7 @@ def resource(tmp_path: Path, executor: BuilderExecutor, *, tag="recipe-test"):
 def test_builder_uses_daemon_architecture_and_explicit_name(tmp_path: Path) -> None:
     executor = BuilderExecutor()
     builder = resource(tmp_path, executor)
-    value = builder.acquire(TaskInputs._for_resources({}, set()))
+    value = acquire_now(builder, TaskInputs._for_resources({}, set()))
     assert value.platform == "linux/arm64"
     assert value.name == "nanolab-recipe-test"
     create = next(
@@ -116,7 +118,7 @@ def test_builder_uses_daemon_architecture_and_explicit_name(tmp_path: Path) -> N
     assert all("--use" not in argv for argv in executor.commands)
     config = Path(create[create.index("--buildkitd-config") + 1]).read_text()
     assert '[registry."127.0.0.1:5000"]' in config
-    builder.release(TaskInputs._for_resources({}, set()), value)
+    release_now(builder, TaskInputs._for_resources({}, set()), value)
     assert executor.builder == ""
     assert executor.registration == ""
 
@@ -126,7 +128,7 @@ def test_probe_and_helper_use_distinct_platform_manifest_digests(
 ) -> None:
     executor = BuilderExecutor()
     builder = resource(tmp_path, executor)
-    value = builder.acquire(TaskInputs._for_resources({}, set()))
+    value = acquire_now(builder, TaskInputs._for_resources({}, set()))
     try:
         helper = next(
             argv for argv in executor.commands if argv[-1] == "inspect-registration"
@@ -137,14 +139,14 @@ def test_probe_and_helper_use_distinct_platform_manifest_digests(
         assert helper_image != probe_image
         assert "@sha256:" in helper_image and "@sha256:" in probe_image
     finally:
-        builder.release(TaskInputs._for_resources({}, set()), value)
+        release_now(builder, TaskInputs._for_resources({}, set()), value)
 
 
 def test_existing_foreign_registration_is_preserved(tmp_path: Path) -> None:
     executor = BuilderExecutor(registration=REGISTRATION)
     builder = resource(tmp_path, executor)
-    value = builder.acquire(TaskInputs._for_resources({}, set()))
-    builder.release(TaskInputs._for_resources({}, set()), value)
+    value = acquire_now(builder, TaskInputs._for_resources({}, set()))
+    release_now(builder, TaskInputs._for_resources({}, set()), value)
     assert executor.registration == REGISTRATION
     assert not any(
         "--install" in argv or "remove-registration" in argv
@@ -158,15 +160,15 @@ def test_owned_registration_is_removed_only_when_unchanged(
 ) -> None:
     executor = BuilderExecutor()
     builder = resource(tmp_path, executor)
-    value = builder.acquire(TaskInputs._for_resources({}, set()))
+    value = acquire_now(builder, TaskInputs._for_resources({}, set()))
     if changed:
         executor.registration = "changed by another tool"
         with pytest.raises(RuntimeError, match=r"cleanup|registration"):
-            builder.release(TaskInputs._for_resources({}, set()), value)
+            release_now(builder, TaskInputs._for_resources({}, set()), value)
         assert executor.registration == "changed by another tool"
         assert "conflict" in (tmp_path / "builder-cleanup.json").read_text()
     else:
-        builder.release(TaskInputs._for_resources({}, set()), value)
+        release_now(builder, TaskInputs._for_resources({}, set()), value)
         assert executor.registration == ""
 
 
@@ -177,7 +179,7 @@ def test_builder_compensates_partial_acquisition(tmp_path: Path, failure: str) -
     executor = BuilderExecutor(failure=failure)
     builder = resource(tmp_path, executor)
     with pytest.raises((RuntimeError, KeyboardInterrupt), match=r"failure|cancel"):
-        builder.acquire(TaskInputs._for_resources({}, set()))
+        acquire_now(builder, TaskInputs._for_resources({}, set()))
     assert executor.builder == ""
     assert executor.registration == ""
 
@@ -185,7 +187,7 @@ def test_builder_compensates_partial_acquisition(tmp_path: Path, failure: str) -
 def test_builder_name_collision_never_removes_existing_builder(tmp_path: Path) -> None:
     executor = BuilderExecutor(failure="collision")
     with pytest.raises(RuntimeError, match=r"exists|collision"):
-        resource(tmp_path, executor).acquire(TaskInputs._for_resources({}, set()))
+        acquire_now(resource(tmp_path, executor), TaskInputs._for_resources({}, set()))
     assert not any(argv[1:3] == ("buildx", "rm") for argv in executor.commands)
     assert not any("--install" in argv for argv in executor.commands)
 
@@ -194,12 +196,12 @@ def test_two_runs_serialize_registration_lifetime(tmp_path: Path) -> None:
     executor = BuilderExecutor()
     first = resource(tmp_path / "one", executor)
     second = resource(tmp_path / "two", executor, tag="recipe-second")
-    value = first.acquire(TaskInputs._for_resources({}, set()))
+    value = acquire_now(first, TaskInputs._for_resources({}, set()))
     try:
         with pytest.raises(RuntimeError, match=r"busy|lock"):
-            second.acquire(TaskInputs._for_resources({}, set()))
+            acquire_now(second, TaskInputs._for_resources({}, set()))
     finally:
-        first.release(TaskInputs._for_resources({}, set()), value)
+        release_now(first, TaskInputs._for_resources({}, set()), value)
     assert executor.registration == ""
 
 
@@ -214,22 +216,22 @@ def test_binfmt_lock_is_independent_of_process_tmpdir(
     first = resource(tmp_path / "one", executor)
     second = resource(tmp_path / "two", executor, tag="recipe-second")
     inputs = TaskInputs._for_resources({}, set())
-    value = first.acquire(inputs)
+    value = acquire_now(first, inputs)
     second_value = None
     try:
         monkeypatch.setattr(tempfile, "gettempdir", lambda: str(second_dir))
         with pytest.raises(RuntimeError, match=r"busy|lock"):
-            second_value = second.acquire(inputs)
+            second_value = acquire_now(second, inputs)
     finally:
-        first.release(inputs, value)
+        release_now(first, inputs, value)
         if second_value is not None:
-            second.release(inputs, second_value)
+            release_now(second, inputs, second_value)
 
 
 def test_cancellation_after_create_reconciles_owned_builder(tmp_path: Path) -> None:
     executor = BuilderExecutor(failure="cancel-after-create")
     with pytest.raises(KeyboardInterrupt, match="after creation"):
-        resource(tmp_path, executor).acquire(TaskInputs._for_resources({}, set()))
+        acquire_now(resource(tmp_path, executor), TaskInputs._for_resources({}, set()))
     assert executor.builder == ""
     assert executor.registration == ""
 
@@ -258,18 +260,17 @@ def test_evidence_failure_cannot_bypass_compensation(
         monkeypatch.setattr(Path, "mkdir", mkdir)
     run = resource(tmp_path / "run", executor)
     with pytest.raises(OSError, match=r"evidence|space"):
-        run.acquire(TaskInputs._for_resources({}, set()))
+        acquire_now(run, TaskInputs._for_resources({}, set()))
     assert executor.registration == ""
     assert executor.builder == ""
     monkeypatch.setattr(Path, "write_text", original_write)
     monkeypatch.setattr(Path, "mkdir", original_mkdir)
     retry = resource(tmp_path / "retry", executor)
-    value = retry.acquire(TaskInputs._for_resources({}, set()))
-    retry.release(TaskInputs._for_resources({}, set()), value)
+    value = acquire_now(retry, TaskInputs._for_resources({}, set()))
+    release_now(retry, TaskInputs._for_resources({}, set()), value)
 
 
 def test_recipe_builder_obeys_shared_acquisition_failure(tmp_path, monkeypatch):
-    from sonata_engine import Resource
 
     from nanolab.tasks.recipes import builder as module
 
@@ -279,8 +280,8 @@ def test_recipe_builder_obeys_shared_acquisition_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(
         module,
         "buildx_builder_resource",
-        lambda **_kwargs: Resource(
-            title="Deny shared builder", acquire=denied, release=lambda *_args: None
+        lambda **_kwargs: resource_of(
+            "Deny shared builder", denied, lambda *_args: None
         ),
         raising=False,
     )
@@ -289,10 +290,12 @@ def test_recipe_builder_obeys_shared_acquisition_failure(tmp_path, monkeypatch):
     inputs = TaskInputs.empty()
     try:
         with pytest.raises(RuntimeError, match="shared builder acquisition denied"):
-            run.acquire(inputs)
+            acquire_now(run, inputs)
     finally:
         if executor.builder:
-            run.release(inputs, module.RecipeBuilder(executor.builder, "linux/arm64"))
+            release_now(
+                run, inputs, module.RecipeBuilder(executor.builder, "linux/arm64")
+            )
     assert executor.registration == ""
     assert all(argv[1:3] != ("buildx", "create") for argv in executor.commands)
 
@@ -313,7 +316,7 @@ def test_unresolved_partial_builder_cleanup_retains_emulation(tmp_path):
 
     executor = InterruptedBuilder()
     with pytest.raises(KeyboardInterrupt, match="partial creation") as caught:
-        resource(tmp_path, executor).acquire(TaskInputs.empty())
+        acquire_now(resource(tmp_path, executor), TaskInputs.empty())
     assert executor.builder == "nanolab-recipe-test"
     assert executor.registration == REGISTRATION
     receipt = json.loads((tmp_path / "builder-cleanup.json").read_text())
@@ -348,12 +351,12 @@ def test_failed_builder_release_retains_registration_and_releases_lock(
         change = "unchanged"
     run = resource(tmp_path / "first", executor)
     inputs = TaskInputs.empty()
-    value = run.acquire(inputs)
+    value = acquire_now(run, inputs)
     change = original_change
     if change == "replacement":
         executor.node = "replacement-node"
     with pytest.raises(RuntimeError, match="cleanup"):
-        run.release(inputs, value)
+        release_now(run, inputs, value)
     assert executor.builder == value.name
     assert executor.registration == REGISTRATION
     receipt = json.loads((tmp_path / "first" / "builder-cleanup.json").read_text())
@@ -363,8 +366,8 @@ def test_failed_builder_release_retains_registration_and_releases_lock(
     # A distinct builder can acquire after cleanup failure: the local lock closed.
     retry_executor = BuilderExecutor(registration=executor.registration)
     retry = resource(tmp_path / "retry", retry_executor, tag="recipe-second")
-    retry_value = retry.acquire(inputs)
-    retry.release(inputs, retry_value)
+    retry_value = acquire_now(retry, inputs)
+    release_now(retry, inputs, retry_value)
     assert executor.builder == value.name
     assert retry_executor.registration == REGISTRATION
     assert executor.registration == REGISTRATION
@@ -374,12 +377,12 @@ def test_recipe_keeps_receipt_and_removes_builder_before_registration(tmp_path):
     executor = BuilderExecutor()
     run = resource(tmp_path, executor)
     inputs = TaskInputs.empty()
-    value = run.acquire(inputs)
+    value = acquire_now(run, inputs)
     receipt = json.loads((tmp_path / "builder.json").read_text())
     assert receipt["ownerNode"] == executor.node
     assert receipt["builder"] == value.name
     assert "Platforms: linux/amd64, linux/arm64" in receipt["bootstrap"]
-    run.release(inputs, value)
+    release_now(run, inputs, value)
     remove_builder = next(
         i for i, argv in enumerate(executor.commands) if argv[1:3] == ("buildx", "rm")
     )
@@ -406,7 +409,7 @@ def test_recipe_platform_validation_failure_cleans_builder_and_emulation(tmp_pat
 
     executor = MissingPlatform()
     with pytest.raises(RuntimeError, match="both required platforms"):
-        resource(tmp_path, executor).acquire(TaskInputs.empty())
+        acquire_now(resource(tmp_path, executor), TaskInputs.empty())
     assert executor.builder == ""
     assert executor.registration == ""
 
@@ -424,7 +427,7 @@ def test_failed_rm_with_missing_client_record_retains_emulation(tmp_path):
 
     executor = RemovedRecordExecutor(failure="bootstrap")
     with pytest.raises(RuntimeError, match="forced failure"):
-        resource(tmp_path, executor).acquire(TaskInputs.empty())
+        acquire_now(resource(tmp_path, executor), TaskInputs.empty())
     assert executor.daemon_alive
     assert executor.builder == ""
     assert executor.registration == REGISTRATION
@@ -438,7 +441,6 @@ def test_failed_rm_with_missing_client_record_retains_emulation(tmp_path):
 def test_interrupted_compensation_preserves_primary_receipt_and_lock(
     tmp_path, monkeypatch, cleanup_error
 ):
-    from sonata_engine import Resource
 
     from nanolab.tasks.recipes import builder as module
 
@@ -451,13 +453,11 @@ def test_interrupted_compensation_preserves_primary_receipt_and_lock(
     monkeypatch.setattr(
         module,
         "buildx_builder_resource",
-        lambda **_kwargs: Resource(
-            title="Interrupted", acquire=acquire, release=release
-        ),
+        lambda **_kwargs: resource_of("Interrupted", acquire, release),
     )
     executor = BuilderExecutor()
     with pytest.raises(ValueError, match="primary acquisition failure") as caught:
-        resource(tmp_path / "first", executor).acquire(TaskInputs.empty())
+        acquire_now(resource(tmp_path / "first", executor), TaskInputs.empty())
     assert any("secondary cleanup failure" in note for note in caught.value.__notes__)
     assert executor.registration == REGISTRATION
     receipt = json.loads((tmp_path / "first" / "builder-cleanup.json").read_text())
@@ -466,4 +466,4 @@ def test_interrupted_compensation_preserves_primary_receipt_and_lock(
 
     # The same daemon's local lock was closed even when release was interrupted.
     with pytest.raises(ValueError, match="primary acquisition failure"):
-        resource(tmp_path / "retry", executor).acquire(TaskInputs.empty())
+        acquire_now(resource(tmp_path / "retry", executor), TaskInputs.empty())

@@ -8,10 +8,11 @@ import time
 from contextlib import contextmanager
 
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 
 from nanolab.config.contract import ContractConfig
 from nanolab.images.plan import build_image_plan
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 from nanolab.workspace.recipe import RecipeRun
 from tests.functions.test_contracts import frozen_fixture as frozen_fixture
 from tests.tasks.validation.test_artifact_contract_capture import capture, request
@@ -161,10 +162,10 @@ def execute(source_root, run_dir, boundary):
         ContractRuntime("network", "capture", "helper", "test"),
     ]
     resources = tuple(
-        Resource(
-            title=f"resource-{index}",
-            acquire=lambda _, value=value: value,
-            release=lambda *_: None,
+        resource_of(
+            f"resource-{index}",
+            lambda _, value=value: value,
+            lambda *_: None,
         )
         for index, value in enumerate(values)
     )
@@ -254,7 +255,7 @@ def test_one_shot_uses_real_entrypoint_and_wrapped_input(tmp_path):
         run_dir=tmp_path,
     )
     inputs = TaskInputs.empty()
-    value = resource.acquire(inputs)
+    value = acquire_now(resource, inputs)
     create = next(
         command["argv"]
         for command in boundary.commands
@@ -264,4 +265,4 @@ def test_one_shot_uses_real_entrypoint_and_wrapped_input(tmp_path):
     assert 'INVOCATION_PAYLOAD={"input": {"text": "hello"}}' in create
     assert create[-1] == "image-id"
     assert "--entrypoint" not in create
-    resource.release(inputs, value)
+    release_now(resource, inputs, value)

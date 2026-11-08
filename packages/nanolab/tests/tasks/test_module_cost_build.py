@@ -7,6 +7,7 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.tasks.models import TaskResult
 
 from nanolab.tasks.recipes.workflow import RecipeDistribution
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 
 
 def test_staging_chunks_roundtrip_and_reject_reuse(tmp_path):
@@ -44,7 +45,7 @@ def test_staging_chunks_roundtrip_and_reject_reuse(tmp_path):
 
 
 def test_native_recipe_does_not_replace_explicit_cpu_limit(tmp_path):
-    from sonata_engine import Resource, TaskInputs
+    from sonata_engine import TaskInputs
 
     from nanolab.tasks.platform import (
         PlatformFunction,
@@ -69,9 +70,7 @@ def test_native_recipe_does_not_replace_explicit_cpu_limit(tmp_path):
             )
         ),
     )
-    distribution = Resource(
-        title="test", acquire=lambda _: value, release=lambda *_: None
-    )
+    distribution = resource_of("test", lambda _: value, lambda *_: None)
     request = PlatformRequest(
         backend="k8s",
         functions=(PlatformFunction("fn", "image", "{}", ("true",)),),
@@ -82,7 +81,9 @@ def test_native_recipe_does_not_replace_explicit_cpu_limit(tmp_path):
         CommandTaskExecutor, SimpleNamespace(run=run, binding_key=lambda role: role)
     )
     release = _helm_release_with_endpoint(request, executor, tmp_path, ())
-    release.acquire(TaskInputs._for_resources({distribution: value}, {distribution}))
+    acquire_now(
+        release, TaskInputs._for_resources({distribution: value}, {distribution})
+    )
     command = next(c for c in commands if "helm" in c.argv)
     assert "controlPlane.resources.limits.cpu=2" in command.argv
     assert "controlPlane.resources.limits.cpu=1" not in command.argv

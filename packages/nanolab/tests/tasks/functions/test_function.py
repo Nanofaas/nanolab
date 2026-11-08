@@ -8,6 +8,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks.function import function_resource
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 
 
 @dataclass
@@ -57,8 +58,8 @@ def test_acquire_registers_and_release_deletes() -> None:
     executor = ScriptedExecutor()
     resource = _resource(executor)
 
-    resource.acquire(TaskInputs.empty())
-    resource.release(TaskInputs.empty(), None)
+    acquire_now(resource, TaskInputs.empty())
+    release_now(resource, TaskInputs.empty(), None)
 
     assert executor.titles == ["Register word-stats", "Delete word-stats"]
 
@@ -73,7 +74,7 @@ def test_readiness_tasks_run_after_the_register_in_order() -> None:
         ),
     )
 
-    resource.acquire(TaskInputs.empty())
+    acquire_now(resource, TaskInputs.empty())
 
     assert executor.titles == [
         "Register word-stats",
@@ -98,7 +99,7 @@ def test_a_failed_register_deletes_best_effort_before_propagating() -> None:
     resource = _resource(executor)
 
     with pytest.raises(RuntimeError, match="boom"):
-        resource.acquire(TaskInputs.empty())
+        acquire_now(resource, TaskInputs.empty())
 
     assert executor.titles == ["Register word-stats", "Delete word-stats"]
 
@@ -116,7 +117,7 @@ def test_a_failed_readiness_also_deletes_because_the_register_did_land() -> None
     )
 
     with pytest.raises(RuntimeError, match="timeout"):
-        resource.acquire(TaskInputs.empty())
+        acquire_now(resource, TaskInputs.empty())
 
     assert executor.titles[-1] == "Delete word-stats"
 
@@ -135,7 +136,7 @@ def test_a_failed_compensation_is_noted_without_masking_the_original_error() -> 
     resource = _resource(executor)
 
     with pytest.raises(RuntimeError, match="conflict") as captured:
-        resource.acquire(TaskInputs.empty())
+        acquire_now(resource, TaskInputs.empty())
 
     notes = getattr(captured.value, "__notes__", [])
     assert len(notes) == 1
@@ -143,10 +144,10 @@ def test_a_failed_compensation_is_noted_without_masking_the_original_error() -> 
 
 
 def test_requires_is_carried_onto_the_resource() -> None:
-    helm = Resource(
-        title="Acquire helm release",
-        acquire=lambda _inputs: None,
-        release=lambda _inputs, _value: None,
+    helm = resource_of(
+        "Acquire helm release",
+        lambda _inputs: None,
+        lambda _inputs, _value: None,
     )
     resource = _resource(ScriptedExecutor(), requires=(helm,))
 

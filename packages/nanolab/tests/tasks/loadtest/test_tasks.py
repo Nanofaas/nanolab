@@ -16,6 +16,7 @@ from nanolab.tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
+from nanolab.tasks.resource_tasks import resource_of
 
 
 class _Executor:
@@ -60,10 +61,10 @@ def test_k6_task_keeps_a_threshold_failure_as_an_outcome(tmp_path: Path) -> None
 
 
 def test_k6_task_resolves_a_resource_target_url(tmp_path: Path) -> None:
-    endpoint: Resource[str] = Resource(
-        title="Control plane",
-        acquire=lambda _inputs: "http://10.0.0.1:30080",
-        release=lambda *_: None,
+    endpoint: Resource[str] = resource_of(
+        "Control plane",
+        lambda _inputs: "http://10.0.0.1:30080",
+        lambda *_: None,
     )
     executor = _Executor()
     workflow = Workflow(workflow_id="k6")

@@ -28,6 +28,7 @@ from nanolab.tasks.loadtest import (
 from nanolab.tasks.loadtest.autoscaling import AutoscalingSummary
 from nanolab.tasks.loadtest.models import K6RunResult, TimeWindow
 from nanolab.tasks.loadtest.tasks import FetchVmResults
+from nanolab.tasks.resource_tasks import resource_of
 
 STARTED = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
 ENDED = datetime(2026, 7, 28, 10, 5, tzinfo=UTC)
@@ -635,7 +636,6 @@ def test_the_gate_fails_a_collapse_in_a_run_that_never_parked() -> None:
 
 
 def test_failed_before_load_check_releases_platform_without_running_k6():
-    from sonata_engine import Resource
     from sonata_tasks.execution.bindings import RoleBindings
 
     from nanolab.tasks.loadtest import build_loadtest_workflow
@@ -647,10 +647,10 @@ def test_failed_before_load_check_releases_platform_without_running_k6():
         def reject(inputs) -> None:
             raise ValueError("scheduler strategy mismatch")
 
-        return Resource(
-            title="Verify prepared cell",
-            acquire=reject,
-            release=lambda inputs, value: None,
+        return resource_of(
+            "Verify prepared cell",
+            reject,
+            lambda inputs, value: None,
             requires=(*platform.resources, *platform.functions),
         )
 

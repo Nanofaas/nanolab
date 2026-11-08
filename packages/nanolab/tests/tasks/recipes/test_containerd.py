@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 from sonata_tasks.tasks.models import TaskResult
 from sonata_tasks.testing import RecordingExecutor
 
@@ -12,6 +12,7 @@ from nanolab.tasks.recipes.workflow import (
     RecipeDistribution,
     RecipeImage,
 )
+from nanolab.tasks.resource_tasks import resource_of
 
 
 def test_recipe_containerd_writes_evidence_and_checks_published_digest(tmp_path: Path):
@@ -35,10 +36,10 @@ def test_recipe_containerd_writes_evidence_and_checks_published_digest(tmp_path:
             ),
         ),
     )
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: distribution,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: distribution,
+        lambda _inputs, _value: None,
     )
     executor = RecordingExecutor(
         results=[

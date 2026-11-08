@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from nanolab.tasks.recipes.workflow import read_distribution
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 
 PLATFORMS = ["linux/amd64", "linux/arm64"]
 SOURCE = {"revision": "123", "dirty": False}
@@ -222,7 +223,7 @@ def test_builder_property_is_forwarded_only_when_selected() -> None:
 def publication_fixture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None = None
 ):
-    from sonata_engine import Resource, TaskInputs
+    from sonata_engine import TaskInputs
     from sonata_tasks.execution.models import TaskResult
 
     from nanolab.tasks.recipes.builder import RecipeBuilder
@@ -282,10 +283,10 @@ def publication_fixture(
         return fixture_fetch(blobs)(repository, kind, reference)
 
     monkeypatch.setattr("nanolab.tasks.recipes.registry.fetch_local_registry", fetch)
-    builder = Resource(
-        title="builder",
-        acquire=lambda _: RecipeBuilder("owned-builder", "linux/arm64"),
-        release=lambda *_: None,
+    builder = resource_of(
+        "builder",
+        lambda _: RecipeBuilder("owned-builder", "linux/arm64"),
+        lambda *_: None,
     )
     value = RecipeBuilder("owned-builder", "linux/arm64")
     inputs = TaskInputs._for_resources({builder: value}, {builder})
@@ -305,7 +306,7 @@ def test_multiarch_publication_runs_once_before_projection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     publication, inputs, commands, run_dir = publication_fixture(tmp_path, monkeypatch)
-    result = publication.acquire(inputs)
+    result = acquire_now(publication, inputs)
     gradle = [task for task in commands if task.argv[0] == "./gradlew"]
     assert len(gradle) == 1
     assert gradle[0].argv[1] == "publishRecipe"
@@ -334,7 +335,7 @@ def test_failed_publication_invalidates_previous_runtime_mapping(
     with pytest.raises(
         (ValueError, RuntimeError), match=r"publication|hash|tag|registry"
     ):
-        publication.acquire(inputs)
+        acquire_now(publication, inputs)
     assert not mapping.exists()
     assert (run_dir / "recipe/gradle.log").exists()
 
@@ -343,10 +344,10 @@ def test_multiarch_source_change_fails_before_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     publication, inputs, commands, run_dir = publication_fixture(tmp_path, monkeypatch)
-    publication.acquire(inputs)
+    acquire_now(publication, inputs)
     (run_dir / "recipe/source/tracked").write_text("tampered")
     commands.clear()
     with pytest.raises(ValueError, match="staged inputs"):
-        publication.acquire(inputs)
+        acquire_now(publication, inputs)
     assert not commands
     assert not (run_dir / "runtime-images.json").exists()

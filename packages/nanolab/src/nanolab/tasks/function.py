@@ -9,6 +9,8 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.tasks.models import TaskResult
 
+from nanolab.tasks.resource_tasks import call
+
 
 def function_resource(
     *,
@@ -46,10 +48,11 @@ def function_resource(
         for check in readiness:
             _ = check.run(inputs)
 
+    title = f"Acquire {name}"
     return compensated_resource(
-        title=f"Acquire {name}",
-        acquire=acquire,
-        compensate=delete.run,
+        title=title,
+        acquire=call(title, acquire),
+        compensate=call(f"Compensate {title}", delete.run),
         requires=requires,
         always_release=always_release,
     )

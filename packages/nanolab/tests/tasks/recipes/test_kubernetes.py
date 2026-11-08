@@ -16,6 +16,7 @@ from nanolab.tasks.recipes.kubernetes import (
     verify_runtime_image,
 )
 from nanolab.tasks.recipes.workflow import RecipeImage
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 
 
 @pytest.mark.parametrize("response", ["{}", '{"images": null}', '{"images": {}}'])
@@ -150,7 +151,7 @@ def test_non_minikube_context_fails_before_build(monkeypatch) -> None:
     resource = minikube_target_resource(executor=executor)
 
     with pytest.raises(RuntimeError, match="not an active Minikube"):
-        resource.acquire(TaskInputs.empty())
+        acquire_now(resource, TaskInputs.empty())
     assert all("build" not in argv for argv in executor.calls)
 
 
@@ -175,7 +176,7 @@ def test_namespace_collision_never_deletes_existing_namespace() -> None:
     )
 
     with pytest.raises(RuntimeError, match="existing namespace"):
-        resource.acquire(TaskInputs.empty())
+        acquire_now(resource, TaskInputs.empty())
     assert len(executor.calls) == 1
 
 
@@ -213,8 +214,6 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
 ):
     from pathlib import Path
 
-    from sonata_engine import Resource
-
     from nanolab.tasks.recipes.kubernetes import minikube_images_resource
     from nanolab.tasks.recipes.workflow import RecipeComponent, RecipeDistribution
 
@@ -239,13 +238,13 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
         ),
     )
     target_value = MinikubeTarget("owned", "owned", nodes)
-    target = Resource(
-        title="target",
-        acquire=lambda _inputs: target_value,
-        release=lambda *_args: None,
+    target = resource_of(
+        "target",
+        lambda _inputs: target_value,
+        lambda *_args: None,
     )
-    distribution = Resource(
-        title="distribution", acquire=lambda _inputs: value, release=lambda *_args: None
+    distribution = resource_of(
+        "distribution", lambda _inputs: value, lambda *_args: None
     )
 
     class ImageBoundary:
@@ -324,17 +323,17 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
     )
     if fault == "wrong-config" or (fault == "wrong-second-node" and "second" in nodes):
         with pytest.raises(ValueError, match="Runtime image config differs"):
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
         assert executor.loaded is False
     elif fault in ("foreign", "load"):
         with pytest.raises(RuntimeError):
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
         if fault == "foreign":
             assert not any("rm" in argv for argv in executor.calls)
         else:
             assert any("rm" in argv for argv in executor.calls)
     else:
-        assert resource.acquire(inputs) == (reference,)
+        assert acquire_now(resource, inputs) == (reference,)
         # Each node is checked against the actual config bytes, while exporting
         # the same immutable image is expensive and only needed once.
         exports = [
@@ -343,7 +342,7 @@ def test_cli_recipe_import_owns_only_recipe_images_without_queue_probe(
         assert len(exports) == (1 if manifest_id else 0)
         if fault == "release":
             with pytest.raises(RuntimeError, match="image command failed"):
-                resource.release(inputs, (reference,))
+                release_now(resource, inputs, (reference,))
         else:
-            resource.release(inputs, (reference,))
+            release_now(resource, inputs, (reference,))
             assert executor.loaded is False

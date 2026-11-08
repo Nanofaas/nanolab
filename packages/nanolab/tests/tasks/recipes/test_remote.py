@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 from sonata_tasks.vm.ports import VmCommandProvider
 
 from nanolab.tasks.recipes.remote import (
@@ -15,6 +15,7 @@ from nanolab.tasks.recipes.remote import (
     bundle_recipe_source,
     remote_recipe_distribution_resource,
 )
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
@@ -96,10 +97,10 @@ def test_failed_vm_gradle_fetches_log_and_rejects_stale_report(tmp_path: Path) -
     local.output_dir.mkdir()
     (local.output_dir / "distribution.json").write_text('{"stale":true}')
     remote = RemoteRecipeRun(local, PurePosixPath("/home/ubuntu/nanolab-recipe-123abc"))
-    resource = Resource(
-        title="remote run",
-        acquire=lambda _inputs: remote,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "remote run",
+        lambda _inputs: remote,
+        lambda _inputs, _value: None,
     )
 
     class Provider:
@@ -129,6 +130,6 @@ def test_failed_vm_gradle_fetches_log_and_rejects_stale_report(tmp_path: Path) -
     inputs = TaskInputs._for_resources({resource: remote}, {resource})
 
     with pytest.raises(RuntimeError, match="VM command failed"):
-        distribution.acquire(inputs)
+        acquire_now(distribution, inputs)
     assert str(remote.root / "gradle.log") in provider.fetched
     assert (local.output_dir.parent / "gradle.log").read_text() == "remote log"

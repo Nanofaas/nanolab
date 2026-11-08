@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import TaskResult
 from sonata_tasks.minikube import MinikubeTarget
 
@@ -24,6 +24,7 @@ from nanolab.tasks.recipes.workflow import (
     RecipeDistribution,
     RecipeImage,
 )
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 from nanolab.workspace.recipe import RecipeRun
 
 OUTPUT = {
@@ -372,9 +373,7 @@ class PlatformBoundary:
 
 
 def _resource(title, value):
-    return Resource(
-        title=title, acquire=lambda _inputs: value, release=lambda *_args: None
-    )
+    return resource_of(title, lambda _inputs: value, lambda *_args: None)
 
 
 @pytest.fixture
@@ -486,9 +485,12 @@ def cli_gate(tmp_path):
     values = {
         run: run_value,
         distribution: distribution_value,
-        target: target.acquire(TaskInputs.empty()),
+        target: acquire_now(target, TaskInputs.empty()),
         endpoint: "http://127.0.0.1:32123",
-        **{resource: resource.acquire(TaskInputs.empty()) for resource in artifacts},
+        **{
+            resource: acquire_now(resource, TaskInputs.empty())
+            for resource in artifacts
+        },
     }
     inputs = TaskInputs._for_resources(values, set(values))
     boundary = PlatformBoundary()

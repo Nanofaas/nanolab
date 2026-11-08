@@ -11,6 +11,7 @@ from sonata_tasks.execution.local import LocalCommandTaskExecutor
 from sonata_tasks.execution.models import TaskResult
 
 from nanolab.tasks.platform import PlatformFunction
+from nanolab.tasks.resource_tasks import release_now, resource_of
 
 
 @pytest.fixture
@@ -114,16 +115,15 @@ def native_api_server():
 def test_native_api_validates_bodies_and_strict_delete(
     native_api_server, tmp_path, fault, resource_endpoint
 ):
-    from sonata_engine import Resource
 
     from nanolab.tasks.validation.native_kubernetes import check_native_api
 
     url, state = native_api_server
     state["fault"] = fault
-    endpoint = Resource(
-        title="Acquired HTTP endpoint",
-        acquire=lambda _inputs: url,
-        release=lambda *_args: None,
+    endpoint = resource_of(
+        "Acquired HTTP endpoint",
+        lambda _inputs: url,
+        lambda *_args: None,
     )
     inputs = TaskInputs._for_resources({endpoint: url}, {endpoint})
     fn = PlatformFunction(
@@ -178,15 +178,12 @@ def test_retry_preserves_failed_native_evidence(tmp_path):
 
 
 def test_function_cleanup_uses_the_endpoint_reopened_after_rollout(native_api_server):
-    from sonata_engine import Resource
 
     from nanolab.tasks.platform import PlatformRequest, _function_resource
 
     url, state = native_api_server
     old_url = "http://127.0.0.1:1"
-    endpoint = Resource(
-        title="Owned API", acquire=lambda _inputs: old_url, release=lambda *_args: None
-    )
+    endpoint = resource_of("Owned API", lambda _inputs: old_url, lambda *_args: None)
     function = PlatformFunction("fn", "image:qualified", "{}", ("true",))
     resource = _function_resource(
         PlatformRequest(backend="k8s", functions=(function,)),
@@ -198,12 +195,13 @@ def test_function_cleanup_uses_the_endpoint_reopened_after_rollout(native_api_se
         None,
         endpoint_overrides={old_url: url},
     )
-    resource.release(TaskInputs._for_resources({endpoint: old_url}, {endpoint}), None)
+    release_now(
+        resource, TaskInputs._for_resources({endpoint: old_url}, {endpoint}), None
+    )
     assert state["registered"] is False
 
 
 def test_refresh_reuses_the_workflows_forward_resource_and_release(tmp_path):
-    from sonata_engine import Resource
 
     from nanolab.tasks.recipes.workflow import RecipeDistribution
     from nanolab.tasks.validation.native_kubernetes import NativeKubernetesLifecycleTask
@@ -219,16 +217,12 @@ def test_refresh_reuses_the_workflows_forward_resource_and_release(tmp_path):
     def release(_inputs, _value):
         events.append("stop-" + state["url"])
 
-    endpoint = Resource(
-        title="Existing owned forward", acquire=acquire, release=release
-    )
+    endpoint = resource_of("Existing owned forward", acquire, release)
 
     def unused(_inputs) -> RecipeDistribution:
         raise AssertionError("No build during refresh")
 
-    distribution = Resource(
-        title="Distribution", acquire=unused, release=lambda *_args: None
-    )
+    distribution = resource_of("Distribution", unused, lambda *_args: None)
     updates = {}
     task = NativeKubernetesLifecycleTask(
         distribution,
@@ -244,7 +238,7 @@ def test_refresh_reuses_the_workflows_forward_resource_and_release(tmp_path):
     inputs = TaskInputs._for_resources({endpoint: "old"}, {endpoint})
     assert task._refresh_endpoint(inputs) == "new"
     assert updates == {"old": "new"}
-    endpoint.release(inputs, "old")
+    release_now(endpoint, inputs, "old")
     assert events == ["stop-old", "start-new", "stop-new"]
 
 
@@ -326,7 +320,6 @@ def test_quota_patch_is_conditional_on_the_acquired_deployment(replaced):
 
 @pytest.mark.parametrize("mode", ["jvm", "native"])
 def test_native_gate_reads_the_distribution_at_execution_time(tmp_path, mode):
-    from sonata_engine import Resource
 
     from nanolab.tasks.recipes.workflow import (
         RecipeComponent,
@@ -362,10 +355,10 @@ def test_native_gate_reads_the_distribution_at_execution_time(tmp_path, mode):
             ),
         ),
     )
-    distribution = Resource(
-        title="Resolved at run time",
-        acquire=lambda _inputs: report,
-        release=lambda *_args: None,
+    distribution = resource_of(
+        "Resolved at run time",
+        lambda _inputs: report,
+        lambda *_args: None,
     )
 
     class RejectCommands:
@@ -398,7 +391,7 @@ def test_native_gate_reads_the_distribution_at_execution_time(tmp_path, mode):
 def test_native_failure_releases_only_the_resources_acquired_by_the_run(
     tmp_path, monkeypatch, fault
 ):
-    from sonata_engine import Resource, TaskOutcome, Workflow
+    from sonata_engine import TaskOutcome, Workflow
 
     import nanolab.tasks.validation.native_kubernetes as native
     from nanolab.tasks.recipes.workflow import (
@@ -428,26 +421,26 @@ def test_native_failure_releases_only_the_resources_acquired_by_the_run(
             RecipeComponent("function", "word-stats", "java", "jvm", image, None, None),
         ),
     )
-    distribution = Resource(
-        title="Owned distribution",
-        acquire=lambda _inputs: report,
-        release=lambda *_args: released.append("distribution"),
+    distribution = resource_of(
+        "Owned distribution",
+        lambda _inputs: report,
+        lambda *_args: released.append("distribution"),
     )
-    namespace = Resource(
-        title="Owned namespace",
-        acquire=lambda _inputs: "owned",
-        release=lambda *_args: released.append("namespace"),
+    namespace = resource_of(
+        "Owned namespace",
+        lambda _inputs: "owned",
+        lambda *_args: released.append("namespace"),
     )
-    function_resource = Resource(
-        title="Owned function",
-        acquire=lambda _inputs: "fn",
-        release=lambda *_args: released.append("function"),
+    function_resource = resource_of(
+        "Owned function",
+        lambda _inputs: "fn",
+        lambda *_args: released.append("function"),
     )
     # Unacquired foreign resources never participate in compensation.
-    Resource(
-        title="Foreign namespace",
-        acquire=lambda _inputs: "foreign",
-        release=lambda *_args: released.append("foreign"),
+    resource_of(
+        "Foreign namespace",
+        lambda _inputs: "foreign",
+        lambda *_args: released.append("foreign"),
     )
     (tmp_path / "k8s-image-control-plane-control-plane.json").write_text(
         json.dumps({"deployment": {"metadata": {"uid": "owned"}}})
@@ -550,7 +543,6 @@ def test_runtime_probe_links_node_commands_to_the_owned_container(
     import base64
     from copy import deepcopy
 
-    from sonata_engine import Resource
     from sonata_tasks.minikube import MinikubeTarget
 
     from nanolab.tasks.recipes.workflow import RecipeDistribution
@@ -559,16 +551,14 @@ def test_runtime_probe_links_node_commands_to_the_owned_container(
     def unavailable(_inputs) -> RecipeDistribution:
         raise AssertionError("Probe does not build a distribution")
 
-    distribution = Resource(
-        title="Distribution", acquire=unavailable, release=lambda *_args: None
-    )
+    distribution = resource_of("Distribution", unavailable, lambda *_args: None)
     selected = MinikubeTarget(
         profile="owned-profile", context="owned-context", nodes=("owned-node",)
     )
-    target = Resource(
-        title="Owned target",
-        acquire=lambda _inputs: selected,
-        release=lambda *_args: None,
+    target = resource_of(
+        "Owned target",
+        lambda _inputs: selected,
+        lambda *_args: None,
     )
     pod = {
         "metadata": {"uid": "owned-pod", "name": "cp"},

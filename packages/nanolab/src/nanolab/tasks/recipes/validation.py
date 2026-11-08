@@ -25,6 +25,7 @@ from nanolab.tasks.compose import (
 from nanolab.tasks.http_function import HttpFunctionRegisterTask
 from nanolab.tasks.managed_containers import inspect_managed_container
 from nanolab.tasks.recipes.workflow import RecipeDistribution
+from nanolab.tasks.resource_tasks import call, release_call
 
 if TYPE_CHECKING:
     from nanolab.tasks.platform import PlatformFunction
@@ -122,11 +123,12 @@ def recipe_watchdog_resource(
             raise RuntimeError("watchdog version differs from the selected source")
         return owned_id
 
+    title = "Verify recipe watchdog artifact"
     return compensated_resource(
-        title="Verify recipe watchdog artifact",
-        acquire=acquire,
-        compensate=lambda inputs: remove(inputs, owned_id),
-        release=remove,
+        title=title,
+        acquire=call(title, acquire),
+        compensate=call(f"Compensate {title}", lambda inputs: remove(inputs, owned_id)),
+        release=release_call(title, remove),
         requires=(distribution,),
     )
 
@@ -240,10 +242,11 @@ def recipe_compose_resource(
         ).run(inputs)
         return project
 
+    title = f"Acquire Docker Compose project {project.name} from recipe"
     return compensated_resource(
-        title=f"Acquire Docker Compose project {project.name} from recipe",
-        acquire=acquire,
-        compensate=down,
+        title=title,
+        acquire=call(title, acquire),
+        compensate=call(f"Compensate {title}", down),
         requires=(*requires, distribution),
     )
 

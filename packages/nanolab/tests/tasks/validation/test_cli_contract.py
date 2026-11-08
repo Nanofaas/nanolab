@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 import pytest
-from sonata_engine import Resource, Selection
+from sonata_engine import Selection
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
@@ -15,6 +15,7 @@ from nanolab.tasks.cli import (
     CliWorkflowRequest,
     build_cli_workflow,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from tests.cli_responses import (
     CLI_CONTRACT_STEPS as CONTRACT_STEPS,
 )
@@ -405,10 +406,10 @@ def test_at_least_one_function_is_required() -> None:
 def test_an_external_resource_wraps_the_whole_workflow() -> None:
     executor = ScriptedExecutor()
     events: list[str] = []
-    control_plane = Resource(
-        title="Acquire local control plane",
-        acquire=lambda _inputs: events.append("start"),
-        release=lambda _inputs, _value: events.append("stop"),
+    control_plane = resource_of(
+        "Acquire local control plane",
+        lambda _inputs: events.append("start"),
+        lambda _inputs, _value: events.append("stop"),
     )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
@@ -433,10 +434,10 @@ def test_an_external_resource_wraps_the_whole_workflow() -> None:
 
 def test_build_only_selection_does_not_acquire_the_external_resource() -> None:
     events: list[str] = []
-    control_plane = Resource(
-        title="Acquire local control plane",
-        acquire=lambda _inputs: events.append("start"),
-        release=lambda _inputs, _value: events.append("stop"),
+    control_plane = resource_of(
+        "Acquire local control plane",
+        lambda _inputs: events.append("start"),
+        lambda _inputs, _value: events.append("stop"),
     )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
@@ -458,10 +459,10 @@ def test_the_external_resource_is_released_when_a_task_fails() -> None:
         }
     )
     events: list[str] = []
-    control_plane = Resource(
-        title="Acquire local control plane",
-        acquire=lambda _inputs: events.append("start"),
-        release=lambda _inputs, _value: events.append("stop"),
+    control_plane = resource_of(
+        "Acquire local control plane",
+        lambda _inputs: events.append("start"),
+        lambda _inputs, _value: events.append("stop"),
     )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
@@ -507,10 +508,10 @@ def test_a_function_with_dockerfile_build_gets_artifact_and_image_tasks() -> Non
 
 
 def test_the_control_plane_build_runs_before_images_and_acquire() -> None:
-    control_plane = Resource(
-        title="Acquire local control plane",
-        acquire=lambda _inputs: None,
-        release=lambda _inputs, _value: None,
+    control_plane = resource_of(
+        "Acquire local control plane",
+        lambda _inputs: None,
+        lambda _inputs, _value: None,
     )
     function = replace(
         FUNCTION,
@@ -624,10 +625,10 @@ def test_every_non_host_or_stack_build_role_is_rejected(role: ExecutionRole) -> 
 def test_bootstrap_tasks_run_between_build_and_the_first_resource() -> None:
     executor = ScriptedExecutor()
     events: list[str] = []
-    vm = Resource(
-        title="Acquire stack VM",
-        acquire=lambda _inputs: events.append("acquire-vm") or "vm-info",
-        release=lambda _inputs, _value: events.append("release-vm"),
+    vm = resource_of(
+        "Acquire stack VM",
+        lambda _inputs: events.append("acquire-vm") or "vm-info",
+        lambda _inputs, _value: events.append("release-vm"),
     )
     bootstrap = (
         CommandTask(
@@ -744,10 +745,10 @@ def test_a_failed_readiness_wait_deletes_the_function_and_reraises() -> None:
 
 def test_function_requires_is_a_real_compiled_edge() -> None:
     events: list[str] = []
-    helm = Resource(
-        title="Acquire Helm release",
-        acquire=lambda _inputs: events.append("helm-acquire"),
-        release=lambda _inputs, _value: events.append("helm-release"),
+    helm = resource_of(
+        "Acquire Helm release",
+        lambda _inputs: events.append("helm-acquire"),
+        lambda _inputs, _value: events.append("helm-release"),
     )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
@@ -779,10 +780,10 @@ def test_function_requires_is_a_real_compiled_edge() -> None:
 
 def test_slicing_the_invoke_task_keeps_function_requires_transitively() -> None:
     events: list[str] = []
-    helm = Resource(
-        title="Acquire Helm release",
-        acquire=lambda _inputs: events.append("helm-acquire"),
-        release=lambda _inputs, _value: events.append("helm-release"),
+    helm = resource_of(
+        "Acquire Helm release",
+        lambda _inputs: events.append("helm-acquire"),
+        lambda _inputs, _value: events.append("helm-release"),
     )
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(

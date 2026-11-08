@@ -21,6 +21,7 @@ from nanolab.tasks.recipes.workflow import (
     recipe_command,
     require_validation_distribution,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmRequest, vm_remote_home
 from nanolab.tasks.vm.runners import VmFileFetcher
 from nanolab.workspace.recipe import RecipeRun
@@ -179,10 +180,10 @@ def remote_recipe_run_resource(
             raise RuntimeError("VM staged tracked changes differ from captured source")
         return remote
 
-    return Resource(
-        title="Stage recipe in stack VM",
-        acquire=acquire,
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        "Stage recipe in stack VM",
+        acquire,
+        lambda _inputs, _value: None,
         requires=(run, *requires),
     )
 
@@ -244,10 +245,10 @@ def remote_recipe_distribution_resource(
         )
         return distribution
 
-    return Resource(
-        title="Publish staged recipe in stack VM",
-        acquire=acquire,
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        "Publish staged recipe in stack VM",
+        acquire,
+        lambda _inputs, _value: None,
         requires=(run,),
     )
 

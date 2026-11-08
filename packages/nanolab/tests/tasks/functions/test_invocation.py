@@ -13,6 +13,7 @@ from nanolab.tasks.http_function import (
     HttpFunctionInvokeTask,
 )
 from nanolab.tasks.invocation import verify_invocation
+from nanolab.tasks.resource_tasks import resource_of
 
 SUCCESS = '{"status":"success","output":"5 words"}'
 
@@ -92,10 +93,10 @@ def test_the_endpoint_can_arrive_as_a_resource_value() -> None:
     at run time from the resource that created it rather than spelled up front.
     """
     executor = RecordingExecutor()
-    endpoint: Resource[str] = Resource(
-        title="Acquire control plane",
-        acquire=lambda _inputs: "http://10.43.0.7:8080",
-        release=lambda _inputs, _value: None,
+    endpoint: Resource[str] = resource_of(
+        "Acquire control plane",
+        lambda _inputs: "http://10.43.0.7:8080",
+        lambda _inputs, _value: None,
     )
     task = HttpFunctionInvokeTask(
         "word-stats",

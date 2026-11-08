@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import TaskResult
 
 from nanolab.config.contract import ContractConfig
 from nanolab.images.plan import ImageArchitecture, ImageCell, ImageTarget
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 from nanolab.workspace.recipe import RecipeRun
 from tests.functions.test_contracts import frozen_fixture as frozen_fixture
 
@@ -206,10 +207,10 @@ def artifact(tmp_path, boundary):
 def test_replacement_container_is_preserved(tmp_path):
     boundary = DockerBoundary()
     resource = artifact(tmp_path, boundary)
-    value = resource.acquire(EMPTY)
+    value = acquire_now(resource, EMPTY)
     boundary.objects[value]["Config"]["Labels"]["nanolab.contract.owner"] = "operator"
     with pytest.raises(RuntimeError, match="ownership"):
-        resource.release(EMPTY, value)
+        release_now(resource, EMPTY, value)
     assert value in boundary.objects
     assert value not in boundary.remove_calls
 
@@ -217,7 +218,7 @@ def test_replacement_container_is_preserved(tmp_path):
 def test_partial_acquisition_compensates(tmp_path):
     boundary = DockerBoundary("start")
     with pytest.raises(RuntimeError, match="failed"):
-        artifact(tmp_path, boundary).acquire(EMPTY)
+        acquire_now(artifact(tmp_path, boundary), EMPTY)
     assert not boundary.objects
     assert list((tmp_path / "cleanup").glob("*.json"))
 
@@ -225,16 +226,16 @@ def test_partial_acquisition_compensates(tmp_path):
 def test_partial_create_compensates(tmp_path):
     boundary = DockerBoundary("create-after")
     with pytest.raises(RuntimeError, match="failed"):
-        artifact(tmp_path, boundary).acquire(EMPTY)
+        acquire_now(artifact(tmp_path, boundary), EMPTY)
     assert not boundary.objects
 
 
 def test_absence_check_does_not_trust_remove_exit(tmp_path):
     boundary = DockerBoundary("remove-lies")
     resource = artifact(tmp_path, boundary)
-    value = resource.acquire(EMPTY)
+    value = acquire_now(resource, EMPTY)
     with pytest.raises(RuntimeError, match="absence"):
-        resource.release(EMPTY, value)
+        release_now(resource, EMPTY, value)
     assert value in boundary.objects
 
 
@@ -244,7 +245,7 @@ def image_resource(frozen_fixture, tmp_path, boundary):
     value = RecipeRun(
         frozen_fixture, tmp_path / "scenario.yaml", tmp_path / "dist", "test"
     )
-    source = Resource(title="source", acquire=lambda _: value, release=lambda *_: None)
+    source = resource_of("source", lambda _: value, lambda *_: None)
     inputs = TaskInputs._for_resources({source: value}, {source})
     resource = contract_images_resource(
         source,
@@ -260,7 +261,7 @@ def image_resource(frozen_fixture, tmp_path, boundary):
 def test_bake_uses_frozen_source_and_load(frozen_fixture, tmp_path):
     boundary = DockerBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     assert images[0].cell.target.name == "python-word-stats"
     baked = [
         command
@@ -271,7 +272,7 @@ def test_bake_uses_frozen_source_and_load(frozen_fixture, tmp_path):
     assert "--load" in baked[0]["argv"]
     assert baked[0]["cwd"] == str(frozen_fixture)
     assert baked[0]["timeout_s"] == 2700
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)
     assert not boundary.objects
 
 
@@ -288,9 +289,9 @@ def test_cmd_only_artifact_is_accepted(frozen_fixture, tmp_path):
 
     boundary = CmdBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     assert len(images) == 1
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)
     assert not boundary.objects
 
 
@@ -309,23 +310,23 @@ def test_changed_artifact_cmd_is_rejected(frozen_fixture, tmp_path):
 
     boundary = CmdBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     boundary.objects["running"] = {
         "Id": "running",
         "Image": images[0].image_id,
         "Config": {"Entrypoint": ["/app/function"], "Cmd": ["other"]},
     }
-    source = Resource(
-        title="source",
-        acquire=lambda _: RecipeRun(
+    source = resource_of(
+        "source",
+        lambda _: RecipeRun(
             frozen_fixture, tmp_path / "scenario.yaml", tmp_path / "dist", "test"
         ),
-        release=lambda *_: None,
+        lambda *_: None,
     )
-    runtime = Resource(
-        title="runtime",
-        acquire=lambda _: ContractRuntime("network", "capture", "helper", "test"),
-        release=lambda *_: None,
+    runtime = resource_of(
+        "runtime",
+        lambda _: ContractRuntime("network", "capture", "helper", "test"),
+        lambda *_: None,
     )
     task = FunctionContractsTask(
         source,
@@ -339,14 +340,14 @@ def test_changed_artifact_cmd_is_rejected(frozen_fixture, tmp_path):
     with pytest.raises(ValueError, match="identity"):
         task._identity(inputs, images[0], "running")
     boundary.objects.pop("running")
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)
 
 
 def test_changed_source_fails(frozen_fixture, tmp_path):
     boundary = DockerBoundary("source-change")
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
     with pytest.raises(RuntimeError, match="source"):
-        resource.acquire(inputs)
+        acquire_now(resource, inputs)
     assert not boundary.objects
 
 
@@ -356,7 +357,7 @@ def test_tag_collision_preserved(frozen_fixture, tmp_path):
     boundary.objects[tag] = {"Id": "operator-image", "Config": {"Labels": {}}}
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
     with pytest.raises(RuntimeError, match="exists"):
-        resource.acquire(inputs)
+        acquire_now(resource, inputs)
     assert boundary.objects[tag]["Id"] == "operator-image"
     assert tag not in boundary.remove_calls
 
@@ -372,21 +373,21 @@ def test_private_builder_limits_verified(frozen_fixture, tmp_path):
     boundary = DockerBoundary("limits")
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
     with pytest.raises(RuntimeError, match="limits"):
-        resource.acquire(inputs)
+        acquire_now(resource, inputs)
     assert not boundary.objects
 
 
 def test_each_image_build_has_deadline(frozen_fixture, tmp_path):
     boundary = DockerBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     builds = [
         command
         for command in boundary.commands
         if command["argv"][:3] == ["docker", "buildx", "bake"]
     ]
     assert all(command["timeout_s"] == 2700 for command in builds)
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)
 
 
 def test_jvm_prerequisites_run_once(frozen_fixture, tmp_path):
@@ -395,7 +396,7 @@ def test_jvm_prerequisites_run_once(frozen_fixture, tmp_path):
     (java / "Dockerfile").write_text("FROM scratch\n")
     boundary = DockerBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     assert len(images) == 3
     assert (
         len(
@@ -407,7 +408,7 @@ def test_jvm_prerequisites_run_once(frozen_fixture, tmp_path):
         )
         == 1
     )
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)
 
 
 def test_java_lite_does_not_claim_unused_native_flags(frozen_fixture, tmp_path):
@@ -416,7 +417,7 @@ def test_java_lite_does_not_claim_unused_native_flags(frozen_fixture, tmp_path):
     (lite / "Dockerfile").write_text("FROM scratch\n")
     boundary = DockerBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     assert len(images) == 2
     target = next(
         cell for cell in images if cell.cell.target.name == "java-lite-word-stats"
@@ -431,19 +432,19 @@ def test_java_lite_does_not_claim_unused_native_flags(frozen_fixture, tmp_path):
         if name.startswith("java-lite")
     ]
     assert lite_args == [{}]
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)
 
 
 def test_runtime_network_has_no_published_ports(tmp_path):
     boundary = DockerBoundary()
     resource = artifact(tmp_path, boundary)
-    value = resource.acquire(EMPTY)
+    value = acquire_now(resource, EMPTY)
     assert boundary.objects[value]["HostConfig"]["PortBindings"] == {}
     assert all(
         "--privileged" not in command["argv"] and "--publish" not in command["argv"]
         for command in boundary.commands
     )
-    resource.release(EMPTY, value)
+    release_now(resource, EMPTY, value)
 
 
 def test_runtime_uses_private_builder_and_compensates(tmp_path):
@@ -454,7 +455,7 @@ def test_runtime_uses_private_builder_and_compensates(tmp_path):
         settings=ContractConfig(), executor=boundary, run_dir=tmp_path, tag="test"
     )
     with pytest.raises(RuntimeError, match="failed"):
-        runtime.acquire(EMPTY)
+        acquire_now(runtime, EMPTY)
     assert not boundary.objects
     builds = [
         item["argv"]
@@ -513,7 +514,7 @@ def test_real_owned_executor_bounds(tmp_path, command, bound, failure_key):
 def test_built_image_identity_bound_before_release(frozen_fixture, tmp_path):
     boundary = DockerBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     leases = list((tmp_path / "attempt" / "ownership").glob("image-*.json"))
     assert len(leases) == 1
     assert (
@@ -522,7 +523,7 @@ def test_built_image_identity_bound_before_release(frozen_fixture, tmp_path):
         )["identity"]
         == images[0].image_id
     )
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)
 
 
 @pytest.mark.parametrize("kind", ["container", "network", "image"])
@@ -631,7 +632,7 @@ def test_native_bake_supplies_empty_maven_context(frozen_fixture, tmp_path):
     (java / "Dockerfile").write_text("FROM scratch\n")
     boundary = DockerBoundary()
     resource, inputs = image_resource(frozen_fixture, tmp_path, boundary)
-    images = resource.acquire(inputs)
+    images = acquire_now(resource, inputs)
     targets = [
         target
         for p in (tmp_path / "attempt/builds").glob("*.json")
@@ -659,4 +660,4 @@ def test_native_bake_supplies_empty_maven_context(frozen_fixture, tmp_path):
     ]
     assert len(native_commands) == 1
     assert f"--allow=fs.read={context}" in native_commands[0]["argv"]
-    resource.release(inputs, images)
+    release_now(resource, inputs, images)

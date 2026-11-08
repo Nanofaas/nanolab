@@ -14,6 +14,7 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.core.execution import ExecutionRole
+from nanolab.tasks.resource_tasks import call
 from nanolab.workspace.paths import bundled_assets_root
 
 
@@ -84,10 +85,11 @@ def _resource(
         _ = acquire.run(inputs)
         return run
 
+    title = f"Acquire {name}"
     return compensated_resource(
-        title=f"Acquire {name}",
-        acquire=start_run,
-        compensate=release.run,
+        title=title,
+        acquire=call(title, start_run),
+        compensate=call(f"Compensate {title}", release.run),
         requires=requires,
     )
 

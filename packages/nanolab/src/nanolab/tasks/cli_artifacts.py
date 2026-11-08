@@ -19,6 +19,7 @@ from sonata_tasks.gradle import GradleTask
 from nanolab.assets.diagnostics.native_k8s_runtime import NATIVE_ERRORS
 from nanolab.comparison.prepare import captured_source_state
 from nanolab.release.versioning import read_project_version
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.workspace.recipe import RecipeRun
 
 CliMode = Literal["jvm", "native"]
@@ -243,9 +244,9 @@ def cli_artifact_resource(
             stream.write("\n")
         return artifact
 
-    return Resource(
-        title=f"Build and verify {mode} CLI",
-        acquire=acquire,
-        release=lambda *_args: None,
+    return resource_of(
+        f"Build and verify {mode} CLI",
+        acquire,
+        lambda *_args: None,
         requires=(run,),
     )

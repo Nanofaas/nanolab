@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_engine import TaskInputs, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
@@ -24,6 +24,7 @@ from nanolab.tasks.recipes.workflow import (
     RecipeDistribution,
     RecipeImage,
 )
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 from nanolab.tasks.validation.workflow import (
     ValidateFunction,
     ValidateWorkflowRequest,
@@ -51,10 +52,10 @@ def test_recipe_owns_platform_builds(
     def unexpected_acquire(_inputs: TaskInputs) -> RecipeDistribution:
         raise AssertionError("Compilation must not publish a recipe")
 
-    published = Resource(
-        title="Published recipe",
-        acquire=unexpected_acquire,
-        release=lambda _inputs, _value: None,
+    published = resource_of(
+        "Published recipe",
+        unexpected_acquire,
+        lambda _inputs, _value: None,
     )
     binding = RecipeBinding(
         distribution=published,
@@ -139,9 +140,7 @@ def test_helm_runtime_limits_follow_the_acquired_recipe(tmp_path, mode):
         original,
         components=(replace(original.components[0], mode=mode), original.components[1]),
     )
-    resource = Resource(
-        title="distribution", acquire=lambda _: value, release=lambda *_: None
-    )
+    resource = resource_of("distribution", lambda _: value, lambda *_: None)
     binding = RecipeBinding(distribution=resource, functions={}, run_dir=tmp_path)
     request = ValidateWorkflowRequest(
         backend="k8s",
@@ -175,7 +174,9 @@ def test_helm_runtime_limits_follow_the_acquired_recipe(tmp_path, mode):
 
     executor = HelmExecutor()
     release = _helm_release_with_endpoint(request, executor, tmp_path, ())
-    result = release.acquire(TaskInputs._for_resources({resource: value}, {resource}))
+    result = acquire_now(
+        release, TaskInputs._for_resources({resource: value}, {resource})
+    )
     assert result == "http://10.1.2.3:8080"
     args = executor.specs[0].argv
     assert "controlPlane.image.repository=registry/control-plane" in args
@@ -191,13 +192,12 @@ def test_helm_runtime_limits_follow_the_acquired_recipe(tmp_path, mode):
 
 
 def test_recipe_registers_report_image(tmp_path: Path) -> None:
-    from sonata_engine import Resource
 
     value = distribution(tmp_path)
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     inputs = TaskInputs._for_resources({resource: value}, {resource})
     executor = RecordingExecutor()
@@ -227,13 +227,12 @@ def test_recipe_registers_report_image(tmp_path: Path) -> None:
 
 
 def test_recipe_compose_uses_report_image_without_build(tmp_path: Path) -> None:
-    from sonata_engine import Resource
 
     value = distribution(tmp_path)
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     inputs = TaskInputs._for_resources({resource: value}, {resource})
     executor = RecordingExecutor()
@@ -246,7 +245,7 @@ def test_recipe_compose_uses_report_image_without_build(tmp_path: Path) -> None:
     compose = recipe_compose_resource(
         project, distribution=resource, executor=executor, cwd=tmp_path
     )
-    compose.acquire(inputs)
+    acquire_now(compose, inputs)
 
     up = next(spec for spec in executor.specs if "up" in spec.argv)
     assert "--no-build" in up.argv
@@ -282,15 +281,14 @@ def test_validation_rejects_unselected_recipe_component(tmp_path: Path) -> None:
 def test_control_plane_image_check_uses_compose_working_directory(
     tmp_path: Path,
 ) -> None:
-    from sonata_engine import Resource
 
     from nanolab.tasks.recipes.validation import RecipeImageCheckTask
 
     value = distribution(tmp_path)
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     inputs = TaskInputs._for_resources({resource: value}, {resource})
 
@@ -336,10 +334,10 @@ def test_failed_metadata_check_retains_raw_response(
     tmp_path: Path, body: str, message: str
 ) -> None:
     value = distribution(tmp_path)
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     inputs = TaskInputs._for_resources({resource: value}, {resource})
 
@@ -361,10 +359,10 @@ def test_failed_metadata_check_retains_raw_response(
 
 def test_failed_image_check_retains_inspected_image_id(tmp_path: Path) -> None:
     value = distribution(tmp_path)
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     inputs = TaskInputs._for_resources({resource: value}, {resource})
 
@@ -399,10 +397,10 @@ def test_failed_image_check_retains_inspected_image_id(tmp_path: Path) -> None:
 
 def test_missing_compose_container_retains_observed_response(tmp_path: Path) -> None:
     value = distribution(tmp_path)
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     inputs = TaskInputs._for_resources({resource: value}, {resource})
 
@@ -445,15 +443,15 @@ def test_recipe_failure_releases_acquired_resources(
 ) -> None:
     events: list[str] = []
     value = distribution(tmp_path)
-    registry = Resource(
-        title="Local registry",
-        acquire=lambda _inputs: events.append("registry-up"),
-        release=lambda _inputs, _value: events.append("registry-down"),
+    registry = resource_of(
+        "Local registry",
+        lambda _inputs: events.append("registry-up"),
+        lambda _inputs, _value: events.append("registry-down"),
     )
-    published = Resource(
-        title="Published recipe",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    published = resource_of(
+        "Published recipe",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
         requires=(registry,),
     )
     project = DockerComposeProject(
@@ -593,10 +591,10 @@ def test_bash_recipe_registers_published_image_for_exec_catalog(
     )
     value = replace(original, components=(control_plane, function_component))
     require_validation_distribution(value, functions=(("word-stats", catalog_sdk),))
-    resource = Resource(
-        title="Bash distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "Bash distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     executor = RecordingExecutor()
     function = PlatformFunction(
@@ -653,10 +651,10 @@ def test_recipe_service_selection_and_registration_keep_component_kind(
         require_validation_distribution(
             value, functions=(("word-stats", "java"),), services=(("other", "java"),)
         )
-    resource = Resource(
-        title="distribution",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    resource = resource_of(
+        "distribution",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     executor = RecordingExecutor()
     RecipeFunctionRegisterTask(

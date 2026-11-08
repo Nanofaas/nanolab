@@ -8,9 +8,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
+from nanolab.tasks.resource_tasks import acquire_now, resource_of
 from nanolab.workspace.recipe import RecipeRun
 
 JVM = Path("clients/cli/build/install/nanofaas-cli/bin/nanofaas-cli")
@@ -147,10 +148,10 @@ def test_artifact_build_depends_only_on_frozen_source(tmp_path, mode, fail):
     recipe = tmp_path / "recipe.yaml"
     recipe.write_text("name: cli\n")
     value = RecipeRun(source, recipe, tmp_path / "distribution", "tag-test")
-    run = Resource(
-        title="Frozen source",
-        acquire=lambda _inputs: value,
-        release=lambda *_args: None,
+    run = resource_of(
+        "Frozen source",
+        lambda _inputs: value,
+        lambda *_args: None,
     )
     executor = BuildExecutor(source, mode, fail)
     evidence = tmp_path / "evidence"
@@ -161,10 +162,10 @@ def test_artifact_build_depends_only_on_frozen_source(tmp_path, mode, fail):
     inputs = TaskInputs._for_resources({run: value}, {run})
     if fail:
         with pytest.raises((ValueError, RuntimeError)):
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
         assert not (evidence / f"{mode}.json").exists()
     else:
-        artifact = resource.acquire(inputs)
+        artifact = acquire_now(resource, inputs)
         assert artifact.binary == source / (JVM if mode == "jvm" else NATIVE)
         receipt = json.loads((evidence / f"{mode}.json").read_text())
         assert receipt["mode"] == mode
@@ -172,7 +173,7 @@ def test_artifact_build_depends_only_on_frozen_source(tmp_path, mode, fail):
         assert receipt["source"]["revision"]
         assert receipt["help"]["stdout"] == "Usage: nanofaas"
         with pytest.raises(FileExistsError):
-            resource.acquire(inputs)
+            acquire_now(resource, inputs)
     assert executor.specs[0].argv == (
         "./gradlew",
         f":nanofaas-cli:{'installDist' if mode == 'jvm' else 'nativeCompile'}",

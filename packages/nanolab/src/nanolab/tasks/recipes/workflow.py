@@ -18,6 +18,7 @@ from sonata_tasks.execution.ports import CommandTaskExecutor
 from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.images.control_plane_variants import jvm_tier
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.workspace.recipe import RecipeRun, prepare_recipe_run
 
 if TYPE_CHECKING:
@@ -461,10 +462,10 @@ def recipe_distribution_resource(
         )
         return result
 
-    return Resource(
-        title=f"Publish recipe {recipe.name}",
-        acquire=acquire,
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        f"Publish recipe {recipe.name}",
+        acquire,
+        lambda _inputs, _value: None,
         requires=requires,
     )
 
@@ -478,10 +479,10 @@ def recipe_run_resource(
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[RecipeRun]:
     """Capture the selected source only when the workflow acquires it."""
-    return Resource(
-        title=f"Stage recipe {recipe.name}",
-        acquire=lambda _inputs: prepare_recipe_run(source, recipe, run_dir, tag),
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        f"Stage recipe {recipe.name}",
+        lambda _inputs: prepare_recipe_run(source, recipe, run_dir, tag),
+        lambda _inputs, _value: None,
         requires=requires,
     )
 
@@ -506,9 +507,9 @@ def assembled_recipe_distribution_resource(
         )
         return result
 
-    return Resource(
-        title="Assemble staged recipe",
-        acquire=acquire,
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        "Assemble staged recipe",
+        acquire,
+        lambda _inputs, _value: None,
         requires=(run, *requires),
     )

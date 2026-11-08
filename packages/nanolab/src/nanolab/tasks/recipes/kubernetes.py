@@ -36,6 +36,7 @@ from nanolab.core.deployment import LOCAL_REGISTRY
 from nanolab.core.execution import ExecutionRole
 from nanolab.tasks.recipes.remote import RemoteRecipeRun
 from nanolab.tasks.recipes.workflow import RecipeDistribution, RecipeImage
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmRequest
 from nanolab.workspace.recipe import RecipeRun
 
@@ -299,10 +300,10 @@ def minikube_images_resource(
         )
         return tuple(references)
 
-    return Resource(
-        title="Load recipe images into selected Minikube",
-        acquire=acquire,
-        release=release,
+    return resource_of(
+        "Load recipe images into selected Minikube",
+        acquire,
+        release,
         requires=(
             target,
             distribution,
@@ -363,10 +364,10 @@ def queue_probe_image_resource(
             )
         return image
 
-    return Resource(
-        title="Build staged Kubernetes queue probe",
-        acquire=acquire,
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        "Build staged Kubernetes queue probe",
+        acquire,
+        lambda _inputs, _value: None,
         requires=(run, *((remote_run,) if remote_run is not None else ())),
     )
 

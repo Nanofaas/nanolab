@@ -26,6 +26,7 @@ from nanolab.tasks.recipes.workflow import (
     require_validation_distribution,
     verify_recipe_identity,
 )
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.workspace.recipe import prepare_recipe_run
 
 MULTIARCH_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
@@ -401,9 +402,9 @@ def multiarch_recipe_distribution_resource(
         temporary.replace(mapping)
         return runtime
 
-    return Resource(
-        title=f"Publish recipe {recipe.name} for both platforms",
-        acquire=acquire,
-        release=lambda _inputs, _value: None,
+    return resource_of(
+        f"Publish recipe {recipe.name} for both platforms",
+        acquire,
+        lambda _inputs, _value: None,
         requires=(builder,),
     )

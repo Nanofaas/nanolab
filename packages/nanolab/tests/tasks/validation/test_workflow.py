@@ -14,6 +14,7 @@ from sonata_tasks.tasks.executors import VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks.http_function import HttpFunctionExpectation
+from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.validation.workflow import (
     AsyncCheck,
     EnvelopeCheck,
@@ -199,15 +200,15 @@ def test_recipe_k8s_native_gate_is_after_queue_and_declares_its_resources(tmp_pa
     def unavailable(_inputs) -> RecipeDistribution:
         raise AssertionError("Compilation must not acquire a distribution")
 
-    distribution = Resource(
-        title="Runtime distribution",
-        acquire=unavailable,
-        release=lambda *_args: None,
+    distribution = resource_of(
+        "Runtime distribution",
+        unavailable,
+        lambda *_args: None,
     )
-    target = Resource(
-        title="Selected target",
-        acquire=lambda _inputs: None,
-        release=lambda *_args: None,
+    target = resource_of(
+        "Selected target",
+        lambda _inputs: None,
+        lambda *_args: None,
     )
     request = _request(
         backend="k8s",
@@ -606,10 +607,10 @@ def test_a_local_control_plane_is_only_built_when_one_is_supplied() -> None:
     started: list[str] = []
 
     def process() -> Resource[object]:
-        return Resource(
-            title="Acquire local control plane",
-            acquire=lambda _inputs: started.append("up") or object(),
-            release=lambda _inputs, _value: started.append("down"),
+        return resource_of(
+            "Acquire local control plane",
+            lambda _inputs: started.append("up") or object(),
+            lambda _inputs, _value: started.append("down"),
         )
 
     workflow = build_validate_workflow(
@@ -717,8 +718,8 @@ def test_inputs_are_only_readable_where_declared() -> None:
     A sanity check on the mechanism the k8s endpoint relies on: reading a
     resource a task did not declare is an error, not an empty string.
     """
-    resource: Resource[str] = Resource(
-        title="X", acquire=lambda _inputs: "v", release=lambda _inputs, _value: None
+    resource: Resource[str] = resource_of(
+        "X", lambda _inputs: "v", lambda _inputs, _value: None
     )
 
     with pytest.raises(UndeclaredResourceError):

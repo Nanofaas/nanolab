@@ -5,9 +5,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from sonata_engine import Resource, TaskInputs
+from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 from tests.tasks.recipes.test_validation import distribution
 
 
@@ -31,10 +32,10 @@ def test_watchdog_probe_verifies_artifact_and_cleans_only_owned_container(
         ),
     )
     value = replace(original, components=(*original.components, service))
-    selected = Resource(
-        title="published recipe",
-        acquire=lambda _inputs: value,
-        release=lambda _inputs, _value: None,
+    selected = resource_of(
+        "published recipe",
+        lambda _inputs: value,
+        lambda _inputs, _value: None,
     )
     inputs = TaskInputs._for_resources({selected: value}, {selected})
     source = tmp_path / "source"
@@ -84,10 +85,10 @@ def test_watchdog_probe_verifies_artifact_and_cleans_only_owned_container(
     )
     if failure:
         with pytest.raises(RuntimeError, match=r"watchdog|occupied|create"):
-            probe.acquire(inputs)
+            acquire_now(probe, inputs)
     else:
-        result = probe.acquire(inputs)
-        probe.release(inputs, result)
+        result = acquire_now(probe, inputs)
+        release_now(probe, inputs, result)
     create = commands[0]
     assert create.argv[-2:] == ("registry/published-watchdog:run-1", "--version")
     removals = [task.argv for task in commands if task.argv[1] == "rm"]

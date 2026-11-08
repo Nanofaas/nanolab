@@ -25,6 +25,7 @@ from nanolab.tasks.loadtest.tasks import CapturePrometheusSnapshot, FetchVmResul
 from nanolab.tasks.module_cost_build import command, stage_bytes
 from nanolab.tasks.platform import PlatformFunction, PlatformRequest, add_platform
 from nanolab.tasks.recipes.workflow import RecipeBinding
+from nanolab.tasks.resource_tasks import resource_of
 
 FUNCTION = "word-stats-java"
 
@@ -123,10 +124,10 @@ class RunModuleArm(Task[None]):
         for image in (cp_images["control-plane"]["reference"], function.image):
             command(self.executor, "stack", ("sudo", "k3s", "crictl", "pull", image))
         binding = RecipeBinding(
-            Resource(
-                title=f"Recipe {self.arm}",
-                acquire=lambda _inputs: distribution,
-                release=lambda _inputs, _value: None,
+            resource_of(
+                f"Recipe {self.arm}",
+                lambda _inputs: distribution,
+                lambda _inputs, _value: None,
             ),
             {},
             directory,

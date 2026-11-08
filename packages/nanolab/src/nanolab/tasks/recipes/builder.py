@@ -20,6 +20,7 @@ from sonata_tasks.docker import DockerTask
 from sonata_tasks.execution.ports import CommandTaskExecutor
 
 from nanolab.core.deployment import LOCAL_REGISTRY
+from nanolab.tasks.resource_tasks import acquire_now, release_now, resource_of
 
 BINFMT_INSTALLER_IMAGE = (
     "tonistiigi/binfmt@sha256:"
@@ -148,7 +149,7 @@ def recipe_builder_resource(
         try:
             if builder_pending_cleanup:
                 try:
-                    builder.release(inputs, name)
+                    release_now(builder, inputs, name)
                 except BaseException as error:
                     errors.append(str(error))
                 else:
@@ -303,7 +304,7 @@ def recipe_builder_resource(
             config = run_dir / "buildkitd.toml"
             config.write_text(f'[registry."{LOCAL_REGISTRY}"]\n  http = true\n')
             builder_pending_cleanup = True
-            builder.acquire(inputs)
+            acquire_now(builder, inputs)
             (run_dir / "builder.json").write_text(json.dumps(evidence, indent=2) + "\n")
             return RecipeBuilder(name, f"linux/{architecture}")
         except BaseException as error:
@@ -320,9 +321,9 @@ def recipe_builder_resource(
                 error.add_note(str(cleanup_error))
             raise
 
-    return Resource(
-        title="Prepare multiarch recipe builder",
-        acquire=acquire,
-        release=lambda inputs, _value: cleanup(inputs),
+    return resource_of(
+        "Prepare multiarch recipe builder",
+        acquire,
+        lambda inputs, _value: cleanup(inputs),
         requires=requires,
     )
