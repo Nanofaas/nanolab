@@ -1563,8 +1563,73 @@ def test_liveness_rows_keep_their_shape(tmp_path):
 
 
 def test_in_process_watches_unchanged(tmp_path):
+    fake = FakeSupervisor()
     supervisor = json_supervision(tmp_path, cadence=0.01)
-    supervisor.attach(FakeSupervisor(), tolerated_seconds=0)
-    supervisor.watch("clock", lambda: None)
+    supervisor.attach(fake, tolerated_seconds=0)
+    calls = []
+    supervisor.watch("clock", lambda: calls.append(1))
+    supervisor.checks["clock"]()
     supervisor.unwatch("clock")
+    assert calls == [1]
     assert set(supervisor.checks) == {"workbench"}
+    assert fake.deletes == []
+    released = [e for e in _events(tmp_path) if e.get("kind") == "process.released"]
+    assert "deleteError" not in released[-1]
+
+
+def _fault(*targets):
+    return {
+        "state": "fault",
+        "targets": {t: _target(True, "x") for t in targets},
+        "anomalies": [
+            {"target": t, "kind": "scrape_up", "detail": "x", "since": 1}
+            for t in targets
+        ],
+        "checkedAt": 1,
+    }
+
+
+def test_retired_target_fault_is_ignored_and_delete_retried(tmp_path):
+    fake = FakeSupervisor()
+    fake.delete_error = OSError("down")
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=0)
+    supervisor.watch_remote("old", "scrape_up", {})
+    supervisor.watch_remote("live", "scrape_up", {})
+    supervisor.unwatch("old")
+    fake.status_value = _fault("old")
+    supervisor._poll_workbench()  # no raise
+    assert supervisor.remote_retired == {"old"}
+    fake.status_value = _fault("old", "live")
+    with pytest.raises(RuntimeError, match="live: scrape_up"):
+        supervisor._poll_workbench()
+    fake.delete_error = None
+    fake.status_value = _fault("old")
+    supervisor._poll_workbench()
+    assert supervisor.remote_retired == set()
+    assert fake.deletes.count("old") >= 3
+
+
+def test_attach_rejects_a_slow_client(tmp_path):
+    class Slow(FakeSupervisor):
+        timeout = 5.0
+
+    supervisor = json_supervision(tmp_path, cadence=10)
+    with pytest.raises(ValueError, match=r"exceeds 2.0"):
+        supervisor.attach(Slow(), tolerated_seconds=0)
+    supervisor = json_supervision(tmp_path, cadence=0.5)
+    with pytest.raises(ValueError, match=r"exceeds 0.5"):
+        supervisor.attach(Slow(), tolerated_seconds=0)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [{"state": "fault", "targets": {}, "anomalies": []}, {"state": "healthy"}],
+)
+def test_malformed_status_is_a_clear_error(tmp_path, document):
+    fake = FakeSupervisor()
+    fake.status_value = document
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=0)
+    with pytest.raises(RuntimeError, match=r"127.0.0.1:9999"):
+        supervisor._poll_workbench()

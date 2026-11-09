@@ -68,6 +68,7 @@ class CampaignSupervision:
         self.checks: dict[str, Callable[[], None]] = {}
         self.remote: Any = None
         self.remote_names: set[str] = set()
+        self.remote_retired: set[str] = set()  # DELETE failed; retried on polls
         self._remote_seen: dict[str, str] = {}
         self._remote_down: float | None = None
         self._remote_tolerated = 0.0
@@ -276,14 +277,23 @@ class CampaignSupervision:
                 self.remote.delete(name)
             except Exception as error:
                 extra["deleteError"] = str(error)
+                with self.lock:
+                    self.remote_retired.add(name)
         self.record("process.released", name=name, **extra)
 
     def attach(self, client, *, tolerated_seconds: float, clock=time.monotonic):
         """Poll the workbench supervisor as one more in-process check.
 
-        `client` calls must be bounded by a short timeout: `_monitor` holds the
-        lock while checks run.
+        `_monitor` holds the lock while checks run, so the client timeout must
+        not exceed min(cadence, 2 s). A socket timeout applies per operation, so
+        the worst case a poll holds the lock is about 3 x timeout (connect, send,
+        read on loopback), plus the same for each best-effort retry of a failed
+        DELETE.
         """
+        limit = min(self.cadence, 2.0)
+        timeout = getattr(client, "timeout", 0.0)
+        if timeout > limit:
+            raise ValueError(f"supervisor timeout {timeout} s exceeds {limit} s")
         self.remote, self._remote_tolerated, self._remote_clock = (
             client,
             tolerated_seconds,
@@ -324,21 +334,40 @@ class CampaignSupervision:
             return
         self._remote_down = None
         self._liveness_row("workbench", started, "running")
-        targets = status.get("targets", {})
-        for name, target in targets.items():
-            if target["failing"]:
-                detail = target.get("detail") or ""
-                self._liveness_row(name, started, "failing", detail)
-            else:
-                self._liveness_row(name, started, "running")
-        for name in list(self._remote_seen):
-            if name != "workbench" and name not in targets:
-                self._liveness_row(name, started, "gone")
-        if status["state"] == "fault":
-            anomaly = status["anomalies"][0]
+        for name in list(self.remote_retired):  # best effort, retried every poll
+            try:
+                client.delete(name)
+            except Exception:
+                continue
+            self.remote_retired.discard(name)
+        try:
+            targets = status["targets"]
+            fault = status["state"] == "fault"
+            anomalies = status["anomalies"] if fault else []
+            for name, target in targets.items():
+                if target["failing"]:
+                    detail = target.get("detail") or ""
+                    self._liveness_row(name, started, "failing", detail)
+                else:
+                    self._liveness_row(name, started, "running")
+        except (KeyError, TypeError, AttributeError) as error:
             raise RuntimeError(
-                f"{anomaly['target']}: {anomaly['kind']}: {anomaly['detail']}"
-            )
+                f"supervisor {client.url} sent a malformed status: {error!r}"
+            ) from error
+        for name in [n for n in self._remote_seen if n != "workbench"]:
+            if name not in targets:
+                self._liveness_row(name, started, "gone")
+                del self._remote_seen[name]
+        # A retired target (unwatched, DELETE failed) may fault when stopped on
+        # purpose: only anomalies of currently watched targets count.
+        for anomaly in anomalies:
+            if anomaly.get("target") in self.remote_names:
+                raise RuntimeError(
+                    f"{anomaly['target']}: {anomaly.get('kind')}: "
+                    f"{anomaly.get('detail')}"
+                )
+        if fault and not anomalies:
+            raise RuntimeError(f"supervisor {client.url} is in fault with no anomaly")
 
     def watch_remote(
         self,
