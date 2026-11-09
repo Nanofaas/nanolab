@@ -350,7 +350,7 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         function_settings,
         output,
         max_clock_skew_seconds: float = 0.1,
-        collectors=None,
+        platform=None,
         neighbor_graph=None,
         node_function_settings=None,
         purpose: Literal[
@@ -362,10 +362,14 @@ class CollectTopologyTask(Task[TopologyEvidence]):
         settings=None,
         node_distributions=None,
     ):
-        """Bind explicit resource handles and expected physical identities."""
+        """Bind explicit resource handles and expected physical identities.
+
+        `platform` is the run's workbench platform: each of its log collectors
+        is measured into the topology's `logging` identities.
+        """
         self.settings = settings
         self.node_distributions = node_distributions or {}
-        self.collectors = collectors or {}
+        self.platform = platform
         self.neighbor_graph = neighbor_graph or {
             key: tuple(
                 other.config.id
@@ -698,10 +702,11 @@ class CollectTopologyTask(Task[TopologyEvidence]):
             shared_physical_host=getattr(self.resources, "shared_physical_host", True),
             nodes=evidence,
             logging={
-                key: inputs.resource(resource).identity
-                for key, resource in self.collectors.items()
+                key: self.platform.collector_identity(key)
+                for key in self.platform.collectors
             }
-            or None,
+            if self.platform is not None and self.platform.collectors
+            else None,
         )
         self.output.write_text(topology.model_dump_json(indent=2) + "\n")
         return TaskOutcome(value=topology)

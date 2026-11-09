@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from dataclasses import asdict
@@ -94,6 +95,9 @@ def _build(
     forwards=FORWARDS,
     metrics=None,
     operator_logging=None,
+    log_endpoints=None,
+    bootstraps=None,
+    nodes=None,
 ):
     """Build a platform whose playbooks and collect side effects only record."""
     vars_dir = tmp_path / "run" / "workbench" / "vars"
@@ -162,7 +166,7 @@ def _build(
     (observability / "loki.yaml").write_text(
         "auth_enabled: false\nserver:\n  http_listen_port: 3100\n"
     )
-    nodes = {key: _node(key, events) for key in NODES}
+    nodes = nodes or {key: _node(key, events) for key in NODES}
     settings = SimpleNamespace(
         observability=SimpleNamespace(logs=logs), host_cpu_placement=PLACEMENT
     )
@@ -174,6 +178,8 @@ def _build(
         forwards=forwards,
         mode="ORACLE",
         operator_logging=operator_logging,
+        log_endpoints=log_endpoints,
+        bootstraps=bootstraps,
     )
 
 
@@ -319,7 +325,12 @@ def test_forwarded_nodes_are_scraped_through_their_forwards(tmp_path, monkeypatc
         "127.0.0.1:18089",
         "127.0.0.1:18090",
     ]
-    assert all("bind" not in SEEN[f"node-exporter-{n}"]["config"] for n in NODES)
+    # A site's forwarders reach the exporters at the VM's address.
+    for component in ("node-exporter", "cadvisor"):
+        assert all(
+            SEEN[f"{component}-{n}"]["config"]["bind"] == "0.0.0.0" for n in NODES
+        )
+        assert "bind" not in SEEN[f"{component}-operator"]["config"]
 
 
 def test_unforwarded_nodes_are_scraped_at_the_vm_address(tmp_path, monkeypatch):
@@ -335,7 +346,6 @@ def test_unforwarded_nodes_are_scraped_at_the_vm_address(tmp_path, monkeypatch):
     assert [t["target"] for t in jobs["cadvisor"]][2] == "10.0.0.5:8089"
     assert SEEN["node-exporter-cloud-1"]["config"]["bind"] == "0.0.0.0"
     assert SEEN["cadvisor-cloud-1"]["config"]["bind"] == "0.0.0.0"
-    assert "bind" not in SEEN["node-exporter-edge-1"]["config"]
 
 
 def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
@@ -529,3 +539,75 @@ def test_prometheus_data_stays_out_of_the_run(tmp_path, monkeypatch):
     assert SEEN["prometheus-operator"]["config"]["data_dir"] == str(
         tmp_path / "workspace" / ".workbench" / "run" / "prometheus"
     )
+
+
+def test_collectors_push_through_their_route(tmp_path, monkeypatch):
+    """A route's push URL, known once it is open, configures the collector."""
+    events: list = []
+    route = resource_of(
+        "route edge-1",
+        lambda _i: "http://10.83.80.1:43100/loki/api/v1/push",
+        lambda _i, _v: None,
+    )
+    built = _build(tmp_path, monkeypatch, events, log_endpoints={"edge-1": route})
+    collector = built.collectors["edge-1"]
+    assert route in collector.requires
+    _run(built, events)
+    assert SEEN["log-collector-edge-1"]["config"]["loki"] == {
+        "host": "10.83.80.1",
+        "port": 43100,
+        "uri": "/loki/api/v1/push",
+        "tls": "Off",
+    }
+    assert SEEN["log-collector-cloud-1"]["config"]["loki"]["host"] == "10.0.0.1"
+    drains = [k for h, a, k in events if h == "edge-1" and a == "collect"]
+    assert drains  # the drain poll runs with the resolved config too
+
+
+def test_node_members_wait_for_the_node_bootstrap(tmp_path, monkeypatch):
+    events: list = []
+    bootstrap = resource_of(
+        "bootstrap edge-1",
+        lambda _i: events.append(("edge-1", "bootstrap", ())),
+        lambda _i, _v: None,
+    )
+    built = _build(tmp_path, monkeypatch, events, bootstraps={"edge-1": bootstrap})
+    assert bootstrap in built.resource.requires
+    _run(built, events)
+    actions = [(host, action) for host, action, _ in events]
+    first_on_edge = next(
+        i for i, (host, action) in enumerate(actions) if host == "edge-1"
+    )
+    assert actions[first_on_edge] == ("edge-1", "bootstrap")
+
+
+def test_collector_identity_is_the_running_collector(tmp_path, monkeypatch):
+    events: list = []
+    commands: list = []
+    nodes = {key: _node(key, events) for key in NODES}
+
+    def command(argv, **_kwargs):
+        commands.append(argv)
+        return SimpleNamespace(stdout="json-file\n")
+
+    monkeypatch.setattr(NodeResource, "command", lambda _self, argv: command(argv))
+    built = _build(tmp_path, monkeypatch, events, nodes=nodes)
+    identity = built.collector_identity("edge-1")
+    assert identity == {
+        "image": "sha256:i",
+        "configSha256": {
+            "fluent-bit.conf": hashlib.sha256(b"fluent-bit.conf").hexdigest(),
+            "parsers.conf": hashlib.sha256(b"parsers.conf").hexdigest(),
+        },
+        "cpu": LOGS.cpu,
+        "memoryMiB": LOGS.memory_mib,
+        "bufferMiB": LOGS.buffer_mib,
+    }
+    commands.clear()
+    monkeypatch.setattr(
+        NodeResource,
+        "command",
+        lambda _self, argv: SimpleNamespace(stdout="journald\n"),
+    )
+    with pytest.raises(ValueError, match="json-file"):
+        built.collector_identity("edge-1")

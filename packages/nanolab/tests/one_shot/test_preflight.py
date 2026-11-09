@@ -278,8 +278,14 @@ def test_collection_validates_measured_facts_and_preserves_failures(
         "nanolab.tasks.one_shot.preflight.collect_container_cgroup", cgroups
     )
     output = tmp_path / "preflight.json"
+    # The platform measures each running collector for the fingerprint.
+    platform = SimpleNamespace(
+        collectors=dict.fromkeys(resources.nodes),
+        collector_identity=lambda key: {"image": "sha256:" + key},
+    )
     task = CollectTopologyTask(
         resources,
+        platform=platform,
         endpoints=endpoints,
         probes=probes,
         distribution=distribution,
@@ -312,6 +318,7 @@ def test_collection_validates_measured_facts_and_preserves_failures(
         assert result is not None and len(result.nodes) == 3
         assert all(node.bandwidth_mbps > 0 for node in result.nodes)
         assert all(node.rtt_seconds == pytest.approx(0.002) for node in result.nodes)
+        assert result.logging == {k: {"image": "sha256:" + k} for k in resources.nodes}
         if failure == "strict-healthy":
             assert all(node.runtime_limits for node in result.nodes)
     assert output.is_file()

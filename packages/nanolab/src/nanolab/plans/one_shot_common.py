@@ -28,7 +28,11 @@ from nanolab.config.one_shot import (
     resolve_node_functions,
 )
 from nanolab.functions.catalog import resolve_function_definition
-from nanolab.one_shot.addresses import advertised_arguments, seed_arguments
+from nanolab.one_shot.addresses import (
+    advertised_arguments,
+    published,
+    seed_arguments,
+)
 from nanolab.one_shot.infrastructure import (
     NodeExecutor,
     NodeResource,
@@ -42,12 +46,7 @@ from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_gra
 from nanolab.one_shot.vm_resources import require_resource_overhead
 from nanolab.tasks.components.bootstrap import plan_vm_provision_base
 from nanolab.tasks.one_shot.images import archive_image_ids
-from nanolab.tasks.one_shot.logging import backend_resource, collector_resource
-from nanolab.tasks.one_shot.operator_logging import (
-    log_routes,
-    operator_endpoint,
-    operator_loki_resource,
-)
+from nanolab.tasks.one_shot.operator_logging import log_routes
 from nanolab.tasks.one_shot.resources import node_probe_resource
 from nanolab.tasks.one_shot.workload import WORKLOAD_NAMES
 from nanolab.tasks.platform import (
@@ -70,6 +69,7 @@ from nanolab.tasks.recipes.workflow import (
     require_validation_distribution,
 )
 from nanolab.tasks.resource_tasks import call, release_call, resource_of
+from nanolab.workbench.platform import OneShotPlatform, one_shot_platform
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,9 @@ class OneShotTopology:
     distribution: Resource[RecipeDistribution]
     function_settings: dict[str, OneShotFunction]
     function_aliases: dict[str, str]
-    collectors: dict[str, Resource] = field(default_factory=dict)
+    # The run's workbench platform; `collectors` are its log-collector members.
+    platform: OneShotPlatform | None = None
+    collectors: Mapping[str, Resource] = field(default_factory=dict)
     node_function_settings: dict[str, dict[str, OneShotFunction]] = field(
         default_factory=dict
     )
@@ -108,7 +110,7 @@ class OneShotTopology:
             *self.probes.values(),
             self.distribution,
             *self.node_distributions.values(),
-            *self.collectors.values(),
+            *((self.platform.resource,) if self.platform is not None else ()),
             *(
                 function
                 for platform in self.platforms.values()
@@ -269,7 +271,8 @@ def _control_plane(
     forecast_provider: str = "ORACLE",
     terminal_queueing: bool = False,
     baseline_depth: int | None = None,
-    collector: Resource | None = None,
+    platform: Resource | None = None,
+    logs_enabled: bool = False,
     neighbor_graph: dict[str, tuple[str, ...]] | None = None,
     scientific: bool = False,
     strict_memory: bool = False,
@@ -384,7 +387,7 @@ def _control_plane(
                     "-e",
                     "NANOFAAS_LOG_FORMAT=json",
                 ]
-                if collector is not None
+                if logs_enabled
                 else []
             ),
             *(
@@ -411,7 +414,7 @@ def _control_plane(
                 [
                     "--logging.level.it.unimib.datai.nanofaas.execution.QueueObservation=INFO"
                 ]
-                if collector is not None
+                if logs_enabled
                 else []
             ),
             "--nanofaas.admission.profile=SYNC_QUEUE",
@@ -507,7 +510,8 @@ def _control_plane(
             distribution,
             archive,
             *topology.vms,
-            *((collector,) if collector is not None else ()),
+            # The platform's collector is up before, and drains after, it.
+            *((platform,) if platform is not None else ()),
         ),
     )
 
@@ -754,110 +758,49 @@ def add_one_shot_platforms(
         for key, node in resources.nodes.items()
     }
     logs = settings.observability.logs
-    collectors = {}
-    if logs.enabled:
-        placement = settings.host_cpu_placement
-        remote = any(
-            node.site_host is not None or node.request.lifecycle == "azure"
-            for node in resources.nodes.values()
+    operator_logging = None
+    routes: dict[str, Resource[str]] = {}
+    if logs.enabled and any(
+        node.site_host is not None or node.request.lifecycle == "azure"
+        for node in resources.nodes.values()
+    ):
+        operator_logging = environment.operator_logging
+        if operator_logging is None:
+            raise ValueError("a multi-site run needs the environment's logging")
+        # Collectors push through their route to the platform's Loki, which
+        # publishes on the operator's loopback `operator_logging.port`.
+        routes = log_routes(
+            resources,
+            operator_logging,
+            run_dir=run_dir,
+            settings=settings,
+            supervision=supervision,
         )
-        if remote:
-            operator_logging = environment.operator_logging
-            if operator_logging is None:
-                raise ValueError("a multi-site run needs the environment's logging")
-            loki = operator_loki_resource(
-                logs,
-                operator_logging,
-                root=repo_root,
-                run_dir=run_dir,
-                operator=resources.generator,
-                settings=settings,
-                supervision=supervision,
-            )
-            routes = log_routes(
-                resources,
-                operator_logging,
-                loki,
-                run_dir=run_dir,
-                settings=settings,
-                supervision=supervision,
-            )
-            # Collectors push through their route; exports query the operator.
-            # A copy, not a validated model: the endpoint is the operator's
-            # loopback, which the scenario rightly refuses for VMs.
-            logs = logs.model_copy(
-                update={"endpoint": operator_endpoint(operator_logging)}
-            )
-        else:
-            backend = backend_resource(
-                logs,
-                root=repo_root,
-                run_dir=run_dir,
-                host_cpus=placement.logging_cpus if placement else None,
-                operator=resources.generator if placement else None,
-                settings=settings,
-                supervision=supervision,
-            )
-            routes = dict.fromkeys(resources.nodes, backend)
-        collectors = {
-            key: collector_resource(
-                node,
-                logs,
-                bootstrap=bootstraps[key],
-                backend=routes[key],
-                root=repo_root,
-                run_dir=run_dir,
-                mode="BASELINE" if baseline else forecast_provider,
-                settings=settings,
-            )
+    platform = one_shot_platform(
+        resources,
+        settings,
+        run_dir=run_dir,
+        nanofaas_root=repo_root,
+        # Behind a site's NAT the exporters are published with the node's
+        # other ports; local and Azure nodes are scraped at their own address.
+        forwards={
+            key: published(node.site_host.site.address, node.ordinal).exporters()
             for key, node in resources.nodes.items()
-        }
-
-    def watch_container(resource, node, role, name_for):
-        if supervision is None:
-            return resource
-        name = node.config.id + ":" + role
-        remote = node.site_host is not None or node.request.lifecycle == "azure"
-        check = LivenessCheck(
-            name,
-            run_dir / "liveness.jsonl",
-            timeout=REMOTE_PROBE_SECONDS
-            if remote
-            else operational_limit(settings, "collection_http_seconds", 10),
-            tolerated_seconds=REMOTE_UNREACHABLE_SECONDS if remote else 0,
-        )
-
-        def probe(value):
-            check.run(
-                node.vm_argv(
-                    node.live_vm(),
-                    "docker",
-                    "inspect",
-                    "--format={{.State.Running}}",
-                    name_for(value),
-                )
-            )
-
-        return supervision.service_resource(
-            resource,
-            name,
-            probe,
-            join_seconds=operational_limit(settings, "worker_join_seconds", 40),
-        )
-
-    collectors = {
-        key: watch_container(
-            resource, resources.nodes[key], "collector", lambda value: value.container
-        )
-        for key, resource in collectors.items()
-    }
+            if node.site_host is not None
+        },
+        mode="BASELINE" if baseline else forecast_provider,
+        operator_logging=operator_logging,
+        log_endpoints=routes,
+        bootstraps=bootstraps,
+    )
 
     endpoints = {
         key: _control_plane(
             node,
             resources,
             bootstrap=bootstraps[key],
-            collector=collectors.get(key),
+            platform=platform.resource,
+            logs_enabled=logs.enabled,
             scientific=settings.purpose == "scientific-experiment",
             strict_memory=settings.strict_memory,
             neighbor_graph=graph if settings.neighbors is not None else None,
@@ -878,15 +821,6 @@ def add_one_shot_platforms(
             else None,
         )
         for key, node in resources.nodes.items()
-    }
-    endpoints = {
-        key: watch_container(
-            resource,
-            resources.nodes[key],
-            "control-plane",
-            lambda _value: "nanolab-one-shot-control-plane",
-        )
-        for key, resource in endpoints.items()
     }
     probes = {key: node_probe_resource(node) for key, node in resources.nodes.items()}
 
@@ -1033,7 +967,8 @@ def add_one_shot_platforms(
         pinned_by_key[primary],
         functions,
         {key: definition.family for key, definition in definitions.items()},
-        collectors,
+        platform,
+        platform.collectors,
         node_functions,
         graph,
         node_distributions={

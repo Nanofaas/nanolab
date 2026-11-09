@@ -68,7 +68,7 @@ def build_one_shot_qualification_plan(
                     probes=topology.probes,
                     distribution=topology.distribution,
                     function_settings=topology.function_settings,
-                    collectors=topology.collectors,
+                    platform=topology.platform,
                     neighbor_graph=topology.neighbor_graph,
                     node_function_settings=topology.node_function_settings,
                     purpose=config.one_shot.purpose,

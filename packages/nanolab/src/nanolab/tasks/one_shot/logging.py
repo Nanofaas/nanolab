@@ -157,6 +157,7 @@ def verify_loki_ingestion(endpoint_url, project, directory, settings=None) -> No
                 stream.write(json.dumps(row) + "\n")
 
 
+# ponytail: kept for scripts/one-shot-logging-overhead.py, delete when it moves
 def backend_resource(
     logs: OneShotLogs,
     *,
@@ -613,6 +614,7 @@ def export_collector(
         raise RuntimeError("collector export write failed") from write_error
 
 
+# ponytail: kept for scripts/one-shot-logging-overhead.py, delete when it moves
 def collector_resource(
     node: NodeResource,
     logs: OneShotLogs,

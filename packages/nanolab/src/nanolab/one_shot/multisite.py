@@ -22,7 +22,13 @@ from nanolab.config import EnvironmentConfig
 from nanolab.config.environment import AZURE_SITE
 from nanolab.config.one_shot import HostCpuPlacement, OneShotConfig, OneShotNode
 from nanolab.one_shot import host_cpu
-from nanolab.one_shot.addresses import API_PORT, MANAGEMENT_PORT, PROBE_PORT
+from nanolab.one_shot.addresses import (
+    API_PORT,
+    CADVISOR_PORT,
+    MANAGEMENT_PORT,
+    NODE_EXPORTER_PORT,
+    PROBE_PORT,
+)
 from nanolab.one_shot.infrastructure import (
     NodeResource,
     OneShotResources,
@@ -40,9 +46,15 @@ from nanolab.one_shot.sites import SiteHost, SiteVmOrchestrator
 from nanolab.tasks.vm.models import VmRequest
 
 # The cloud's NSG: the operator drives and observes it, the edges' sites
-# offload to it and measure bandwidth from its probe. SSH keeps the SDK's own
-# rule.
-CLOUD_OPERATOR_PORTS = (API_PORT, MANAGEMENT_PORT, PROBE_PORT)
+# offload to it and measure bandwidth from its probe. The operator's
+# Prometheus scrapes its exporters. SSH keeps the SDK's own rule.
+CLOUD_OPERATOR_PORTS = (
+    API_PORT,
+    MANAGEMENT_PORT,
+    PROBE_PORT,
+    NODE_EXPORTER_PORT,
+    CADVISOR_PORT,
+)
 CLOUD_SITE_PORTS = (API_PORT, PROBE_PORT)
 AZURE_MIN_DISK_GIB = 64
 

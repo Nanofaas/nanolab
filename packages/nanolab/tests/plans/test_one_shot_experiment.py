@@ -164,7 +164,7 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
             probes={},
             distribution=resource,
             function_settings={},
-            collectors={},
+            platform=None,
             neighbor_graph={},
             node_function_settings={},
         )

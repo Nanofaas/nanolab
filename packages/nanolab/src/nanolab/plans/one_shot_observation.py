@@ -135,7 +135,7 @@ def build_one_shot_observation_plan(
         distribution=topology.distribution,
         node_distributions=getattr(topology, "node_distributions", None),
         function_settings=topology.function_settings,
-        collectors=topology.collectors,
+        platform=topology.platform,
         neighbor_graph=topology.neighbor_graph,
         node_function_settings=topology.node_function_settings,
         purpose=settings.purpose,

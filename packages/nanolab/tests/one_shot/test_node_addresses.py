@@ -49,7 +49,13 @@ def test_published_node_advertises_the_site_address_and_its_own_ports():
         (19013, 9090),
         (14203, 14203),
         (17203, 17111),
+        (19203, 9100),
+        (19303, 8089),
     )
+    assert own.exporters() == {
+        "node-exporter": "149.132.179.35:19203",
+        "cadvisor": "149.132.179.35:19303",
+    }
 
 
 def test_published_ports_never_collide_between_nodes_of_a_site():

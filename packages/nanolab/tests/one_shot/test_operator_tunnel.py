@@ -154,14 +154,21 @@ def test_a_site_node_is_published_and_unpublished_in_order(
     )
     acquired = acquire_now(node.vm, cast(Any, None))
     release_now(node.vm, cast(Any, None), acquired)
-    forwards = ((18006, 8080), (19016, 9090), (14206, 14206), (17206, 17111))
+    forwards = (
+        (18006, 8080),
+        (19016, 9090),
+        (14206, 14206),
+        (17206, 17111),
+        (19206, 9100),
+        (19306, 8089),
+    )
     published = [("forward", "10.0.0.5", forwards)]
     if tunnelled:
         assert events == [
             (
                 "tunnel",
                 "149.132.176.50",
-                (18006, 19016, 14206, 17206),
+                (18006, 19016, 14206, 17206, 19206, 19306),
                 "edge-6",
                 tmp_path / "tunnels.jsonl",
             ),

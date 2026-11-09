@@ -165,9 +165,7 @@ def test_runtime_plan_keeps_each_registration_on_its_own_vm(tmp_path, monkeypatc
     assert workflow.compile().tasks
 
 
-def test_platform_builder_watches_owned_services_without_acquiring(
-    tmp_path, monkeypatch
-):
+def test_platform_builder_puts_logging_on_the_workbench_platform(tmp_path, monkeypatch):
     from nanolab.config.scenario import ScenarioConfig
     from nanolab.one_shot.supervision import CampaignSupervision
     from nanolab.plans.one_shot_common import add_one_shot_platforms
@@ -202,6 +200,7 @@ def test_platform_builder_watches_owned_services_without_acquiring(
     assets.mkdir(parents=True)
     for name in ("fluent-bit.conf", "parsers.conf"):
         (assets / name).write_text("# fixture\n")
+    (assets / "loki.yaml").write_text("auth_enabled: false\n")
     original = supervisor.service_resource
     wrapped = {}
 
@@ -220,16 +219,19 @@ def test_platform_builder_watches_owned_services_without_acquiring(
         repo_root=tmp_path,
         supervision=supervisor,
     )
-    assert set(wrapped) == {"logging-backend"} | {
-        f"{node}:{role}"
-        for node in ("edge-0", "edge-1", "cloud")
-        for role in ("collector", "control-plane")
-    }
+    # Loki and the collectors are platform members; the workbench supervisor
+    # watches them, so no in-process service probe wraps anything.
+    assert wrapped == {}
+    platform = topology.platform
+    assert platform is not None and platform.loki is not None
+    assert platform.resource in topology.requires
     for node in topology.resources.nodes:
-        assert topology.collectors[node] is wrapped[f"{node}:collector"]
-        assert topology.endpoints[node] is wrapped[f"{node}:control-plane"]
-        assert topology.collectors[node] in topology.endpoints[node].requires
-        assert wrapped["logging-backend"] in topology.collectors[node].requires
+        collector = topology.collectors[node]
+        assert collector is platform.collectors[node]
+        assert collector.title == f"Deploy log-collector-{node} on {node}"
+        assert platform.loki in collector.requires
+        # Collectors start before, and drain after, the control plane.
+        assert platform.resource in topology.endpoints[node].requires
     workflow.add(Observe(), requires=topology.requires)
     assert workflow.compile().tasks
     assert not supervisor.checks  # constructing/compiling never acquires services
@@ -467,7 +469,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
         archive=archive,
         run_dir=tmp_path,
         terminal_queueing=terminal_queueing,
-        collector=bootstrap if terminal_queueing else None,
+        logs_enabled=terminal_queueing,
         scientific=scientific,
         forecast_max_age_seconds=forecast_max_age_seconds,
         **(

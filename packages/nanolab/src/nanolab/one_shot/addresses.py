@@ -16,6 +16,9 @@ API_PORT = 8080
 MANAGEMENT_PORT = 9090
 GOSSIP_PORT = 14200
 PROBE_PORT = 17111
+# The workbench exporters' default ports (node-exporter, cAdvisor).
+NODE_EXPORTER_PORT = 9100
+CADVISOR_PORT = 8089
 
 # The management port keeps the in-VM distance from the API port on published
 # nodes too, so a management URL is derived from any API URL the same way.
@@ -24,6 +27,8 @@ MANAGEMENT_OFFSET = MANAGEMENT_PORT - API_PORT
 PUBLISHED_API_BASE = 18000
 PUBLISHED_GOSSIP_BASE = GOSSIP_PORT
 PUBLISHED_PROBE_BASE = 17200
+PUBLISHED_NODE_EXPORTER_BASE = 19200
+PUBLISHED_CADVISOR_BASE = 19300
 MAX_PUBLISHED_NODES = 99
 
 
@@ -35,6 +40,8 @@ class NodeAddresses:
     api_port: int = API_PORT
     gossip_port: int = GOSSIP_PORT
     probe_port: int = PROBE_PORT
+    node_exporter_port: int = NODE_EXPORTER_PORT
+    cadvisor_port: int = CADVISOR_PORT
     published: bool = False
 
     @property
@@ -68,7 +75,16 @@ class NodeAddresses:
             # advertises its bind port, so the two must be equal.
             (self.gossip_port, self.gossip_port),
             (self.probe_port, PROBE_PORT),
+            (self.node_exporter_port, NODE_EXPORTER_PORT),
+            (self.cadvisor_port, CADVISOR_PORT),
         )
+
+    def exporters(self) -> dict[str, str]:
+        """Return where the operator scrapes each workbench exporter."""
+        return {
+            "node-exporter": f"{self.host}:{self.node_exporter_port}",
+            "cadvisor": f"{self.host}:{self.cadvisor_port}",
+        }
 
 
 def direct(host: str) -> NodeAddresses:
@@ -85,6 +101,8 @@ def published(site_address: str, ordinal: int) -> NodeAddresses:
         api_port=PUBLISHED_API_BASE + ordinal,
         gossip_port=PUBLISHED_GOSSIP_BASE + ordinal,
         probe_port=PUBLISHED_PROBE_BASE + ordinal,
+        node_exporter_port=PUBLISHED_NODE_EXPORTER_BASE + ordinal,
+        cadvisor_port=PUBLISHED_CADVISOR_BASE + ordinal,
         published=True,
     )
 

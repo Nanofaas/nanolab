@@ -143,16 +143,15 @@ def test_nodes_on_one_site_share_its_route_and_the_cloud_has_its_own():
         config=SimpleNamespace(id="cloud"),
         vm=vm,
     )
-    loki = object()
     routes = log_routes(
         SimpleNamespace(nodes={"edge-1": edge, "edge-2": edge, "cloud": cloud}),
         logging_config(),
-        loki,  # type: ignore[arg-type]
         run_dir=Path("/run"),
     )
     assert routes["edge-1"] is routes["edge-2"]
-    assert routes["edge-1"].requires == (loki,)
-    assert routes["cloud"].requires == (loki, vm)
+    # The collector requires the Loki; a route opens without one.
+    assert routes["edge-1"].requires == ()
+    assert routes["cloud"].requires == (vm,)
 
 
 def test_site_forwarders_can_listen_on_one_address(tmp_path, monkeypatch):

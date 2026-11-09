@@ -1,9 +1,10 @@
 """One Loki on the operator for a multi-site run, reached through reverse tunnels.
 
-The single-host workflows run Loki with the operator's Docker on the Multipass
-bridge. A multi-site operator need not have Docker and is reachable from the
-sites only on a public address, so Loki runs from a pinned release binary on
-the operator's loopback. Each site and the cloud reach it through a reverse
+The run's Loki is the workbench platform's container, published on the
+operator's loopback (`OperatorLogging.port`): the operator is reachable from
+the sites only on a public address. (`operator_loki_resource`, the older
+pinned-binary form, stays until its last user moves.) Each site and the cloud
+reach it through a reverse
 SSH tunnel ending on their own loopback: a site publishes it on its Multipass
 bridge with socat, the cloud's collector (host network) pushes to it directly.
 Fluent Bit buffers on disk and retries without limit, so a tunnel that drops is
@@ -341,13 +342,17 @@ def _site_route(
 def log_routes(
     resources,
     logging: OperatorLogging,
-    loki: Resource[str],
     *,
     run_dir: Path,
     settings=None,
     supervision=None,
 ) -> dict[str, Resource[str]]:
-    """Return, per node, the route its collector pushes through to the Loki."""
+    """Return, per node, the route its collector pushes through to the Loki.
+
+    A route carries the operator's loopback `logging.port`, where the run's
+    Loki publishes; it needs no running Loki to open (Fluent Bit retries), so
+    the collector, not the route, requires the Loki.
+    """
     directory = run_dir / "logging"
     routes: dict[str, Resource[str]] = {}
     sites: dict[str, Resource[str]] = {}
@@ -365,7 +370,6 @@ def log_routes(
                         acquire=call(title, acquire),
                         release=release_call(title, release),
                         compensate=call(f"Compensate {title}", release),
-                        requires=(loki,),
                     ),
                     f"log-route:{name}",
                     tunnel.ensure,
@@ -374,15 +378,13 @@ def log_routes(
                 )
             routes[key] = sites[name]
         elif node.request.lifecycle == "azure":
-            routes[key] = _cloud_route(
-                node, logging, loki, directory, settings, supervision
-            )
+            routes[key] = _cloud_route(node, logging, directory, settings, supervision)
         else:
             raise ValueError("multi-site logging needs every node on a site or Azure")
     return routes
 
 
-def _cloud_route(node, logging, loki, directory, settings, supervision):
+def _cloud_route(node, logging, directory, settings, supervision):
     port = logging.port
     holder: dict[str, ReverseTunnel] = {}
 
@@ -424,7 +426,7 @@ def _cloud_route(node, logging, loki, directory, settings, supervision):
             acquire=call(title, acquire),
             release=release_call(title, release),
             compensate=call(f"Compensate {title}", release),
-            requires=(loki, node.vm),
+            requires=(node.vm,),
         ),
         f"log-route:{node.config.id}",
         ensure,

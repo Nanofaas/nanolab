@@ -214,7 +214,9 @@ def test_nodes_are_owned_on_their_placed_sites(offline_site, tmp_path):
     # Both egress addresses are faked to the site: the rules collapse to it.
     assert cloud.request.azure_ingress == {
         8080: ("149.132.179.35/32",),
+        8089: ("149.132.179.35/32",),
         9090: ("149.132.179.35/32",),
+        9100: ("149.132.179.35/32",),
         17111: ("149.132.179.35/32",),
     }
     assert isinstance(cloud.provider, multisite.AzureSiteProvider)
@@ -291,7 +293,9 @@ def test_cloud_ingress_is_bounded_to_operator_and_sites():
     everyone = ("149.132.176.50/32", "149.132.179.175/32", "149.132.179.35/32")
     assert ingress == {
         8080: everyone,
+        8089: operator,  # the operator's Prometheus scrapes the exporters
         9090: operator,
+        9100: operator,
         17111: everyone,
         43100: operator,
     }

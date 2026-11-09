@@ -25,6 +25,7 @@ from sonata_engine import Members, Resource, TaskInputs, compose
 
 from nanolab.config.environment import OperatorLogging
 from nanolab.config.one_shot import OneShotConfig, operational_limit
+from nanolab.one_shot.addresses import CADVISOR_PORT, NODE_EXPORTER_PORT
 from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
 from nanolab.one_shot.operator_memory import MAX_SWAP_PAGES, MIN_AVAILABLE_BYTES
 from nanolab.tasks.one_shot.logging import (
@@ -46,8 +47,6 @@ from nanolab.workspace.paths import operator_workspace_root
 OPERATOR = WorkbenchHost("operator", None)
 # Named in plans/one_shot_common, which this package may not import.
 CONTROL_PLANE = "nanolab-one-shot-control-plane"
-NODE_EXPORTER_PORT = 9100
-CADVISOR_PORT = 8089
 COLLECTOR_PORT = 2020  # fluent-bit.conf's HTTP_Port
 PROMETHEUS_PORT = 9090
 SUPERVISOR_PORT = 8099
@@ -71,6 +70,8 @@ class OneShotPlatform:
     """The composite and the members later tasks read with `Members.of`.
 
     `loki` is None and `collectors` empty when the scenario has no logs.
+    `collector_identity(node)` measures a running collector, as the
+    environment fingerprint records it.
     """
 
     resource: Resource[Members]
@@ -79,6 +80,7 @@ class OneShotPlatform:
     supervisor: Resource[Deployed]
     loadgen_host: WorkbenchHost
     collectors: Mapping[str, Resource[Deployed]]
+    collector_identity: Callable[[str], dict[str, Any]]
 
 
 def _cpus(cpus: list[int] | None) -> str | None:
@@ -169,6 +171,16 @@ def _loki_config(source: Path, into: Path) -> Path:
     return into
 
 
+def _loki_target(push_url: str) -> dict[str, Any]:
+    push = urlsplit(push_url)
+    return {
+        "host": push.hostname,
+        "port": push.port or (443 if push.scheme == "https" else 80),
+        "uri": push.path,
+        "tls": "On" if push.scheme == "https" else "Off",
+    }
+
+
 def _write_json(path: Path, document: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2) + "\n")
@@ -189,16 +201,18 @@ def one_shot_platform(
     forwards: Mapping[str, Mapping[str, str]],
     mode: str,
     operator_logging: OperatorLogging | None = None,
-    log_endpoints: Mapping[str, str] | None = None,
+    log_endpoints: Mapping[str, Resource[str]] | None = None,
+    bootstraps: Mapping[str, Resource[Any]] | None = None,
 ) -> OneShotPlatform:
     """Compose the run's workbench instances on the operator and every node.
 
-    A node in `forwards` is scraped at its forwarded local addresses, with
-    exporters bound to its loopback; any other node's exporters listen on
-    every address and are scraped at its VM's address. `mode` is the
-    collectors' NANOFAAS_MODE. A multi-site run passes its `operator_logging`
-    and, per node, the push URL its collector reaches Loki at
+    Node exporters listen on every VM address. A node in `forwards` is
+    scraped at the addresses those publish it on (a site's forwarded
+    ports); any other node at its VM's address. `mode` is the collectors'
+    NANOFAAS_MODE. A multi-site run passes its `operator_logging` and, per
+    node, the route whose value is the push URL its collector reaches Loki at
     (`log_endpoints`); otherwise collectors push to the scenario's endpoint.
+    A node's members also require its entry in `bootstraps` (Docker there).
     """
     logs = settings.observability.logs
     if logs.enabled and not logs.backend_owned:
@@ -206,6 +220,7 @@ def one_shot_platform(
             "the one-shot platform runs its own Loki: an external logging "
             "endpoint is not supported, set backendOwned"
         )
+    bootstraps = bootstraps or {}
     run_id = run_dir.name
     workbench_dir = run_dir / "workbench"
     vars_dir = workbench_dir / "vars"
@@ -224,6 +239,8 @@ def one_shot_platform(
         requires: tuple[Resource[Any], ...] = (),
         config_from_inputs: Callable[[TaskInputs], dict[str, Any]] | None = None,
     ) -> tuple[Resource[Deployed], Instance]:
+        if host.node is not None and host.key in bootstraps:
+            requires = (bootstraps[host.key], *requires)
         instance = Instance.model_validate(
             {
                 "name": f"{component}-{host.key}",
@@ -248,7 +265,7 @@ def one_shot_platform(
         member(
             host,
             component,
-            {"bind": "0.0.0.0"} if key in direct else {},  # nosec B104 - see docstring
+            {} if host.node is None else {"bind": "0.0.0.0"},  # nosec B104 - docstring
             url=None
             if key in direct
             else "http://"
@@ -319,19 +336,14 @@ def one_shot_platform(
         )
         members += [store, loki]
         for key, host in nodes.items():
-            push = urlsplit((log_endpoints or {}).get(key) or logs.endpoint or "")
+            route = (log_endpoints or {}).get(key)
             collectors[key] = member(
                 host,
                 "log-collector",
                 {
                     "port": COLLECTOR_PORT,
                     "config_files": {k: str(v) for k, v in config_files.items()},
-                    "loki": {
-                        "host": push.hostname,
-                        "port": push.port or (443 if push.scheme == "https" else 80),
-                        "uri": push.path,
-                        "tls": "On" if push.scheme == "https" else "Off",
-                    },
+                    **({} if route else {"loki": _loki_target(logs.endpoint or "")}),
                     "storage_dir": storage_dir,
                     "cpus": logs.cpu,
                     "memory_mib": logs.memory_mib,
@@ -345,7 +357,13 @@ def one_shot_platform(
                         "NANOFAAS_LOG_BUFFER_SIZE": f"{logs.buffer_mib}M",
                     },
                 },
-                requires=(loki,),
+                requires=(loki,) if route is None else (loki, route),
+                # A route's push URL exists only once it is open.
+                config_from_inputs=None
+                if route is None
+                else lambda inputs, route=route: {
+                    "loki": _loki_target(inputs.resource(route))
+                },
             )
             members.append(collectors[key][0])
 
@@ -436,11 +454,14 @@ def one_shot_platform(
         inputs: TaskInputs, host: WorkbenchHost, instance: Instance, value: Deployed
     ) -> None:
         revive = None if host.node is None else host.node.vm.revive
+        resolved = instance.model_copy(
+            update={"config": {**instance.config, **(value.config or {})}}
+        )
         WorkbenchPlaybook(
             f"Collect {instance.name}",
             host,
             "collect",
-            HostVars(instances=(instance,), collect_dir=str(workbench_dir)),
+            HostVars(instances=(resolved,), collect_dir=str(workbench_dir)),
             vars_dir=vars_dir,
             collections=ensure_installed(),
             vm=None if revive is None or value.vm is None else revive(value.vm),
@@ -475,6 +496,30 @@ def one_shot_platform(
     # Exports query the operator's Loki, as today's multi-site copy of `logs`.
     export_logs = logs.model_copy(update={"endpoint": loki_url + PUSH_PATH})
 
+    def collector_budget() -> dict[str, Any]:
+        return {
+            "configSha256": {
+                file: hashlib.sha256(path.read_bytes()).hexdigest()
+                for file, path in config_files.items()
+            },
+            "cpu": logs.cpu,
+            "memoryMiB": logs.memory_mib,
+            "bufferMiB": logs.buffer_mib,
+        }
+
+    def collector_identity(key: str) -> dict[str, Any]:
+        node = topology.nodes[key]
+        # Fluent Bit tails the json-file logs under the Docker root.
+        driver = node.command(
+            ("docker", "info", "--format={{.LoggingDriver}}")
+        ).stdout.strip()
+        if driver != "json-file":
+            raise ValueError(
+                "managed function collection requires Docker json-file driver"
+            )
+        image = _inspect(nodes[key], f"wb-log-collector-{key}")["image"]
+        return {"image": image, **collector_budget()}
+
     def collector_step(key: str) -> Step:
         resource, instance = collectors[key]
         host = nodes[key]
@@ -500,16 +545,7 @@ def one_shot_platform(
                 issues.append(f"collector metrics: {error}")
             identity: dict[str, Any] | None = None
             try:
-                identity = {
-                    **_inspect(host, name),
-                    "configSha256": {
-                        file: hashlib.sha256(path.read_bytes()).hexdigest()
-                        for file, path in config_files.items()
-                    },
-                    "cpu": logs.cpu,
-                    "memoryMiB": logs.memory_mib,
-                    "bufferMiB": logs.buffer_mib,
-                }
+                identity = {**_inspect(host, name), **collector_budget()}
             except Exception as error:
                 issues.append(f"docker inspect: {error}")
             archive_issue = None
@@ -611,4 +647,5 @@ def one_shot_platform(
         supervisor,
         OPERATOR,
         {key: resource for key, (resource, _) in collectors.items()},
+        collector_identity,
     )

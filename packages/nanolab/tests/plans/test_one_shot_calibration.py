@@ -104,7 +104,12 @@ def test_logging_compiles_one_collector_for_every_node(tmp_path, monkeypatch):
     data = scenario().model_dump(by_alias=True, exclude_unset=True)
     data["oneShot"]["functions"]["one-shot-workload-rust"]["cpu"] = 0.5
     data["oneShot"]["observability"] = {
-        "logs": {"enabled": True, "endpoint": "http://10.0.0.1:3100/loki/api/v1/push"}
+        "logs": {
+            "enabled": True,
+            "endpoint": "http://10.0.0.1:3100/loki/api/v1/push",
+            "backendOwned": True,
+            "backendBind": "10.0.0.1",
+        }
     }
     config = ScenarioConfig.model_validate(data)
     (tmp_path / "functions/rust/one-shot-workload").mkdir(parents=True)
@@ -112,19 +117,24 @@ def test_logging_compiles_one_collector_for_every_node(tmp_path, monkeypatch):
     assets.mkdir(parents=True)
     for filename in ["fluent-bit.conf", "parsers.conf"]:
         (assets / filename).write_text(filename)
+    (assets / "loki.yaml").write_text("auth_enabled: false\n")
     monkeypatch.setenv("NANOFAAS_ROOT", str(tmp_path))
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "workspace"))
     workflow = build_one_shot_calibration_plan(
         config, environment(), run_dir=tmp_path / "run", repo_root=tmp_path
     )
     compiled = workflow.compile()
     # Resource dependency closure, rather than constructing unused handles.
-    titles = [
-        unit.resource.title
+    (platform,) = [
+        unit.resource
         for unit in compiled.tasks
-        if unit.kind == "acquire" and unit.resource is not None
+        if unit.kind == "acquire"
+        and unit.resource is not None
+        and unit.resource.title == "Acquire the one-shot workbench platform"
     ]
-    assert sum("Fluent Bit collector" in title for title in titles) == 3
-    assert "Use external logging backend" in titles
+    members = [m.title for m in getattr(platform.acquire, "members")]  # noqa: B009
+    assert sum(title.startswith("Deploy log-collector-") for title in members) == 3
+    assert "Deploy loki-operator on operator" in members
 
 
 def test_multi_function_calibration_qualifies_trace_mixes_before_publication(
