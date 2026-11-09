@@ -425,7 +425,7 @@ def test_capacity_collection_is_opted_into_by_qualified_resource_gate():
 
 
 @pytest.mark.parametrize("logical", [False, True])
-def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
+def test_timing_load_exports_its_resources_and_preserves_auction_error(
     tmp_path, monkeypatch, logical
 ):
     from types import SimpleNamespace
@@ -438,20 +438,14 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
         lambda _: True,
     )
 
-    class Sampler:
-        def __init__(self, *args, terminal_probe=None):
-            actions.append("sampler-start")
-            self.terminal_probe = terminal_probe
+    def export(run, *, coverage_until):
+        assert run.run_dir == tmp_path / "timing"
+        assert coverage_until is not None
+        actions.append("resources")
 
-        def require_healthy(self):
-            actions.append("sampler-health")
-
-        def close(self, **kwargs):
-            actions.append("sampler-close")
-            if self.terminal_probe is not None:
-                self.terminal_probe()
-
-    monkeypatch.setattr("nanolab.one_shot.vm_resources.VmTelemetrySession", Sampler)
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.experiment.export_run_resources", export
+    )
     child = SimpleNamespace(poll=lambda: None)
     resource = resource_of(
         "generator",
@@ -500,16 +494,14 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
     )
     with pytest.raises(RuntimeError, match="original-auction"), load:
         raise RuntimeError("original-auction")
-    assert actions.index("sampler-start") < actions.index("generator-start")
-    assert actions.index("generator-stop") < actions.index("sampler-close")
-    assert "sampler-health" in actions
+    # The trial window is exported after the generator stopped, as the
+    # sampler closed; the supervisor targets replace its health checks.
+    assert actions.index("generator-stop") < actions.index("resources")
+    assert "terminal-clock" not in actions
     if logical:
-        assert actions.index("sampler-close") < actions.index("terminal-clock")
         manifest = json.loads((tmp_path / "timing/manifest.json").read_text())
         assert manifest["parameters"]["logicalSchedule"]["protocolVersion"] == 2
         assert manifest["parameters"]["logicalSchedule"]["probeScope"] == "parent"
-    else:
-        assert "terminal-clock" not in actions
 
 
 def test_protocol_rejects_changed_vm_sampling_period(tmp_path, monkeypatch):

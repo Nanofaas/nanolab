@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 
 from nanolab.config.one_shot import resolve_node_functions
-from nanolab.one_shot.vm_resources import VmTelemetrySession, capacity_telemetry_enabled
+from nanolab.one_shot.vm_resources import capacity_telemetry_enabled
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
     canonical_bytes,
@@ -101,6 +101,7 @@ def _run_capacity_trial(
         LiveEvidenceCollector,
         classify_result,
         collect_runtime_evidence,
+        export_run_resources,
         generator_rows,
         physical_attempts,
     )
@@ -339,13 +340,9 @@ def _run_capacity_trial(
 
     try:
         with ExitStack() as stack:
-            telemetry = None
             if use_telemetry:
-                # The sampler starts before the same physical SDK load path.
-                telemetry = VmTelemetrySession(
-                    run, inputs, terminal_probe=monitor.refresh if monitor else None
-                )
-                stack.callback(compensate, telemetry.close)
+                # Last out: the trial's window is exported after the load.
+                stack.callback(compensate, export_run_resources, run)
             process = acquire_now(resource, inputs)
             stack.callback(compensate, release_now, resource, inputs, process)
             collector = LiveEvidenceCollector(run, inputs)
@@ -354,8 +351,6 @@ def _run_capacity_trial(
             while process.poll() is None:
                 inputs.resource(clock).require_healthy()
                 collector.require_healthy()
-                if telemetry is not None:
-                    telemetry.require_healthy()
                 if time.monotonic() >= deadline:
                     raise RuntimeError("capacity generator exceeded bounded drain")
                 time.sleep(0.25)

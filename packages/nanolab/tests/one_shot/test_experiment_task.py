@@ -524,3 +524,89 @@ def test_k6_version_comes_from_the_pinned_loadgen_image(tmp_path, monkeypatch):
             "version",
         )
     ]
+
+
+def test_run_resources_export_the_window_then_coverage(tmp_path, monkeypatch):
+    """The in-workflow replacement of the VM sampler's close."""
+    from datetime import timedelta
+
+    from nanolab.tasks.one_shot import experiment
+
+    model = manifest()
+    model.parameters.update(generator={"warmupSeconds": 30})
+    (tmp_path / "manifest.json").write_text(model.model_dump_json())
+    windows = []
+    run = SimpleNamespace(
+        run_dir=tmp_path,
+        topology=SimpleNamespace(
+            platform=SimpleNamespace(
+                export_vm_resources=lambda *window: windows.append(window)
+            ),
+            resources=SimpleNamespace(nodes={"edge-0": None}),
+        ),
+        trace=SimpleNamespace(windows=[{}, {}]),
+        mode="oracle",
+        settings=SimpleNamespace(functions={"work": None}),
+    )
+    seen = {}
+
+    def summarize(run_dir, **kwargs):
+        seen.update(kwargs, run_dir=run_dir)
+        return {"complete": True}
+
+    monkeypatch.setattr(experiment, "summarize_resources", summarize)
+    until = datetime.fromisoformat(model.anchor) + timedelta(seconds=5)
+    experiment.export_run_resources(run, coverage_until=until)
+    ((into, start, end),) = windows
+    assert into == tmp_path
+    assert start == datetime.fromisoformat(model.anchor) - timedelta(seconds=30)
+    assert end > start
+    assert seen["warmup"] == 30 and seen["period"] == 5 and seen["epochs"] == 2
+    assert seen["nodes"] == ["edge-0"] and seen["functions"] == ["work"]
+    coverage = json.loads((tmp_path / "vm-resources/coverage.json").read_text())
+    assert coverage == {
+        "complete": True,
+        "measuredThroughUtc": until.isoformat(),
+        "cleanupErrors": [],
+    }
+
+
+@pytest.mark.parametrize("telemetry", [False, True])
+def test_the_load_task_exports_resources_where_the_sampler_closed(
+    tmp_path, monkeypatch, telemetry
+):
+    from nanolab.tasks.one_shot import experiment
+
+    model = manifest()
+    if telemetry:
+        model.parameters.update(vmTelemetry={"periodSeconds": 1})
+    (tmp_path / "manifest.json").write_text(model.model_dump_json())
+    actions = []
+    child = SimpleNamespace(
+        returncode=None, poll=lambda: None, stop=lambda: actions.append("stop")
+    )
+    freeze = SimpleNamespace(
+        run_dir=tmp_path,
+        clock="clock",
+        settings=SimpleNamespace(experiment=SimpleNamespace(fail_load=True)),
+    )
+    values = {
+        "generator": child,
+        "collector": SimpleNamespace(close=lambda: actions.append("close")),
+        "clock": object(),
+    }
+    inputs = cast(Any, SimpleNamespace(resource=lambda key: values[key]))
+    monkeypatch.setattr(
+        experiment, "export_run_resources", lambda run: actions.append("resources")
+    )
+    monkeypatch.setattr(
+        experiment, "collect_original_evidence", lambda *a: actions.append("evidence")
+    )
+    with pytest.raises(RuntimeError, match="injected"):
+        RunOneShotLoadTask(freeze, "generator", "collector").run(inputs)
+    assert actions == [
+        "close",
+        "stop",
+        *(["resources"] if telemetry else []),
+        "evidence",
+    ]

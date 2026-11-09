@@ -94,7 +94,6 @@ class QualificationLoad:
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
         self.use_telemetry = capacity_telemetry_enabled(settings)
-        self.telemetry = None
         self.run = SimpleNamespace(
             topology=topology, run_dir=run_dir, settings=settings, mode="qualification"
         )
@@ -158,12 +157,13 @@ class QualificationLoad:
 
     def __enter__(self):
         """Start owned processes and await independently proven handler activity."""
-        from nanolab.tasks.one_shot.experiment import LiveEvidenceCollector
+        from nanolab.tasks.one_shot.experiment import (
+            LiveEvidenceCollector,
+            export_run_resources,
+        )
 
         try:
             if self.use_telemetry:
-                from nanolab.one_shot.vm_resources import VmTelemetrySession
-
                 write_immutable_artifact(
                     self.run_dir / "manifest.json",
                     canonical_bytes(
@@ -183,16 +183,11 @@ class QualificationLoad:
                         }
                     ),
                 )
-                sampler = VmTelemetrySession(
-                    self.run,
-                    self.inputs,
-                    terminal_probe=self.clock.refresh
-                    if self.logical_schedule
-                    else None,
-                )
-                self.telemetry = sampler
+                # Last out: the load's window is exported after it stopped.
                 self.stack.callback(
-                    lambda: sampler.close(coverage_until=datetime.now(UTC))
+                    lambda: export_run_resources(
+                        self.run, coverage_until=datetime.now(UTC)
+                    )
                 )
             # A loadgen runs once: each load deploys its own instance.
             resource = self.run.topology.platform.loadgen(
@@ -223,8 +218,6 @@ class QualificationLoad:
         if self.process.poll() is not None:
             raise RuntimeError("qualification generator stopped during measurements")
         self.collector.require_healthy()
-        if self.telemetry is not None:
-            self.telemetry.require_healthy()
         self.clock.require_healthy()
 
     def audit(self, *, cutoff):

@@ -2,6 +2,7 @@ import hashlib
 import json
 import time
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -386,8 +387,7 @@ def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
 
 
 COLLECT_ORDER = [
-    ("operator", "collect"),  # Prometheus snapshot
-    ("collect", "vm-resources"),
+    ("operator", "collect"),  # Prometheus snapshot; vm-resources are in-workflow
     ("edge-1", "collect"),
     ("edge-1", "stop"),
     ("collect", "archive"),
@@ -478,9 +478,9 @@ def test_logs_disabled_omits_logging(tmp_path, monkeypatch):
     assert "running.control-plane.edge-1" in targets
     assert _collects(events) == [
         ("operator", "collect"),
-        ("collect", "vm-resources"),
         ("collect", "supervisor"),
     ]
+    built.export_vm_resources(tmp_path, datetime.now(UTC), datetime.now(UTC))
     (export,) = [k for _h, a, k in events if a == "vm-resources"]
     roles = export["nodes"]["edge-1"]
     assert roles.roles == {"nanolab-one-shot-control-plane": "control-plane"}

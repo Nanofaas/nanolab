@@ -16,7 +16,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -531,10 +531,6 @@ def one_shot_platform(
             step_seconds=SCRAPE_SECONDS,
         )
 
-    def vm_resources(values: Members, _inputs: TaskInputs) -> None:
-        started = values.of(prometheus).deployed_at or time.time()
-        export(run_dir, datetime.fromtimestamp(started, UTC), datetime.now(UTC))
-
     # Exports query the operator's Loki, as today's multi-site copy of `logs`.
     export_logs = logs.model_copy(update={"endpoint": loki_url + PUSH_PATH})
 
@@ -670,7 +666,6 @@ def one_shot_platform(
 
     steps: list[tuple[str, Step]] = [
         ("Snapshot the workbench Prometheus", snapshot),
-        ("Export vm-resources", vm_resources),
         *(
             (f"Collect the {key} log collector", collector_step(key))
             for key in collectors

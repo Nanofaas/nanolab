@@ -205,17 +205,11 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
 
     topology.platform = SimpleNamespace(loadgen=generator)
 
-    def sampler(*args, terminal_probe=None):
-        telemetry_actions.append("sampler")
+    def export(run):
+        assert run.run_dir == directory
+        telemetry_actions.append("resources")
 
-        def close():
-            telemetry_actions.append("sampler-close")
-            if terminal_probe is not None:
-                terminal_probe()
-
-        return SimpleNamespace(close=close, require_healthy=lambda: None)
-
-    monkeypatch.setattr("nanolab.tasks.one_shot.capacity.VmTelemetrySession", sampler)
+    monkeypatch.setattr(experiment, "export_run_resources", export)
 
     def close():
         if fault == "generator-cleanup-error":
@@ -411,12 +405,8 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             tmp_path / "preflight-probes.jsonl",
             tmp_path / "clock-probes.jsonl",
         )
-        assert telemetry_actions == [
-            "sampler",
-            "generator",
-            "sampler-close",
-            "terminal-probe",
-        ]
+        # The trial is exported after the load; no terminal clock probe.
+        assert telemetry_actions == ["generator", "resources"]
     else:
         assert "logicalSchedule" not in manifest["parameters"]
     assert manifest["period_seconds"] == measurement_seconds
@@ -446,7 +436,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
         "long-telemetry-off",
     }:
         if fault in {"telemetry", "long-telemetry"}:
-            assert telemetry_actions == ["sampler", "generator", "sampler-close"]
+            assert telemetry_actions == ["generator", "resources"]
         if fault in {"telemetry-off", "long-telemetry-off"}:
             assert telemetry_actions == ["generator"]
         assert all(

@@ -37,7 +37,7 @@ from nanolab.one_shot.profiles import (
 )
 from nanolab.one_shot.returned_errors import classify_response
 from nanolab.one_shot.topology import observe_neighbors
-from nanolab.one_shot.vm_resources import telemetry_policy
+from nanolab.one_shot.vm_resources import summarize_resources, telemetry_policy
 from nanolab.tasks.infra.ansible import workbench_collections_path
 from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import (
@@ -88,6 +88,42 @@ def k6_version() -> str:
         text=True,
         timeout=300,
     ).stdout.strip()
+
+
+def export_run_resources(run, *, coverage_until: datetime | None = None) -> None:
+    """Export the run's vm-resources, then `coverage.json`, as the sampler closed.
+
+    The window starts at the first expected slot (anchor - warmup) and ends
+    now; `coverage_until` bounds the period a partial load is held to.
+    """
+    manifest = json.loads((run.run_dir / "manifest.json").read_text())
+    warmup = manifest["parameters"]["generator"]["warmupSeconds"]
+    anchor = datetime.fromisoformat(manifest["anchor"])
+    run.topology.platform.export_vm_resources(
+        run.run_dir, anchor - timedelta(seconds=warmup), datetime.now(UTC)
+    )
+    period = int(manifest["period_seconds"])
+    if coverage_until is not None:
+        period = max(0, min(period, int((coverage_until - anchor).total_seconds())))
+    coverage = summarize_resources(
+        run.run_dir,
+        anchor=anchor,
+        warmup=warmup,
+        period=period,
+        epochs=len(run.trace.windows),
+        nodes=list(run.topology.resources.nodes),
+        mode=run.mode,
+        functions=list(run.settings.functions),
+        run_id=manifest["run_id"],
+    )
+    coverage["measuredThroughUtc"] = (
+        coverage_until.isoformat() if coverage_until else None
+    )
+    # The sampler's terminal clock probe is gone: scrapes carry UTC time.
+    coverage["cleanupErrors"] = []
+    write_immutable_artifact(
+        run.run_dir / "vm-resources" / "coverage.json", canonical_bytes(coverage)
+    )
 
 
 def read_qualification(settings) -> TimingQualification:
@@ -1615,6 +1651,10 @@ class RunOneShotLoadTask(Task[None]):
 
             attempt(collector.close)
             attempt(process.stop)
+            if manifest.parameters.get("vmTelemetry"):
+                # Where the VM sampler closed: rows and coverage, before
+                # the evidence reads them.
+                attempt(lambda: export_run_resources(run))
             attempt(
                 lambda: append_observation(
                     run.run_dir / "load-status.jsonl",
