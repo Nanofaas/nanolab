@@ -48,6 +48,7 @@ class InstallWorkbench(Task[Path]):
                 "ansible-galaxy",
                 "collection",
                 "install",
+                "--force",
                 "-r",
                 str(bundled_ansible_root() / _REQUIREMENTS),
                 "-p",

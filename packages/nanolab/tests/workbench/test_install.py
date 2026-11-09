@@ -15,7 +15,7 @@ def test_requirements_pin_the_tag():
     data = yaml.safe_load((bundled_ansible_root() / "requirements.yml").read_text())
     (entry,) = data["collections"]
     assert entry["name"] == "git+https://github.com/Nanofaas/nanofaas-workbench.git"
-    assert entry["type"] == "git" or entry["name"].startswith("git+")
+    assert entry["type"] == "git"
     assert entry["version"] == "v0.1.0"
 
 
@@ -63,3 +63,18 @@ def test_install_failure_raises(tmp_path, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="boom"):
         install.InstallWorkbench().run(INPUTS)
+
+
+def test_install_forces_over_a_stale_version(tmp_path, monkeypatch):
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
+    _manifest(tmp_path / ".ansible/collections", "0.0.9")
+    seen = []
+    monkeypatch.setattr(
+        install.subprocess,
+        "run",
+        lambda argv, **k: (
+            seen.append(argv) or subprocess.CompletedProcess(argv, 0, "", "")
+        ),
+    )
+    install.InstallWorkbench().run(INPUTS)
+    assert "--force" in seen[0]

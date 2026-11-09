@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Self
@@ -72,8 +73,6 @@ class HostVars(BaseModel):
 
 def write_host_vars(path: Path, host_vars: HostVars) -> Path:
     """Write `host_vars` as JSON with sorted keys; return `path`."""
-    import json
-
     path.parent.mkdir(parents=True, exist_ok=True)
     document = host_vars.model_dump(mode="json", exclude_none=True)
     path.write_text(json.dumps(document, sort_keys=True, indent=2) + "\n")
