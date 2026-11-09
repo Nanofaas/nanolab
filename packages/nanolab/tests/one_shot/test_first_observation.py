@@ -1190,27 +1190,13 @@ def test_final_inventory_failure_still_renders_offline_report(
     assert result["cause"] == ("final inventory failed" if inventory_fails else None)
 
 
-def test_no_operator_memory_recorder(observer, tmp_path, monkeypatch):
-    """The workbench supervisor watches swap; the quiet precheck stays."""
-    from types import SimpleNamespace
+def test_no_operator_memory_recorder(observer):
+    """The workbench supervisor's swap target replaces the recorder.
 
-    from nanolab.one_shot import operator_memory
-
+    The quiet precheck stays: test_a_swapping_operator_refuses_the_run_before_
+    any_output (Linux) covers the refusal of a swapping operator.
+    """
     assert "OperatorMemoryRecorder" not in Path(observer.__file__).read_text()
-
-    def refuse(*_a, **_k):
-        pytest.fail("the observe script built an OperatorMemoryRecorder")
-
-    monkeypatch.setattr(
-        operator_memory, "OperatorMemoryRecorder", refuse, raising=False
-    )
-    args, _releases = offline_observation(observer, tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        observer.subprocess, "run", lambda *_a, **_k: SimpleNamespace(stdout="{}")
-    )
-    observer.run_observation(args)
-    assert not (args.output / "operator-memory.jsonl").exists()
-    assert (args.output / "operator-memory-preflight.json").exists()
 
 
 @pytest.mark.parametrize(
