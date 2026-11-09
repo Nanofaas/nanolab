@@ -120,21 +120,32 @@ def test_logging_compiles_one_collector_for_every_node(tmp_path, monkeypatch):
     (assets / "loki.yaml").write_text("auth_enabled: false\n")
     monkeypatch.setenv("NANOFAAS_ROOT", str(tmp_path))
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "workspace"))
+    from nanolab.plans import one_shot_calibration
+
+    built = []
+    original = one_shot_calibration.add_one_shot_platforms
+
+    def platforms(*args, **kwargs):
+        built.append(original(*args, **kwargs))
+        return built[-1]
+
+    monkeypatch.setattr(one_shot_calibration, "add_one_shot_platforms", platforms)
     workflow = build_one_shot_calibration_plan(
         config, environment(), run_dir=tmp_path / "run", repo_root=tmp_path
     )
     compiled = workflow.compile()
+    (topology,) = built
+    platform = topology.platform
+    assert platform is not None and platform.loki is not None
+    assert len(platform.collectors) == 3
+    assert all(platform.loki in c.requires for c in platform.collectors.values())
     # Resource dependency closure, rather than constructing unused handles.
-    (platform,) = [
+    acquired = [
         unit.resource
         for unit in compiled.tasks
-        if unit.kind == "acquire"
-        and unit.resource is not None
-        and unit.resource.title == "Acquire the one-shot workbench platform"
+        if unit.kind == "acquire" and unit.resource is not None
     ]
-    members = [m.title for m in getattr(platform.acquire, "members")]  # noqa: B009
-    assert sum(title.startswith("Deploy log-collector-") for title in members) == 3
-    assert "Deploy loki-operator on operator" in members
+    assert platform.resource in acquired
 
 
 def test_multi_function_calibration_qualifies_trace_mixes_before_publication(

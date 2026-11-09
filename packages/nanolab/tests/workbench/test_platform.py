@@ -151,7 +151,13 @@ def _build(
     monkeypatch.setattr(
         platform,
         "_inspect",
-        lambda _host, name: {"container": name, "image": "sha256:i", "cpuset": None},
+        lambda _host, name: {
+            "container": name,
+            "image": "sha256:i",
+            "cpuset": None,
+            "nanoCpus": round(LOGS.cpu * 1e9),
+            "memoryBytes": LOGS.memory_mib * 1024 * 1024,
+        },
     )
 
     def status(_self):
@@ -611,3 +617,17 @@ def test_collector_identity_is_the_running_collector(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="json-file"):
         built.collector_identity("edge-1")
+    monkeypatch.setattr(NodeResource, "command", lambda _self, argv: command(argv))
+    monkeypatch.setattr(
+        platform,
+        "_inspect",
+        lambda _host, name: {"image": "sha256:i", "nanoCpus": 1, "memoryBytes": 1},
+    )
+    with pytest.raises(ValueError, match="budget mismatch"):
+        built.collector_identity("edge-1")
+
+
+def test_a_custom_collector_image_is_refused(tmp_path, monkeypatch):
+    logs = LOGS.model_copy(update={"image": "fluent/fluent-bit:9"})
+    with pytest.raises(ValueError, match=r"logs\.image"):
+        _build(tmp_path, monkeypatch, [], logs=logs)

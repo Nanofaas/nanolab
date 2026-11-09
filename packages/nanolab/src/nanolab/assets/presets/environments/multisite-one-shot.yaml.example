@@ -5,6 +5,8 @@ provider: multipass
 roles:
   stack:
     name: one-shot
+# A site without `tunnel` must accept from the operator, besides each node's
+# 18xxx/19xxx/17xxx/14xxx ports, the exporter ports 19201-19299 and 19301-19399.
 sites:
   spark-35:
     ssh: 149.132.179.35

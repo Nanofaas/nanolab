@@ -24,7 +24,7 @@ import yaml
 from sonata_engine import Members, Resource, TaskInputs, compose
 
 from nanolab.config.environment import OperatorLogging
-from nanolab.config.one_shot import OneShotConfig, operational_limit
+from nanolab.config.one_shot import OneShotConfig, OneShotLogs, operational_limit
 from nanolab.one_shot.addresses import CADVISOR_PORT, NODE_EXPORTER_PORT
 from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
 from nanolab.one_shot.operator_memory import MAX_SWAP_PAGES, MIN_AVAILABLE_BYTES
@@ -97,7 +97,7 @@ def _cpu_list(cpuset: str | None) -> list[int]:
 
 
 def _inspect(host: WorkbenchHost, name: str) -> dict[str, Any]:
-    """`docker inspect` one container: its image and cpuset."""
+    """`docker inspect` one container: image, cpuset and CPU/memory limits."""
     argv = ("docker", "inspect", name)
     if host.node is None:
         out = subprocess.run(
@@ -111,6 +111,8 @@ def _inspect(host: WorkbenchHost, name: str) -> dict[str, Any]:
         "image": inspected["Image"],
         "imageReference": inspected["Config"]["Image"],
         "cpuset": inspected["HostConfig"].get("CpusetCpus") or None,
+        "nanoCpus": inspected["HostConfig"].get("NanoCpus"),
+        "memoryBytes": inspected["HostConfig"].get("Memory"),
     }
 
 
@@ -219,6 +221,11 @@ def one_shot_platform(
         raise ValueError(
             "the one-shot platform runs its own Loki: an external logging "
             "endpoint is not supported, set backendOwned"
+        )
+    if logs.enabled and logs.image != OneShotLogs.model_fields["image"].default:
+        raise ValueError(
+            "logs.image is not configurable: the workbench pins the "
+            "log-collector image by digest"
         )
     bootstraps = bootstraps or {}
     run_id = run_dir.name
@@ -517,8 +524,13 @@ def one_shot_platform(
             raise ValueError(
                 "managed function collection requires Docker json-file driver"
             )
-        image = _inspect(nodes[key], f"wb-log-collector-{key}")["image"]
-        return {"image": image, **collector_budget()}
+        inspected = _inspect(nodes[key], f"wb-log-collector-{key}")
+        if (
+            inspected["nanoCpus"] != round(logs.cpu * 1e9)
+            or inspected["memoryBytes"] != logs.memory_mib * 1024 * 1024
+        ):
+            raise ValueError("collector resource budget mismatch")
+        return {"image": inspected["image"], **collector_budget()}
 
     def collector_step(key: str) -> Step:
         resource, instance = collectors[key]

@@ -46,3 +46,11 @@ def test_provision_base_installs_the_project_jdk() -> None:
     )
 
     assert "openjdk-25-jdk-headless" in base
+
+
+def test_provision_base_installs_requests_for_the_workbench() -> None:
+    base = (bundled_ansible_root() / "playbooks" / "provision-base.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "python3-requests" in base

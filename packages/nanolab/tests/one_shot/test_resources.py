@@ -237,6 +237,118 @@ def test_platform_builder_puts_logging_on_the_workbench_platform(tmp_path, monke
     assert not supervisor.checks  # constructing/compiling never acquires services
 
 
+def test_site_nodes_are_scraped_through_their_published_exporters(
+    tmp_path, monkeypatch
+):
+    """Site exporters are scraped at published ports; collectors use routes."""
+    from dataclasses import replace
+
+    from nanolab.config.environment import MultipassSite, OperatorLogging
+    from nanolab.config.scenario import ScenarioConfig
+    from nanolab.one_shot.sites import SiteHost
+    from nanolab.plans import one_shot_common
+
+    settings = config().model_dump(by_alias=True)
+    settings["functions"] = {"one-shot-workload-rust": {"input": {}}}
+    settings["observability"] = {
+        "logs": {
+            "enabled": True,
+            "backendOwned": True,
+            "backendBind": "192.168.64.1",
+            "endpoint": "http://192.168.64.1:3100/loki/api/v1/push",
+        }
+    }
+    scenario = ScenarioConfig.model_validate(
+        {
+            "workflow": "one-shot-calibration",
+            "backend": "container",
+            "functions": ["one-shot-workload-rust"],
+            "oneShot": settings,
+        }
+    )
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
+    ).model_copy(
+        update={
+            "operator_logging": OperatorLogging.model_validate(
+                {"lokiBinary": "/x", "lokiSha256": "0" * 64, "cpus": [5]}
+            )
+        }
+    )
+    site = SiteHost(
+        MultipassSite.model_validate(
+            {
+                "ssh": "spark",
+                "address": "149.132.179.35",
+                "vmSshKey": "~/.ssh/k",
+                "architecture": "arm64",
+            }
+        ),
+        "spark",
+    )
+    real_resources = one_shot_common.build_one_shot_resources
+
+    def on_a_site(*args, **kwargs):
+        built = real_resources(*args, **kwargs)
+        nodes = {
+            key: replace(node, site_host=site, ordinal=index)
+            for index, (key, node) in enumerate(built.nodes.items(), start=1)
+        }
+        return replace(built, nodes=nodes)
+
+    routes = {}
+
+    def log_routes(resources, *_args, **_kwargs):
+        for key in resources.nodes:
+            routes[key] = resource_of(
+                f"route {key}", lambda _i: "", lambda _i, _v: None
+            )
+        return routes
+
+    seen = {}
+    real_platform = one_shot_common.one_shot_platform
+
+    def platform(*args, **kwargs):
+        seen.update(kwargs)
+        return real_platform(*args, **kwargs)
+
+    monkeypatch.setattr(one_shot_common, "build_one_shot_resources", on_a_site)
+    monkeypatch.setattr(one_shot_common, "log_routes", log_routes)
+    monkeypatch.setattr(one_shot_common, "one_shot_platform", platform)
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "workspace"))
+    (tmp_path / "functions/rust/one-shot-workload").mkdir(parents=True)
+    assets = tmp_path / "deploy/observability"
+    assets.mkdir(parents=True)
+    for name in ("fluent-bit.conf", "parsers.conf"):
+        (assets / name).write_text("# fixture\n")
+    (assets / "loki.yaml").write_text("auth_enabled: false\n")
+    topology = one_shot_common.add_one_shot_platforms(
+        Workflow("site-forwards"),
+        scenario,
+        environment,
+        run_dir=tmp_path / "run",
+        repo_root=tmp_path,
+    )
+    assert seen["forwards"] == {
+        "edge-0": {
+            "node-exporter": "149.132.179.35:19201",
+            "cadvisor": "149.132.179.35:19301",
+        },
+        "edge-1": {
+            "node-exporter": "149.132.179.35:19202",
+            "cadvisor": "149.132.179.35:19302",
+        },
+        "cloud": {
+            "node-exporter": "149.132.179.35:19203",
+            "cadvisor": "149.132.179.35:19303",
+        },
+    }
+    assert seen["log_endpoints"] is routes
+    assert seen["operator_logging"] is environment.operator_logging
+    for key, route in routes.items():
+        assert route in topology.collectors[key].requires
+
+
 def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
     from types import SimpleNamespace
 

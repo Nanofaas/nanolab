@@ -69,6 +69,8 @@
           - docker-buildx
           - skopeo
           - socat
+          # community.docker's API client (the workbench's container form).
+          - python3-requests
         state: present
         update_cache: true
         cache_valid_time: 3600
