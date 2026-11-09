@@ -103,24 +103,68 @@ def _identity(labels: dict[str, str], roles: NodeRoles) -> dict[str, Any]:
     }
 
 
+# cAdvisor series per container field; True marks a counter read as its rate.
+_CONTAINER_SERIES = {
+    "cpuUsedCores": ("container_cpu_usage_seconds_total", True),
+    "memoryCurrentBytes": ("container_memory_usage_bytes", False),
+    "throttledSeconds": ("container_cpu_cfs_throttled_seconds_total", True),
+    "periods": ("container_cpu_cfs_periods_total", True),
+    "throttledPeriods": ("container_cpu_cfs_throttled_periods_total", True),
+    "quota": ("container_spec_cpu_quota", False),
+    "period": ("container_spec_cpu_period", False),
+    "start": ("container_start_time_seconds", False),
+}
+
+
 def _containers(
-    cpu: list[tuple[float, dict[str, str]]],
-    memory: list[tuple[float, dict[str, str]]],
+    series: Mapping[str, list[tuple[float, dict[str, str]]]],
     roles: NodeRoles,
+    *,
+    vcpus: int | None,
+    step: int,
 ) -> dict[str, dict[str, Any]]:
-    found: dict[str, dict[str, Any]] = {}
-    for samples, field in ((cpu, "cpuUsedCores"), (memory, "memoryCurrentBytes")):
+    """Build the sampler's container entries at one step point, keyed by id."""
+    raw: dict[str, dict[str, float]] = defaultdict(dict)
+    identities: dict[str, dict[str, Any]] = {}
+    for field, samples in series.items():
         for value, labels in samples:
             identity = _identity(labels, roles)
-            entry = found.setdefault(
-                identity["containerId"],
-                {**identity, "cpuUsedCores": None, "memoryCurrentBytes": None},
-            )
-            # cAdvisor may split usage per cpu; the container's cores are the sum.
-            entry[field] = (entry[field] or 0) + (
-                value if field == "cpuUsedCores" else int(value)
-            )
-    return dict(sorted(found.items()))
+            key = identity["containerId"]
+            identities[key] = identity
+            # cAdvisor may split usage per cpu; the container's value is the sum.
+            raw[key][field] = raw[key].get(field, 0.0) + value
+    found = {}
+    for key in sorted(identities):
+        values = raw[key]
+        cores = values.get("cpuUsedCores")
+        quota = (
+            values["quota"] / values["period"]
+            if values.get("quota", 0) > 0 and values.get("period")
+            else None
+        )
+
+        def delta(field: str, scale: float = 1, values=values) -> int | None:
+            # The sampler's deltas cover one sample interval: rate x period.
+            value = values.get(field)
+            return None if value is None else round(value * step * scale)
+
+        memory = values.get("memoryCurrentBytes")
+        start = values.get("start")
+        found[key] = {
+            **identities[key],
+            # The start time tells a restarted container from its predecessor,
+            # as the sampler's PID:start-ticks did.
+            "incarnation": None if start is None else repr(start),
+            "cpuUsedCores": cores,
+            "cpuVmFraction": cores / vcpus if cores is not None and vcpus else None,
+            "cpuQuotaCores": quota,
+            "cpuQuotaFraction": cores / quota if cores is not None and quota else None,
+            "memoryCurrentBytes": None if memory is None else int(memory),
+            "periodsDelta": delta("periods"),
+            "throttledPeriodsDelta": delta("throttledPeriods"),
+            "throttledUsecDelta": delta("throttledSeconds", 1e6),
+        }
+    return found
 
 
 def _images() -> dict[str, str]:
@@ -153,7 +197,6 @@ def export_vm_resources(
     window = f"[{2 * step_seconds}s]"
     for node, roles in nodes.items():
         where = f'node="{node}"'
-        containers = f'{{{where},name!=""}}'
 
         def points(query: str) -> dict[str, list[tuple[float, dict[str, str]]]]:
             return _points(prometheus_url, query, start, end, step_seconds)
@@ -165,13 +208,30 @@ def export_vm_resources(
             f'{{__name__=~"node_memory_({"|".join(_MEMORY)})_bytes",{where}}}'
         )
         cpu = points(f"irate(node_cpu_seconds_total{{{where}}}{window})")
-        container_cpu = points(
-            f"irate(container_cpu_usage_seconds_total{containers}{window})"
-        )
-        container_memory = points(f"container_memory_usage_bytes{containers}")
-        lines = []
+        containers = {
+            field: points(
+                f'irate({metric}{{{where},name!=""}}{window})'
+                if rate
+                else f'{metric}{{{where},name!=""}}'
+            )
+            for field, (metric, rate) in _CONTAINER_SERIES.items()
+        }
+        # Containers the role map names are expected for the whole window, so
+        # one that drops out shows as a missing container sample.
+        expected = {
+            _identity(labels, roles)["containerId"]
+            for by_step in containers.values()
+            for samples in by_step.values()
+            for _value, labels in samples
+            if labels["name"] in roles.roles
+        }
+        rows = []
+        previous = None
         for step in sorted(scrapes):
             ((scraped, _labels),) = scrapes[step]
+            if scraped == previous:
+                continue  # two step points read the same scrape
+            previous = scraped
             row: dict[str, Any] = {
                 "schemaVersion": 1,
                 "timestampUtc": datetime.fromtimestamp(scraped, UTC).isoformat(),
@@ -181,19 +241,16 @@ def export_vm_resources(
                 **_cpu(cpu.get(step, [])),
             }
             found = _containers(
-                container_cpu.get(step, []), container_memory.get(step, []), roles
+                {field: by_step.get(step, []) for field, by_step in containers.items()},
+                roles,
+                vcpus=row.get("vcpuCount"),
+                step=step_seconds,
             )
-            vcpus = row.get("vcpuCount")
-            for entry in found.values():
-                cores = entry["cpuUsedCores"]
-                entry["cpuVmFraction"] = (
-                    cores / vcpus if cores is not None and vcpus else None
-                )
-            identity = ("containerId", "containerName", "role", "function", "replica")
+            keys = ("containerId", "containerName", "role", "function", "replica")
             row["containerInventory"] = [
-                {key: entry[key] for key in identity} for entry in found.values()
+                {key: entry[key] for key in keys} for entry in found.values()
             ]
-            row["expectedContainerIds"] = list(found)
+            row["expectedContainerIds"] = sorted(expected | found.keys())
             row["containers"] = list(found.values())
             observers = [
                 entry
@@ -213,8 +270,9 @@ def export_vm_resources(
             row["sampler"] = {"cpuUsedCores": sum(cores) if cores else None}
             if sizes:
                 row["sampler"]["memoryRssPeakBytes"] = sum(sizes)
-            lines.append(canonical_bytes(row) + b"\n")
-        write_immutable_artifact(directory / f"{node}.jsonl", b"".join(lines))
+            rows.append(canonical_bytes(row) + b"\n")
+        # A node Prometheus never scraped gets an empty file: every slot is missing.
+        write_immutable_artifact(directory / f"{node}.jsonl", b"".join(rows))
     policy = {
         key: value
         for key, value in telemetry_policy().items()

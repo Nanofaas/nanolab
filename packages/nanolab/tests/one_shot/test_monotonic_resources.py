@@ -5,7 +5,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from nanolab.one_shot.vm_resources import correlate_sample, summarize_resources
+from nanolab.one_shot.vm_resources import summarize_resources
+from nanolab.one_shot.vm_sampler import correlate_sample
 
 
 def probe(host, guest):

@@ -19,6 +19,7 @@ from nanolab.one_shot.vm_resources import (
     correlate_sample,
     read_samples,
     resource_clock_context,
+    resource_policy,
 )
 from nanolab.tasks.one_shot.conservation import RunEvidence
 from nanolab.tasks.one_shot.statistics import quantile
@@ -705,6 +706,8 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
     time_axis = (
         "Host monotonic time projected on frozen UTC anchor" if clock_context else "UTC"
     )
+    # A gap is a sample later than one and a half sampling periods.
+    gap = 1.5 * resource_policy(directory).get("periodSeconds", 1)
     for node in manifest.nodes:
         rows, _malformed = read_samples(directory / "vm-resources" / (node + ".jsonl"))
         # Insert missing timeline seconds explicitly: Plotly must not connect a gap.
@@ -745,7 +748,7 @@ def resource_figures(directory: Path, manifest: CampaignManifest) -> list[str]:
             if (
                 previous is not None
                 and timestamp is not None
-                and (timestamp - previous).total_seconds() > 1.5
+                and (timestamp - previous).total_seconds() > gap
             ):
                 timed.append({"plotTimestampUtc": row["plotTimestampUtc"]})
             timed.append(row)

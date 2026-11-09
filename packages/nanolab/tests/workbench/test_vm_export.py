@@ -1,8 +1,10 @@
 """vm-resources rows rebuilt from the workbench Prometheus (stub HTTP server)."""
 
 import json
+import re
 import threading
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,14 +35,55 @@ FUNCTION_LABELS = {
     "container_label_io_nanofaas_function": "ns/work",
     "container_label_io_nanofaas_replica": "1",
 }
+CONTROL = {
+    "container_cpu_usage_seconds_total": 0.25,
+    "container_memory_usage_bytes": 300,
+    "container_cpu_cfs_throttled_seconds_total": 0.002,  # 2 ms throttled per s
+    "container_cpu_cfs_periods_total": 10,
+    "container_cpu_cfs_throttled_periods_total": 2,
+    "container_spec_cpu_quota": 50000,
+    "container_spec_cpu_period": 100000,
+    "container_start_time_seconds": 1762646400.5,
+}
 CONTAINERS = [
-    # (cgroup id, name, extra labels, cpu cores, memory bytes)
-    ("/system.slice/docker-aaa.scope", "nanolab-one-shot-control-plane", {}, 0.5, 300),
-    ("/system.slice/docker-bbb.scope", "fn-work-1", FUNCTION_LABELS, 0.25, 64),
-    ("/system.slice/docker-ccc.scope", f"wb-node-exporter-{NODE}", {}, 0.01, 10),
-    ("/system.slice/docker-ddd.scope", f"wb-cadvisor-{NODE}", {}, 0.02, 20),
-    ("/system.slice/docker-eee.scope", "someone-else", {}, 0.0, 1),
+    # (cgroup id, name, extra labels, metric -> value)
+    ("/system.slice/docker-aaa.scope", "nanolab-one-shot-control-plane", {}, CONTROL),
+    (
+        "/system.slice/docker-bbb.scope",
+        "fn-work-1",
+        FUNCTION_LABELS,
+        {"container_cpu_usage_seconds_total": 0.25, "container_memory_usage_bytes": 64},
+    ),
+    (
+        "/system.slice/docker-ccc.scope",
+        f"wb-node-exporter-{NODE}",
+        {},
+        {"container_cpu_usage_seconds_total": 0.01, "container_memory_usage_bytes": 10},
+    ),
+    (
+        "/system.slice/docker-ddd.scope",
+        f"wb-cadvisor-{NODE}",
+        {},
+        {"container_cpu_usage_seconds_total": 0.02, "container_memory_usage_bytes": 20},
+    ),
+    (
+        "/system.slice/docker-eee.scope",
+        "someone-else",
+        {},
+        {"container_cpu_usage_seconds_total": 0.0, "container_memory_usage_bytes": 1},
+    ),
 ]
+
+
+@dataclass
+class Stub:
+    """What the stub Prometheus saw; tests change it before exporting."""
+
+    scraped: list[int] = field(default_factory=lambda: list(STEPS))
+    # step point -> step point whose scrape it re-reads (a scrape read twice)
+    reread: dict[int, int] = field(default_factory=dict)
+    # container name -> step points where cAdvisor no longer reported it
+    dropped: dict[str, set[int]] = field(default_factory=dict)
 
 
 def _series(labels: dict, value: Callable[[int], float], steps: list[int]) -> dict:
@@ -52,13 +95,13 @@ def _series(labels: dict, value: Callable[[int], float], steps: list[int]) -> di
     }
 
 
-def canned(query: str, *, scraped: list[int]) -> list[dict]:
-    """Answer as a Prometheus that scraped NODE at the `scraped` step points."""
+def canned(query: str, stub: Stub) -> list[dict]:
+    """Answer as a Prometheus that scraped NODE as `stub` describes."""
     if f'node="{NODE}"' not in query:
         return []
     if query.startswith("timestamp("):
-        scrape = (ANCHOR - timedelta(seconds=SCRAPE_LAG)).timestamp()
-        return [_series({}, lambda s: scrape + s, scraped)]
+        lag = (ANCHOR - timedelta(seconds=SCRAPE_LAG)).timestamp()
+        return [_series({}, lambda s: lag + stub.reread.get(s, s), stub.scraped)]
     if "node_memory" in query:
         memory = {"MemTotal": 1000, "MemAvailable": 400, "SwapTotal": 100}
         memory["SwapFree"] = 70
@@ -72,20 +115,21 @@ def canned(query: str, *, scraped: list[int]) -> list[dict]:
             for cpu in range(4)
             for mode, rate in [("idle", 0.75), ("user", 0.25)]
         ]
-    column = 3 if "container_cpu" in query else 4
     return [
         _series(
-            {"id": item[0], "name": item[1], **item[2]},
-            lambda _s, v=item[column]: v,
-            STEPS,
+            {"id": cgroup, "name": name, **labels},
+            lambda _s, v=value: v,
+            [s for s in STEPS if s not in stub.dropped.get(name, set())],
         )
-        for item in CONTAINERS
+        for cgroup, name, labels, metrics in CONTAINERS
+        for metric, value in metrics.items()
+        if metric + "{" in query
     ]
 
 
 @pytest.fixture
-def prometheus() -> Iterator[Callable[[list[int]], str]]:
-    scraped = list(STEPS)
+def prometheus() -> Iterator[Callable[[Stub], str]]:
+    current = Stub()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -98,7 +142,7 @@ def prometheus() -> Iterator[Callable[[list[int]], str]]:
                     "status": "success",
                     "data": {
                         "resultType": "matrix",
-                        "result": canned(params["query"][0], scraped=scraped),
+                        "result": canned(params["query"][0], current),
                     },
                 }
             ).encode()
@@ -113,8 +157,9 @@ def prometheus() -> Iterator[Callable[[list[int]], str]]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    def start(steps: list[int]) -> str:
-        scraped[:] = steps
+    def start(stub: Stub) -> str:
+        nonlocal current
+        current = stub
         return f"http://127.0.0.1:{server.server_address[1]}"
 
     yield start
@@ -132,11 +177,11 @@ def collection(tmp_path, monkeypatch):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(workspace))
 
 
-def export(url: str, run_dir: Path) -> list[dict]:
+def export(url: str, run_dir: Path, **extra: NodeRoles) -> list[dict]:
     export_vm_resources(
         url,
         run_dir,
-        nodes={NODE: ROLES},
+        nodes={NODE: ROLES, **extra},
         start=ANCHOR - timedelta(seconds=10),
         end=ANCHOR + timedelta(seconds=10),
         step_seconds=5,
@@ -162,7 +207,7 @@ def summarize(run_dir: Path) -> dict:
 
 @pytest.mark.usefixtures("collection")
 def test_rows_have_the_summary_fields(prometheus, tmp_path):
-    rows = export(prometheus(STEPS), tmp_path)
+    rows = export(prometheus(Stub()), tmp_path)
     assert len(rows) == len(STEPS)
     row = rows[0]
     assert row["node"] == NODE
@@ -185,10 +230,26 @@ def test_rows_have_the_summary_fields(prometheus, tmp_path):
         "ddd",
         "eee",
     ]
-    control = row["containers"][0]
-    assert control["cpuUsedCores"] == 0.5
-    assert control["cpuVmFraction"] == 0.125
-    assert control["memoryCurrentBytes"] == 300
+    control, function = row["containers"][:2]
+    # The sampler's units: cores, fractions, per-sample deltas over one period.
+    assert control == {
+        "containerId": "aaa",
+        "containerName": "nanolab-one-shot-control-plane",
+        "role": "control-plane",
+        "function": None,
+        "replica": None,
+        "incarnation": "1762646400.5",
+        "cpuUsedCores": 0.25,
+        "cpuVmFraction": 0.0625,
+        "cpuQuotaCores": 0.5,
+        "cpuQuotaFraction": 0.5,
+        "memoryCurrentBytes": 300,
+        "periodsDelta": 50,
+        "throttledPeriodsDelta": 10,
+        "throttledUsecDelta": 10000,
+    }
+    assert function["cpuQuotaCores"] is None and function["cpuQuotaFraction"] is None
+    assert function["incarnation"] is None and function["throttledUsecDelta"] is None
     assert row["sampler"]["cpuUsedCores"] == pytest.approx(0.03)
     assert row["sampler"]["memoryRssPeakBytes"] == 30
     policy = json.loads((tmp_path / "vm-resources/policy.json").read_text())
@@ -204,7 +265,7 @@ def test_rows_have_the_summary_fields(prometheus, tmp_path):
 
 @pytest.mark.usefixtures("collection")
 def test_cpu_fractions_from_modes(prometheus, tmp_path):
-    row = export(prometheus(STEPS), tmp_path)[0]
+    row = export(prometheus(Stub()), tmp_path)[0]
     assert row["vcpuCount"] == 4
     assert row["cpuUtilization"] == 0.25
     assert row["cpuUsedCores"] == 1.0
@@ -214,7 +275,7 @@ def test_cpu_fractions_from_modes(prometheus, tmp_path):
 
 @pytest.mark.usefixtures("collection")
 def test_container_roles_mapped(prometheus, tmp_path):
-    row = export(prometheus(STEPS), tmp_path)[0]
+    row = export(prometheus(Stub()), tmp_path)[0]
     identities = [
         (c["containerName"], c["role"], c["function"], c["replica"])
         for c in row["containers"]
@@ -230,7 +291,7 @@ def test_container_roles_mapped(prometheus, tmp_path):
 
 @pytest.mark.usefixtures("collection")
 def test_scrape_gap_is_missing_slots(prometheus, tmp_path):
-    rows = export(prometheus([s for s in STEPS if s != 0]), tmp_path)
+    rows = export(prometheus(Stub(scraped=[s for s in STEPS if s != 0])), tmp_path)
     assert len(rows) == len(STEPS) - 1
     node = summarize(tmp_path)["nodes"][NODE]
     assert node["missingSeconds"] == [-5]
@@ -239,10 +300,78 @@ def test_scrape_gap_is_missing_slots(prometheus, tmp_path):
 
 @pytest.mark.usefixtures("collection")
 def test_summary_complete_at_five_second_policy(prometheus, tmp_path):
-    export(prometheus(STEPS), tmp_path)
+    export(prometheus(Stub()), tmp_path)
     result = summarize(tmp_path)
     node = result["nodes"][NODE]
     assert result["complete"], node
     assert node["expectedSamples"] == 4
     assert node["observedSeconds"] == 4
     assert node["observedRoles"] == ["control-plane", "function", "other"]
+
+
+@pytest.mark.usefixtures("collection")
+def test_dropped_mapped_container_is_a_missing_sample(prometheus, tmp_path):
+    stub = Stub(dropped={"nanolab-one-shot-control-plane": {5}, "fn-work-1": {5}})
+    rows = export(prometheus(stub), tmp_path)
+    # Only containers the role map names stay expected once they disappear.
+    assert rows[3]["expectedContainerIds"] == ["aaa", "ccc", "ddd", "eee"]
+    assert "aaa" not in [c["containerId"] for c in rows[3]["containers"]]
+    node = summarize(tmp_path)["nodes"][NODE]
+    assert node["missingContainerSamples"] == [{"second": 0, "containerIds": ["aaa"]}]
+
+
+@pytest.mark.usefixtures("collection")
+def test_scrape_read_twice_is_one_row(prometheus, tmp_path):
+    rows = export(prometheus(Stub(reread={0: -5})), tmp_path)
+    stamps = [row["timestampUtc"] for row in rows]
+    assert len(rows) == len(STEPS) - 1 and len(set(stamps)) == len(stamps)
+
+
+@pytest.mark.usefixtures("collection")
+def test_node_absent_from_prometheus_is_an_empty_file(prometheus, tmp_path):
+    export(prometheus(Stub()), tmp_path, ghost=NodeRoles(roles={}))
+    assert (tmp_path / "vm-resources/ghost.jsonl").read_bytes() == b""
+    result = summarize_resources(
+        tmp_path,
+        anchor=ANCHOR,
+        warmup=10,
+        period=10,
+        epochs=1,
+        nodes=["ghost"],
+        mode="ewma",
+        functions=["work"],
+        run_id="r",
+    )
+    assert result["nodes"]["ghost"]["missingSeconds"] == [-10, -5, 0, 5]
+
+
+@pytest.mark.usefixtures("collection")
+def test_v2_schedule_run_correlates_on_scrape_utc_and_charts_continuously(
+    prometheus, tmp_path
+):
+    from nanolab.one_shot.report import resource_figures
+    from tests.one_shot.test_report import manifest
+
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "parameters": {
+                    "logicalSchedule": {
+                        "protocolVersion": 2,
+                        "anchorMonotonicSeconds": 1000.0,
+                    }
+                }
+            }
+        )
+    )
+    rows = export(prometheus(Stub()), tmp_path)
+    result = summarize(tmp_path)
+    assert result["complete"], result["nodes"][NODE]
+    charts = resource_figures(
+        tmp_path,
+        manifest().model_copy(update={"anchor": ANCHOR.isoformat(), "nodes": [NODE]}),
+    )
+    cpu = re.search(r'"x":\[(.*?)\]', charts[0])
+    assert cpu is not None
+    # Every scrape is a point, and 5 s apart is no gap: no null breaks the line.
+    assert json.loads("[" + cpu.group(1) + "]") == [r["timestampUtc"] for r in rows]

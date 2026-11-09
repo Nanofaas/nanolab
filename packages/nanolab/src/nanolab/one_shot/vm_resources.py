@@ -44,123 +44,7 @@ def telemetry_policy() -> dict:
     }
 
 
-def correlate_sample(
-    sample: dict,
-    *,
-    anchor: datetime,
-    warmup: int,
-    period: int,
-    epochs: int,
-    mode: str,
-    functions: list[str],
-    run_id: str,
-    host_anchor_monotonic: float | None = None,
-    clock_probes: list[dict] | None = None,
-) -> dict:
-    """Use bracketing monotonic clocks for v2, preserving ambiguous boundaries."""
-    timestamp = datetime.fromisoformat(sample["timestampUtc"])
-    if timestamp.tzinfo is None or anchor.tzinfo is None:
-        raise ValueError("resource timestamps must have UTC timezone")
-    row = {**sample, "runId": run_id, "mode": mode, "functions": functions}
-    if host_anchor_monotonic is not None:
-        monotonic = sample.get("monotonicSeconds")
-        boot = sample.get("bootId")
-        probes = [
-            probe
-            for probe in clock_probes or []
-            if probe.get("node") == sample.get("node")
-            and probe.get("remoteBootId") == boot
-            and boot
-            and probe.get("errorType") is None
-            and all(
-                isinstance(probe.get(key), (int, float))
-                and not isinstance(probe[key], bool)
-                and math.isfinite(probe[key])
-                for key in (
-                    "remoteMonotonicSeconds",
-                    "beforeMonotonicSeconds",
-                    "afterMonotonicSeconds",
-                )
-            )
-            and probe["beforeMonotonicSeconds"] <= probe["afterMonotonicSeconds"]
-        ]
-        if not isinstance(monotonic, (int, float)) or not math.isfinite(monotonic):
-            probes = []
-        previous = [p for p in probes if p["remoteMonotonicSeconds"] <= monotonic]
-        following = [p for p in probes if p["remoteMonotonicSeconds"] >= monotonic]
-        if not previous or not following:
-            return {
-                **row,
-                "phase": "uncorrelated",
-                "epoch": None,
-                "timeFromAnchorSeconds": None,
-                "epochCandidates": [],
-                "correlationMethod": "host-guest-monotonic-brackets",
-                "correlationError": "missing bracketing probes or boot identity",
-            }
-        before = max(previous, key=lambda p: p["remoteMonotonicSeconds"])
-        after = min(following, key=lambda p: p["remoteMonotonicSeconds"])
-        lower = before["beforeMonotonicSeconds"] - host_anchor_monotonic
-        upper = after["afterMonotonicSeconds"] - host_anchor_monotonic
-        if lower > upper:
-            raise ValueError("inconsistent host/guest monotonic ordering")
-        before_mid = (
-            before["beforeMonotonicSeconds"] + before["afterMonotonicSeconds"]
-        ) / 2
-        after_mid = (
-            after["beforeMonotonicSeconds"] + after["afterMonotonicSeconds"]
-        ) / 2
-        span = after["remoteMonotonicSeconds"] - before["remoteMonotonicSeconds"]
-        fraction = (monotonic - before["remoteMonotonicSeconds"]) / span if span else 0
-        offset = (
-            before_mid + fraction * (after_mid - before_mid) - host_anchor_monotonic
-        )
-        candidates = {
-            resource_phase(lower, warmup, period, epochs),
-            resource_phase(upper, warmup, period, epochs),
-        }
-        for boundary in [
-            -warmup,
-            *(range(0, period * epochs + 1, period) if period else [0]),
-        ]:
-            if lower <= boundary <= upper:
-                candidates.add(resource_phase(boundary, warmup, period, epochs))
-        phase, epoch = resource_phase(offset, warmup, period, epochs)
-        if len(candidates) > 1:
-            phase, epoch = "ambiguous", None
-        return {
-            **row,
-            "phase": phase,
-            "epoch": epoch,
-            "timeFromAnchorSeconds": offset,
-            "correlationBoundsSeconds": [lower, upper],
-            "epochCandidates": sorted({e for _, e in candidates if e is not None}),
-            "phaseCandidates": sorted({p for p, _ in candidates}),
-            "correlationMethod": "host-guest-monotonic-brackets",
-        }
-    offset = (timestamp - anchor).total_seconds()
-    phase, epoch = resource_phase(offset, warmup, period, epochs)
-    return {
-        **row,
-        "phase": phase,
-        "epoch": epoch,
-        "timeFromAnchorSeconds": offset,
-        "correlationMethod": "legacy-utc",
-    }
-
-
-def resource_phase(
-    offset: float, warmup: int, period: int, epochs: int
-) -> tuple[str, int | None]:
-    """Classify one point on the frozen experiment timeline."""
-    phase, epoch = ("before", None)
-    if -warmup <= offset < 0:
-        phase, epoch = "warmup", -1
-    elif 0 <= offset < period * epochs:
-        phase, epoch = "measurement", int(offset // period)
-    elif offset >= period * epochs:
-        phase = "after"
-    return phase, epoch
+correlate_sample = vm_sampler.correlate_sample
 
 
 def resource_clock_grid(run_dir: Path) -> dict | None:
@@ -191,10 +75,20 @@ def resource_probe_paths(run_dir: Path) -> tuple[Path, Path]:
     return probe_dir / "preflight-probes.jsonl", probe_dir / "clock-probes.jsonl"
 
 
+def resource_policy(run_dir: Path) -> dict:
+    """Return the run's frozen telemetry policy, or today's for runs without one."""
+    path = run_dir / "vm-resources" / "policy.json"
+    return json.loads(path.read_text()) if path.exists() else telemetry_policy()
+
+
 def resource_clock_context(run_dir: Path) -> dict:
     """Read original successful and failed probes without repairing raw files."""
     grid = resource_clock_grid(run_dir)
-    if grid is None:
+    # Prometheus rows carry scrape UTC and no guest monotonic clock: brackets
+    # cannot place them, so they correlate on UTC like the legacy path.
+    if grid is None or resource_policy(run_dir).get("phaseCorrelation") == (
+        "prometheus-scrape-utc"
+    ):
         return {}
     return {
         "host_anchor_monotonic": grid["anchorMonotonicSeconds"],
@@ -234,12 +128,7 @@ def summarize_resources(
     run_id: str,
 ) -> dict:
     """Count every expected slot of the policy's period, including absent nodes."""
-    policy_path = run_dir / "vm-resources" / "policy.json"
-    policy = (
-        json.loads(policy_path.read_text())
-        if policy_path.exists()
-        else telemetry_policy()
-    )
+    policy = resource_policy(run_dir)
     result: dict[str, Any] = {
         "policy": policy,
         "complete": True,
