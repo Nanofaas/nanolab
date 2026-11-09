@@ -168,3 +168,26 @@ def test_config_from_inputs_is_deployed_and_recorded(tmp_path, monkeypatch):
     assert value.config == {"jobs": "coll"}
     release_now(resource, TaskInputs._for_resource_values({}, ()), value)
     assert saved == [{"port": 9090, "jobs": "coll"}] * 2
+
+
+@pytest.mark.parametrize("undeploy_fails", [False, True])
+def test_a_failed_deploy_undeploys_best_effort(tmp_path, monkeypatch, undeploy_fails):
+    from nanolab.tasks.resource_tasks import acquire_now
+
+    events: list[str] = []
+    monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
+
+    def bootstrap(_provider, operations, *, role):
+        del role
+        action = operations[0].operation_id
+        events.append(action)
+        if action == "workbench.deploy" or undeploy_fails:
+            raise RuntimeError(f"{action} failed")
+
+    monkeypatch.setattr(playbook, "run_bootstrap_operations", bootstrap)
+    inputs = TaskInputs({id(INSTALLED): Path("/coll")}, {id(INSTALLED)})
+    with pytest.raises(RuntimeError, match=r"workbench\.deploy failed") as caught:
+        acquire_now(_resource(tmp_path), inputs)
+    assert events == ["workbench.deploy", "workbench.undeploy"]
+    notes = getattr(caught.value, "__notes__", [])
+    assert any("undeploy" in note for note in notes) is undeploy_fails

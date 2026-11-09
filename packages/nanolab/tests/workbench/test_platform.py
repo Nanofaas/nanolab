@@ -240,7 +240,8 @@ def test_failed_platform_acquire_undeploys_earlier_members(tmp_path, monkeypatch
     with pytest.raises(Exception, match="deploy failed"):
         _run(built, events)
     assert _of(events, "deploy") == DEPLOY_ORDER[:10]  # the last one failed
-    assert _of(events, "undeploy") == DEPLOY_ORDER[:9][::-1]
+    # The failed member cleans itself up first, then the others in reverse.
+    assert _of(events, "undeploy") == DEPLOY_ORDER[:10][::-1]
     assert ("consume", "", ()) not in events
 
 

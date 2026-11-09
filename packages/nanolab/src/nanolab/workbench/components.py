@@ -100,17 +100,27 @@ class _Deploy(Task[Deployed]):
         resolved = (
             None if self.config_from_inputs is None else self.config_from_inputs(inputs)
         )
-        _playbook(
-            self.title,
-            self.host,
-            "deploy",
-            (_with_config(self.instance, resolved),),
-            self.vars_dir,
+        instance = _with_config(self.instance, resolved)
+        collections = (
             ensure_installed()
             if self.installed is None
-            else inputs.resource(self.installed),
-            vm,
-        ).run(inputs)
+            else inputs.resource(self.installed)
+        )
+
+        def run(action: Action, title: str) -> None:
+            _playbook(
+                title, self.host, action, (instance,), self.vars_dir, collections, vm
+            ).run(inputs)
+
+        try:
+            run("deploy", self.title)
+        except BaseException as error:
+            # A failed acquire is never released: leave nothing half deployed.
+            try:
+                run("undeploy", f"Undeploy {self.instance.name} after a failed deploy")
+            except Exception as cleanup:
+                error.add_note(f"undeploy after the failed deploy: {cleanup}")
+            raise
         return TaskOutcome(
             value=Deployed(
                 self.host.key,
