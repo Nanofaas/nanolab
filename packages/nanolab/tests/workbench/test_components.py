@@ -135,3 +135,36 @@ def test_collect_task_runs_collect(tmp_path, monkeypatch):
     assert events == ["workbench.collect:Collect operator"]
     saved = json.loads((tmp_path / "operator-collect.json").read_text())
     assert saved["collect_dir"] == "/runs/x"
+
+
+def test_config_from_inputs_is_deployed_and_recorded(tmp_path, monkeypatch):
+    """Config resolved at acquire reaches the vars; undeploy reads it back."""
+    _record(monkeypatch, [])
+    saved: list[dict] = []
+    monkeypatch.setattr(
+        playbook,
+        "run_bootstrap_operations",
+        lambda _p, operations, *, role: saved.append(
+            json.loads(
+                (
+                    tmp_path / f"operator-{operations[0].operation_id[10:]}.json"
+                ).read_text()
+            )["instances"][0]["config"]
+        ),
+    )
+    resource = component_resource(
+        HOST,
+        PROM.model_copy(update={"config": {"port": 9090}}),
+        url=None,
+        vars_dir=tmp_path,
+        installed=INSTALLED,
+        config_from_inputs=lambda inputs: {"jobs": inputs.resource(INSTALLED).name},
+    )
+    outcome = resource.acquire.run(
+        TaskInputs._for_resource_values({id(INSTALLED): Path("/coll")}, (INSTALLED,))
+    )
+    value = outcome.value
+    assert value is not None
+    assert value.config == {"jobs": "coll"}
+    release_now(resource, TaskInputs._for_resource_values({}, ()), value)
+    assert saved == [{"port": 9090, "jobs": "coll"}] * 2

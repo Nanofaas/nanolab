@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, override
@@ -24,7 +25,9 @@ class Deployed:
 
     `vm` is the host VM's journal form (None on the nanolab host), so an
     undeploy in a later process needs no live resource. `deployed_at` (epoch
-    seconds) opens the windows the platform's collect steps export.
+    seconds) opens the windows the platform's collect steps export. `config`
+    is the part of the instance's config resolved at deploy, which undeploy
+    reuses.
     """
 
     host: str
@@ -33,6 +36,7 @@ class Deployed:
     url: str | None
     vm: dict[str, Any] | None = None
     deployed_at: float | None = None
+    config: dict[str, Any] | None = None
 
 
 def _playbook(
@@ -59,6 +63,12 @@ def _playbook(
     )
 
 
+def _with_config(instance: Instance, extra: dict[str, Any] | None) -> Instance:
+    if not extra:
+        return instance
+    return instance.model_copy(update={"config": {**instance.config, **extra}})
+
+
 def _vm(host: WorkbenchHost, inputs: TaskInputs) -> VmInfo | None:
     return None if host.node is None else inputs.resource(host.node.vm)
 
@@ -74,6 +84,7 @@ class _Deploy(Task[Deployed]):
         url: str | None,
         vars_dir: Path,
         installed: Resource[Path],
+        config_from_inputs: Callable[[TaskInputs], dict[str, Any]] | None,
     ) -> None:
         self.title = title
         self.host = host
@@ -81,15 +92,19 @@ class _Deploy(Task[Deployed]):
         self.url = url
         self.vars_dir = vars_dir
         self.installed = installed
+        self.config_from_inputs = config_from_inputs
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[Deployed]:
         vm = _vm(self.host, inputs)
+        resolved = (
+            None if self.config_from_inputs is None else self.config_from_inputs(inputs)
+        )
         _playbook(
             self.title,
             self.host,
             "deploy",
-            (self.instance,),
+            (_with_config(self.instance, resolved),),
             self.vars_dir,
             inputs.resource(self.installed),
             vm,
@@ -102,6 +117,7 @@ class _Deploy(Task[Deployed]):
                 self.url,
                 None if vm is None else asdict(vm),
                 time.time(),
+                resolved,
             )
         )
 
@@ -146,8 +162,13 @@ def component_resource(
     vars_dir: Path,
     installed: Resource[Path],
     requires: tuple[Resource[Any], ...] = (),
+    config_from_inputs: Callable[[TaskInputs], dict[str, Any]] | None = None,
 ) -> Resource[Deployed]:
-    """Deploy `instance` on `host`; undeploy it on release, even when kept."""
+    """Deploy `instance` on `host`; undeploy it on release, even when kept.
+
+    `config_from_inputs` adds config only known once `requires` are acquired;
+    it is recorded in the `Deployed`, so undeploy needs no inputs.
+    """
     where = f"{instance.name} on {host.key}"
     node = () if host.node is None else (host.node.vm,)
 
@@ -161,7 +182,7 @@ def component_resource(
             f"Undeploy {where}",
             host,
             "undeploy",
-            (instance,),
+            (_with_config(instance, value.config),),
             vars_dir,
             ensure_installed(),
             vm,
@@ -169,7 +190,15 @@ def component_resource(
 
     return Resource(
         f"Deploy {where}",
-        _Deploy(f"Deploy {where}", host, instance, url, vars_dir, installed),
+        _Deploy(
+            f"Deploy {where}",
+            host,
+            instance,
+            url,
+            vars_dir,
+            installed,
+            config_from_inputs,
+        ),
         release_call(f"Undeploy {where}", undeploy),
         requires=(installed, *node, *requires),
         always_release=True,

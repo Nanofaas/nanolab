@@ -458,17 +458,44 @@ def collection_evidence(metrics: str) -> dict:
     }
 
 
-def _export_collector(
-    *, node, name, run_dir, logs, session, final_metrics, archive_issue
+def archive_node_dir(node, source: str, archive: Path) -> None:
+    """Copy a node directory, as root, into the local tarball `archive`.
+
+    The copy is checked against the node's own sha256 of the tarball.
+    """
+    private = node.command(("mktemp", "-d")).stdout.strip()
+    if not private.startswith("/"):
+        raise RuntimeError("collector archive private directory unavailable")
+    remote = private + "/state.tar.gz"
+    node.command(("sudo", "tar", "-czf", remote, "-C", source, "."))
+    node.command(("sudo", "chmod", "644", remote))
+    copied = node.provider.transfer_from(
+        node.request, source=remote, destination=archive
+    )
+    if copied.return_code or not archive.is_file() or not archive.stat().st_size:
+        raise RuntimeError("collector state archive transfer failed")
+    remote_hash = node.command(("sha256sum", remote)).stdout.split()[0]
+    if hashlib.sha256(archive.read_bytes()).hexdigest() != remote_hash:
+        raise RuntimeError("collector state archive checksum mismatch")
+    node.command(("rm", "-f", remote))
+    node.command(("rmdir", private))
+
+
+def export_collector(
+    *, node, name, run_dir, logs, session, final_metrics, archive_issue, issues=()
 ):
-    """Export logs and bounded status without owning collector teardown."""
+    """Export logs and bounded status without owning collector teardown.
+
+    `issues` are earlier problems the status records first.
+    """
     directory = run_dir / "logging" / node.config.id
     directory.mkdir(parents=True, exist_ok=True)
     status = {
         "status": "complete",
         "exportStatus": "complete",
         "nodeId": node.config.id,
-        "issues": [],
+        "issues": list(issues),
+        "identity": None if session is None else session.identity,
         "truncated": False,
         "collection": collection_evidence(final_metrics),
         "stateArchive": "verified" if archive_issue is None else "failed",
@@ -633,23 +660,7 @@ def collector_resource(
         ).stdout.strip()
         if not mountpoint.startswith("/"):
             raise RuntimeError("collector state mountpoint unavailable")
-        private = node.command(("mktemp", "-d")).stdout.strip()
-        if not private.startswith("/"):
-            raise RuntimeError("collector archive private directory unavailable")
-        remote = private + "/state.tar.gz"
-        node.command(("sudo", "tar", "-czf", remote, "-C", mountpoint, "."))
-        node.command(("sudo", "chmod", "644", remote))
-        archive = directory / "collector-state.tar.gz"
-        copied = node.provider.transfer_from(
-            node.request, source=remote, destination=archive
-        )
-        if copied.return_code or not archive.is_file() or not archive.stat().st_size:
-            raise RuntimeError("collector state archive transfer failed")
-        remote_hash = node.command(("sha256sum", remote)).stdout.split()[0]
-        if hashlib.sha256(archive.read_bytes()).hexdigest() != remote_hash:
-            raise RuntimeError("collector state archive checksum mismatch")
-        node.command(("rm", "-f", remote))
-        node.command(("rmdir", private))
+        archive_node_dir(node, mountpoint, directory / "collector-state.tar.gz")
 
     def release(_inputs, _value=None):
         nonlocal created, final_metrics, archive_issue
@@ -689,7 +700,7 @@ def collector_resource(
             )
         export_error = None
         try:
-            _export_collector(
+            export_collector(
                 node=node,
                 name=name,
                 run_dir=run_dir,
