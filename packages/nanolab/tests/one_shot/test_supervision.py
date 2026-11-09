@@ -1633,3 +1633,17 @@ def test_malformed_status_is_a_clear_error(tmp_path, document):
     supervisor.attach(fake, tolerated_seconds=0)
     with pytest.raises(RuntimeError, match=r"127.0.0.1:9999"):
         supervisor._poll_workbench()
+
+
+def test_rewatched_name_is_not_deleted_by_a_pending_retry(tmp_path):
+    fake = FakeSupervisor()
+    fake.delete_error = OSError("down")
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=0)
+    supervisor.watch_remote("n", "scrape_up", {})
+    supervisor.unwatch("n")
+    fake.delete_error = None
+    supervisor.watch_remote("n", "scrape_up", {})
+    fake.deletes.clear()
+    supervisor._poll_workbench()
+    assert fake.deletes == []

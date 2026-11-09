@@ -344,16 +344,17 @@ class CampaignSupervision:
             targets = status["targets"]
             fault = status["state"] == "fault"
             anomalies = status["anomalies"] if fault else []
-            for name, target in targets.items():
-                if target["failing"]:
-                    detail = target.get("detail") or ""
-                    self._liveness_row(name, started, "failing", detail)
-                else:
-                    self._liveness_row(name, started, "running")
+            failing = {n: bool(t["failing"]) for n, t in targets.items()}
+            details = {n: t.get("detail") or "" for n, t in targets.items()}
         except (KeyError, TypeError, AttributeError) as error:
             raise RuntimeError(
                 f"supervisor {client.url} sent a malformed status: {error!r}"
             ) from error
+        for name, is_failing in failing.items():
+            if is_failing:
+                self._liveness_row(name, started, "failing", details[name])
+            else:
+                self._liveness_row(name, started, "running")
         for name in [n for n in self._remote_seen if n != "workbench"]:
             if name not in targets:
                 self._liveness_row(name, started, "gone")
@@ -381,6 +382,9 @@ class CampaignSupervision:
         """Register a target with the workbench supervisor."""
         if self.remote is None:
             raise RuntimeError("watch_remote needs attach() first")
+        with self.lock:
+            # Before the put: no retry may delete the target registered here.
+            self.remote_retired.discard(name)
         self.remote.put(name, kind, params, tolerated_seconds, grace_seconds)
         with self.lock:
             self.remote_names.add(name)
