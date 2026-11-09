@@ -30,16 +30,23 @@ GENERATOR_DRAIN_SECONDS = 60
 # ponytail: one `docker inspect` per second at most, however often callers poll;
 # an exit is noticed up to this late.
 POLL_SECONDS = 1.0
+INSPECT_SECONDS = 2
 
 
 @dataclass
 class LoadgenRun:
-    """A deployed loadgen job, polled like a `Popen` through `docker inspect`."""
+    """A deployed loadgen job, polled like a `Popen` through `docker inspect`.
+
+    `poll()` never raises and never waits long, since supervision checks call
+    it under a lock: a failed inspect reads as "still running" (None), and
+    its cause stays in `error` until an inspect succeeds again.
+    """
 
     deployed: Deployed
     grace: float
     returncode: int | None = None
     checked: float = field(default=0.0, repr=False)
+    error: str | None = field(default=None, repr=False)
 
     @property
     def container(self) -> str:
@@ -47,23 +54,28 @@ class LoadgenRun:
         return f"wb-{self.deployed.instance}"
 
     def poll(self) -> int | None:
-        """Return None while the container runs, its exit code once it exited."""
+        """Return None while the container runs (or is unknown), its exit after."""
         now = time.monotonic()
         if self.returncode is None and now - self.checked >= POLL_SECONDS:
             self.checked = now
-            status, code = subprocess.run(
-                (
-                    "docker",
-                    "inspect",
-                    "--format",
-                    "{{.State.Status}} {{.State.ExitCode}}",
-                    self.container,
-                ),
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            ).stdout.split()
+            try:
+                status, code = subprocess.run(
+                    (
+                        "docker",
+                        "inspect",
+                        "--format",
+                        "{{.State.Status}} {{.State.ExitCode}}",
+                        self.container,
+                    ),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=INSPECT_SECONDS,
+                ).stdout.split()
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                self.error = f"docker inspect {self.container}: {error}"
+                return None
+            self.error = None
             if status in ("exited", "dead"):
                 self.returncode = int(code)
         return self.returncode

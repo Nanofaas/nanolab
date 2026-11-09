@@ -836,7 +836,9 @@ class CampaignSupervision:
             if any(
                 process is not None and process.poll() is None for process in processes
             ):
-                raise RuntimeError("archive unsafe: owned process still running")
+                raise RuntimeError(
+                    "archive unsafe: owned process still running or its state unknown"
+                )
 
     def _write_result(self):
         self._terminal_outcome()

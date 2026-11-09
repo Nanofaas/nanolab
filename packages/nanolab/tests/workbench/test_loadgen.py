@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import subprocess
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -18,19 +19,23 @@ from nanolab.workbench.platform import OPERATOR
 INPUTS = TaskInputs._for_resource_values({}, ())
 
 
-def _docker(monkeypatch, states: list[str], calls: list):
+def _docker(monkeypatch, states: list, calls: list):
     """Answer `docker inspect` with each state in turn; record every argv."""
 
-    def run(argv, **_kwargs):
+    def run(argv, **kwargs):
         calls.append(tuple(argv))
         if argv[1] == "inspect":
-            return SimpleNamespace(stdout=states.pop(0) + "\n")
+            assert kwargs["timeout"] <= 2
+            state = states.pop(0)
+            if isinstance(state, BaseException):
+                raise state
+            return SimpleNamespace(stdout=state + "\n")
         return SimpleNamespace(stdout="")
 
     monkeypatch.setattr(loadgen.subprocess, "run", run)
 
 
-def _run(states: list[str], monkeypatch, calls=None) -> loadgen.LoadgenRun:
+def _run(states: list, monkeypatch, calls=None) -> loadgen.LoadgenRun:
     _docker(monkeypatch, states, [] if calls is None else calls)
     return loadgen.LoadgenRun(
         Deployed("operator", "loadgen-x", "loadgen", None), grace=5
@@ -59,6 +64,32 @@ def test_loadgen_poll_tracks_container(monkeypatch):
         ]
         * 2
     )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        subprocess.TimeoutExpired("docker", 2),
+        subprocess.CalledProcessError(1, "docker", stderr="No such object"),
+        OSError("docker missing"),
+    ],
+)
+def test_a_failed_inspect_is_unknown_not_an_exit(monkeypatch, failure):
+    run = _run([failure, "exited 0"], monkeypatch)
+    assert run.poll() is None  # never raises under the supervision lock
+    assert run.error and run.returncode is None
+    run.checked = 0
+    assert run.poll() == 0
+    assert run.error is None
+
+
+def test_stop_caches_the_final_exit_code(monkeypatch):
+    calls: list = []
+    run = _run(["running 0", "exited 143"], monkeypatch, calls)
+    run.stop()
+    assert run.returncode == 143
+    assert run.poll() == 143
+    assert [c[1] for c in calls] == ["inspect", "stop", "inspect"]
 
 
 def test_check_process_on_loadgen(monkeypatch):
@@ -124,3 +155,11 @@ def test_the_loadgen_runs_on_the_nanolab_host(tmp_path):
     node = playbook.WorkbenchHost("edge-1", object())  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="nanolab host"):
         loadgen.loadgen_resource(node, run_dir=tmp_path, vus=1, duration=1)
+
+
+def test_an_unknown_loadgen_blocks_the_archive(tmp_path, monkeypatch):
+    run = _run([OSError("docker missing")], monkeypatch)
+    supervision = CampaignSupervision(tmp_path)
+    supervision.writers.append(run)
+    with pytest.raises(RuntimeError, match="still running or its state unknown"):
+        supervision._require_writers_stopped()
