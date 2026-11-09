@@ -183,11 +183,15 @@ old version; the plan includes that one-off drain step.
 - **CPU pinning is a per-instance placement option** (container:
   `--cpuset-cpus`; pod: resource requests/limits), replacing today's
   process-level pinning of Loki/logging CPUs where an experiment needs it.
-- **No Sonata, no VM knowledge in the workbench.** It is a versioned Python
-  package (published, pinned in nanolab like Sonata) shipping the roles,
-  playbooks and configurations as package data (as nanolab bundles its own
-  playbooks in `tasks/infra/ansible_assets`), plus the inventory schema; its
-  custom images are published to the registry under the same version.
+- **No Sonata, no VM knowledge in the workbench.** It is an **Ansible
+  collection** (`nanofaas.workbench`) holding the roles, playbooks,
+  configurations and the Helm chart, declaring its own collection
+  dependencies (`community.docker`, `kubernetes.core`) in `galaxy.yml`.
+  Released by git tag (`vX.Y.Z`); nanolab pins it by listing the GitHub repo
+  at that tag in its Ansible `requirements.yml` — no PyPI. The supervisor
+  image is published to the registry under the same version. The inventory
+  vars format is documented in the collection; its typed model lives in
+  nanolab, the only caller that generates it (decided 2026-11-09).
 - **Supervisor** is a workbench service: given the targets, it runs periodic
   checks (exporters alive, operator swap, clock drift, nodes responsive,
   Prometheus/Loki up), keeps `healthy | degraded | fault` with anomalies, and
@@ -217,10 +221,10 @@ old version; the plan includes that one-off drain step.
   from `up`/scrape gaps), so `vm_resources.py`, `report.py`, `campaign.py`
   and `capacity.py` run unchanged.
 - **Images go to GitHub Container Registry** (`ghcr.io/nanofaas/...`),
-  versioned with the package. If a site cannot pull, nanolab preloads the
-  images on its VMs.
-- **Repository and names** (author's call): GitHub organisation `Nanofaas`,
-  repository and PyPI distribution `nanofaas-workbench`.
+  versioned with the collection tag. If a site cannot pull, nanolab preloads
+  the images on its VMs.
+- **Repository and names**: GitHub `Nanofaas/nanofaas-workbench` (public,
+  created 2026-11-09), collection `nanofaas.workbench`.
 
 ### Components (first milestone: what the one-shot run uses today)
 
@@ -299,6 +303,6 @@ reference run, not for equality.
 ## Order of work
 
 1. Sonata: task resources, composite, removal of callables; release.
-2. nanofaas-workbench: repo, one-shot components, supervisor; release.
-3. nanolab: bump both pins, convert resources, platform resource for the
+2. nanofaas-workbench: repo, one-shot components, supervisor; release (tag).
+3. nanolab: pin the collection tag, platform resource for the
    one-shot workflows; acceptance run.
