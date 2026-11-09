@@ -127,7 +127,9 @@ class QualificationLoad:
             else None,
         )
         self.run.trace = trace
-        delay = 45 if self.use_telemetry else 2
+        from nanolab.tasks.one_shot.experiment import LOADGEN_START_SECONDS
+
+        delay = max(LOADGEN_START_SECONDS, 45 if self.use_telemetry else 2)
         captured_at = datetime.now(UTC)
         self.logical_schedule = None
         if getattr(settings, "protocol_version", 1) == 2:

@@ -308,6 +308,10 @@ def test_open_loop_trial_requires_sdk_release_and_preserves_generator_failure(
 
     monkeypatch.setattr(experiment, "generator_rows", originals)
     monkeypatch.setattr(experiment, "physical_attempts", proofs)
+    import json
+    from datetime import UTC, datetime
+
+    started = datetime.now(UTC)
     with httpx.Client(transport=httpx.MockTransport(respond)) as http:
         monkeypatch.setattr(
             "nanolab.tasks.one_shot.capacity.httpx.Client",
@@ -346,3 +350,8 @@ def test_open_loop_trial_requires_sdk_release_and_preserves_generator_failure(
             assert rows[0]["censored"] == (0 if outcome == "complete" else 60)
             assert rows[0]["validOutput"] is (outcome != "wrong-output")
             assert (directory / "trial.json").is_file()
+            # The loadgen deploy gets LOADGEN_START_SECONDS before the first
+            # request (30 s warmup precedes the manifest anchor).
+            frozen = json.loads((directory / "manifest.json").read_text())
+            lead = datetime.fromisoformat(frozen["anchor"]) - started
+            assert lead.total_seconds() >= 30 + experiment.LOADGEN_START_SECONDS

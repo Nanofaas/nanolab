@@ -108,6 +108,11 @@ def test_owned_load_compensates_generator_and_collector_on_failure(
         monkeypatch.setattr(
             "nanolab.tasks.one_shot.qualification_load.time.sleep", lambda _: None
         )
+    from datetime import UTC, datetime
+
+    from nanolab.tasks.one_shot.experiment import LOADGEN_START_SECONDS
+
+    started = datetime.now(UTC)
     load = QualificationLoad(
         topology,
         settings,
@@ -117,6 +122,8 @@ def test_owned_load_compensates_generator_and_collector_on_failure(
         run_dir=tmp_path / "load",
         clock=SimpleNamespace(require_healthy=lambda: None),
     )
+    # The first request leaves the loadgen deploy its start floor.
+    assert (load.anchor - started).total_seconds() >= LOADGEN_START_SECONDS
     if failure:
         with pytest.raises(RuntimeError) as error, load:
             raise RuntimeError("auction failed")

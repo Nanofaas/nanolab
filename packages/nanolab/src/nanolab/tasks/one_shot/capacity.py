@@ -97,6 +97,7 @@ def _run_capacity_trial(
     # checksum oracle; this task reuses its existing lifecycle rather than a CLI.
     from nanolab.tasks.one_shot.calibration import measure_invocation
     from nanolab.tasks.one_shot.experiment import (
+        LOADGEN_START_SECONDS,
         LiveEvidenceCollector,
         classify_result,
         collect_runtime_evidence,
@@ -236,10 +237,11 @@ def _run_capacity_trial(
         if telemetry_enabled is None
         else telemetry_enabled
     )
-    lead = (
+    lead = max(
+        LOADGEN_START_SECONDS,
         preload_lead_seconds
         if preload_lead_seconds is not None
-        else (45 if use_telemetry else 2)
+        else (45 if use_telemetry else 2),
     )
     extra_budget = lead if lead > 2 else 0
     captured_at = datetime.now(UTC)

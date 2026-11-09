@@ -69,6 +69,10 @@ from nanolab.tasks.one_shot.verification import (
 )
 from nanolab.tasks.resource_tasks import resource_of
 
+# A loadgen deploy (container start; the image is pulled with the platform)
+# needs this long before its first scheduled request.
+LOADGEN_START_SECONDS = 10
+
 
 def k6_version() -> str:
     """`k6 version` of the image the workbench loadgen runs."""

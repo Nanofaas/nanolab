@@ -142,6 +142,11 @@ def _build(
         platform, "_chown_back", lambda path: events.append(("operator", "chown", path))
     )
     monkeypatch.setattr(platform, "_loki_log", lambda: "loki says hi\n")
+    monkeypatch.setattr(
+        platform,
+        "_pull_loadgen",
+        lambda collections: events.append(("operator", "pull", (str(collections),))),
+    )
     monkeypatch.setattr(one_shot_logging, "httpx", SimpleNamespace(Client=failing_loki))
     monkeypatch.setattr(
         platform,
@@ -258,6 +263,7 @@ def test_platform_release_from_journal(tmp_path, monkeypatch):
         )
     }
     members["Own the Loki store"] = None
+    members["Pull the loadgen image"] = None
     journal = tmp_path / "journal.jsonl"
     journal.write_text(
         json.dumps(
@@ -657,3 +663,25 @@ def test_a_window_exports_with_the_run_roles(tmp_path, monkeypatch):
         "wb-cadvisor-edge-1",
         "wb-log-collector-edge-1",
     )
+
+
+def test_the_loadgen_image_is_pulled_with_the_platform(tmp_path, monkeypatch):
+    """A deploy after the anchor is captured must never wait on a pull."""
+    events: list = []
+    _run(_build(tmp_path, monkeypatch, events), events)
+    assert ("operator", "pull", ("/coll",)) in events
+    assert events.index(("operator", "pull", ("/coll",))) < events.index(
+        ("consume", "", ())
+    )
+
+
+def test_pull_loadgen_pulls_the_pinned_image(tmp_path, monkeypatch):
+    defaults = tmp_path / "ansible_collections/nanofaas/workbench/roles/loadgen"
+    (defaults / "defaults").mkdir(parents=True)
+    (defaults / "defaults/main.yml").write_text("loadgen_image: grafana/k6@sha256:a\n")
+    calls = []
+    monkeypatch.setattr(
+        platform.subprocess, "run", lambda argv, **_k: calls.append(argv)
+    )
+    platform._pull_loadgen(tmp_path)
+    assert calls == [("docker", "pull", "grafana/k6@sha256:a")]

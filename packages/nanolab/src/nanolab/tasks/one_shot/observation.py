@@ -50,6 +50,7 @@ from nanolab.tasks.one_shot.artifacts import (
 )
 from nanolab.tasks.one_shot.calibration import measure_invocation, workload_checksum
 from nanolab.tasks.one_shot.experiment import (
+    LOADGEN_START_SECONDS,
     collect_original_evidence,
     generator_rows,
     logical_schedule,
@@ -541,6 +542,15 @@ class ObservationFreeze(Task):
     def run(self, inputs):
         """Execute this observation stage on the owned resources."""
         run = self.run_context
+        setup = operational_limit(
+            run.settings, "schedule_setup_seconds", SCHEDULE_SETUP_SECONDS
+        )
+        if setup < LOADGEN_START_SECONDS:
+            raise ValueError(
+                f"scheduleSetupSeconds {setup} is below the {LOADGEN_START_SECONDS} s "
+                "the loadgen needs to start before the first request; refreeze "
+                "with a longer setup"
+            )
         verify_files(run.frozen_dir, run.frozen)
         built = inputs.resource(run.topology.distribution)
 
@@ -579,9 +589,6 @@ class ObservationFreeze(Task):
         )
         run.profile = CalibrationProfiles(
             profiles, profile_sha, "sha256:" + sha(run.frozen_dir / "freeze.json")
-        )
-        setup = operational_limit(
-            run.settings, "schedule_setup_seconds", SCHEDULE_SETUP_SECONDS
         )
         anchor = datetime.now(UTC) + timedelta(
             seconds=run.settings.experiment.warmup_seconds + setup

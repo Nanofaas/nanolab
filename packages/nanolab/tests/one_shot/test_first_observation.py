@@ -1587,3 +1587,17 @@ def test_minute_decisions_keep_step_durations_rates_and_arrival_calendar(observe
     assert trace.period_seconds == 360
     with pytest.raises(ValueError, match="period"):
         observer.step_decision_grid(trace, selected, 61)
+
+
+def test_a_frozen_setup_below_the_loadgen_floor_is_refused():
+    from types import SimpleNamespace
+
+    from nanolab.config.one_shot import OperationalLimits
+    from nanolab.tasks.one_shot.experiment import LOADGEN_START_SECONDS
+
+    limits = OperationalLimits().model_copy(
+        update={"schedule_setup_seconds": LOADGEN_START_SECONDS - 1}
+    )
+    run = SimpleNamespace(settings=SimpleNamespace(operational_limits=limits))
+    with pytest.raises(ValueError, match="loadgen"):
+        observation_tasks.ObservationFreeze(run).run(cast(Any, None))

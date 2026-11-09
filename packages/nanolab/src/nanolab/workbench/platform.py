@@ -1,8 +1,9 @@
 """The one-shot platform: every workbench instance of a run as one composite.
 
-Members deploy in order (exporters, Loki, log collectors, Prometheus, the
-supervisor) and undeploy in reverse; the collect steps run first at release
-and read only the journalled member values, so a later process can run them.
+Members deploy in order (the loadgen image pull, exporters, Loki, log
+collectors, Prometheus, the supervisor) and undeploy in reverse; the collect
+steps run first at release and read only the journalled member values, so a
+later process can run them.
 Without logs the platform is the exporters, Prometheus and the supervisor.
 """
 
@@ -166,6 +167,18 @@ def _chown_back(path: Path) -> None:
     )
 
 
+def _pull_loadgen(collections: Path) -> None:
+    """Pull the pinned k6 image, so a loadgen deploy never waits on a pull."""
+    defaults = (
+        collections
+        / "ansible_collections/nanofaas/workbench/roles/loadgen/defaults/main.yml"
+    )
+    image = yaml.safe_load(defaults.read_text())["loadgen_image"]
+    subprocess.run(
+        ("docker", "pull", image), capture_output=True, check=True, timeout=600
+    )
+
+
 def _loki_config(source: Path, into: Path) -> Path:
     """Write nanoFaaS' Loki config with today's WAL flags as YAML keys.
 
@@ -290,7 +303,13 @@ def one_shot_platform(
         for key, host in hosts.items()
         for component, port in exporter_ports.items()
     ]
-    members: list[Resource[Any]] = [resource for resource, _ in exporters]
+    pull = resource_of(
+        "Pull the loadgen image",
+        lambda inputs: _pull_loadgen(inputs.resource(installed)),
+        lambda _inputs, _value: None,
+        requires=(installed,),
+    )
+    members: list[Resource[Any]] = [pull, *(resource for resource, _ in exporters)]
 
     # Logging: Loki on the operator, a collector on every node.
     loki: Resource[Deployed] | None = None
