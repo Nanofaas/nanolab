@@ -1410,3 +1410,161 @@ def test_supervision_wrappers_keep_the_wrapped_resource_shape(tmp_path, kind):
     assert wrapped.acquire.idempotent is True
     assert wrapped.acquire.title == base.acquire.title
     assert wrapped.release.title == base.release.title
+
+
+class FakeSupervisor:
+    """Stands in for SupervisorClient; `status_value` is what GET /status says."""
+
+    url = "http://127.0.0.1:9999"
+
+    def __init__(self):
+        self.status_value = {
+            "state": "healthy",
+            "targets": {},
+            "anomalies": [],
+            "checkedAt": None,
+        }
+        self.puts, self.deletes = [], []
+        self.error: Exception | None = None
+        self.delete_error: Exception | None = None
+
+    def put(self, name, kind, params, tolerated_seconds, grace_seconds=None):
+        self.puts.append((name, kind, params, tolerated_seconds, grace_seconds))
+
+    def delete(self, name):
+        self.deletes.append(name)
+        if self.delete_error:
+            raise self.delete_error
+
+    def status(self):
+        if self.error:
+            raise self.error
+        return self.status_value
+
+
+def _target(failing, detail=""):
+    return {"kind": "scrape_up", "failing": failing, "since": None, "detail": detail}
+
+
+def _liveness(tmp_path):
+    path = tmp_path / "liveness.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def _events(tmp_path):
+    return [
+        json.loads(line)
+        for line in (tmp_path / "supervision.jsonl").read_text().splitlines()
+    ]
+
+
+def test_fault_becomes_operational_failure(tmp_path):
+    fake = FakeSupervisor()
+    supervisor = json_supervision(
+        tmp_path, archive=tmp_path.parent / "fault-archive", cadence=0.01
+    )
+    supervisor.attach(fake, tolerated_seconds=0)
+    supervisor.watch_remote("node-1", "scrape_up", {"job": "node"})
+    fake.status_value = {
+        "state": "fault",
+        "targets": {"node-1": _target(True, "up==0")},
+        "anomalies": [
+            {"target": "node-1", "kind": "scrape_up", "detail": "up==0", "since": 1}
+        ],
+        "checkedAt": 2,
+    }
+    workflow = Workflow("remote-fault")
+    workflow.add(Action(lambda _inputs: time.sleep(2)))
+    with pytest.raises(RuntimeError, match=r"workbench.*node-1: scrape_up: up==0"):
+        supervisor.run(workflow.run)
+    assert json.loads((tmp_path / "result.json").read_text())["exitCode"] == 1
+    assert fake.puts == [("node-1", "scrape_up", {"job": "node"}, 0, None)]
+
+
+def test_degraded_is_tolerated(tmp_path):
+    fake = FakeSupervisor()
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=0)
+    fake.status_value["state"] = "degraded"
+    fake.status_value["targets"] = {"node-1": _target(True, "slow")}
+    supervisor._poll_workbench()
+    assert supervisor.fault is None
+
+
+def test_supervisor_unreachable_tolerated_then_fault(tmp_path):
+    fake = FakeSupervisor()
+    now = [100.0]
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=10, clock=lambda: now[0])
+    fake.error = OSError("connection refused")
+    supervisor._poll_workbench()
+    now[0] = 109.0
+    supervisor._poll_workbench()
+    now[0] = 111.0
+    with pytest.raises(RuntimeError, match=r"127.0.0.1:9999.*connection refused"):
+        supervisor._poll_workbench()
+    # a successful poll resets the count
+    fake.error = None
+    now[0] = 200.0
+    supervisor._poll_workbench()
+    fake.error = OSError("again")
+    supervisor._poll_workbench()
+
+
+def test_unwatched_target_stop_is_silent(tmp_path):
+    fake = FakeSupervisor()
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=0)
+    supervisor.watch_remote("node-1", "container_running", {"name": "c"})
+    fake.status_value["targets"] = {"node-1": _target(False)}
+    supervisor._poll_workbench()
+    supervisor.unwatch("node-1")
+    fake.status_value["targets"] = {}  # the supervisor forgot it on DELETE
+    supervisor._poll_workbench()
+    assert fake.deletes == ["node-1"]
+    assert supervisor.fault is None
+    assert [r["outcome"] for r in _liveness(tmp_path) if r["check"] == "node-1"] == [
+        "running",
+        "gone",
+    ]
+
+
+def test_unwatch_survives_a_failed_delete(tmp_path):
+    fake = FakeSupervisor()
+    fake.delete_error = OSError("down")
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=0)
+    supervisor.watch_remote("node-1", "scrape_up", {}, grace_seconds=3)
+    supervisor.unwatch("node-1")
+    released = [e for e in _events(tmp_path) if e.get("kind") == "process.released"]
+    assert released and "down" in released[-1]["deleteError"]
+    assert fake.puts[0][4] == 3
+
+
+def test_liveness_rows_keep_their_shape(tmp_path):
+    fake = FakeSupervisor()
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(fake, tolerated_seconds=0)
+    fake.status_value["targets"] = {"node-1": _target(False)}
+    supervisor._poll_workbench()
+    supervisor._poll_workbench()  # no change: no new row
+    fake.status_value["targets"] = {"node-1": _target(True, "up==0")}
+    supervisor._poll_workbench()
+    rows = [r for r in _liveness(tmp_path) if r["check"] == "node-1"]
+    assert [(r["check"], r["outcome"]) for r in rows] == [
+        ("node-1", "running"),
+        ("node-1", "failing"),
+    ]
+    for row in rows:
+        assert {"atUtc", "check", "seconds", "outcome", "unreachableSeconds"} <= set(
+            row
+        )
+    assert rows[1]["stderr"] == "up==0"
+
+
+def test_in_process_watches_unchanged(tmp_path):
+    supervisor = json_supervision(tmp_path, cadence=0.01)
+    supervisor.attach(FakeSupervisor(), tolerated_seconds=0)
+    supervisor.watch("clock", lambda: None)
+    supervisor.unwatch("clock")
+    assert set(supervisor.checks) == {"workbench"}

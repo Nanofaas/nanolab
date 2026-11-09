@@ -66,6 +66,12 @@ class CampaignSupervision:
         self.stop = Event()
         self.thread = Thread(target=self._monitor, name="one-shot-supervision")
         self.checks: dict[str, Callable[[], None]] = {}
+        self.remote: Any = None
+        self.remote_names: set[str] = set()
+        self._remote_seen: dict[str, str] = {}
+        self._remote_down: float | None = None
+        self._remote_tolerated = 0.0
+        self._remote_clock: Callable[[], float] = time.monotonic
         self.writers: list[Any] = []
         self.active: dict[str, str] = {}
         self.aborting = False
@@ -261,7 +267,95 @@ class CampaignSupervision:
         """Remove health checks before an intentional stop or release."""
         with self.lock:
             self.checks.pop(name, None)
-        self.record("process.released", name=name)
+            remote = name in self.remote_names
+            self.remote_names.discard(name)
+        extra = {}
+        if remote:
+            # Outside the lock: a slow supervisor must not stall the monitor.
+            try:
+                self.remote.delete(name)
+            except Exception as error:
+                extra["deleteError"] = str(error)
+        self.record("process.released", name=name, **extra)
+
+    def attach(self, client, *, tolerated_seconds: float, clock=time.monotonic):
+        """Poll the workbench supervisor as one more in-process check.
+
+        `client` calls must be bounded by a short timeout: `_monitor` holds the
+        lock while checks run.
+        """
+        self.remote, self._remote_tolerated, self._remote_clock = (
+            client,
+            tolerated_seconds,
+            clock,
+        )
+        self.watch("workbench", self._poll_workbench)
+
+    def _liveness_row(self, check, started, outcome, detail="", unreachable=0.0):
+        """Append a row in the shape LivenessCheck writes, on outcome change only."""
+        if self._remote_seen.get(check) == outcome:
+            return
+        self._remote_seen[check] = outcome
+        row = {
+            "atUtc": datetime.now(UTC).isoformat(),
+            "check": check,
+            "seconds": round(self._remote_clock() - started, 3),
+            "outcome": outcome,
+            "unreachableSeconds": round(unreachable, 1),
+        }
+        if detail and outcome != "running":
+            row["stderr"] = detail[-300:]
+        with (self.output / "liveness.jsonl").open("a") as stream:
+            stream.write(json.dumps(row) + "\n")
+
+    def _poll_workbench(self):
+        client, started = self.remote, self._remote_clock()
+        try:
+            status = client.status()
+        except Exception as error:
+            if self._remote_down is None:
+                self._remote_down = started
+            down = self._remote_clock() - self._remote_down
+            self._liveness_row("workbench", started, "transport", str(error), down)
+            if down >= self._remote_tolerated:
+                raise RuntimeError(
+                    f"supervisor {client.url} unreachable for {down:.0f} s: {error}"
+                ) from error
+            return
+        self._remote_down = None
+        self._liveness_row("workbench", started, "running")
+        targets = status.get("targets", {})
+        for name, target in targets.items():
+            if target["failing"]:
+                detail = target.get("detail") or ""
+                self._liveness_row(name, started, "failing", detail)
+            else:
+                self._liveness_row(name, started, "running")
+        for name in list(self._remote_seen):
+            if name != "workbench" and name not in targets:
+                self._liveness_row(name, started, "gone")
+        if status["state"] == "fault":
+            anomaly = status["anomalies"][0]
+            raise RuntimeError(
+                f"{anomaly['target']}: {anomaly['kind']}: {anomaly['detail']}"
+            )
+
+    def watch_remote(
+        self,
+        name: str,
+        kind: str,
+        params,
+        *,
+        tolerated_seconds: float = 0,
+        grace_seconds: float | None = None,
+    ):
+        """Register a target with the workbench supervisor."""
+        if self.remote is None:
+            raise RuntimeError("watch_remote needs attach() first")
+        self.remote.put(name, kind, params, tolerated_seconds, grace_seconds)
+        with self.lock:
+            self.remote_names.add(name)
+        self.record("process.watched", name=name, targetKind=kind)
 
     def resource(self, resource: Resource, name: str, check: Callable) -> Resource:
         """Wrap ownership callbacks while preserving all declared dependencies."""
