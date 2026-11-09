@@ -813,3 +813,58 @@ def test_sampler_preserves_inventory_when_all_cgroup_reads_fail(monkeypatch, cap
     }
     assert row["containers"] == []
     assert len(row["errors"]) == 2
+
+
+def test_one_second_policy_summary_unchanged(tmp_path):
+    """A 1 s run summarizes to exactly the JSON the per-second slots produced."""
+    import hashlib
+
+    anchor = datetime(2026, 10, 10, tzinfo=UTC)
+    directory = tmp_path / "vm-resources"
+    directory.mkdir()
+    policy = {"schemaVersion": 1, "periodSeconds": 1, "samplerSha256": "0" * 64}
+    (directory / "policy.json").write_text(json.dumps(policy))
+    memory = {
+        "memoryTotalBytes": 1000,
+        "memoryAvailableBytes": 400,
+        "memoryUsedBytes": 600,
+        "swapTotalBytes": 0,
+        "swapFreeBytes": 0,
+        "swapUsedBytes": 0,
+        "vcpuCount": 2,
+    }
+    rows = [
+        {
+            "timestampUtc": (
+                anchor + timedelta(seconds=second, milliseconds=300)
+            ).isoformat(),
+            "node": "edge1",
+            **memory,
+            "cpuUtilization": None if second == -2 else 0.5,
+            "errors": [{"containerId": "c2", "error": "gone"}] if second == 3 else [],
+            "expectedContainerIds": ["c1", "c2"],
+            "containers": [{"containerId": "c1", "role": "function"}],
+        }
+        for second in [-2, -1, 0, 0, 2, 3]
+    ]
+    (directory / "edge1.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows) + "{partial"
+    )
+    result = summarize_resources(
+        tmp_path,
+        anchor=anchor,
+        warmup=2,
+        period=2,
+        epochs=2,
+        nodes=["edge1", "cloud"],
+        mode="ewma",
+        functions=["a"],
+        run_id="r",
+    )
+    assert result["nodes"]["edge1"]["missingSeconds"] == [1]
+    assert result["nodes"]["edge1"]["duplicateSeconds"] == [0]
+    # Hash of the summary as produced before slots read periodSeconds (8b5006d7).
+    assert (
+        hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest()
+        == "3e56866cd45cefee3930c418b18be5b424e750844756a6ac5982f897efac2e3e"
+    )
