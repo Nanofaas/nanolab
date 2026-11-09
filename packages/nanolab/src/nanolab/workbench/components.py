@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, override
@@ -22,7 +23,8 @@ class Deployed:
     """What a deployed component instance leaves in the journal.
 
     `vm` is the host VM's journal form (None on the nanolab host), so an
-    undeploy in a later process needs no live resource.
+    undeploy in a later process needs no live resource. `deployed_at` (epoch
+    seconds) opens the windows the platform's collect steps export.
     """
 
     host: str
@@ -30,6 +32,7 @@ class Deployed:
     component: str
     url: str | None
     vm: dict[str, Any] | None = None
+    deployed_at: float | None = None
 
 
 def _playbook(
@@ -98,6 +101,7 @@ class _Deploy(Task[Deployed]):
                 self.instance.component,
                 self.url,
                 None if vm is None else asdict(vm),
+                time.time(),
             )
         )
 
