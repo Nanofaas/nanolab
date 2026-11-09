@@ -3,12 +3,14 @@
 Members deploy in order (exporters, Loki, log collectors, Prometheus, the
 supervisor) and undeploy in reverse; the collect steps run first at release
 and read only the journalled member values, so a later process can run them.
+Without logs the platform is the exporters, Prometheus and the supervisor.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import time
 from collections.abc import Callable, Mapping
@@ -18,27 +20,28 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-import httpx
+import yaml
 from sonata_engine import Members, Resource, TaskInputs, compose
 
 from nanolab.config.environment import OperatorLogging
-from nanolab.config.one_shot import OneShotConfig
-from nanolab.one_shot.infrastructure import OneShotResources
+from nanolab.config.one_shot import OneShotConfig, operational_limit
+from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
 from nanolab.one_shot.operator_memory import MAX_SWAP_PAGES, MIN_AVAILABLE_BYTES
 from nanolab.tasks.one_shot.logging import (
+    LogSession,
+    archive_node_dir,
     collection_evidence,
-    export_queue_events,
-    query_url,
+    export_collector,
     verify_loki_ingestion,
 )
-from nanolab.tasks.one_shot.queue_telemetry import queue_timings
-from nanolab.tasks.resource_tasks import call
+from nanolab.tasks.resource_tasks import call, resource_of
 from nanolab.workbench.components import Deployed, component_resource
 from nanolab.workbench.install import ensure_installed, workbench_resource
 from nanolab.workbench.inventory import HostVars, Instance
 from nanolab.workbench.playbook import WorkbenchHost, WorkbenchPlaybook
 from nanolab.workbench.supervisor import SupervisorClient
 from nanolab.workbench.vm_export import NodeRoles, export_vm_resources
+from nanolab.workspace.paths import operator_workspace_root
 
 OPERATOR = WorkbenchHost("operator", None)
 # Named in plans/one_shot_common, which this package may not import.
@@ -47,22 +50,31 @@ NODE_EXPORTER_PORT = 9100
 CADVISOR_PORT = 8089
 COLLECTOR_PORT = 2020  # fluent-bit.conf's HTTP_Port
 PROMETHEUS_PORT = 9090
-SUPERVISOR_PORT = 9095
+SUPERVISOR_PORT = 8099
 SCRAPE_SECONDS = 5
+# cAdvisor housekeeping (5 s) plus scrape (5 s) jitter, with room to spare.
+STALE_SECONDS = 30
 PUSH_PATH = "/loki/api/v1/push"
 # As LivenessCheck tolerates today: a node behind a site or on Azure may be
 # unreachable this long before its checks fault.
 REMOTE_UNREACHABLE_SECONDS = 300
+# Today's bounded drain wait: up to five metric reads two seconds apart.
+DRAIN_POLLS = 5
+DRAIN_POLL_SECONDS = 2
+LOKI_STORE = "Own the Loki store"
 
 type Step = Callable[[Members, TaskInputs], None]
 
 
 @dataclass(frozen=True)
 class OneShotPlatform:
-    """The composite and the members later tasks read with `Members.of`."""
+    """The composite and the members later tasks read with `Members.of`.
+
+    `loki` is None and `collectors` empty when the scenario has no logs.
+    """
 
     resource: Resource[Members]
-    loki: Resource[Deployed]
+    loki: Resource[Deployed] | None
     prometheus: Resource[Deployed]
     supervisor: Resource[Deployed]
     loadgen_host: WorkbenchHost
@@ -100,9 +112,72 @@ def _inspect(host: WorkbenchHost, name: str) -> dict[str, Any]:
     }
 
 
+def _loki_log() -> str:
+    done = subprocess.run(
+        ("docker", "logs", "wb-loki-operator"),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    return done.stdout + done.stderr
+
+
+def _chown_back(path: Path) -> None:
+    """Give a store Loki (uid 10001) wrote back to the operator's user."""
+    defaults = (
+        ensure_installed()
+        / "ansible_collections/nanofaas/workbench/roles/common/defaults/main.yml"
+    )
+    image = yaml.safe_load(defaults.read_text())["common_probe_image"]
+    subprocess.run(
+        (
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            "0:0",
+            "-v",
+            f"{path}:/data",
+            image,
+            "chown",
+            "-R",
+            f"{os.getuid()}:{os.getgid()}",
+            "/data",
+        ),
+        capture_output=True,
+        check=True,
+        timeout=300,
+    )
+
+
+def _loki_config(source: Path, into: Path) -> Path:
+    """Write nanoFaaS' Loki config with today's WAL flags as YAML keys.
+
+    Equivalent to `-ingester.wal-enabled=true` and
+    `-ingester.wal-disk-full-threshold=0` (verified with Loki 3.7.8's
+    `-print-config-stderr`).
+    """
+    config = yaml.safe_load(source.read_text())
+    config.setdefault("ingester", {}).setdefault("wal", {}).update(
+        enabled=True, disk_full_threshold=0
+    )
+    into.parent.mkdir(parents=True, exist_ok=True)
+    into.write_text(yaml.safe_dump(config, sort_keys=False))
+    return into
+
+
 def _write_json(path: Path, document: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2) + "\n")
+
+
+def _remote(node: NodeResource | None) -> bool:
+    return node is not None and (
+        node.site_host is not None or node.request.lifecycle == "azure"
+    )
 
 
 def one_shot_platform(
@@ -118,32 +193,26 @@ def one_shot_platform(
 ) -> OneShotPlatform:
     """Compose the run's workbench instances on the operator and every node.
 
-    `forwards[node]` holds the local addresses Prometheus scrapes that node's
-    exporters at. `mode` is the collectors' NANOFAAS_MODE. A multi-site run
-    passes its `operator_logging` and, per node, the push URL its collector
-    reaches Loki at (`log_endpoints`); otherwise collectors push to the
-    scenario's endpoint.
+    A node in `forwards` is scraped at its forwarded local addresses, with
+    exporters bound to its loopback; any other node's exporters listen on
+    every address and are scraped at its VM's address. `mode` is the
+    collectors' NANOFAAS_MODE. A multi-site run passes its `operator_logging`
+    and, per node, the push URL its collector reaches Loki at
+    (`log_endpoints`); otherwise collectors push to the scenario's endpoint.
     """
     logs = settings.observability.logs
-    if not logs.backend_owned or not logs.endpoint:
-        raise ValueError("the one-shot platform owns its Loki: set backendOwned")
+    if logs.enabled and not logs.backend_owned:
+        raise ValueError(
+            "the one-shot platform runs its own Loki: an external logging "
+            "endpoint is not supported, set backendOwned"
+        )
     run_id = run_dir.name
     workbench_dir = run_dir / "workbench"
     vars_dir = workbench_dir / "vars"
     installed = workbench_resource()
-    placement = settings.host_cpu_placement
-    if operator_logging is not None:
-        loki_bind, loki_port = "127.0.0.1", operator_logging.port
-        loki_cpus = operator_logging.cpus
-        logging_dir = run_dir / "logging" / "backend"
-    else:
-        loki_bind = logs.backend_bind
-        loki_port = urlsplit(logs.endpoint).port or 80
-        loki_cpus = placement.logging_cpus if placement else None
-        logging_dir = run_dir / "logging"
-    loki_url = f"http://{loki_bind}:{loki_port}"
     nodes = {key: WorkbenchHost(key, node) for key, node in topology.nodes.items()}
     hosts = {"operator": OPERATOR, **nodes}
+    direct = {k: n for k, n in topology.nodes.items() if k not in forwards}
 
     def member(
         host: WorkbenchHost,
@@ -153,6 +222,7 @@ def one_shot_platform(
         url: str | None = None,
         cpuset: str | None = None,
         requires: tuple[Resource[Any], ...] = (),
+        config_from_inputs: Callable[[TaskInputs], dict[str, Any]] | None = None,
     ) -> tuple[Resource[Deployed], Instance]:
         instance = Instance.model_validate(
             {
@@ -169,104 +239,157 @@ def one_shot_platform(
             vars_dir=vars_dir,
             installed=installed,
             requires=requires,
+            config_from_inputs=config_from_inputs,
         )
         return resource, instance
 
-    def scraped(key: str, component: str, port: int) -> str:
-        return f"127.0.0.1:{port}" if key == "operator" else forwards[key][component]
-
+    exporter_ports = {"node-exporter": NODE_EXPORTER_PORT, "cadvisor": CADVISOR_PORT}
     exporters = [
         member(
             host,
             component,
-            {},
-            url="http://" + scraped(key, component, port),
+            {"bind": "0.0.0.0"} if key in direct else {},  # nosec B104 - see docstring
+            url=None
+            if key in direct
+            else "http://"
+            + (f"127.0.0.1:{port}" if host.node is None else forwards[key][component]),
         )
         for key, host in hosts.items()
-        for component, port in (
-            ("node-exporter", NODE_EXPORTER_PORT),
-            ("cadvisor", CADVISOR_PORT),
-        )
+        for component, port in exporter_ports.items()
     ]
-    loki, _ = member(
-        OPERATOR,
-        "loki",
-        {
-            "port": loki_port,
-            "bind": loki_bind,
-            "data_dir": str(run_dir / "logging" / "backend" / "backend-data"),
-            "config_file": str(nanofaas_root / "deploy/observability/loki.yaml"),
-        },
-        url=loki_url,
-        cpuset=_cpus(loki_cpus),
-    )
+    members: list[Resource[Any]] = [resource for resource, _ in exporters]
+
+    # Logging: Loki on the operator, a collector on every node.
+    loki: Resource[Deployed] | None = None
+    collectors: dict[str, tuple[Resource[Deployed], Instance]] = {}
+    if operator_logging is not None:
+        logging_dir = run_dir / "logging" / "backend"
+    else:
+        logging_dir = run_dir / "logging"
+    loki_url = ""
     config_files = {
         name: nanofaas_root / "deploy/observability" / name
         for name in ("fluent-bit.conf", "parsers.conf")
     }
-    collectors: dict[str, tuple[Resource[Deployed], Instance]] = {}
-    for key, host in nodes.items():
-        push = urlsplit((log_endpoints or {}).get(key, logs.endpoint))
-        collectors[key] = member(
-            host,
-            "log-collector",
+    storage_dir = f"/var/tmp/nanolab-logs-{run_id}"  # nosec B108 - on the node VM
+    if logs.enabled:
+        if operator_logging is not None:
+            loki_bind, loki_port = "127.0.0.1", operator_logging.port
+            loki_cpus = operator_logging.cpus
+        else:
+            placement = settings.host_cpu_placement
+            loki_bind = logs.backend_bind
+            loki_port = urlsplit(logs.endpoint or "").port or 80
+            loki_cpus = placement.logging_cpus if placement else None
+        loki_url = f"http://{loki_bind}:{loki_port}"
+        data = logging_dir / "backend-data"
+
+        def hand_back(_inputs: TaskInputs, _value: None) -> None:
+            if not data.is_dir():
+                return
+            _chown_back(data)
+            hashes = {}
+            for path in sorted(data.rglob("*")):
+                if path.is_file():
+                    with path.open("rb") as stream:
+                        hashes[str(path.relative_to(data))] = hashlib.file_digest(
+                            stream, "sha256"
+                        ).hexdigest()
+            _write_json(logging_dir / "backend-data-sha256.json", hashes)
+
+        # Released after Loki, so the store it hashes is final.
+        store = resource_of(LOKI_STORE, lambda _inputs: None, hand_back)
+        loki, _ = member(
+            OPERATOR,
+            "loki",
             {
-                "port": COLLECTOR_PORT,
-                "config_files": {k: str(v) for k, v in config_files.items()},
-                "loki": {
-                    "host": push.hostname,
-                    "port": push.port or (443 if push.scheme == "https" else 80),
-                    "uri": push.path,
-                    "tls": "On" if push.scheme == "https" else "Off",
-                },
-                # On the node VM, per run; the VM's home is unknown until acquired.
-                "storage_dir": f"/var/tmp/nanolab-logs-{run_id}",  # nosec B108
-                "cpus": logs.cpu,
-                "memory_mib": logs.memory_mib,
-                "env": {
-                    "NANOFAAS_NODE_ID": key,
-                    "NANOFAAS_ENVIRONMENT": logs.environment,
-                    "NANOFAAS_CAMPAIGN_ID": logs.campaign_id,
-                    "NANOFAAS_RUN_ID": run_id,
-                    "NANOFAAS_MODE": mode,
-                    "NANOFAAS_NODE_ROLE": topology.nodes[key].config.kind,
-                    "NANOFAAS_LOG_BUFFER_SIZE": f"{logs.buffer_mib}M",
-                },
+                "port": loki_port,
+                "bind": loki_bind,
+                "data_dir": str(data),
+                "config_file": str(
+                    _loki_config(
+                        nanofaas_root / "deploy/observability/loki.yaml",
+                        logging_dir / "loki.yaml",
+                    )
+                ),
             },
-            requires=(loki,),
+            url=loki_url,
+            cpuset=_cpus(loki_cpus),
+            requires=(store,),
         )
-    jobs = {
-        job: [
-            {
-                "target": scraped(key, component, port),
-                "labels": {"node": key},
+        members += [store, loki]
+        for key, host in nodes.items():
+            push = urlsplit((log_endpoints or {}).get(key) or logs.endpoint or "")
+            collectors[key] = member(
+                host,
+                "log-collector",
+                {
+                    "port": COLLECTOR_PORT,
+                    "config_files": {k: str(v) for k, v in config_files.items()},
+                    "loki": {
+                        "host": push.hostname,
+                        "port": push.port or (443 if push.scheme == "https" else 80),
+                        "uri": push.path,
+                        "tls": "On" if push.scheme == "https" else "Off",
+                    },
+                    "storage_dir": storage_dir,
+                    "cpus": logs.cpu,
+                    "memory_mib": logs.memory_mib,
+                    "env": {
+                        "NANOFAAS_NODE_ID": key,
+                        "NANOFAAS_ENVIRONMENT": logs.environment,
+                        "NANOFAAS_CAMPAIGN_ID": logs.campaign_id,
+                        "NANOFAAS_RUN_ID": run_id,
+                        "NANOFAAS_MODE": mode,
+                        "NANOFAAS_NODE_ROLE": topology.nodes[key].config.kind,
+                        "NANOFAAS_LOG_BUFFER_SIZE": f"{logs.buffer_mib}M",
+                    },
+                },
+                requires=(loki,),
+            )
+            members.append(collectors[key][0])
+
+    jobs = {"node": "node-exporter", "cadvisor": "cadvisor"}
+
+    def scrape_jobs(inputs: TaskInputs) -> dict[str, Any]:
+        # A direct node's address exists only once its VM is acquired.
+        def target(key: str, component: str) -> str:
+            port = exporter_ports[component]
+            if key == "operator":
+                return f"127.0.0.1:{port}"
+            if key in direct:
+                return f"{inputs.resource(direct[key].vm).host}:{port}"
+            return forwards[key][component]
+
+        return {
+            "jobs": {
+                job: [
+                    {"target": target(key, component), "labels": {"node": key}}
+                    for key in hosts
+                ]
+                for job, component in jobs.items()
             }
-            for key in hosts
-        ]
-        for job, component, port in (
-            ("node", "node-exporter", NODE_EXPORTER_PORT),
-            ("cadvisor", "cadvisor", CADVISOR_PORT),
-        )
-    }
+        }
+
     prometheus_url = f"http://127.0.0.1:{PROMETHEUS_PORT}"
     prometheus, prometheus_instance = member(
         OPERATOR,
         "prometheus",
         {
             "port": PROMETHEUS_PORT,
-            "data_dir": str(workbench_dir / "prometheus-data"),
+            # Only the snapshot belongs in the run directory.
+            "data_dir": str(
+                operator_workspace_root() / ".workbench" / run_id / "prometheus"
+            ),
             "scrape_interval": f"{SCRAPE_SECONDS}s",
-            "jobs": jobs,
         },
         url=prometheus_url,
+        requires=tuple(node.vm for node in direct.values()),
+        config_from_inputs=scrape_jobs,
     )
 
     def tolerated(key: str) -> int:
-        node = topology.nodes.get(key)
-        remote = node is not None and (
-            node.site_host is not None or node.request.lifecycle == "azure"
-        )
-        return REMOTE_UNREACHABLE_SECONDS if remote else 0
+        return REMOTE_UNREACHABLE_SECONDS if _remote(topology.nodes.get(key)) else 0
 
     targets: dict[str, dict[str, Any]] = {
         f"up.{job}.{key}": {
@@ -278,13 +401,13 @@ def one_shot_platform(
         for job in jobs
     }
     for key in nodes:
-        for role, name in (
-            ("control-plane", CONTROL_PLANE),
-            ("log-collector", f"wb-log-collector-{key}"),
-        ):
+        watched = {"control-plane": CONTROL_PLANE}
+        if logs.enabled:
+            watched["log-collector"] = f"wb-log-collector-{key}"
+        for role, name in watched.items():
             targets[f"running.{role}.{key}"] = {
                 "kind": "container_running",
-                "params": {"name": name, "node": key},
+                "params": {"name": name, "node": key, "staleSeconds": STALE_SECONDS},
                 "toleratedSeconds": tolerated(key),
             }
     targets["swap.operator"] = {
@@ -307,6 +430,7 @@ def one_shot_platform(
         url=f"http://127.0.0.1:{SUPERVISOR_PORT}",
         requires=(prometheus,),
     )
+    members += [prometheus, supervisor]
 
     def collect(
         inputs: TaskInputs, host: WorkbenchHost, instance: Instance, value: Deployed
@@ -327,16 +451,18 @@ def one_shot_platform(
 
     def vm_resources(values: Members, _inputs: TaskInputs) -> None:
         started = values.of(prometheus).deployed_at or time.time()
-        observers = ("node-exporter", "cadvisor", "log-collector")
+        observers = ("node-exporter", "cadvisor") + (
+            ("log-collector",) if logs.enabled else ()
+        )
         export_vm_resources(
             prometheus_url,
             run_dir,
             nodes={
                 key: NodeRoles(
-                    roles={
-                        CONTROL_PLANE: "control-plane",
-                        f"wb-log-collector-{key}": "collector",
-                    },
+                    roles={CONTROL_PLANE: "control-plane"}
+                    | (
+                        {f"wb-log-collector-{key}": "collector"} if logs.enabled else {}
+                    ),
                     observers=tuple(f"wb-{c}-{key}" for c in observers),
                 )
                 for key in nodes
@@ -346,86 +472,111 @@ def one_shot_platform(
             step_seconds=SCRAPE_SECONDS,
         )
 
-    def loki_export(values: Members, _inputs: TaskInputs) -> None:
-        facts = _inspect(OPERATOR, "wb-loki-operator")
-        placement_file = (
-            logging_dir if operator_logging is not None else run_dir
-        ) / "logging-host-placement.json"
-        _write_json(
-            placement_file,
-            {"host": "operator", **facts, "cpus": _cpu_list(facts["cpuset"])},
-        )
-        verify_loki_ingestion(
-            loki_url + PUSH_PATH, f"nanolab-logs-{run_id}", logging_dir, settings
-        )
-        for key, (resource, _instance) in collectors.items():
-            directory = run_dir / "logging" / key
-            directory.mkdir(parents=True, exist_ok=True)
-            query = (
-                '{job="nanofaas",node='
-                + json.dumps(key)
-                + "} | json | runId="
-                + json.dumps(run_id)
-                + ' | logger="it.unimib.datai.nanofaas.execution.QueueObservation"'
-            )
-            started = values.of(resource).deployed_at or time.time()
-            with httpx.Client(trust_env=False) as http:
-                export_queue_events(
-                    http,
-                    query_url(loki_url + PUSH_PATH),
-                    query,
-                    int(started * 1e9),
-                    time.time_ns(),
-                    logs.export_limit,
-                    directory / "queue-events.jsonl",
-                )
-            events = directory / "queue-events.jsonl"
-            rows = (
-                [json.loads(line) for line in events.read_text().splitlines()]
-                if events.exists()
-                else []
-            )
-            (directory / "queue-timings.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in queue_timings(rows))
-            )
+    # Exports query the operator's Loki, as today's multi-site copy of `logs`.
+    export_logs = logs.model_copy(update={"endpoint": loki_url + PUSH_PATH})
 
     def collector_step(key: str) -> Step:
         resource, instance = collectors[key]
         host = nodes[key]
+        node = topology.nodes[key]
+        name = f"wb-{instance.name}"
+        metrics_file = workbench_dir / instance.name / "metrics.txt"
 
         def run(values: Members, inputs: TaskInputs) -> None:
-            collect(inputs, host, instance, values.of(resource))
-            metrics = (workbench_dir / instance.name / "metrics.txt").read_text()
-            directory = run_dir / "logging" / key
-            directory.mkdir(parents=True, exist_ok=True)
-            (directory / "collector-metrics.txt").write_text(metrics)
-            evidence = collection_evidence(metrics)
-            issues = (
-                []
-                if evidence["status"] == "drained"
-                else ["collection delivery is " + evidence["status"]]
-            )
-            _write_json(
-                directory / "status.json",
-                {
-                    "status": "partial" if issues else "complete",
-                    "nodeId": key,
-                    "issues": issues,
-                    "collection": evidence,
-                    "identity": {
-                        **_inspect(host, f"wb-{instance.name}"),
-                        "configSha256": {
-                            name: hashlib.sha256(path.read_bytes()).hexdigest()
-                            for name, path in config_files.items()
-                        },
-                        "cpu": logs.cpu,
-                        "memoryMiB": logs.memory_mib,
-                        "bufferMiB": logs.buffer_mib,
+            # Today's teardown, step for step: bounded drain wait, graceful
+            # stop, state archive, then the Loki and queue-event export. Every
+            # failure is an issue in this node's status.json.
+            value = values.of(resource)
+            issues: list[str] = []
+            final_metrics = ""
+            try:
+                for _ in range(DRAIN_POLLS):
+                    time.sleep(DRAIN_POLL_SECONDS)
+                    collect(inputs, host, instance, value)
+                    final_metrics = metrics_file.read_text()
+                    if collection_evidence(final_metrics)["status"] == "drained":
+                        break
+            except Exception as error:
+                issues.append(f"collector metrics: {error}")
+            identity: dict[str, Any] | None = None
+            try:
+                identity = {
+                    **_inspect(host, name),
+                    "configSha256": {
+                        file: hashlib.sha256(path.read_bytes()).hexdigest()
+                        for file, path in config_files.items()
                     },
-                },
+                    "cpu": logs.cpu,
+                    "memoryMiB": logs.memory_mib,
+                    "bufferMiB": logs.buffer_mib,
+                }
+            except Exception as error:
+                issues.append(f"docker inspect: {error}")
+            archive_issue = None
+            try:
+                stopped = node.provider.exec_argv(
+                    node.request,
+                    (
+                        "docker",
+                        "stop",
+                        "-t",
+                        str(
+                            int(
+                                operational_limit(settings, "process_drain_seconds", 15)
+                            )
+                        ),
+                        name,
+                    ),
+                )
+                if stopped.return_code:
+                    raise RuntimeError("collector graceful stop failed")
+                directory = run_dir / "logging" / key
+                directory.mkdir(parents=True, exist_ok=True)
+                archive_node_dir(
+                    node, storage_dir, directory / "collector-state.tar.gz"
+                )
+                node.command(("sudo", "rm", "-rf", storage_dir))
+            except Exception as error:
+                archive_issue = str(error)
+            export_collector(
+                node=node,
+                name=name,
+                run_dir=run_dir,
+                logs=export_logs,
+                session=LogSession(
+                    key,
+                    name,
+                    storage_dir,
+                    int((value.deployed_at or 0) * 1e9),
+                    identity or {},
+                ),
+                final_metrics=final_metrics,
+                archive_issue=archive_issue,
+                issues=issues,
             )
+            if archive_issue is not None:
+                raise RuntimeError(
+                    f"{key}: collector state archive failed; {storage_dir} "
+                    f"retained on the VM: {archive_issue}"
+                )
 
         return run
+
+    def loki_step(_values: Members, _inputs: TaskInputs) -> None:
+        placement_file = (
+            logging_dir if operator_logging is not None else run_dir
+        ) / "logging-host-placement.json"
+        try:
+            facts = _inspect(OPERATOR, "wb-loki-operator")
+            facts["cpus"] = _cpu_list(facts["cpuset"])
+        except Exception as error:
+            facts = {"error": str(error)}
+        _write_json(placement_file, {"host": "operator", **facts})
+        logging_dir.mkdir(parents=True, exist_ok=True)
+        (logging_dir / "backend.log").write_text(_loki_log())
+        verify_loki_ingestion(
+            loki_url + PUSH_PATH, f"nanolab-logs-{run_id}", logging_dir, settings
+        )
 
     def supervisor_status(values: Members, _inputs: TaskInputs) -> None:
         url = values.of(supervisor).url or f"http://127.0.0.1:{SUPERVISOR_PORT}"
@@ -437,8 +588,11 @@ def one_shot_platform(
     steps: list[tuple[str, Step]] = [
         ("Snapshot the workbench Prometheus", snapshot),
         ("Export vm-resources", vm_resources),
-        ("Export and verify Loki", loki_export),
-        *((f"Collect the {key} log collector", collector_step(key)) for key in nodes),
+        *(
+            (f"Collect the {key} log collector", collector_step(key))
+            for key in collectors
+        ),
+        *((("Export and verify Loki", loki_step),) if logs.enabled else ()),
         ("Record the supervisor status", supervisor_status),
     ]
 
@@ -446,19 +600,12 @@ def one_shot_platform(
         # Collect steps get the members' values as their upstream.
         return lambda inputs: fn(cast(Members, inputs.upstream()), inputs)
 
-    resource = compose(
-        "Acquire the one-shot workbench platform",
-        (
-            *(resource for resource, _ in exporters),
-            loki,
-            *(resource for resource, _ in collectors.values()),
-            prometheus,
-            supervisor,
-        ),
-        collect=tuple(call(title, step(fn)) for title, fn in steps),
-    )
     return OneShotPlatform(
-        resource,
+        compose(
+            "Acquire the one-shot workbench platform",
+            tuple(members),
+            collect=tuple(call(title, step(fn)) for title, fn in steps),
+        ),
         loki,
         prometheus,
         supervisor,

@@ -1,9 +1,12 @@
 import json
+import time
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
+import yaml
 from sonata_engine import (
     JournalConfig,
     Task,
@@ -13,8 +16,10 @@ from sonata_engine import (
     release_retained,
 )
 
+from nanolab.config.environment import OperatorLogging
 from nanolab.config.one_shot import HostCpuPlacement, OneShotLogs
 from nanolab.one_shot.infrastructure import NodeResource
+from nanolab.tasks.one_shot import logging as one_shot_logging
 from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 from nanolab.workbench import components, platform, playbook
@@ -48,9 +53,15 @@ FORWARDS = {
 }
 SEEN: dict = {}  # deployed instance name -> its vars, as the fake saw them
 VM = VmInfo(name="n", host="10.0.0.5", user="ubuntu", home="/home/ubuntu")
+DRAINED = (
+    "fluentbit_input_records_total 3\n"
+    "fluentbit_output_proc_records_total 3\n"
+    "fluentbit_output_dropped_records_total 0\n"
+)
+PENDING = DRAINED.replace("proc_records_total 3", "proc_records_total 1")
 
 
-def _node(key: str) -> NodeResource:
+def _node(key: str, events: list) -> NodeResource:
     vm = resource_of(
         f"vm {key}",
         lambda _i: VM,
@@ -58,33 +69,59 @@ def _node(key: str) -> NodeResource:
         revive=lambda raw: VmInfo(**raw),
     )
     request = VmRequest(lifecycle="external", name=key, user="ubuntu", host="h")
+
+    def exec_argv(_request, argv, remote_dir=None):
+        del remote_dir
+        if argv[:2] == ("docker", "stop"):
+            events.append((key, "stop", (argv[-1],)))
+        return SimpleNamespace(return_code=0, stdout="", stderr="")
+
     return NodeResource(
         SimpleNamespace(id=key, kind="edge"),  # type: ignore[arg-type]
         request,
         vm,
-        SimpleNamespace(shell=None),
+        SimpleNamespace(shell=None, exec_argv=exec_argv),
     )
 
 
-def _build(tmp_path, monkeypatch, events, *, fail=None):
+def _build(
+    tmp_path,
+    monkeypatch,
+    events,
+    *,
+    fail=None,
+    logs=LOGS,
+    forwards=FORWARDS,
+    metrics=None,
+    operator_logging=None,
+):
     """Build a platform whose playbooks and collect side effects only record."""
     vars_dir = tmp_path / "run" / "workbench" / "vars"
     SEEN.clear()
+    metrics = metrics or {}
 
     def bootstrap(_provider, operations, *, role):
         action = operations[0].operation_id.removeprefix("workbench.")
         saved = json.loads((vars_dir / f"{role}-{action}.json").read_text())
         names = tuple(i["name"] for i in saved["instances"])
-        if fail in names and action == "deploy":
-            raise RuntimeError("deploy failed")
         events.append((role, action, names))
+        if fail in names and action in ("deploy", "collect"):
+            raise RuntimeError(f"{action} failed")
         if action == "collect" and names[0].startswith("log-collector-"):
-            metrics = Path(saved["collect_dir"]) / names[0] / "metrics.txt"
-            metrics.parent.mkdir(parents=True, exist_ok=True)
-            metrics.write_text("")
+            path = Path(saved["collect_dir"]) / names[0] / "metrics.txt"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(metrics.get(role, DRAINED))
         if action == "deploy":
             SEEN.update({i["name"]: i for i in saved["instances"]})
 
+    def archive(node, source, path):
+        events.append(("collect", "archive", (node.config.id, source)))
+        path.write_bytes(b"tar")
+
+    def failing_loki(**_kwargs):
+        raise RuntimeError("no Loki in tests")
+
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "workspace"))
     monkeypatch.setattr(playbook, "run_bootstrap_operations", bootstrap)
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
     monkeypatch.setattr(platform, "ensure_installed", lambda: Path("/coll"))
@@ -93,30 +130,50 @@ def _build(tmp_path, monkeypatch, events, *, fail=None):
         "workbench_resource",
         lambda: resource_of("Install", lambda _i: Path("/coll"), lambda _i, _v: None),
     )
-    record = lambda name: lambda *_a, **_k: events.append(("collect", name, ()))  # noqa: E731
+    record = lambda name: lambda *_a, **k: events.append(("collect", name, k))  # noqa: E731
     monkeypatch.setattr(platform, "export_vm_resources", record("vm-resources"))
     monkeypatch.setattr(platform, "verify_loki_ingestion", record("loki-ingestion"))
-    monkeypatch.setattr(platform, "export_queue_events", lambda *_a: 0)
+    monkeypatch.setattr(platform, "archive_node_dir", archive)
+    monkeypatch.setattr(
+        platform, "_chown_back", lambda path: events.append(("operator", "chown", path))
+    )
+    monkeypatch.setattr(platform, "_loki_log", lambda: "loki says hi\n")
+    monkeypatch.setattr(one_shot_logging, "httpx", SimpleNamespace(Client=failing_loki))
+    monkeypatch.setattr(
+        platform,
+        "time",
+        SimpleNamespace(time=time.time, time_ns=time.time_ns, sleep=lambda _s: None),
+    )
     monkeypatch.setattr(
         platform,
         "_inspect",
         lambda _host, name: {"container": name, "image": "sha256:i", "cpuset": None},
     )
-    monkeypatch.setattr(
-        platform.SupervisorClient, "status", lambda _self: {"state": "healthy"}
-    )
+
+    def status(_self):
+        events.append(("collect", "supervisor", ()))
+        return {"state": "healthy"}
+
+    monkeypatch.setattr(platform.SupervisorClient, "status", status)
     observability = tmp_path / "nanofaas" / "deploy" / "observability"
     observability.mkdir(parents=True, exist_ok=True)
     for name in ("fluent-bit.conf", "parsers.conf"):
         (observability / name).write_text(name)
-    nodes = {key: _node(key) for key in NODES}
+    (observability / "loki.yaml").write_text(
+        "auth_enabled: false\nserver:\n  http_listen_port: 3100\n"
+    )
+    nodes = {key: _node(key, events) for key in NODES}
+    settings = SimpleNamespace(
+        observability=SimpleNamespace(logs=logs), host_cpu_placement=PLACEMENT
+    )
     return one_shot_platform(
         SimpleNamespace(nodes=nodes),  # type: ignore[arg-type]
-        SETTINGS,  # type: ignore[arg-type]
+        settings,  # type: ignore[arg-type]
         run_dir=tmp_path / "run",
         nanofaas_root=tmp_path / "nanofaas",
-        forwards=FORWARDS,
+        forwards=forwards,
         mode="ORACLE",
+        operator_logging=operator_logging,
     )
 
 
@@ -170,7 +227,7 @@ def test_failed_platform_acquire_undeploys_earlier_members(tmp_path, monkeypatch
     built = _build(tmp_path, monkeypatch, events, fail="prometheus-operator")
     with pytest.raises(Exception, match="deploy failed"):
         _run(built, events)
-    assert _of(events, "deploy") == DEPLOY_ORDER[:9]
+    assert _of(events, "deploy") == DEPLOY_ORDER[:10]  # the last one failed
     assert _of(events, "undeploy") == DEPLOY_ORDER[:9][::-1]
     assert ("consume", "", ()) not in events
 
@@ -179,7 +236,7 @@ def test_platform_release_from_journal(tmp_path, monkeypatch):
     """A later process releases every member on its recorded host."""
     events: list = []
     built = _build(tmp_path, monkeypatch, events)
-    members = {
+    members: dict[str, Any] = {
         title: asdict(
             Deployed(host, title, "x", None, None if host == "operator" else asdict(VM))
         )
@@ -187,6 +244,7 @@ def test_platform_release_from_journal(tmp_path, monkeypatch):
             (host, f"Deploy {name} on {host}") for host, name in DEPLOY_ORDER
         )
     }
+    members["Own the Loki store"] = None
     journal = tmp_path / "journal.jsonl"
     journal.write_text(
         json.dumps(
@@ -210,6 +268,8 @@ def test_supervisor_targets_cover_every_node(tmp_path, monkeypatch):
     events: list = []
     _run(_build(tmp_path, monkeypatch, events), events)
     config = SEEN["supervisor-operator"]["config"]
+    assert config["port"] == 8099
+    assert config["prometheus_url"] == "http://127.0.0.1:9090"
     targets = config["targets"]
     hosts = ("operator", *NODES)
     for host in hosts:
@@ -219,13 +279,19 @@ def test_supervisor_targets_cover_every_node(tmp_path, monkeypatch):
                 "labels": {"node": host},
             }
     for node in NODES:
-        assert targets[f"running.control-plane.{node}"]["params"] == {
-            "name": "nanolab-one-shot-control-plane",
-            "node": node,
+        assert targets[f"running.control-plane.{node}"] == {
+            "kind": "container_running",
+            "params": {
+                "name": "nanolab-one-shot-control-plane",
+                "node": node,
+                "staleSeconds": 30,
+            },
+            "toleratedSeconds": 0,
         }
         assert targets[f"running.log-collector.{node}"]["params"] == {
             "name": f"wb-log-collector-{node}",
             "node": node,
+            "staleSeconds": 30,
         }
     assert targets["swap.operator"] == {
         "kind": "swap_quiet",
@@ -237,7 +303,11 @@ def test_supervisor_targets_cover_every_node(tmp_path, monkeypatch):
         "toleratedSeconds": 0,
     }
     assert len(targets) == 2 * len(hosts) + 2 * len(NODES) + 1
-    assert config["prometheus_url"] == "http://127.0.0.1:9090"
+
+
+def test_forwarded_nodes_are_scraped_through_their_forwards(tmp_path, monkeypatch):
+    events: list = []
+    _run(_build(tmp_path, monkeypatch, events), events)
     jobs = SEEN["prometheus-operator"]["config"]["jobs"]
     assert jobs["node"] == [
         {"target": "127.0.0.1:9100", "labels": {"node": "operator"}},
@@ -249,6 +319,23 @@ def test_supervisor_targets_cover_every_node(tmp_path, monkeypatch):
         "127.0.0.1:18089",
         "127.0.0.1:18090",
     ]
+    assert all("bind" not in SEEN[f"node-exporter-{n}"]["config"] for n in NODES)
+
+
+def test_unforwarded_nodes_are_scraped_at_the_vm_address(tmp_path, monkeypatch):
+    events: list = []
+    forwards = {"edge-1": FORWARDS["edge-1"]}
+    _run(_build(tmp_path, monkeypatch, events, forwards=forwards), events)
+    jobs = SEEN["prometheus-operator"]["config"]["jobs"]
+    assert [t["target"] for t in jobs["node"]] == [
+        "127.0.0.1:9100",
+        "127.0.0.1:19100",
+        "10.0.0.5:9100",
+    ]
+    assert [t["target"] for t in jobs["cadvisor"]][2] == "10.0.0.5:8089"
+    assert SEEN["node-exporter-cloud-1"]["config"]["bind"] == "0.0.0.0"
+    assert SEEN["cadvisor-cloud-1"]["config"]["bind"] == "0.0.0.0"
+    assert "bind" not in SEEN["node-exporter-edge-1"]["config"]
 
 
 def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
@@ -267,27 +354,178 @@ def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
     )
 
 
+COLLECT_ORDER = [
+    ("operator", "collect"),  # Prometheus snapshot
+    ("collect", "vm-resources"),
+    ("edge-1", "collect"),
+    ("edge-1", "stop"),
+    ("collect", "archive"),
+    ("cloud-1", "collect"),
+    ("cloud-1", "stop"),
+    ("collect", "archive"),
+    ("collect", "loki-ingestion"),
+    ("collect", "supervisor"),
+]
+
+
+def _collects(events):
+    actions = [(host, action) for host, action, _ in events]
+    first_undeploy = actions.index(("operator", "undeploy"))
+    return actions[actions.index(("consume", "")) + 1 : first_undeploy]
+
+
 def test_collect_runs_before_undeploy(tmp_path, monkeypatch):
     events: list = []
     _run(_build(tmp_path, monkeypatch, events), events)
-    actions = [(host, action) for host, action, _ in events]
-    first_undeploy = actions.index(("operator", "undeploy"))
-    collects = actions[actions.index(("consume", "")) + 1 : first_undeploy]
-    assert collects == [
-        ("operator", "collect"),
-        ("collect", "vm-resources"),
-        ("collect", "loki-ingestion"),
-        ("edge-1", "collect"),
-        ("cloud-1", "collect"),
-    ]
-    status = tmp_path / "run" / "workbench" / "supervisor-status.json"
+    assert _collects(events) == COLLECT_ORDER
+    run = tmp_path / "run"
+    status = run / "workbench" / "supervisor-status.json"
     assert json.loads(status.read_text()) == {"state": "healthy"}
+    placement = json.loads((run / "logging-host-placement.json").read_text())
+    assert placement["container"] == "wb-loki-operator"
+    assert (run / "logging" / "backend.log").read_text() == "loki says hi\n"
     for node in NODES:
-        status = json.loads(
-            (tmp_path / "run/logging" / node / "status.json").read_text()
-        )
+        directory = run / "logging" / node
+        status = json.loads((directory / "status.json").read_text())
         assert status["identity"]["image"] == "sha256:i"
         assert status["identity"]["container"] == f"wb-log-collector-{node}"
-        assert status["collection"]["status"] == "unverified"
-    placement = json.loads((tmp_path / "run/logging-host-placement.json").read_text())
-    assert placement["container"] == "wb-loki-operator"
+        assert status["stateArchive"] == "verified"
+        assert (directory / "collector-state.tar.gz").read_bytes() == b"tar"
+        assert (directory / "collector-metrics.txt").read_text() == DRAINED
+        assert "status.json" in json.loads((directory / "sha256.json").read_text())
+
+
+def test_collectors_poll_until_drained(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events, metrics={"cloud-1": PENDING})
+    _run(built, events)
+    collects = [host for host, action in _collects(events) if action == "collect"]
+    assert collects.count("edge-1") == 1
+    assert collects.count("cloud-1") == 5  # today's bounded drain wait
+    statuses = {
+        node: json.loads(
+            (tmp_path / "run" / "logging" / node / "status.json").read_text()
+        )
+        for node in NODES
+    }
+    assert statuses["edge-1"]["collection"]["status"] == "drained"
+    assert statuses["cloud-1"]["collection"]["status"] == "pending"
+    assert "collection delivery is pending" in statuses["cloud-1"]["issues"]
+
+
+def test_a_failing_node_keeps_the_others_evidence(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    original = playbook.run_bootstrap_operations
+
+    def flaky(provider, operations, *, role):
+        if role == "edge-1" and operations[0].operation_id == "workbench.collect":
+            events.append((role, "collect", ()))
+            raise RuntimeError("edge-1 unreachable")
+        return original(provider, operations, role=role)
+
+    monkeypatch.setattr(playbook, "run_bootstrap_operations", flaky)
+    _run(built, events)  # a failed poll is evidence, not a failed release
+    logging_dir = tmp_path / "run" / "logging"
+    edge = json.loads((logging_dir / "edge-1" / "status.json").read_text())
+    cloud = json.loads((logging_dir / "cloud-1" / "status.json").read_text())
+    assert edge["status"] == "partial"
+    assert any("edge-1 unreachable" in issue for issue in edge["issues"])
+    assert cloud["collection"]["status"] == "drained"
+    assert ("collect", "supervisor") in _collects(events)
+
+
+def test_logs_disabled_omits_logging(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events, logs=OneShotLogs())
+    _run(built, events)
+    assert built.loki is None
+    assert built.collectors == {}
+    assert not any(name.startswith(("loki-", "log-collector-")) for name in SEEN)
+    targets = SEEN["supervisor-operator"]["config"]["targets"]
+    assert not any(name.startswith("running.log-collector.") for name in targets)
+    assert "running.control-plane.edge-1" in targets
+    assert _collects(events) == [
+        ("operator", "collect"),
+        ("collect", "vm-resources"),
+        ("collect", "supervisor"),
+    ]
+    (export,) = [k for _h, a, k in events if a == "vm-resources"]
+    roles = export["nodes"]["edge-1"]
+    assert roles.roles == {"nanolab-one-shot-control-plane": "control-plane"}
+    assert roles.observers == ("wb-node-exporter-edge-1", "wb-cadvisor-edge-1")
+
+
+def test_external_loki_is_refused(tmp_path, monkeypatch):
+    logs = OneShotLogs.model_validate(
+        {"enabled": True, "endpoint": "http://10.0.0.1:3100/loki/api/v1/push"}
+    )
+    with pytest.raises(ValueError, match="backendOwned"):
+        _build(tmp_path, monkeypatch, [], logs=logs)
+
+
+def test_loki_store_is_handed_back_after_loki(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    data = tmp_path / "run" / "logging" / "backend-data"
+    data.mkdir(parents=True)
+    _run(built, events)
+    assert SEEN["loki-operator"]["config"]["data_dir"] == str(data)
+    undeploys = [names for _h, action, names in events if action == "undeploy"]
+    after = [
+        (host, action)
+        for host, action, _ in events[
+            events.index(("operator", "undeploy", ("loki-operator",))) :
+        ]
+    ]
+    assert after[1] == ("operator", "chown")
+    assert undeploys[-1] == ("node-exporter-operator",)
+
+
+def test_loki_store_hashes_today_format(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    data = tmp_path / "run" / "logging" / "backend-data"
+    (data / "chunks").mkdir(parents=True)
+    (data / "chunks" / "a").write_text("a")
+    _run(built, events)
+    hashes = json.loads((data.parent / "backend-data-sha256.json").read_text())
+    assert hashes == {
+        "chunks/a": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+    }
+
+
+def test_multi_site_loki_lives_under_backend(tmp_path, monkeypatch):
+    operator_logging = OperatorLogging.model_validate(
+        {"lokiBinary": "/x", "lokiSha256": "0" * 64, "port": 43100, "cpus": [5]}
+    )
+    events: list = []
+    _run(
+        _build(tmp_path, monkeypatch, events, operator_logging=operator_logging),
+        events,
+    )
+    loki = SEEN["loki-operator"]
+    backend = tmp_path / "run" / "logging" / "backend"
+    assert loki["config"]["data_dir"] == str(backend / "backend-data")
+    assert loki["config"]["port"] == 43100
+    assert loki["cpuset"] == "5"
+    assert (backend / "backend.log").exists()
+    assert (backend / "logging-host-placement.json").exists()
+
+
+def test_loki_config_keeps_the_wal_settings(tmp_path, monkeypatch):
+    events: list = []
+    _run(_build(tmp_path, monkeypatch, events), events)
+    path = Path(SEEN["loki-operator"]["config"]["config_file"])
+    assert path.parent == tmp_path / "run" / "logging"
+    config = yaml.safe_load(path.read_text())
+    assert config["ingester"]["wal"] == {"enabled": True, "disk_full_threshold": 0}
+    assert config["server"] == {"http_listen_port": 3100}
+
+
+def test_prometheus_data_stays_out_of_the_run(tmp_path, monkeypatch):
+    events: list = []
+    _run(_build(tmp_path, monkeypatch, events), events)
+    assert SEEN["prometheus-operator"]["config"]["data_dir"] == str(
+        tmp_path / "workspace" / ".workbench" / "run" / "prometheus"
+    )
