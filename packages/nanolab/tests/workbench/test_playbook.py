@@ -1,6 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Literal
+
+import pytest
+from sonata_engine import TaskInputs
 
 from nanolab.config.environment import MultipassSite
 from nanolab.one_shot.infrastructure import NodeResource
@@ -12,11 +15,15 @@ from nanolab.workbench.inventory import HostVars, Instance
 from nanolab.workbench.playbook import WorkbenchHost, WorkbenchPlaybook
 
 VARS = HostVars(instances=(Instance(name="prom", component="prometheus"),))
-INSTALLED = resource_of("Install", lambda _i: Path("/coll"), lambda _i, _v: None)
 VM = resource_of("vm", lambda _i: None, lambda _i, _v: None)
 
 
-def run(host, tmp_path, monkeypatch, action: Any = "deploy"):
+def run(
+    host: WorkbenchHost,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    action: Literal["deploy", "collect", "undeploy"] = "deploy",
+):
     captured = []
     monkeypatch.setattr(
         playbook,
@@ -25,16 +32,14 @@ def run(host, tmp_path, monkeypatch, action: Any = "deploy"):
             (provider, operations, role)
         ),
     )
-    inputs = SimpleNamespace(
-        resource=lambda r: (
-            Path("/coll")
-            if r is INSTALLED
-            else VmInfo(name="n", host="10.0.0.5", user="ubuntu", home="/home/ubuntu")
-        )
+    vm = (
+        None
+        if host.node is None
+        else VmInfo(name="n", host="10.0.0.5", user="ubuntu", home="/home/ubuntu")
     )
     WorkbenchPlaybook(
-        "t", host, action, VARS, vars_dir=tmp_path, installed=INSTALLED
-    ).run(inputs)  # type: ignore[arg-type]
+        "t", host, action, VARS, vars_dir=tmp_path, collections=Path("/coll"), vm=vm
+    ).run(TaskInputs._for_resource_values({}, ()))
     return captured[0]
 
 

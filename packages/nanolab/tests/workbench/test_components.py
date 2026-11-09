@@ -3,10 +3,13 @@ from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 
+from nanolab.one_shot.infrastructure import NodeResource
 from nanolab.tasks.resource_tasks import release_now, resource_of
-from nanolab.workbench import playbook
+from nanolab.tasks.vm.models import VmInfo, VmRequest
+from nanolab.workbench import components, playbook
 from nanolab.workbench.components import Deployed, collect_task, component_resource
 from nanolab.workbench.inventory import Instance
 from nanolab.workbench.playbook import WorkbenchHost
@@ -30,6 +33,7 @@ class Consume(Task[None]):
 
 
 def _record(monkeypatch, events: list[str]) -> None:
+    monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
     monkeypatch.setattr(
         playbook,
         "run_bootstrap_operations",
@@ -71,17 +75,46 @@ def test_undeploy_runs_when_kept(tmp_path, monkeypatch):
     assert events[-1].startswith("workbench.undeploy")
 
 
-def test_value_revives_from_json(tmp_path, monkeypatch):
-    events: list[str] = []
-    _record(monkeypatch, events)
-    resource = _resource(tmp_path)
-    value = Deployed("operator", "prom", "prometheus", "http://x:9090")
+def _node() -> WorkbenchHost:
+    vm = resource_of(
+        "vm",
+        lambda _i: VmInfo(name="n", host="h", user="u", home="/h"),
+        lambda _i, _v: None,
+        revive=lambda raw: VmInfo(**raw),
+    )
+    request = VmRequest(lifecycle="external", name="nl-x", user="ubuntu", host="h")
+    node = NodeResource(
+        SimpleNamespace(id="edge-1"),  # type: ignore[arg-type]
+        request,
+        vm,
+        SimpleNamespace(shell=None),
+    )
+    return WorkbenchHost("edge-1", node)
+
+
+@pytest.mark.parametrize("node", [False, True])
+def test_release_from_journal_needs_no_live_resources(tmp_path, monkeypatch, node):
+    """A later-process teardown runs with empty inputs and a revived value."""
+    captured: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        playbook,
+        "run_bootstrap_operations",
+        lambda _p, operations, *, role: captured.append(
+            (operations[0].operation_id, operations[0].argv[2])
+        ),
+    )
+    monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
+    host = _node() if node else HOST
+    resource = component_resource(
+        host, PROM, url=None, vars_dir=tmp_path, installed=INSTALLED
+    )
+    vm = VmInfo(name="n", host="10.0.0.5", user="ubuntu", home="/home/ubuntu")
+    value = Deployed(host.key, "prom", "prometheus", None, asdict(vm) if node else None)
     assert resource.revive is not None
     revived = resource.revive(json.loads(json.dumps(asdict(value))))
     assert revived == value
-    inputs = SimpleNamespace(resource=lambda _r: Path("/coll"))
-    release_now(resource, inputs, revived)
-    assert events == ["workbench.undeploy:Undeploy prom on operator"]
+    release_now(resource, TaskInputs._for_resource_values({}, ()), revived)
+    assert captured == [("workbench.undeploy", "10.0.0.5," if node else "localhost,")]
 
 
 def test_titles_name_instance_and_host(tmp_path, monkeypatch):
@@ -96,7 +129,9 @@ def test_collect_task_runs_collect(tmp_path, monkeypatch):
     events: list[str] = []
     _record(monkeypatch, events)
     task = collect_task(HOST, (PROM,), Path("/runs/x"), tmp_path, INSTALLED)
-    task.run(SimpleNamespace(resource=lambda _r: Path("/coll")))  # type: ignore[arg-type]
+    task.run(
+        TaskInputs._for_resource_values({id(INSTALLED): Path("/coll")}, (INSTALLED,))
+    )
     assert events == ["workbench.collect:Collect operator"]
     saved = json.loads((tmp_path / "operator-collect.json").read_text())
     assert saved["collect_dir"] == "/runs/x"

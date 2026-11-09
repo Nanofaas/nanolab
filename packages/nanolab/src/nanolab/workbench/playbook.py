@@ -9,7 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, override
 
-from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
+from sonata_engine import Task, TaskInputs, TaskOutcome
 from sonata_tasks.ansible import build_ansible_argv
 
 from nanolab.one_shot.infrastructure import NodeResource
@@ -22,6 +22,7 @@ from nanolab.tasks.provisioning.bootstrap import (
     run_bootstrap_operations,
     scenario_context,
 )
+from nanolab.tasks.vm.models import VmInfo
 from nanolab.workbench.inventory import HostVars, write_host_vars
 
 
@@ -46,7 +47,8 @@ class WorkbenchPlaybook(Task[None]):
         host_vars: HostVars,
         *,
         vars_dir: Path,
-        installed: Resource[Path],
+        collections: Path,
+        vm: VmInfo | None,
     ) -> None:
         """Bind the task to one host, action and vars."""
         self.title = title
@@ -54,11 +56,13 @@ class WorkbenchPlaybook(Task[None]):
         self.action = action
         self.host_vars = host_vars
         self.vars_dir = vars_dir
-        self.installed = installed
+        self.collections = collections
+        self.vm = vm
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
-        collections = inputs.resource(self.installed)
+        del inputs
+        collections = self.collections
         vars_file = write_host_vars(
             self.vars_dir / f"{self.host.key}-{self.action}.json", self.host_vars
         )
@@ -90,7 +94,9 @@ class WorkbenchPlaybook(Task[None]):
             )
             run_bootstrap_operations(None, (operation,), role=self.host.key)
             return TaskOutcome()
-        vm = inputs.resource(node.vm)
+        vm = self.vm
+        if vm is None:
+            raise ValueError(f"{self.host.key} needs its VM")
         request = node.request.model_copy(
             update={"host": vm.host, "user": vm.user, "home": vm.home}
         )

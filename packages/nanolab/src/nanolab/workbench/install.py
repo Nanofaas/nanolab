@@ -31,6 +31,34 @@ def _installed_version(collections: Path) -> str | None:
         return None
 
 
+def ensure_installed() -> Path:
+    """Install the pinned collection unless it is already there; return its path."""
+    collections = workbench_collections_path()
+    if _installed_version(collections) == _pinned_version():
+        return collections
+    done = subprocess.run(
+        [
+            "ansible-galaxy",
+            "collection",
+            "install",
+            "--force",
+            "-r",
+            str(bundled_ansible_root() / _REQUIREMENTS),
+            "-p",
+            str(collections),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if done.returncode != 0:
+        raise RuntimeError(
+            f"installing the workbench collection failed: "
+            f"{(done.stderr or done.stdout).strip()}"
+        )
+    return collections
+
+
 class InstallWorkbench(Task[Path]):
     """`ansible-galaxy collection install` the pin, unless it is already there."""
 
@@ -40,30 +68,7 @@ class InstallWorkbench(Task[Path]):
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[Path]:
         del inputs
-        collections = workbench_collections_path()
-        if _installed_version(collections) == _pinned_version():
-            return TaskOutcome(value=collections)
-        done = subprocess.run(
-            [
-                "ansible-galaxy",
-                "collection",
-                "install",
-                "--force",
-                "-r",
-                str(bundled_ansible_root() / _REQUIREMENTS),
-                "-p",
-                str(collections),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if done.returncode != 0:
-            raise RuntimeError(
-                f"installing the workbench collection failed: "
-                f"{(done.stderr or done.stdout).strip()}"
-            )
-        return TaskOutcome(value=collections)
+        return TaskOutcome(value=ensure_installed())
 
 
 def workbench_resource() -> Resource[Path]:

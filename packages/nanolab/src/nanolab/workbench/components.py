@@ -2,60 +2,44 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, override
+from typing import Any, Literal, override
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
 from nanolab.tasks.resource_tasks import release_call
+from nanolab.tasks.vm.models import VmInfo
+from nanolab.workbench.install import ensure_installed
 from nanolab.workbench.inventory import HostVars, Instance
 from nanolab.workbench.playbook import WorkbenchHost, WorkbenchPlaybook
+
+Action = Literal["deploy", "collect", "undeploy"]
 
 
 @dataclass(frozen=True)
 class Deployed:
-    """What a deployed component instance leaves in the journal."""
+    """What a deployed component instance leaves in the journal.
+
+    `vm` is the host VM's journal form (None on the nanolab host), so an
+    undeploy in a later process needs no live resource.
+    """
 
     host: str
     instance: str
     component: str
     url: str | None
-
-
-class _Deploy(Task[Deployed]):
-    idempotent = False
-
-    def __init__(
-        self,
-        host: WorkbenchHost,
-        instance: Instance,
-        url: str | None,
-        playbook: WorkbenchPlaybook,
-    ) -> None:
-        self.title = playbook.title
-        self.host = host
-        self.instance = instance
-        self.url = url
-        self.playbook = playbook
-
-    @override
-    def run(self, inputs: TaskInputs) -> TaskOutcome[Deployed]:
-        self.playbook.run(inputs)
-        return TaskOutcome(
-            value=Deployed(
-                self.host.key, self.instance.name, self.instance.component, self.url
-            )
-        )
+    vm: dict[str, Any] | None = None
 
 
 def _playbook(
     title: str,
     host: WorkbenchHost,
-    action: Any,
+    action: Action,
     instances: tuple[Instance, ...],
     vars_dir: Path,
-    installed: Resource[Path],
+    collections: Path,
+    vm: VmInfo | None,
     collect_dir: Path | None = None,
 ) -> WorkbenchPlaybook:
     return WorkbenchPlaybook(
@@ -67,8 +51,87 @@ def _playbook(
             collect_dir=None if collect_dir is None else str(collect_dir),
         ),
         vars_dir=vars_dir,
-        installed=installed,
+        collections=collections,
+        vm=vm,
     )
+
+
+def _vm(host: WorkbenchHost, inputs: TaskInputs) -> VmInfo | None:
+    return None if host.node is None else inputs.resource(host.node.vm)
+
+
+class _Deploy(Task[Deployed]):
+    idempotent = False
+
+    def __init__(
+        self,
+        title: str,
+        host: WorkbenchHost,
+        instance: Instance,
+        url: str | None,
+        vars_dir: Path,
+        installed: Resource[Path],
+    ) -> None:
+        self.title = title
+        self.host = host
+        self.instance = instance
+        self.url = url
+        self.vars_dir = vars_dir
+        self.installed = installed
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[Deployed]:
+        vm = _vm(self.host, inputs)
+        _playbook(
+            self.title,
+            self.host,
+            "deploy",
+            (self.instance,),
+            self.vars_dir,
+            inputs.resource(self.installed),
+            vm,
+        ).run(inputs)
+        return TaskOutcome(
+            value=Deployed(
+                self.host.key,
+                self.instance.name,
+                self.instance.component,
+                self.url,
+                None if vm is None else asdict(vm),
+            )
+        )
+
+
+class _Collect(Task[None]):
+    idempotent = False
+
+    def __init__(
+        self,
+        host: WorkbenchHost,
+        instances: tuple[Instance, ...],
+        collect_dir: Path,
+        vars_dir: Path,
+        installed: Resource[Path],
+    ) -> None:
+        self.title = f"Collect {host.key}"
+        self.host = host
+        self.instances = instances
+        self.collect_dir = collect_dir
+        self.vars_dir = vars_dir
+        self.installed = installed
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        return _playbook(
+            self.title,
+            self.host,
+            "collect",
+            self.instances,
+            self.vars_dir,
+            inputs.resource(self.installed),
+            _vm(self.host, inputs),
+            self.collect_dir,
+        ).run(inputs)
 
 
 def component_resource(
@@ -82,23 +145,28 @@ def component_resource(
 ) -> Resource[Deployed]:
     """Deploy `instance` on `host`; undeploy it on release, even when kept."""
     where = f"{instance.name} on {host.key}"
-    undeploy = _playbook(
-        f"Undeploy {where}", host, "undeploy", (instance,), vars_dir, installed
-    )
     node = () if host.node is None else (host.node.vm,)
+
+    def undeploy(inputs: TaskInputs, value: Deployed) -> None:
+        # A teardown in a later process rebuilds this resource by title and
+        # runs the release with no resource values, so everything comes from
+        # the journalled `Deployed` and the workspace, never from `inputs`.
+        revive = None if host.node is None else host.node.vm.revive
+        vm = None if revive is None or value.vm is None else revive(value.vm)
+        _playbook(
+            f"Undeploy {where}",
+            host,
+            "undeploy",
+            (instance,),
+            vars_dir,
+            ensure_installed(),
+            vm,
+        ).run(inputs)
+
     return Resource(
         f"Deploy {where}",
-        _Deploy(
-            host,
-            instance,
-            url,
-            _playbook(
-                f"Deploy {where}", host, "deploy", (instance,), vars_dir, installed
-            ),
-        ),
-        # The undeploy is rebuilt from what was captured here, so a later
-        # process releasing from the journal needs only the revived Deployed.
-        release_call(undeploy.title, lambda inputs, _value: undeploy.run(inputs)),
+        _Deploy(f"Deploy {where}", host, instance, url, vars_dir, installed),
+        release_call(f"Undeploy {where}", undeploy),
         requires=(installed, *node, *requires),
         always_release=True,
         revive=lambda raw: Deployed(**raw),
@@ -113,12 +181,4 @@ def collect_task(
     installed: Resource[Path],
 ) -> Task[None]:
     """Run the `collect` playbook for `instances` into `collect_dir`."""
-    return _playbook(
-        f"Collect {host.key}",
-        host,
-        "collect",
-        instances,
-        vars_dir,
-        installed,
-        collect_dir,
-    )
+    return _Collect(host, instances, collect_dir, vars_dir, installed)
