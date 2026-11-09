@@ -42,13 +42,9 @@ def test_load_failure_keeps_original_error_and_collects_even_if_collection_fails
         def poll(self):
             return self.returncode
 
-        def terminate(self):
-            actions.append("terminate")
+        def stop(self):
+            actions.append("stop")
             self.returncode = -15
-
-        def wait(self, **kwargs):
-            actions.append("wait")
-            return self.returncode
 
     def close():
         actions.append("collector-close")
@@ -77,7 +73,7 @@ def test_load_failure_keeps_original_error_and_collects_even_if_collection_fails
     )
     with pytest.raises(RuntimeError, match="injected load-task failure"):
         RunOneShotLoadTask(freeze, "generator", "collector").run(inputs)
-    assert actions == ["collector-close", "terminate", "wait", "evidence"]
+    assert actions == ["collector-close", "stop", "evidence"]
     assert "injected load-task failure" in (tmp_path / "load-status.jsonl").read_text()
     if collector_fails:
         assert (
@@ -239,11 +235,9 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
                 self.returncode = 0
             return self.returncode
 
-        def terminate(self):
-            self.returncode = -15
-
-        def wait(self, **_):
-            return self.returncode
+        def stop(self):
+            if self.returncode is None:
+                self.returncode = -15
 
     collector = SimpleNamespace(require_healthy=lambda: None, close=lambda: None)
     resources = {
@@ -369,11 +363,9 @@ def test_observation_stops_after_consecutive_epochs_without_any_plan(
                 self.returncode = 0
             return self.returncode
 
-        def terminate(self):
-            self.returncode = -15
-
-        def wait(self, **_):
-            return self.returncode
+        def stop(self):
+            if self.returncode is None:
+                self.returncode = -15
 
     resources = {
         "clock": SimpleNamespace(require_healthy=lambda: None),
@@ -468,13 +460,9 @@ def test_artifact_write_failure_keeps_primary_load_error_and_attempts_cleanup(
         def poll(self):
             return self.returncode
 
-        def terminate(self):
-            actions.append("terminate")
+        def stop(self):
+            actions.append("stop")
             self.returncode = -15
-
-        def wait(self, **kwargs):
-            actions.append("wait")
-            return self.returncode
 
     freeze = SimpleNamespace(
         run_dir=tmp_path,
@@ -502,5 +490,37 @@ def test_artifact_write_failure_keeps_primary_load_error_and_attempts_cleanup(
     )
     with pytest.raises(RuntimeError, match="injected load-task failure") as error:
         RunOneShotLoadTask(freeze, "generator", "collector").run(inputs)
-    assert actions == ["close", "terminate", "wait", "evidence"]
+    assert actions == ["close", "stop", "evidence"]
     assert any("No space left" in note for note in error.value.__notes__)
+
+
+def test_k6_version_comes_from_the_pinned_loadgen_image(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from nanolab.tasks.one_shot import experiment
+
+    defaults = (
+        tmp_path / "ansible_collections/nanofaas/workbench/roles/loadgen/defaults"
+    )
+    defaults.mkdir(parents=True)
+    (defaults / "main.yml").write_text("loadgen_image: grafana/k6@sha256:abc\n")
+    monkeypatch.setattr(experiment, "workbench_collections_path", lambda: tmp_path)
+    calls = []
+
+    def run(argv, **_kwargs):
+        calls.append(argv)
+        return SimpleNamespace(stdout="k6 v2.3.0 (go1.25)\n")
+
+    monkeypatch.setattr(experiment.subprocess, "run", run)
+    assert experiment.k6_version() == "k6 v2.3.0 (go1.25)"
+    assert calls == [
+        (
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "grafana/k6@sha256:abc",
+            "version",
+        )
+    ]

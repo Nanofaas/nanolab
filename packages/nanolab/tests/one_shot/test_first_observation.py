@@ -547,94 +547,52 @@ def test_observation_stages_have_names_for_sonata_journaling(observer):
     assert all(stage.title for stage in stages)
 
 
-def test_observer_precheck_correlates_samples_with_parent_clock_probes(
-    observer, tmp_path, monkeypatch
-):
+def test_observer_precheck_uses_exporter_cost(tmp_path, monkeypatch):
+    """The cost is the observer containers' share of the exported rows."""
     from datetime import datetime
     from types import SimpleNamespace
 
-    from nanolab.one_shot.vm_resources import summarize_resources
+    windows = []
 
-    assert observer is not None
-    probes = [
-        {
-            "node": "edge-1",
-            "remoteBootId": "guest-boot",
-            "remoteMonotonicSeconds": 1000 + second / 2,
-            "beforeMonotonicSeconds": 100 + second / 2,
-            "afterMonotonicSeconds": 100 + second / 2 + 0.001,
-            "errorType": None,
-        }
-        for second in range(181)
-    ]
-    (tmp_path / "clock-probes.jsonl").write_text(
-        "".join(json.dumps(row) + "\n" for row in probes)
-    )
-    coverage = {}
+    def export(into, start, end):
+        windows.append((into, start, end))
+        raw = into / "vm-resources"
+        raw.mkdir()
+        rows = [
+            {"node": "edge-1", "sampler": {"cpuUsedCores": c, "memoryRssPeakBytes": r}}
+            for c, r in ((0.1, 100), (0.3, 300))
+        ]
+        (raw / "edge-1.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows) + "{partial"
+        )
 
-    class Sampler:
-        def __init__(self, context, _inputs, *, terminal_probe):
-            self.context = context
-            self.terminal_probe = terminal_probe
-            manifest = json.loads((context.run_dir / "manifest.json").read_text())
-            raw = context.run_dir / "vm-resources"
-            raw.mkdir()
-            rows = [
-                {
-                    "timestampUtc": manifest["anchor"],
-                    "node": "edge-1",
-                    "bootId": "guest-boot",
-                    "monotonicSeconds": 1030.5 + second,
-                    "cpuUtilization": 0.2,
-                    "vcpuCount": 1,
-                    "memoryTotalBytes": 1024,
-                    "memoryAvailableBytes": 512,
-                    "memoryUsedBytes": 512,
-                    "swapTotalBytes": 0,
-                    "swapFreeBytes": 0,
-                    "swapUsedBytes": 0,
-                    "containers": [],
-                }
-                for second in range(60)
-            ]
-            (raw / "edge-1.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in rows)
-            )
-
-        def close(self):
-            self.terminal_probe()
-            manifest = json.loads((self.context.run_dir / "manifest.json").read_text())
-            coverage.update(
-                summarize_resources(
-                    self.context.run_dir,
-                    anchor=datetime.fromisoformat(manifest["anchor"]),
-                    warmup=0,
-                    period=60,
-                    epochs=1,
-                    nodes=["edge-1"],
-                    mode="oracle",
-                    functions=["arithmetic"],
-                    run_id="observer-precheck",
-                )
-            )
-
-    ticks = iter([100, 191])
+    ticks = iter([100, 100.1, 161])
     monkeypatch.setattr(observation_tasks.time, "monotonic", lambda: next(ticks))
-    monkeypatch.setattr(observation_tasks, "VmTelemetrySession", Sampler)
+    monkeypatch.setattr(observation_tasks.time, "sleep", lambda _s: None)
     run = SimpleNamespace(
         run_dir=tmp_path,
-        topology=SimpleNamespace(resources=SimpleNamespace(nodes={"edge-1": None})),
-        settings=object(),
+        topology=SimpleNamespace(
+            resources=SimpleNamespace(nodes={"edge-1": None}),
+            platform=SimpleNamespace(export_vm_resources=export),
+        ),
         clock=object(),
     )
-    inputs = SimpleNamespace(resource=lambda _: SimpleNamespace(refresh=lambda: None))
+    checks = []
+    clock = SimpleNamespace(require_healthy=lambda: checks.append("clock"))
+    inputs = SimpleNamespace(resource=lambda _: clock)
     observation_tasks.ObserverPrecheck(run).run(cast(Any, inputs))
-    assert coverage["complete"] is True
-    node = coverage["nodes"]["edge-1"]
-    assert node["observedSeconds"] == 60
-    assert node["missingSeconds"] == []
-    assert node["uncorrelatedSamples"] == 0
-    assert node["phaseCorrelationComplete"] is True
+    ((into, start, end),) = windows
+    assert into == tmp_path / "observer-precheck"
+    assert isinstance(start, datetime) and end > start
+    assert checks == ["clock"]
+    cost = json.loads((into / "cost.json").read_text())
+    assert cost["nodes"]["edge-1"] == {
+        "samples": 2,
+        "malformedLines": 1,
+        "samplerMeanUsedCores": pytest.approx(0.2),
+        "samplerPeakRssBytes": 300,
+    }
+    assert cost["method"] == "idle-sampler-and-collector-resource-cost"
 
 
 @pytest.mark.parametrize("profiled", [False, True])
@@ -1232,42 +1190,27 @@ def test_final_inventory_failure_still_renders_offline_report(
     assert result["cause"] == ("final inventory failed" if inventory_fails else None)
 
 
-def test_the_operator_memory_recorder_stops_before_the_run_is_archived(
-    observer, tmp_path, monkeypatch
-):
-    """An appended operator-memory.jsonl once failed the archive hash check."""
+def test_no_operator_memory_recorder(observer, tmp_path, monkeypatch):
+    """The workbench supervisor watches swap; the quiet precheck stays."""
     from types import SimpleNamespace
 
     from nanolab.one_shot import operator_memory
 
-    events = []
+    assert "OperatorMemoryRecorder" not in Path(observer.__file__).read_text()
 
-    class Recorder:
-        def __init__(self, path, **_kwargs):
-            events.append(("created", path.name))
+    def refuse(*_a, **_k):
+        pytest.fail("the observe script built an OperatorMemoryRecorder")
 
-        def start(self):
-            events.append("start")
-
-        def close(self):
-            events.append("close")
-
-    def inventory(*_a, **_k):
-        events.append("inventory")
-        return SimpleNamespace(stdout='{"list":[]}')
-
-    monkeypatch.setattr(operator_memory, "OperatorMemoryRecorder", Recorder)
+    monkeypatch.setattr(
+        operator_memory, "OperatorMemoryRecorder", refuse, raising=False
+    )
     args, _releases = offline_observation(observer, tmp_path, monkeypatch)
-    monkeypatch.setattr(observer.subprocess, "run", inventory)
+    monkeypatch.setattr(
+        observer.subprocess, "run", lambda *_a, **_k: SimpleNamespace(stdout="{}")
+    )
     observer.run_observation(args)
-    # Closed with the workflow, before the final inventory and the archive.
-    assert events == [
-        ("created", "operator-memory.jsonl"),
-        "start",
-        "inventory",
-        "close",
-        "inventory",
-    ]
+    assert not (args.output / "operator-memory.jsonl").exists()
+    assert (args.output / "operator-memory-preflight.json").exists()
 
 
 @pytest.mark.parametrize(

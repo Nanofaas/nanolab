@@ -2,9 +2,8 @@
 
 import importlib.util
 from pathlib import Path
-from typing import Any, cast
 
-from nanolab.tasks.resource_tasks import acquire_now, release_now
+from nanolab.tasks.resource_tasks import acquire_now
 
 
 def test_observation_binding_centralizes_limits_without_changing_hardware(tmp_path):
@@ -52,12 +51,14 @@ def test_limits_are_optional_and_legacy_defaults_remain_explicit():
 
 def test_generator_duration_uses_remaining_frozen_horizon(tmp_path, monkeypatch):
     import json
+    from pathlib import Path
     from types import SimpleNamespace
 
     from sonata_engine import TaskInputs
 
     from nanolab.config.one_shot import OperationalLimits
-    from nanolab.tasks.one_shot import experiment
+    from nanolab.workbench import components, loadgen, playbook
+    from nanolab.workbench.platform import OPERATOR
 
     (tmp_path / "manifest.json").write_text(
         json.dumps(
@@ -69,22 +70,21 @@ def test_generator_duration_uses_remaining_frozen_horizon(tmp_path, monkeypatch)
             }
         )
     )
-    monkeypatch.setattr(experiment.time, "monotonic", lambda: 900)
+    monkeypatch.setattr(loadgen.time, "monotonic", lambda: 900)
+    monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
     environments = []
-    child = SimpleNamespace(poll=lambda: 0)
 
-    def start(*_, **kwargs):
-        environments.append(kwargs["env"])
-        return child
+    def deploy(_provider, _operations, *, role):
+        saved = tmp_path / "workbench" / "vars" / f"{role}-deploy.json"
+        environments.append(json.loads(saved.read_text())["instances"][0]["config"])
 
-    monkeypatch.setattr(experiment.subprocess, "Popen", start)
-    resource = experiment.generator_resource(
+    monkeypatch.setattr(playbook, "run_bootstrap_operations", deploy)
+    resource = loadgen.loadgen_resource(
+        OPERATOR,
         run_dir=tmp_path,
         vus=512,
         duration=4050,
         settings=SimpleNamespace(operational_limits=OperationalLimits()),
     )
-    inputs = TaskInputs._for_resources({}, set())
-    acquire_now(resource, inputs)
-    release_now(resource, inputs, cast(Any, child))
-    assert environments[0]["ONE_SHOT_DURATION"] == "3520s"
+    acquire_now(resource, TaskInputs._for_resource_values({}, ()))
+    assert environments[0]["env"]["ONE_SHOT_DURATION"] == "3520s"

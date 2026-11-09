@@ -83,8 +83,7 @@ def frozen_run(tmp_path, monkeypatch, *, mode="oracle"):
         lambda *args: profile.environment_fingerprint,
     )
     monkeypatch.setattr(
-        "nanolab.tasks.one_shot.experiment.subprocess.run",
-        lambda *args, **kwargs: SimpleNamespace(stdout="k6 fake-test"),
+        "nanolab.tasks.one_shot.experiment.k6_version", lambda: "k6 fake-test"
     )
     trace = TraceArtifact(
         nodes=["edge-0", "edge-1"],

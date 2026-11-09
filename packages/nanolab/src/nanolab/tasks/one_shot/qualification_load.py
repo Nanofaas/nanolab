@@ -156,10 +156,7 @@ class QualificationLoad:
 
     def __enter__(self):
         """Start owned processes and await independently proven handler activity."""
-        from nanolab.tasks.one_shot.experiment import (
-            LiveEvidenceCollector,
-            generator_resource,
-        )
+        from nanolab.tasks.one_shot.experiment import LiveEvidenceCollector
 
         try:
             if self.use_telemetry:
@@ -195,7 +192,8 @@ class QualificationLoad:
                 self.stack.callback(
                     lambda: sampler.close(coverage_until=datetime.now(UTC))
                 )
-            resource = generator_resource(
+            # A loadgen runs once: each load deploys its own instance.
+            resource = self.run.topology.platform.loadgen(
                 run_dir=self.run_dir,
                 vus=64,
                 duration=self.duration + (45 if self.use_telemetry else 0),

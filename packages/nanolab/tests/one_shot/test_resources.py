@@ -774,3 +774,76 @@ def test_sync_queue_limits_reach_the_control_plane_only_when_set():
         SyncQueueLimits.model_validate(
             {"maxEstimatedWaitSeconds": 0, "maxQueueWaitSeconds": 4}
         )
+
+
+def test_the_supervisor_is_attached_once_the_control_planes_are_up():
+    from types import SimpleNamespace
+    from typing import cast
+
+    from sonata_engine import Members
+
+    from nanolab.plans.one_shot_common import (
+        REMOTE_UNREACHABLE_SECONDS,
+        workbench_supervision,
+    )
+    from nanolab.workbench.components import Deployed
+
+    composite = resource_of("platform", lambda _i: None, lambda _i, _v: None)
+    supervisor = resource_of("supervisor", lambda _i: None, lambda _i, _v: None)
+    endpoint = resource_of("endpoint", lambda _i: None, lambda _i, _v: None)
+    targets = {
+        "up.node.edge-1": {
+            "kind": "scrape_up",
+            "params": {"job": "node"},
+            "toleratedSeconds": 300,
+        },
+        "running.control-plane.edge-1": {
+            "kind": "container_running",
+            "params": {"name": "cp", "node": "edge-1"},
+            "toleratedSeconds": 0,
+        },
+    }
+    platform = SimpleNamespace(
+        resource=composite, supervisor=supervisor, targets=targets
+    )
+    calls: list = []
+
+    class Supervision:
+        cadence = 5.0
+
+        def attach(self, client, *, tolerated_seconds):
+            calls.append(("attach", client.url, client.timeout, tolerated_seconds))
+
+        def watch_remote(self, name, kind, params, *, tolerated_seconds):
+            calls.append(("watch", name, kind, params, tolerated_seconds))
+
+        def unwatch(self, name):
+            calls.append(("unwatch", name))
+
+    resource = workbench_supervision(
+        cast(Any, platform), Supervision(), requires=(endpoint,)
+    )
+    assert resource.requires == (composite, endpoint)
+    members = Members(
+        {"supervisor": Deployed("operator", "s", "supervisor", "http://127.0.0.1:8099")}
+    )
+    inputs = cast(Any, SimpleNamespace(resource=lambda _r: members))
+    acquire_now(resource, inputs)
+    assert calls == [
+        ("attach", "http://127.0.0.1:8099", 2.0, REMOTE_UNREACHABLE_SECONDS),
+        ("watch", "up.node.edge-1", "scrape_up", {"job": "node"}, 300),
+        (
+            "watch",
+            "running.control-plane.edge-1",
+            "container_running",
+            {"name": "cp", "node": "edge-1"},
+            0,
+        ),
+    ]
+    calls.clear()
+    release_now(resource, inputs, None)
+    assert calls == [
+        ("unwatch", "up.node.edge-1"),
+        ("unwatch", "running.control-plane.edge-1"),
+        ("unwatch", "workbench"),
+    ]

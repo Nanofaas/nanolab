@@ -237,7 +237,7 @@ def test_open_loop_trial_requires_sdk_release_and_preserves_generator_failure(
         poll=lambda: 0, returncode=1 if outcome == "generator-error" else 0
     )
     generator = resource_of("generator", lambda _: process, lambda *_: None)
-    monkeypatch.setattr(experiment, "generator_resource", lambda **_: generator)
+    topology.platform = SimpleNamespace(loadgen=lambda **_: generator)
     monkeypatch.setattr(
         experiment,
         "LiveEvidenceCollector",

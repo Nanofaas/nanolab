@@ -88,7 +88,7 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
         ),
     )
     monkeypatch.setattr(target + "clock_health_resource", lambda **_: resource)
-    monkeypatch.setattr(target + "generator_resource", lambda **_: resource)
+    monkeypatch.setattr(target + "loadgen_resource", lambda *_, **__: resource)
     monkeypatch.setattr(target + "evidence_collector_resource", lambda *_: resource)
 
     class Preflight(Task):

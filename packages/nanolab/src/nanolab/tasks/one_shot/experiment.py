@@ -1,10 +1,9 @@
-"""Frozen comparisons driven through APIs and an owned k6 generator resource."""
+"""Frozen comparisons driven through APIs and an owned k6 generator (loadgen) job."""
 
 from __future__ import annotations
 
 import json
 import math
-import os
 import subprocess
 import time
 from collections import Counter
@@ -12,13 +11,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from importlib.metadata import version
-from importlib.resources import files
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any, cast
 from uuid import uuid4
 
 import httpx
+import yaml
 from pydantic import JsonValue, TypeAdapter
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
@@ -39,6 +38,7 @@ from nanolab.one_shot.profiles import (
 from nanolab.one_shot.returned_errors import classify_response
 from nanolab.one_shot.topology import observe_neighbors
 from nanolab.one_shot.vm_resources import telemetry_policy
+from nanolab.tasks.infra.ansible import workbench_collections_path
 from nanolab.tasks.loadtest.soak import parse_prometheus
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
@@ -69,7 +69,21 @@ from nanolab.tasks.one_shot.verification import (
 )
 from nanolab.tasks.resource_tasks import resource_of
 
-GENERATOR_DRAIN_SECONDS = 60
+
+def k6_version() -> str:
+    """`k6 version` of the image the workbench loadgen runs."""
+    defaults = (
+        workbench_collections_path()
+        / "ansible_collections/nanofaas/workbench/roles/loadgen/defaults/main.yml"
+    )
+    image = yaml.safe_load(defaults.read_text())["loadgen_image"]
+    return subprocess.run(
+        ("docker", "run", "--rm", "--network", "none", image, "version"),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    ).stdout.strip()
 
 
 def read_qualification(settings) -> TimingQualification:
@@ -364,13 +378,7 @@ class FreezeManifestTask(Task[CampaignManifest]):
             "generator": {
                 **experiment.model_dump(by_alias=True),
                 "warmupSeconds": warmup_seconds,
-                "version": subprocess.run(
-                    ("k6", "version"),
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                ).stdout.strip(),
+                "version": k6_version(),
                 "retry": False,
                 "location": "operator-host",
             },
@@ -652,85 +660,6 @@ class UploadForecastTask(Task[None]):
                         },
                     )
         return TaskOutcome()
-
-
-def generator_resource(
-    *,
-    run_dir: Path,
-    vus: int,
-    duration: float,
-    telemetry: Resource | None = None,
-    settings=None,
-) -> Resource[subprocess.Popen]:
-    """Sonata owns the only k6 child, including termination after task failures."""
-    # k6 resolves open() relative to its JS module, not the operator's cwd.
-    run_dir = run_dir.resolve()
-    streams = []
-
-    def acquire(_inputs):
-        try:
-            output = (run_dir / "generator.jsonl").open("w")
-            streams.append(output)
-            errors = (run_dir / "generator.stderr").open("w")
-            streams.append(errors)
-            remaining = duration
-            if getattr(settings, "operational_limits", None) is not None:
-                manifest = json.loads((run_dir / "manifest.json").read_text())
-                grid = manifest["parameters"]["logicalSchedule"]
-                remaining = max(
-                    0,
-                    grid["anchorMonotonicSeconds"]
-                    + grid["epochCount"] * manifest["period_seconds"]
-                    - time.monotonic(),
-                )
-            drain = operational_limit(
-                settings, "generator_drain_seconds", GENERATOR_DRAIN_SECONDS
-            )
-            environment = {
-                **os.environ,
-                "ONE_SHOT_SCHEDULE": str(run_dir / "schedule.json"),
-                "ONE_SHOT_VUS": str(vus),
-                "ONE_SHOT_DURATION": f"{math.ceil(remaining + drain)}s",
-            }
-            return subprocess.Popen(
-                (
-                    "k6",
-                    "run",
-                    "--quiet",
-                    "--log-format=json",
-                    "--log-output=stdout",
-                    str(files("nanolab").joinpath("assets/k6/one-shot.js")),
-                ),
-                stdout=output,
-                stderr=errors,
-                env=environment,
-            )
-        except BaseException:
-            for stream in streams:
-                stream.close()
-            raise
-
-    def release(_inputs, process):
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(
-                    timeout=operational_limit(settings, "process_exit_seconds", 5)
-                )
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(
-                    timeout=operational_limit(settings, "process_exit_seconds", 5)
-                )
-        for stream in streams:
-            stream.close()
-
-    return resource_of(
-        "Own bounded one-shot k6 generator",
-        acquire,
-        release,
-        requires=(telemetry,) if telemetry is not None else (),
-    )
 
 
 def _observation_rows(path: Path) -> list[dict]:
@@ -1456,13 +1385,11 @@ class RunOneShotLoadTask(Task[None]):
         freeze,
         generator,
         collector,
-        telemetry=None,
         *,
         enforce_timing_budget=True,
     ):
         """Bind the owned generator and already frozen topology."""
         self.freeze, self.generator, self.collector = freeze, generator, collector
-        self.telemetry = telemetry
         self.enforce_timing_budget = enforce_timing_budget
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
@@ -1475,9 +1402,6 @@ class RunOneShotLoadTask(Task[None]):
         process, clock = inputs.resource(self.generator), inputs.resource(run.clock)
         observation_only = manifest.parameters.get("observationOnly") is True
         collector = inputs.resource(self.collector)
-        telemetry = (
-            inputs.resource(self.telemetry) if self.telemetry is not None else None
-        )
         failure = None
         primary_error = None
         try:
@@ -1514,8 +1438,6 @@ class RunOneShotLoadTask(Task[None]):
                             clock=clock,
                         )
                     collector.require_healthy()
-                    if telemetry is not None:
-                        telemetry.require_healthy()
                     if process.poll() is not None and not (
                         getattr(run, "supervision", None) is not None
                         and process.returncode == 0
@@ -1658,8 +1580,6 @@ class RunOneShotLoadTask(Task[None]):
             while process.poll() is None:
                 clock.require_healthy()
                 collector.require_healthy()
-                if telemetry is not None:
-                    telemetry.require_healthy()
                 if (
                     time.monotonic() > mono_limit
                     if logical
@@ -1679,7 +1599,7 @@ class RunOneShotLoadTask(Task[None]):
         finally:
             supervision = getattr(run, "supervision", None)
             if supervision is not None:
-                for name in ("generator", "collector", "sampler"):
+                for name in ("generator", "collector"):
                     supervision.unwatch(name)
             secondary = []
 
@@ -1689,27 +1609,8 @@ class RunOneShotLoadTask(Task[None]):
                 except Exception as error:
                     secondary.append(error)
 
-            def stop_child():
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(
-                            timeout=operational_limit(
-                                run.settings, "process_exit_seconds", 5
-                            )
-                        )
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(
-                            timeout=operational_limit(
-                                run.settings, "process_exit_seconds", 5
-                            )
-                        )
-
             attempt(collector.close)
-            attempt(stop_child)
-            if telemetry is not None:
-                attempt(telemetry.close)
+            attempt(process.stop)
             attempt(
                 lambda: append_observation(
                     run.run_dir / "load-status.jsonl",

@@ -56,6 +56,7 @@ def test_owned_load_compensates_generator_and_collector_on_failure(
         function_aliases={"work": "work"},
         function_settings={"work": SimpleNamespace(input={})},
         endpoints={"edge": "url"},
+        platform=SimpleNamespace(loadgen=lambda **kwargs: resource),
     )
     settings = SimpleNamespace(
         timing=SimpleNamespace(minimum_samples=1),
@@ -78,10 +79,6 @@ def test_owned_load_compensates_generator_and_collector_on_failure(
             raise OSError("release failed")
 
     resource = resource_of("generator", acquire, release)
-    monkeypatch.setattr(
-        "nanolab.tasks.one_shot.experiment.generator_resource",
-        lambda **kwargs: resource,
-    )
 
     class Collector:
         def __init__(self, *args):

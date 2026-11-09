@@ -203,7 +203,7 @@ def test_two_functions_keep_distinct_runtime_payload_output_and_accounting(
             lambda *args: released.append(True),
         )
 
-    monkeypatch.setattr(experiment, "generator_resource", generator)
+    topology.platform = SimpleNamespace(loadgen=generator)
 
     def sampler(*args, terminal_probe=None):
         telemetry_actions.append("sampler")

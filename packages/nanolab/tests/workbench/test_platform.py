@@ -278,11 +278,19 @@ def test_platform_release_from_journal(tmp_path, monkeypatch):
 
 def test_supervisor_targets_cover_every_node(tmp_path, monkeypatch):
     events: list = []
-    _run(_build(tmp_path, monkeypatch, events), events)
+    built = _build(tmp_path, monkeypatch, events)
+    _run(built, events)
     config = SEEN["supervisor-operator"]["config"]
     assert config["port"] == 8099
     assert config["prometheus_url"] == "http://127.0.0.1:9090"
-    targets = config["targets"]
+    targets = built.targets
+    # A control plane starts after the supervisor: its targets would fault
+    # (sticky) before it exists, so they are registered once it is up.
+    assert config["targets"] == {
+        name: target
+        for name, target in targets.items()
+        if not name.startswith("running.control-plane.")
+    }
     hosts = ("operator", *NODES)
     for host in hosts:
         for job in ("node", "cadvisor"):
@@ -458,7 +466,7 @@ def test_logs_disabled_omits_logging(tmp_path, monkeypatch):
     assert built.loki is None
     assert built.collectors == {}
     assert not any(name.startswith(("loki-", "log-collector-")) for name in SEEN)
-    targets = SEEN["supervisor-operator"]["config"]["targets"]
+    targets = built.targets
     assert not any(name.startswith("running.log-collector.") for name in targets)
     assert "running.control-plane.edge-1" in targets
     assert _collects(events) == [
@@ -631,3 +639,20 @@ def test_a_custom_collector_image_is_refused(tmp_path, monkeypatch):
     logs = LOGS.model_copy(update={"image": "fluent/fluent-bit:9"})
     with pytest.raises(ValueError, match=r"logs\.image"):
         _build(tmp_path, monkeypatch, [], logs=logs)
+
+
+def test_a_window_exports_with_the_run_roles(tmp_path, monkeypatch):
+    from datetime import UTC, datetime
+
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    start, end = datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)
+    built.export_vm_resources(tmp_path / "window", start, end)
+    ((_h, _a, export),) = [e for e in events if e[1] == "vm-resources"]
+    assert export["start"] == start and export["end"] == end
+    assert export["step_seconds"] == 5
+    assert export["nodes"]["edge-1"].observers == (
+        "wb-node-exporter-edge-1",
+        "wb-cadvisor-edge-1",
+        "wb-log-collector-edge-1",
+    )

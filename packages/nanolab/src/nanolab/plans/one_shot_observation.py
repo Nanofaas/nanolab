@@ -11,10 +11,6 @@ from nanolab.one_shot.models import CampaignManifest
 from nanolab.one_shot.supervision import (
     CampaignSupervision,
     check_background_worker,
-    check_sampler,
-)
-from nanolab.one_shot.vm_resources import (
-    vm_telemetry_resource,
 )
 from nanolab.plans.one_shot_common import add_one_shot_platforms
 from nanolab.tasks.one_shot.arrivals import read_frozen_arrival_profile
@@ -23,7 +19,6 @@ from nanolab.tasks.one_shot.clock import clock_health_resource
 from nanolab.tasks.one_shot.experiment import (
     RunOneShotLoadTask,
     evidence_collector_resource,
-    generator_resource,
     generator_rows,
     logical_schedule,
 )
@@ -44,6 +39,8 @@ from nanolab.tasks.one_shot.preflight import (
 from nanolab.tasks.one_shot.trace import (
     TraceArtifact,
 )
+from nanolab.workbench.loadgen import loadgen_resource
+from nanolab.workbench.platform import OPERATOR
 
 
 def build_one_shot_observation_plan(
@@ -159,12 +156,8 @@ def build_one_shot_observation_plan(
         ),
         requires=requires,
     )
-    telemetry = supervision.resource(
-        vm_telemetry_resource(run, clock=clock),
-        "sampler",
-        check_sampler,
-    )
-    generator = generator_resource(
+    generator = loadgen_resource(
+        OPERATOR,
         run_dir=run_dir,
         vus=512,
         duration=oracle_lifetime_seconds(
@@ -172,7 +165,6 @@ def build_one_shot_observation_plan(
         )
         - settings.operational_limits.generator_drain_seconds,
         settings=settings,
-        telemetry=telemetry,
     )
 
     generator_finished = False
@@ -211,10 +203,8 @@ def build_one_shot_observation_plan(
         check_background_worker,
     )
     workflow.add(
-        RunOneShotLoadTask(
-            run, generator, collector, telemetry, enforce_timing_budget=False
-        ),
-        requires=(*requires, generator, collector, telemetry),
+        RunOneShotLoadTask(run, generator, collector, enforce_timing_budget=False),
+        requires=(*requires, generator, collector),
     )
     workflow.add(ObservationReport(run), requires=requires)
     return workflow

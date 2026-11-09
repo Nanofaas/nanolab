@@ -6,8 +6,8 @@ Azure, forwarders, bootstrap, per-architecture images, control planes, per-site
 logging, then the preflight's physical checks (peer graph through the
 forwarders, clocks, bandwidth, replica relay). With `--hold` the topology stays
 up under the campaign supervisor for that long, so its periodic checks run as
-in an observation; today that is the log routes only, until the workbench
-supervisor is attached (Loki, collectors, control planes). No load
+in an observation: the log routes and the workbench supervisor's targets
+(exporters, collectors, control planes, operator swap). No load
 is generated; Sonata releases everything afterwards, on success and on failure.
 """
 

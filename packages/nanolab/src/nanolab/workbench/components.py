@@ -83,7 +83,7 @@ class _Deploy(Task[Deployed]):
         instance: Instance,
         url: str | None,
         vars_dir: Path,
-        installed: Resource[Path],
+        installed: Resource[Path] | None,
         config_from_inputs: Callable[[TaskInputs], dict[str, Any]] | None,
     ) -> None:
         self.title = title
@@ -106,7 +106,9 @@ class _Deploy(Task[Deployed]):
             "deploy",
             (_with_config(self.instance, resolved),),
             self.vars_dir,
-            inputs.resource(self.installed),
+            ensure_installed()
+            if self.installed is None
+            else inputs.resource(self.installed),
             vm,
         ).run(inputs)
         return TaskOutcome(
@@ -160,14 +162,16 @@ def component_resource(
     *,
     url: str | None,
     vars_dir: Path,
-    installed: Resource[Path],
+    installed: Resource[Path] | None,
     requires: tuple[Resource[Any], ...] = (),
     config_from_inputs: Callable[[TaskInputs], dict[str, Any]] | None = None,
 ) -> Resource[Deployed]:
     """Deploy `instance` on `host`; undeploy it on release, even when kept.
 
     `config_from_inputs` adds config only known once `requires` are acquired;
-    it is recorded in the `Deployed`, so undeploy needs no inputs.
+    it is recorded in the `Deployed`, so undeploy needs no inputs. With
+    `installed` None the deploy installs the collection inline, so a task can
+    acquire the resource by hand (`acquire_now`) without declaring it.
     """
     where = f"{instance.name} on {host.key}"
     node = () if host.node is None else (host.node.vm,)
@@ -200,7 +204,7 @@ def component_resource(
             config_from_inputs,
         ),
         release_call(f"Undeploy {where}", undeploy),
-        requires=(installed, *node, *requires),
+        requires=(*(() if installed is None else (installed,)), *node, *requires),
         always_release=True,
         revive=lambda raw: Deployed(**raw),
     )

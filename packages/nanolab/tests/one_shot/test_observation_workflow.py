@@ -652,56 +652,30 @@ def run_observation_workflow(
         lambda **kwargs: original_http(transport=httpx.MockTransport(respond)),
     )
 
-    class Sampler:
-        def __init__(self, run, inputs, **kwargs):
-            self.run = run
-            self.sessions = []
-            self.closed = False
-            for vm in vms.values():
-                inputs.resource(vm)
-
-        def require_healthy(self):
-            pass
-
-        def close(self):
-            if self.closed:
-                return
-            self.closed = True
-            directory = self.run.run_dir / "vm-resources"
-            directory.mkdir(exist_ok=True)
-            for node in node_ids:
-                (directory / (node + ".jsonl")).write_text(
-                    json.dumps(
-                        {
-                            "timestampUtc": VirtualDate.now(UTC).isoformat(),
-                            "node": node,
-                            "monotonicSeconds": now[0],
-                            "bootId": node + "-boot",
-                            "cpuUtilization": 0.2,
-                            "vcpuCount": 2,
-                            "memoryTotalBytes": 4096,
-                            "memoryAvailableBytes": 2048,
-                            "memoryUsedBytes": 2048,
-                            "swapTotalBytes": 0,
-                            "swapFreeBytes": 0,
-                            "swapUsedBytes": 0,
-                            "containers": [],
-                        }
-                    )
-                    + "\n"
+    def export(into, start, end):
+        directory = into / "vm-resources"
+        directory.mkdir(exist_ok=True)
+        for node in node_ids:
+            (directory / (node + ".jsonl")).write_text(
+                json.dumps(
+                    {
+                        "timestampUtc": end.isoformat(),
+                        "node": node,
+                        "cpuUtilization": 0.2,
+                        "vcpuCount": 2,
+                        "memoryTotalBytes": 4096,
+                        "memoryAvailableBytes": 2048,
+                        "memoryUsedBytes": 2048,
+                        "swapTotalBytes": 0,
+                        "swapFreeBytes": 0,
+                        "swapUsedBytes": 0,
+                        "containers": [],
+                    }
                 )
+                + "\n"
+            )
 
-    monkeypatch.setattr(observation, "VmTelemetrySession", Sampler)
-
-    def telemetry(run, *, clock):
-        return resource_of(
-            "sampler",
-            lambda inputs: Sampler(run, inputs),
-            lambda _, s: s.close(),
-            requires=() if failure == "dependency" else (*topology.requires, clock),
-        )
-
-    monkeypatch.setattr(builder, "vm_telemetry_resource", telemetry)
+    topology.platform = SimpleNamespace(export_vm_resources=export)
     if failure == "precheck":
 
         def failed_precheck(self, inputs):
@@ -720,16 +694,17 @@ def run_observation_workflow(
     class Child:
         returncode = None
 
-        def __init__(self, *args, **kwargs):
+        def __init__(self):
             self.manifest = json.loads((raw / "manifest.json").read_text())
             self.anchor = self.manifest["parameters"]["logicalSchedule"][
                 "anchorMonotonicSeconds"
             ]
             # A deliberate generation deficit remains an observation.
+            output = (raw / "generator.jsonl").open("a")
             schedule = json.loads((raw / "schedule.json").read_text())
             for row in schedule[:1]:
                 for kind in ("emitted", "result"):
-                    kwargs["stdout"].write(
+                    output.write(
                         json.dumps(
                             dict(
                                 row,
@@ -745,7 +720,7 @@ def run_observation_workflow(
                         )
                         + "\n"
                     )
-            kwargs["stdout"].flush()
+            output.close()
 
         def poll(self):
             if failure == "generator" and now[0] >= self.anchor + 720:
@@ -754,16 +729,23 @@ def run_observation_workflow(
                 self.returncode = 0
             return self.returncode
 
-        def terminate(self):
-            self.returncode = -15
+        def stop(self):
+            if self.returncode is None:
+                self.returncode = 143
 
-        def kill(self):
-            self.returncode = -9
+    def loadgen(_host, **_kwargs):
+        def acquire(inputs):
+            if failure == "dependency":
+                inputs.resource(vms[node_ids[0]])  # never declared
+            return Child()
 
-        def wait(self, **kwargs):
-            return self.returncode
+        return resource_of(
+            "Own bounded one-shot k6 generator",
+            acquire,
+            lambda _inputs, child: child.stop(),
+        )
 
-    monkeypatch.setattr(experiment.subprocess, "Popen", Child)
+    monkeypatch.setattr(builder, "loadgen_resource", loadgen)
     from io import StringIO
 
     from rich.console import Console

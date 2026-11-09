@@ -70,6 +70,7 @@ from nanolab.tasks.recipes.workflow import (
 )
 from nanolab.tasks.resource_tasks import call, release_call, resource_of
 from nanolab.workbench.platform import OneShotPlatform, one_shot_platform
+from nanolab.workbench.supervisor import SupervisorClient
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,8 @@ class OneShotTopology:
     function_aliases: dict[str, str]
     # The run's workbench platform; `collectors` are its log-collector members.
     platform: OneShotPlatform | None = None
+    # Attaches the workbench supervisor to the run's supervision, if any.
+    supervised: Resource[None] | None = None
     collectors: Mapping[str, Resource] = field(default_factory=dict)
     node_function_settings: dict[str, dict[str, OneShotFunction]] = field(
         default_factory=dict
@@ -111,6 +114,7 @@ class OneShotTopology:
             self.distribution,
             *self.node_distributions.values(),
             *((self.platform.resource,) if self.platform is not None else ()),
+            *((self.supervised,) if self.supervised is not None else ()),
             *(
                 function
                 for platform in self.platforms.values()
@@ -125,6 +129,48 @@ class OneShotTopology:
 # counters are cumulative), so only a node unreachable this long fails the run.
 REMOTE_PROBE_SECONDS = 30
 REMOTE_UNREACHABLE_SECONDS = 300
+
+
+def workbench_supervision(
+    platform: OneShotPlatform, supervision: Any, *, requires: tuple[Resource[Any], ...]
+) -> Resource[None]:
+    """Poll the platform's supervisor and react to its targets while held.
+
+    Requiring the control planes, it attaches once they run and detaches
+    before any of them, or the platform, is stopped on purpose.
+    """
+
+    def detach(_inputs: TaskInputs, _value: None) -> None:
+        for name in platform.targets:
+            supervision.unwatch(name)
+        supervision.unwatch("workbench")
+
+    def attach(inputs: TaskInputs) -> None:
+        url = inputs.resource(platform.resource).of(platform.supervisor).url
+        supervision.attach(
+            SupervisorClient(url or "", timeout_seconds=min(supervision.cadence, 2.0)),
+            tolerated_seconds=REMOTE_UNREACHABLE_SECONDS,
+        )
+        try:
+            # Only watched targets count; re-putting one already running
+            # keeps its state, the control planes' start their grace now.
+            for name, target in platform.targets.items():
+                supervision.watch_remote(
+                    name,
+                    target["kind"],
+                    target["params"],
+                    tolerated_seconds=target["toleratedSeconds"],
+                )
+        except BaseException:
+            detach(inputs, None)
+            raise
+
+    return resource_of(
+        "Attach the workbench supervisor",
+        attach,
+        detach,
+        requires=(platform.resource, *requires),
+    )
 
 
 class LivenessCheck:
@@ -968,6 +1014,11 @@ def add_one_shot_platforms(
         functions,
         {key: definition.family for key, definition in definitions.items()},
         platform,
+        None
+        if supervision is None
+        else workbench_supervision(
+            platform, supervision, requires=tuple(endpoints.values())
+        ),
         platform.collectors,
         node_functions,
         graph,

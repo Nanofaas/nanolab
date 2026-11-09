@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -39,6 +40,7 @@ from nanolab.tasks.resource_tasks import call, resource_of
 from nanolab.workbench.components import Deployed, component_resource
 from nanolab.workbench.install import ensure_installed, workbench_resource
 from nanolab.workbench.inventory import HostVars, Instance
+from nanolab.workbench.loadgen import LoadgenRun, loadgen_resource
 from nanolab.workbench.playbook import WorkbenchHost, WorkbenchPlaybook
 from nanolab.workbench.supervisor import SupervisorClient
 from nanolab.workbench.vm_export import NodeRoles, export_vm_resources
@@ -71,16 +73,23 @@ class OneShotPlatform:
 
     `loki` is None and `collectors` empty when the scenario has no logs.
     `collector_identity(node)` measures a running collector, as the
-    environment fingerprint records it.
+    environment fingerprint records it. `targets` are every supervisor target
+    of the run; the supervisor starts with all but the control planes', which
+    are registered once those are up. `export_vm_resources(into, start, end)`
+    writes a window's vm-resources rows under `into`. `loadgen(...)` is
+    `loadgen_resource` on the nanolab host, for tasks that may not import the
+    workbench.
     """
 
     resource: Resource[Members]
     loki: Resource[Deployed] | None
     prometheus: Resource[Deployed]
     supervisor: Resource[Deployed]
-    loadgen_host: WorkbenchHost
     collectors: Mapping[str, Resource[Deployed]]
     collector_identity: Callable[[str], dict[str, Any]]
+    targets: Mapping[str, dict[str, Any]]
+    export_vm_resources: Callable[[Path, datetime, datetime], None]
+    loadgen: Callable[..., Resource[LoadgenRun]]
 
 
 def _cpus(cpus: list[int] | None) -> str | None:
@@ -450,7 +459,11 @@ def one_shot_platform(
         {
             "port": SUPERVISOR_PORT,
             "prometheus_url": prometheus_url,
-            "targets": targets,
+            "targets": {
+                name: target
+                for name, target in targets.items()
+                if not name.startswith("running.control-plane.")
+            },
         },
         url=f"http://127.0.0.1:{SUPERVISOR_PORT}",
         requires=(prometheus,),
@@ -477,28 +490,31 @@ def one_shot_platform(
     def snapshot(values: Members, inputs: TaskInputs) -> None:
         collect(inputs, OPERATOR, prometheus_instance, values.of(prometheus))
 
-    def vm_resources(values: Members, _inputs: TaskInputs) -> None:
-        started = values.of(prometheus).deployed_at or time.time()
-        observers = ("node-exporter", "cadvisor") + (
-            ("log-collector",) if logs.enabled else ()
+    observers = ("node-exporter", "cadvisor") + (
+        ("log-collector",) if logs.enabled else ()
+    )
+    node_roles = {
+        key: NodeRoles(
+            roles={CONTROL_PLANE: "control-plane"}
+            | ({f"wb-log-collector-{key}": "collector"} if logs.enabled else {}),
+            observers=tuple(f"wb-{c}-{key}" for c in observers),
         )
+        for key in nodes
+    }
+
+    def export(into: Path, start: datetime, end: datetime) -> None:
         export_vm_resources(
             prometheus_url,
-            run_dir,
-            nodes={
-                key: NodeRoles(
-                    roles={CONTROL_PLANE: "control-plane"}
-                    | (
-                        {f"wb-log-collector-{key}": "collector"} if logs.enabled else {}
-                    ),
-                    observers=tuple(f"wb-{c}-{key}" for c in observers),
-                )
-                for key in nodes
-            },
-            start=datetime.fromtimestamp(started, UTC),
-            end=datetime.now(UTC),
+            into,
+            nodes=node_roles,
+            start=start,
+            end=end,
             step_seconds=SCRAPE_SECONDS,
         )
+
+    def vm_resources(values: Members, _inputs: TaskInputs) -> None:
+        started = values.of(prometheus).deployed_at or time.time()
+        export(run_dir, datetime.fromtimestamp(started, UTC), datetime.now(UTC))
 
     # Exports query the operator's Loki, as today's multi-site copy of `logs`.
     export_logs = logs.model_copy(update={"endpoint": loki_url + PUSH_PATH})
@@ -657,7 +673,9 @@ def one_shot_platform(
         loki,
         prometheus,
         supervisor,
-        OPERATOR,
         {key: resource for key, (resource, _) in collectors.items()},
         collector_identity,
+        targets,
+        export,
+        partial(loadgen_resource, OPERATOR),
     )

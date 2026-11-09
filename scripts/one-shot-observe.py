@@ -765,15 +765,8 @@ def run_observation(args):
         ),
     )
 
-    # The recorder stops with the workflow, before the supervisor archives the
-    # run and hashes every file: an appended file would fail the archive check.
-    recorder = operator_memory.OperatorMemoryRecorder(
-        args.output / "operator-memory.jsonl"
-    )
-
     def execute():
         primary = None
-        recorder.start()
         try:
             if arrival_document is not None:
                 write_immutable_artifact(
@@ -812,7 +805,6 @@ def run_observation(args):
             except Exception as reporting:  # noqa: BLE001 - retain the first cause
                 error.add_note("failure event: " + str(reporting))
         finally:
-            recorder.close()
             try:
                 inventory("vms-after.json")
             except Exception as error:  # noqa: BLE001 - complete independent diagnostics

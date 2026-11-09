@@ -1,59 +1,10 @@
-from subprocess import TimeoutExpired
 from threading import Event
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from sonata_engine import TaskInputs
 
-from nanolab.tasks.one_shot.experiment import LiveEvidenceCollector, generator_resource
-from nanolab.tasks.resource_tasks import acquire_now, release_now
-
-
-@pytest.mark.parametrize("fails", [False, True])
-def test_generator_child_is_reaped_and_streams_close_even_if_launch_fails(
-    tmp_path, monkeypatch, fails
-):
-    streams = []
-    actions = []
-
-    class Child:
-        returncode = None
-
-        def poll(self):
-            return self.returncode
-
-        def terminate(self):
-            actions.append("terminate")
-
-        def wait(self, **_):
-            if self.returncode is None:
-                raise TimeoutExpired("k6", 5)
-            return self.returncode
-
-        def kill(self):
-            actions.append("kill")
-            self.returncode = -9
-
-    def start(argv, **kwargs):
-        assert argv[0] == "k6"
-        assert kwargs["env"]["ONE_SHOT_SCHEDULE"] == str(tmp_path / "schedule.json")
-        streams.extend([kwargs["stdout"], kwargs["stderr"]])
-        if fails:
-            raise OSError("launch refused")
-        return Child()
-
-    monkeypatch.setattr("nanolab.tasks.one_shot.experiment.subprocess.Popen", start)
-    resource = generator_resource(run_dir=tmp_path, vus=4, duration=20)
-    inputs = TaskInputs._for_resources({}, set())
-    if fails:
-        with pytest.raises(OSError, match="launch refused"):
-            acquire_now(resource, inputs)
-    else:
-        child = acquire_now(resource, inputs)
-        release_now(resource, inputs, child)
-        assert actions == ["terminate", "kill"]
-    assert all(stream.closed for stream in streams)
+from nanolab.tasks.one_shot.experiment import LiveEvidenceCollector
 
 
 def test_live_collector_failure_is_visible_and_owned_thread_is_joined(
@@ -83,32 +34,6 @@ def test_live_collector_unjoined_thread_is_not_reported_as_clean():
     collector.thread = SimpleNamespace(join=lambda **_: None, is_alive=lambda: True)
     with pytest.raises(RuntimeError, match="cleanup unconfirmed"):
         collector.close()
-
-
-@pytest.mark.parametrize("failure", ["second-open", "manifest"])
-def test_generator_partial_acquisition_closes_streams(tmp_path, monkeypatch, failure):
-    from pathlib import Path
-
-    streams = []
-    original = Path.open
-
-    def open_file(path, *args, **kwargs):
-        if failure == "second-open" and path.name == "generator.stderr":
-            raise OSError("disk full")
-        stream = original(path, *args, **kwargs)
-        streams.append(stream)
-        return stream
-
-    monkeypatch.setattr(Path, "open", open_file)
-    resource = generator_resource(
-        run_dir=tmp_path,
-        vus=4,
-        duration=20,
-        settings=SimpleNamespace(operational_limits=object()),
-    )
-    with pytest.raises(OSError, match=r"disk full|manifest\.json"):
-        acquire_now(resource, TaskInputs._for_resources({}, set()))
-    assert streams and all(stream.closed for stream in streams)
 
 
 def test_live_event_pages_persist_before_later_error_and_resume_cursor(

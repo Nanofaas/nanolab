@@ -100,7 +100,6 @@ def _run_capacity_trial(
         LiveEvidenceCollector,
         classify_result,
         collect_runtime_evidence,
-        generator_resource,
         generator_rows,
         physical_attempts,
     )
@@ -315,7 +314,8 @@ def _run_capacity_trial(
             for row in schedule
         },
     )
-    resource = generator_resource(
+    # A loadgen runs once: each trial deploys its own instance.
+    resource = topology.platform.loadgen(
         run_dir=run_dir, vus=512, duration=window_seconds + extra_budget
     )
     primary = None

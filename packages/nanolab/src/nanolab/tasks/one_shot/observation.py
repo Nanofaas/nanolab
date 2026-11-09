@@ -17,7 +17,6 @@ from concurrent.futures import (
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
-from types import SimpleNamespace
 from typing import cast
 from uuid import uuid4
 
@@ -35,12 +34,8 @@ from nanolab.one_shot.profiles import CalibrationProfiles
 from nanolab.one_shot.recording import CampaignRecorder
 from nanolab.one_shot.report import render_report
 from nanolab.one_shot.returned_errors import summarize_responses
-from nanolab.one_shot.supervision import (
-    CampaignSupervision,
-    check_sampler,
-)
+from nanolab.one_shot.supervision import CampaignSupervision
 from nanolab.one_shot.vm_resources import (
-    VmTelemetrySession,
     read_samples,
     telemetry_policy,
 )
@@ -481,7 +476,7 @@ class WarmInstances(Task):
 
 
 class ObserverPrecheck(Task):
-    """Record idle collector/sampler cost before warmup and measurement."""
+    """Record the idle observer containers' cost before warmup and measurement."""
 
     title = "Measure observer resource cost"
 
@@ -494,56 +489,14 @@ class ObserverPrecheck(Task):
         run = self.run_context
         directory = run.run_dir / "observer-precheck"
         directory.mkdir()
-        anchor = datetime.now(UTC) + timedelta(seconds=30)
-        mono = time.monotonic() + 30
-        grid = {
-            "protocolVersion": 2,
-            "sessionId": uuid4().hex,
-            "hostBootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
-            "anchorMonotonicSeconds": mono,
-            "probeScope": "parent",
-            "probeParentLevels": 1,
-        }
-        save(
-            directory / "manifest.json",
-            {
-                "anchor": anchor.isoformat(),
-                "period_seconds": 60,
-                "run_id": "observer-precheck",
-                "parameters": {
-                    "generator": {"warmupSeconds": 0},
-                    "logicalSchedule": grid,
-                },
-            },
-        )
-        context = SimpleNamespace(
-            run_dir=directory,
-            topology=run.topology,
-            settings=run.settings,
-            mode="oracle",
-            trace=SimpleNamespace(windows=[{}], period_seconds=60),
-        )
-        context.supervision = getattr(run, "supervision", None)
-        session = VmTelemetrySession(
-            context, inputs, terminal_probe=inputs.resource(run.clock).refresh
-        )
-        supervision = context.supervision
-        try:
-            if supervision is not None:
-                supervision.watch(
-                    "precheck-sampler", lambda: check_sampler(session), writer=session
-                )
-            event(run.run_dir, "observer-precheck-started", seconds=60)
-            while time.monotonic() < mono + 60:
-                session.require_healthy()
-                inputs.resource(run.clock).require_healthy()
-                time.sleep(0.2)
-        finally:
-            try:
-                if supervision is not None:
-                    supervision.unwatch("precheck-sampler")
-            finally:
-                session.close()
+        start = datetime.now(UTC)
+        until = time.monotonic() + 60
+        event(run.run_dir, "observer-precheck-started", seconds=60)
+        while time.monotonic() < until:
+            inputs.resource(run.clock).require_healthy()
+            time.sleep(0.2)
+        # Ruling 2: the rows' `sampler` is the node's observer containers.
+        run.topology.platform.export_vm_resources(directory, start, datetime.now(UTC))
         costs = {}
         for node in run.topology.resources.nodes:
             rows, malformed = read_samples(directory / "vm-resources" / f"{node}.jsonl")

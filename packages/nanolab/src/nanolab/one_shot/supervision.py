@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 import signal
-import subprocess
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -16,7 +15,7 @@ from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, RLock, Thread, current_thread, main_thread
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from sonata_engine import Resource, WorkflowEvent, WorkflowSink, bind_workflow_sink
 from sonata_engine.workflow.context import active_sink
@@ -28,6 +27,14 @@ from nanolab.tasks.one_shot.clock import ClockMonitor
 from nanolab.tasks.resource_tasks import acquire_now, call, release_call, release_now
 
 _INHERIT = object()
+
+
+class Polled(Protocol):
+    """A child process or job: `poll()` is None while it runs, then its exit."""
+
+    def poll(self) -> int | None:
+        """Return None while running, the exit code after."""
+        ...
 
 
 class CampaignInterruptedError(RuntimeError):
@@ -424,7 +431,7 @@ class CampaignSupervision:
 
     @staticmethod
     def check_process(
-        process: subprocess.Popen,
+        process: Polled,
         *,
         expected_end: float,
         completed: Callable[[], bool] = lambda: False,
@@ -820,7 +827,8 @@ class CampaignSupervision:
             thread = getattr(writer, "thread", None) or getattr(writer, "_thread", None)
             if thread is not None and thread.is_alive():
                 raise RuntimeError("archive unsafe: background writer still running")
-            processes = [writer] if isinstance(writer, subprocess.Popen) else []
+            # A Popen, or a loadgen job polled through `docker inspect`.
+            processes = [writer] if callable(getattr(writer, "poll", None)) else []
             for session in getattr(writer, "sessions", []):
                 processes.append(session.get("process"))
                 if any(reader.is_alive() for reader in session.get("readers", [])):

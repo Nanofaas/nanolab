@@ -1,80 +1,33 @@
-"""Exercise k6 module initialization through the actual Sonata resource."""
+"""The loadgen mounts the run directory the plan named, wherever it runs from."""
 
 import json
-import shutil
 from pathlib import Path
 
-import pytest
-from sonata_engine import Task, TaskOutcome, Workflow
+from sonata_engine import TaskInputs
 
-from nanolab.tasks.one_shot import experiment
 from nanolab.tasks.resource_tasks import acquire_now
-
-
-@pytest.mark.skipif(
-    shutil.which("k6") is None, reason="Requires the real k6 executable"
-)
-@pytest.mark.parametrize("relative", [True, False])
-@pytest.mark.parametrize("change_directory", [True, False])
-def test_k6_reads_schedule_with_relative_absolute_and_spaced_paths(
-    tmp_path, monkeypatch, relative, change_directory
-):
-    operator = tmp_path / "operator directory"
-    run_dir = operator / "run data"
-    run_dir.mkdir(parents=True)
-    (run_dir / "schedule.json").write_text(json.dumps([{"originalId": "probe"}]))
-    monkeypatch.chdir(operator)
-    resource = experiment.generator_resource(
-        run_dir=Path("run data") if relative else run_dir, vus=1, duration=1
-    )
-    original_popen = experiment.subprocess.Popen
-
-    def inspect_module(argv, **kwargs):
-        # Execute the same module and environment, without sending any requests.
-        assert argv[:2] == ("k6", "run")
-        return original_popen(
-            ("k6", "inspect", "--include-system-env-vars", argv[-1]), **kwargs
-        )
-
-    monkeypatch.setattr(experiment.subprocess, "Popen", inspect_module)
-    if change_directory:
-        other = tmp_path / "other directory"
-        other.mkdir()
-        monkeypatch.chdir(other)
-
-    class Inspect(Task):
-        title = "Inspect actual k6 module"
-
-        def run(self, inputs):
-            child = inputs.resource(resource)
-            assert child.wait(timeout=15) == 0, (
-                run_dir / "generator.stderr"
-            ).read_text()
-            return TaskOutcome()
-
-    workflow = Workflow("generator-path-regression")
-    workflow.add(Inspect(), requires=(resource,))
-    workflow.run()
-    options = json.loads((run_dir / "generator.jsonl").read_text())
-    assert options["scenarios"]["originals"]["iterations"] == 1
+from nanolab.workbench import components, loadgen, playbook
+from nanolab.workbench.platform import OPERATOR
 
 
 def test_generator_captures_invocation_directory(tmp_path, monkeypatch):
-    """Keep path coverage in environments where k6 is unavailable."""
-    from sonata_engine import TaskInputs
-
     run_dir = tmp_path / "run data"
     run_dir.mkdir()
     monkeypatch.chdir(tmp_path)
-    resource = experiment.generator_resource(
-        run_dir=Path("run data"), vus=1, duration=1
+    resource = loadgen.loadgen_resource(
+        OPERATOR, run_dir=Path("run data"), vus=1, duration=1
     )
     monkeypatch.chdir(tmp_path.parent)
+    configs = []
 
-    def launch(_argv, **kwargs):
-        assert Path(kwargs["env"]["ONE_SHOT_SCHEDULE"]) == run_dir / "schedule.json"
-        raise OSError("intentional launch stop")
+    def deploy(_provider, _operations, *, role):
+        saved = run_dir / "workbench" / "vars" / f"{role}-deploy.json"
+        configs.append(json.loads(saved.read_text())["instances"][0]["config"])
 
-    monkeypatch.setattr(experiment.subprocess, "Popen", launch)
-    with pytest.raises(OSError, match="intentional launch stop"):
-        acquire_now(resource, TaskInputs._for_resources({}, set()))
+    monkeypatch.setattr(playbook, "run_bootstrap_operations", deploy)
+    monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
+    acquire_now(resource, TaskInputs._for_resource_values({}, ()))
+    (config,) = configs
+    # k6 reads the schedule inside the container, where the run dir is /out.
+    assert config["output_dir"] == str(run_dir.resolve())
+    assert config["env"]["ONE_SHOT_SCHEDULE"] == "/out/schedule.json"

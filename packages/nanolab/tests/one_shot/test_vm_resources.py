@@ -458,9 +458,6 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
         lambda _: actions.append("generator-start") or child,
         lambda *_: actions.append("generator-stop"),
     )
-    monkeypatch.setattr(
-        "nanolab.tasks.one_shot.experiment.generator_resource", lambda **_: resource
-    )
 
     class Collector:
         def __init__(self, *args):
@@ -480,6 +477,7 @@ def test_timing_load_keeps_same_sampler_active_and_preserves_auction_error(
         function_aliases={"a": "a"},
         function_settings={"a": SimpleNamespace(input={})},
         endpoints={"edge1": "url"},
+        platform=SimpleNamespace(loadgen=lambda **_: resource),
     )
     settings = SimpleNamespace(
         timing=SimpleNamespace(minimum_samples=1),

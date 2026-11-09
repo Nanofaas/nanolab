@@ -12,7 +12,6 @@ from nanolab.config.one_shot import TimingCell
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.one_shot.campaign import read_campaign_binding
 from nanolab.one_shot.profiles import CalibrationProfiles, validate_trace_capacity
-from nanolab.one_shot.vm_resources import vm_telemetry_resource
 from nanolab.plans.one_shot_common import add_one_shot_platforms
 from nanolab.tasks.one_shot.clock import clock_health_resource
 from nanolab.tasks.one_shot.experiment import (
@@ -22,13 +21,14 @@ from nanolab.tasks.one_shot.experiment import (
     RunOneShotLoadTask,
     UploadForecastTask,
     evidence_collector_resource,
-    generator_resource,
     read_qualification,
     verify_qualified_load,
 )
 from nanolab.tasks.one_shot.preflight import CollectTopologyTask
 from nanolab.tasks.one_shot.qualification import read_profile
 from nanolab.tasks.one_shot.trace import experiment_trace
+from nanolab.workbench.loadgen import loadgen_resource
+from nanolab.workbench.platform import OPERATOR
 from nanolab.workspace.paths import default_tool_paths
 
 
@@ -153,26 +153,23 @@ def build_one_shot_experiment_plan(
                 requires=requires,
             )
             workflow.add(UploadForecastTask(freeze), requires=requires)
-            telemetry = (
-                vm_telemetry_resource(freeze, clock=clock)
-                if settings.strict_memory and len(settings.functions) > 1
-                else None
-            )
-            generator = generator_resource(
+            # The margin these runs had while they also owned the VM sampler.
+            sampled = settings.strict_memory and len(settings.functions) > 1
+            generator = loadgen_resource(
+                OPERATOR,
                 run_dir=directory,
                 vus=experiment.generator_vus,
-                telemetry=telemetry,
                 duration=len(trace.windows) * trace.period_seconds
                 + (
                     max(experiment.warmup_seconds, 2 * trace.period_seconds)
                     if settings.purpose == "scientific-experiment"
                     else 0
                 )
-                + (65 if telemetry is not None else 25),
+                + (65 if sampled else 25),
             )
             collector = evidence_collector_resource(freeze, generator)
             workflow.add(
-                RunOneShotLoadTask(freeze, generator, collector, telemetry),
+                RunOneShotLoadTask(freeze, generator, collector),
                 requires=(*requires, generator, collector),
             )
             workflow.add(
