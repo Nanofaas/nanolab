@@ -66,17 +66,17 @@ def _frozen_env(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
     return MappingProxyType(dict(env or {}))
 
 
-def _ansible_operation(
+def ansible_operation(
     *,
     context: ScenarioExecutionContext,
     operation_id: str,
     summary: str,
-    playbook_name: str,
+    playbook: Path,
     extra_vars: Mapping[str, str],
     discover_private_key: bool = True,
+    env: Mapping[str, str] = MappingProxyType({}),
 ) -> RemoteCommandOperation:
-    # Playbooks are bundled with the library.
-
+    """Plan one playbook run against the context's VM; `env` overrides the config."""
     ansible_root = bundled_ansible_root()
     private_key = (
         find_ssh_private_key_path(find_ssh_public_key())
@@ -84,7 +84,7 @@ def _ansible_operation(
         else None
     )
     command = build_ansible_argv(
-        playbook=ansible_root / "playbooks" / playbook_name,
+        playbook=playbook,
         inventory=_inventory_target(context.vm_request),
         user=context.vm_request.user,
         private_key_path=private_key,
@@ -94,7 +94,7 @@ def _ansible_operation(
         operation_id=operation_id,
         summary=summary,
         argv=command,
-        env=_frozen_env({"ANSIBLE_CONFIG": str(ansible_root / "ansible.cfg")}),
+        env=_frozen_env({"ANSIBLE_CONFIG": str(ansible_root / "ansible.cfg"), **env}),
     )
 
 
@@ -106,11 +106,11 @@ def plan_vm_provision_base(
 ) -> tuple[RemoteCommandOperation, ...]:
     """Install the base dependencies every VM needs, Helm and optionally uv."""
     return (
-        _ansible_operation(
+        ansible_operation(
             context=context,
             operation_id="vm.provision_base",
             summary="Provision base VM dependencies",
-            playbook_name="provision-base.yml",
+            playbook=bundled_ansible_root() / "playbooks" / "provision-base.yml",
             extra_vars={
                 "install_helm": "true",
                 "install_uv": str(install_uv).lower(),
@@ -218,11 +218,13 @@ def plan_containerd_rootless_install(
 ) -> tuple[RemoteCommandOperation, ...]:
     """Install and verify the rootless daemon after NanoLab assets are synced."""
     return (
-        _ansible_operation(
+        ansible_operation(
             context=context,
             operation_id="vm.provision_containerd_rootless",
             summary="Provision rootless containerd",
-            playbook_name="provision-containerd-rootless.yml",
+            playbook=bundled_ansible_root()
+            / "playbooks"
+            / "provision-containerd-rootless.yml",
             extra_vars={
                 "vm_user": context.vm_request.user,
                 "vm_home": _remote_home(context.vm_request),
@@ -315,11 +317,11 @@ def plan_registry_ensure_container(
     """Ensure the local registry container is running on the VM."""
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
-        _ansible_operation(
+        ansible_operation(
             context=context,
             operation_id="registry.ensure_container",
             summary="Ensure local registry container is running",
-            playbook_name="ensure-registry.yml",
+            playbook=bundled_ansible_root() / "playbooks" / "ensure-registry.yml",
             extra_vars={
                 "registry": context.local_registry,
                 "registry_host": registry_host,
@@ -339,11 +341,11 @@ def plan_k3s_install(
     """Install k3s and write the VM's kubeconfig."""
     vm_request = context.vm_request
     return (
-        _ansible_operation(
+        ansible_operation(
             context=context,
             operation_id="k3s.install",
             summary="Install k3s",
-            playbook_name="provision-k3s.yml",
+            playbook=bundled_ansible_root() / "playbooks" / "provision-k3s.yml",
             extra_vars={
                 "vm_user": vm_request.user,
                 "kubeconfig_path": _kubeconfig_path(vm_request),
@@ -362,11 +364,13 @@ def plan_k3s_configure_registry(
     """Point k3s at the local registry so it can pull the images it is given."""
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
-        _ansible_operation(
+        ansible_operation(
             context=context,
             operation_id="k3s.configure_registry",
             summary="Configure k3s registry access",
-            playbook_name="configure-k3s-registry.yml",
+            playbook=bundled_ansible_root()
+            / "playbooks"
+            / "configure-k3s-registry.yml",
             extra_vars={
                 "registry": context.local_registry,
                 "registry_host": registry_host,
@@ -382,11 +386,11 @@ def plan_loadtest_install_k6(
 ) -> tuple[RemoteCommandOperation, ...]:
     """Install k6 on the VM for the load tests."""
     return (
-        _ansible_operation(
+        ansible_operation(
             context=context,
             operation_id="loadtest.install_k6",
             summary="Install k6 for load testing",
-            playbook_name="install-k6.yml",
+            playbook=bundled_ansible_root() / "playbooks" / "install-k6.yml",
             extra_vars={},
         ),
     )

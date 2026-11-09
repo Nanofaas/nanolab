@@ -175,3 +175,31 @@ def test_retarget_bootstrap_azure_uses_default_ssh_port() -> None:
     assert " -p " not in ssh_command
     assert "-i /keys/azure" in ssh_command
     assert retargeted.argv[-1] == "ubuntu@20.30.40.50:/home/ubuntu/nanofaas/"
+
+
+def test_existing_bootstrap_operations_unchanged() -> None:
+    operation = _remote(
+        bs.plan_vm_provision_base(_ctx(), discover_private_key=False)[0]
+    )
+    root = bs.bundled_ansible_root()
+    assert operation.argv == (
+        "ansible-playbook", "-i", "vm.test,", "-u", "ubuntu",
+        "-e", "install_helm=true", "-e", "install_uv=false",
+        "-e", "helm_version=3.16.4", "-e", "vm_user=ubuntu",
+        str(root / "playbooks" / "provision-base.yml"),
+    )  # fmt: skip
+    assert dict(operation.env) == {"ANSIBLE_CONFIG": str(root / "ansible.cfg")}
+
+
+def test_ansible_operation_merges_env_over_the_config() -> None:
+    operation = bs.ansible_operation(
+        context=_ctx(),
+        operation_id="x",
+        summary="x",
+        playbook=Path("/p.yml"),
+        extra_vars={},
+        discover_private_key=False,
+        env={"ANSIBLE_COLLECTIONS_PATH": "/c"},
+    )
+    assert operation.argv[-1] == "/p.yml"
+    assert set(operation.env) == {"ANSIBLE_CONFIG", "ANSIBLE_COLLECTIONS_PATH"}

@@ -39,6 +39,7 @@ type = forbidden
 source_modules =
     nanolab.application
     nanolab.tasks
+    nanolab.workbench
     nanolab.release
     nanolab.comparison
     nanolab.plans
@@ -52,6 +53,7 @@ name = runtime must not import plan builders
 type = forbidden
 source_modules =
     nanolab.tasks
+    nanolab.workbench
     nanolab.release
     nanolab.comparison
     nanolab.application
@@ -62,3 +64,9 @@ name = sonata_tasks must not depend on nanolab
 type = forbidden
 source_modules = sonata_tasks
 forbidden_modules = nanolab
+
+[importlinter:contract:tasks_below_workbench]
+name = tasks must not import the workbench
+type = forbidden
+source_modules = nanolab.tasks
+forbidden_modules = nanolab.workbench

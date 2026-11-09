@@ -47,6 +47,7 @@ nanolab = [
     "py.typed",
     "tasks/infra/ansible_assets/ansible.cfg",
     "tasks/infra/ansible_assets/requirements.txt",
+    "tasks/infra/ansible_assets/requirements.yml",
     "tasks/infra/ansible_assets/playbooks/*.yml",
     # Bundled runtime assets, inside the package on purpose: they are shipped,
     # alongside public presets, independently of caller inputs and outputs.
