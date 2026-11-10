@@ -365,12 +365,13 @@ def test_site_nodes_are_scraped_through_their_published_exporters(
 
 
 def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
     from types import SimpleNamespace
 
     from sonata_engine import TaskInputs
 
     from nanolab.plans.one_shot_common import _bootstrap
-    from nanolab.tasks.components.operations import RemoteCommandOperation
     from nanolab.tasks.vm.models import VmInfo
 
     environment = EnvironmentConfig.model_validate(
@@ -387,21 +388,13 @@ def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0, stdout='{"status":"done"}', stderr="")
 
     monkeypatch.setattr("nanolab.plans.one_shot_common.subprocess.run", cloud_init)
-    operation = RemoteCommandOperation(
-        operation_id="vm.provision_base",
-        summary="bootstrap",
-        argv=("ansible-playbook", "base.yml", "-i", "<multipass-ip:fake>,"),
-    )
-    monkeypatch.setattr(
-        "nanolab.plans.one_shot_common.plan_vm_provision_base",
-        lambda context: (operation,),
-    )
+    from sonata_tasks.ansible import AnsiblePlaybookTask
+
     observed = []
     monkeypatch.setattr(
-        "nanolab.plans.one_shot_common.run_bootstrap_operations",
-        lambda provider, operations, **kwargs: observed.extend(operations),
+        AnsiblePlaybookTask, "run", lambda task, inputs: observed.append(task)
     )
-    resource = _bootstrap(node, tmp_path)
+    resource = _bootstrap(node, tmp_path, run_dir=tmp_path)
     inputs = TaskInputs._for_resources(
         {
             node.vm: VmInfo(
@@ -415,7 +408,12 @@ def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):
     )
     acquire_now(resource, inputs)
     assert cloud_init_calls[0][:3] == ("multipass", "exec", node.request.name)
-    assert observed[0].argv[-1] == "10.0.0.9,"
+    task = observed[0]
+    path = task.argv[task.argv.index("-i") + 1]
+    assert (
+        json.loads(Path(path).read_text())["all"]["hosts"]["edge-0"]["ansible_host"]
+        == "10.0.0.9"
+    )
 
 
 @pytest.mark.parametrize("fault", [None, "inspect-timeout", "save-timeout"])

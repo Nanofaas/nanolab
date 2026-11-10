@@ -40,10 +40,10 @@ from nanolab.one_shot.infrastructure import (
     machine_architecture,
     transfer_to_vm,
 )
-from nanolab.one_shot.sites import through_site
 from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_graph
 from nanolab.one_shot.vm_resources import require_resource_overhead
-from nanolab.tasks.components.bootstrap import plan_vm_provision_base
+from nanolab.tasks.components.bootstrap import base_provision_vars
+from nanolab.tasks.infra.ansible import bundled_ansible_root, playbook_task
 from nanolab.tasks.one_shot.images import archive_image_ids
 from nanolab.tasks.one_shot.operator_logging import log_routes
 from nanolab.tasks.one_shot.resources import node_probe_resource
@@ -53,11 +53,6 @@ from nanolab.tasks.platform import (
     PlatformFunction,
     PlatformRequest,
     add_platform,
-)
-from nanolab.tasks.provisioning.bootstrap import (
-    retarget_cloud_operations,
-    run_bootstrap_operations,
-    scenario_context,
 )
 from nanolab.tasks.recipes.workflow import (
     RecipeBinding,
@@ -70,6 +65,7 @@ from nanolab.tasks.recipes.workflow import (
 from nanolab.tasks.resource_tasks import call, release_call, resource_of
 from nanolab.workbench.platform import OneShotPlatform, one_shot_platform
 from nanolab.workbench.supervisor import SupervisorClient
+from nanolab.workspace.paths import operator_workspace_root
 
 
 @dataclass(frozen=True)
@@ -202,19 +198,16 @@ def _bootstrap(
             )
         if ready.returncode != 0 or json.loads(ready.stdout).get("status") != "done":
             raise RuntimeError(f"{node.config.id}: cloud-init is not complete")
-        request = node.request.model_copy(
-            update={"host": vm.host, "user": vm.user, "home": vm.home}
-        )
-        assets = Path(str(files("nanolab").joinpath("assets")))
-        context = scenario_context(root, request, assets)
-        operations = retarget_cloud_operations(
-            node.provider, context, plan_vm_provision_base(context)
-        )
-        if node.site_host is not None:
-            operations = through_site(
-                operations, context=context, host=vm.host, site=node.site_host.site
-            )
-        run_bootstrap_operations(node.provider, operations, role=node.config.id)
+        playbook_task(
+            title=f"Bootstrap {node.config.id} container VM",
+            playbook=bundled_ansible_root() / "playbooks/provision-base.yml",
+            inventory=(run_dir or operator_workspace_root())
+            / "ansible"
+            / f"{node.config.id}-bootstrap-inventory.json",
+            hosts={node.config.id: node.ansible_vars(vm)},
+            extra_vars=base_provision_vars(vm.user),
+            shell=getattr(node.provider, "shell", None),
+        ).run(inputs)
         node.reset_shared_ssh(vm)
 
     return resource_of(

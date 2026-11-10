@@ -55,10 +55,12 @@ def test_generator_duration_uses_remaining_frozen_horizon(tmp_path, monkeypatch)
     from types import SimpleNamespace
 
     from sonata_engine import TaskInputs
+    from sonata_tasks.ansible import AnsiblePlaybookTask
 
     from nanolab.config.one_shot import OperationalLimits
-    from nanolab.workbench import components, loadgen, playbook
+    from nanolab.workbench import components, loadgen
     from nanolab.workbench.platform import OPERATOR
+    from tests.workbench.playbook_fakes import host_of
 
     (tmp_path / "manifest.json").write_text(
         json.dumps(
@@ -74,11 +76,12 @@ def test_generator_duration_uses_remaining_frozen_horizon(tmp_path, monkeypatch)
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
     environments = []
 
-    def deploy(_provider, _operations, *, role):
+    def deploy(task, inputs):
+        role = host_of(task)
         saved = tmp_path / "workbench" / "vars" / f"{role}-deploy.json"
         environments.append(json.loads(saved.read_text())["instances"][0]["config"])
 
-    monkeypatch.setattr(playbook, "run_bootstrap_operations", deploy)
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", deploy)
     resource = loadgen.loadgen_resource(
         OPERATOR,
         run_dir=tmp_path,

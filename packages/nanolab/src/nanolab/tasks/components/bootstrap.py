@@ -98,6 +98,16 @@ def ansible_operation(
     )
 
 
+def base_provision_vars(user: str, *, install_uv: bool = False) -> dict[str, str]:
+    """Variables shared by planned and acquired-VM bootstrap paths."""
+    return {
+        "install_helm": "true",
+        "install_uv": str(install_uv).lower(),
+        "helm_version": "3.16.4",
+        "vm_user": user,
+    }
+
+
 def plan_vm_provision_base(
     context: ScenarioExecutionContext,
     *,
@@ -111,12 +121,9 @@ def plan_vm_provision_base(
             operation_id="vm.provision_base",
             summary="Provision base VM dependencies",
             playbook=bundled_ansible_root() / "playbooks" / "provision-base.yml",
-            extra_vars={
-                "install_helm": "true",
-                "install_uv": str(install_uv).lower(),
-                "helm_version": "3.16.4",
-                "vm_user": context.vm_request.user,
-            },
+            extra_vars=base_provision_vars(
+                context.vm_request.user, install_uv=install_uv
+            ),
             discover_private_key=discover_private_key,
         ),
     )

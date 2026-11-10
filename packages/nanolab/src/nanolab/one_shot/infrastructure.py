@@ -70,6 +70,37 @@ class NodeResource:
             return published(self.site_host.site.address, self.ordinal)
         return direct(vm.host)
 
+    def ansible_vars(self, vm: VmInfo) -> dict[str, Any]:
+        """Resolve Ansible connection facts from an acquired or journalled VM."""
+        from multipass_vm_sdk import find_ssh_public_key
+        from sonata_tasks.vm.azure import AzureVmProvider
+        from sonata_tasks.vm.proxmox import ProxmoxVmProvider
+        from sonata_tasks.vm.ssh import find_ssh_private_key_path
+
+        from nanolab.one_shot.sites import site_jump
+
+        request = self.request.model_copy(
+            update={"host": vm.host, "user": vm.user, "home": vm.home}
+        )
+        facts: dict[str, Any] = {"ansible_host": vm.host, "ansible_user": vm.user}
+        if self.site_host is not None:
+            site = self.site_host.site
+            key = Path(site.vm_ssh_key).expanduser()
+            facts["ansible_ssh_common_args"] = "-o " + shlex.quote(site_jump(site))
+        elif isinstance(self.provider, ProxmoxVmProvider):
+            facts["ansible_host"], facts["ansible_port"] = self.provider.ssh_endpoint(
+                request
+            )
+            key = self.provider.ssh_private_key_path(request)
+        elif isinstance(self.provider, AzureVmProvider):
+            facts["ansible_host"] = self.provider.connection_host(request)
+            key = self.provider.ssh_private_key_path(request)
+        else:
+            key = find_ssh_private_key_path(find_ssh_public_key())
+        if key is not None:
+            facts["ansible_private_key_file"] = str(key)
+        return facts
+
     def replica_url(self, vm: VmInfo, host_port: int) -> str:
         """Return the URL the operator reads a replica's runtime endpoints at.
 

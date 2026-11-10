@@ -9,12 +9,14 @@ from types import SimpleNamespace
 
 import pytest
 from sonata_engine import TaskInputs
+from sonata_tasks.ansible import AnsiblePlaybookTask
 
 from nanolab.one_shot.supervision import CampaignSupervision
 from nanolab.tasks.resource_tasks import acquire_now, release_now
 from nanolab.workbench import components, loadgen, playbook
 from nanolab.workbench.components import Deployed
 from nanolab.workbench.platform import OPERATOR
+from tests.workbench.playbook_fakes import action_of, host_of
 
 INPUTS = TaskInputs._for_resource_values({}, ())
 
@@ -101,14 +103,15 @@ def test_check_process_on_loadgen(monkeypatch):
 
 
 def _deploys(monkeypatch, run_dir: Path, seen: list) -> None:
-    def bootstrap(_provider, operations, *, role):
-        action = operations[0].operation_id.removeprefix("workbench.")
+    def bootstrap(task, inputs):
+        role = host_of(task)
+        action = action_of(task)
         saved = json.loads(
             (run_dir / "workbench" / "vars" / f"{role}-{action}.json").read_text()
         )
         seen.append((action, saved["instances"][0]))
 
-    monkeypatch.setattr(playbook, "run_bootstrap_operations", bootstrap)
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", bootstrap)
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
 
 

@@ -22,6 +22,7 @@ from nanolab.tasks.components.operations import (
     RemoteCommandOperation,
     ScenarioOperation,
 )
+from nanolab.tasks.infra.ansible import OWN_STDIN
 from nanolab.tasks.vm.models import VmRequest
 
 
@@ -69,12 +70,6 @@ class OperationTask:
                 f"{self.task_id} failed (exit {result.return_code}): {detail}"
             )
         return result
-
-
-# A host command gets its own /dev/null as stdin. Inherited, the run's stdin is
-# one open file shared with every concurrent ssh, which marks it non-blocking
-# while it runs; Ansible then refuses to start ("requires blocking IO").
-OWN_STDIN = ("sh", "-c", 'exec "$@" </dev/null', "sh")
 
 
 def operation_task(

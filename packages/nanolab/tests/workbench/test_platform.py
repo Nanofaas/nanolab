@@ -19,6 +19,7 @@ from sonata_engine import (
     Workflow,
     release_retained,
 )
+from sonata_tasks.ansible import AnsiblePlaybookTask
 
 from nanolab.config.environment import OperatorLogging
 from nanolab.config.one_shot import HostCpuPlacement, OneShotLogs
@@ -26,9 +27,10 @@ from nanolab.one_shot.infrastructure import NodeResource
 from nanolab.tasks.one_shot import logging as one_shot_logging
 from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmInfo, VmRequest
-from nanolab.workbench import components, platform, playbook
+from nanolab.workbench import components, platform
 from nanolab.workbench.components import Deployed
 from nanolab.workbench.platform import one_shot_platform
+from tests.workbench.playbook_fakes import action_of, host_of
 
 NODES = ("edge-1", "cloud-1")
 LOGS = OneShotLogs.model_validate(
@@ -107,8 +109,9 @@ def _build(
     SEEN.clear()
     metrics = metrics or {}
 
-    def bootstrap(_provider, operations, *, role):
-        action = operations[0].operation_id.removeprefix("workbench.")
+    def bootstrap(task, inputs):
+        role = host_of(task)
+        action = action_of(task)
         saved = json.loads((vars_dir / f"{role}-{action}.json").read_text())
         names = tuple(i["name"] for i in saved["instances"])
         events.append((role, action, names))
@@ -145,7 +148,7 @@ def _build(
         ),
     )
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "workspace"))
-    monkeypatch.setattr(playbook, "run_bootstrap_operations", bootstrap)
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", bootstrap)
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
     monkeypatch.setattr(platform, "ensure_installed", lambda: Path("/coll"))
     monkeypatch.setattr(
@@ -506,15 +509,16 @@ def test_collectors_poll_until_drained(tmp_path, monkeypatch):
 def test_a_failing_node_keeps_the_others_evidence(tmp_path, monkeypatch):
     events: list = []
     built = _build(tmp_path, monkeypatch, events)
-    original = playbook.run_bootstrap_operations
+    original = AnsiblePlaybookTask.run
 
-    def flaky(provider, operations, *, role):
-        if role == "edge-1" and operations[0].operation_id == "workbench.collect":
+    def flaky(task, inputs):
+        role = host_of(task)
+        if role == "edge-1" and ("workbench." + action_of(task)) == "workbench.collect":
             events.append((role, "collect", ()))
             raise RuntimeError("edge-1 unreachable")
-        return original(provider, operations, role=role)
+        return original(task, inputs)
 
-    monkeypatch.setattr(playbook, "run_bootstrap_operations", flaky)
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", flaky)
     _run(built, events)  # a failed poll is evidence, not a failed release
     logging_dir = tmp_path / "run" / "logging"
     edge = json.loads((logging_dir / "edge-1" / "status.json").read_text())

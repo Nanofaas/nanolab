@@ -5,14 +5,16 @@ from types import SimpleNamespace
 
 import pytest
 from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
+from sonata_tasks.ansible import AnsiblePlaybookTask
 
 from nanolab.one_shot.infrastructure import NodeResource
 from nanolab.tasks.resource_tasks import release_now, resource_of
 from nanolab.tasks.vm.models import VmInfo, VmRequest
-from nanolab.workbench import components, playbook
+from nanolab.workbench import components
 from nanolab.workbench.components import Deployed, collect_task, component_resource
 from nanolab.workbench.inventory import Instance
 from nanolab.workbench.playbook import WorkbenchHost
+from tests.workbench.playbook_fakes import action_of, host_of, inventory_of
 
 INSTALLED = resource_of("Install", lambda _i: Path("/coll"), lambda _i, _v: None)
 HOST = WorkbenchHost("operator", None)
@@ -35,10 +37,10 @@ class Consume(Task[None]):
 def _record(monkeypatch, events: list[str]) -> None:
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
     monkeypatch.setattr(
-        playbook,
-        "run_bootstrap_operations",
-        lambda _p, operations, *, role: events.append(
-            f"{operations[0].operation_id}:{operations[0].summary}"
+        AnsiblePlaybookTask,
+        "run",
+        lambda task, inputs: events.append(
+            f"{('workbench.' + action_of(task))}:{task.title}"
         ),
     )
 
@@ -97,10 +99,10 @@ def test_release_from_journal_needs_no_live_resources(tmp_path, monkeypatch, nod
     """A later-process teardown runs with empty inputs and a revived value."""
     captured: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        playbook,
-        "run_bootstrap_operations",
-        lambda _p, operations, *, role: captured.append(
-            (operations[0].operation_id, operations[0].argv[2])
+        AnsiblePlaybookTask,
+        "run",
+        lambda task, inputs: captured.append(
+            (("workbench." + action_of(task)), inventory_of(task))
         ),
     )
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
@@ -114,14 +116,12 @@ def test_release_from_journal_needs_no_live_resources(tmp_path, monkeypatch, nod
     revived = resource.revive(json.loads(json.dumps(asdict(value))))
     assert revived == value
     release_now(resource, TaskInputs._for_resource_values({}, ()), revived)
-    expected = (
-        str(tmp_path / "edge-1-undeploy-inventory.json") if node else "localhost,"
-    )
+    expected = str(tmp_path / f"{host.key}-undeploy-inventory.json")
     assert captured == [("workbench.undeploy", expected)]
     if node:
-        assert json.loads(Path(expected).read_text())["all"]["hosts"] == {
-            "edge-1": {"ansible_host": "10.0.0.5"}
-        }
+        facts = json.loads(Path(expected).read_text())["all"]["hosts"]["edge-1"]
+        assert facts["ansible_host"] == "10.0.0.5"
+        assert facts["ansible_user"] == "ubuntu"
 
 
 def test_titles_name_instance_and_host(tmp_path, monkeypatch):
@@ -149,14 +149,12 @@ def test_config_from_inputs_is_deployed_and_recorded(tmp_path, monkeypatch):
     _record(monkeypatch, [])
     saved: list[dict] = []
     monkeypatch.setattr(
-        playbook,
-        "run_bootstrap_operations",
-        lambda _p, operations, *, role: saved.append(
-            json.loads(
-                (
-                    tmp_path / f"operator-{operations[0].operation_id[10:]}.json"
-                ).read_text()
-            )["instances"][0]["config"]
+        AnsiblePlaybookTask,
+        "run",
+        lambda task, inputs: saved.append(
+            json.loads((tmp_path / f"operator-{action_of(task)}.json").read_text())[
+                "instances"
+            ][0]["config"]
         ),
     )
     resource = component_resource(
@@ -184,14 +182,15 @@ def test_a_failed_deploy_undeploys_best_effort(tmp_path, monkeypatch, undeploy_f
     events: list[str] = []
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
 
-    def bootstrap(_provider, operations, *, role):
+    def bootstrap(task, inputs):
+        role = host_of(task)
         del role
-        action = operations[0].operation_id
+        action = "workbench." + action_of(task)
         events.append(action)
         if action == "workbench.deploy" or undeploy_fails:
             raise RuntimeError(f"{action} failed")
 
-    monkeypatch.setattr(playbook, "run_bootstrap_operations", bootstrap)
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", bootstrap)
     inputs = TaskInputs({id(INSTALLED): Path("/coll")}, {id(INSTALLED)})
     with pytest.raises(RuntimeError, match=r"workbench\.deploy failed") as caught:
         acquire_now(_resource(tmp_path), inputs)
