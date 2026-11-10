@@ -289,6 +289,9 @@ def one_shot_platform(
     hosts = {"operator": OPERATOR, **nodes}
     direct = {k: n for k, n in topology.nodes.items() if k not in forwards}
 
+    placement = settings.host_cpu_placement
+    operator_cpus = _cpus(placement.operator_cpus) if placement else None
+
     def member(
         host: WorkbenchHost,
         component: str,
@@ -301,6 +304,8 @@ def one_shot_platform(
     ) -> tuple[Resource[Deployed], Instance]:
         if host.node is not None and host.key in bootstraps:
             requires = (bootstraps[host.key], *requires)
+        if host.node is None and component != "loki" and cpuset is None:
+            cpuset = operator_cpus
         instance = Instance.model_validate(
             {
                 "name": f"{component}-{host.key}"
@@ -779,6 +784,6 @@ def one_shot_platform(
         collector_identity,
         targets,
         export,
-        partial(loadgen_resource, OPERATOR),
+        partial(loadgen_resource, OPERATOR, cpuset=operator_cpus),
         record_supervisor_status,
     )

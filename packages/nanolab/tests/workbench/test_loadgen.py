@@ -169,3 +169,17 @@ def test_an_unreadable_exit_code_is_unknown_not_an_error(monkeypatch):
     run = _run(["exited ?"], monkeypatch)
     assert run.poll() is None  # never raises under the supervision lock
     assert run.error and run.returncode is None
+
+
+@pytest.mark.parametrize("cpuset", [None, "0,1"])
+def test_generator_respects_explicit_cpu_placement(tmp_path, monkeypatch, cpuset):
+    seen = []
+    _deploys(monkeypatch, tmp_path, seen)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: SimpleNamespace(stdout="0-1")
+    )
+    resource = loadgen.loadgen_resource(
+        OPERATOR, run_dir=tmp_path, vus=1, duration=1, cpuset=cpuset
+    )
+    acquire_now(resource, INPUTS)
+    assert seen[0][1].get("cpuset") == cpuset

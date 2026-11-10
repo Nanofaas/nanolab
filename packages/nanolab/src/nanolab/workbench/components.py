@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -10,6 +11,7 @@ from typing import Any, Literal, override
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 
+from nanolab.one_shot.site_cpu import parse_cpu_list
 from nanolab.tasks.resource_tasks import release_call
 from nanolab.tasks.vm.models import VmInfo
 from nanolab.workbench.install import ensure_installed
@@ -114,6 +116,24 @@ class _Deploy(Task[Deployed]):
 
         try:
             run("deploy", self.title)
+            if self.host.node is None and instance.cpuset is not None:
+                observed = subprocess.run(
+                    (
+                        "docker",
+                        "inspect",
+                        "--format={{.HostConfig.CpusetCpus}}",
+                        f"wb-{instance.name}",
+                    ),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
+                ).stdout.strip()
+                if parse_cpu_list(observed) != parse_cpu_list(instance.cpuset):
+                    raise ValueError(
+                        f"CPU placement for {instance.name}: expected "
+                        f"{instance.cpuset}, got {observed!r}"
+                    )
         except BaseException as error:
             # A failed acquire is never released: leave nothing half deployed.
             try:

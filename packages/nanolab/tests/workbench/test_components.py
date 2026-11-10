@@ -191,3 +191,31 @@ def test_a_failed_deploy_undeploys_best_effort(tmp_path, monkeypatch, undeploy_f
     assert events == ["workbench.deploy", "workbench.undeploy"]
     notes = getattr(caught.value, "__notes__", [])
     assert any("undeploy" in note for note in notes) is undeploy_fails
+
+
+@pytest.mark.parametrize("observed", ["0-1", "2-3", ""])
+def test_deploy_refuses_incorrect_operator_cpuset(tmp_path, monkeypatch, observed):
+    import subprocess
+
+    events = []
+    _record(monkeypatch, events)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: SimpleNamespace(stdout=observed)
+    )
+    resource = component_resource(
+        HOST,
+        PROM.model_copy(update={"cpuset": "0,1"}),
+        url=None,
+        vars_dir=tmp_path,
+        installed=None,
+    )
+    workflow = Workflow("placement")
+    workflow.add(Consume(events), requires=(resource,))
+    if observed == "0-1":
+        workflow.run()
+        assert "consume" in events
+    else:
+        with pytest.raises(ValueError, match="CPU placement"):
+            workflow.run()
+        assert "consume" not in events
+        assert any(e.startswith("workbench.undeploy:") for e in events)

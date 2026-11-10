@@ -132,6 +132,13 @@ def _build(
     def failing_loki(**_kwargs):
         raise RuntimeError("no Loki in tests")
 
+    monkeypatch.setattr(
+        components.subprocess,
+        "run",
+        lambda argv, **_kwargs: SimpleNamespace(
+            stdout=SEEN[argv[-1].removeprefix("wb-")].get("cpuset") or ""
+        ),
+    )
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "workspace"))
     monkeypatch.setattr(playbook, "run_bootstrap_operations", bootstrap)
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
@@ -418,9 +425,9 @@ def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
         assert collector["config"]["cpus"] == LOGS.cpu
         assert collector["config"]["memory_mib"] == LOGS.memory_mib
     assert all(
-        "cpuset" not in SEEN[name]
+        SEEN[name].get("cpuset") == "0"
         for name in SEEN
-        if not name.startswith(("loki-", "log-collector-"))
+        if "-operator-" in name and not name.startswith("loki-")
     )
 
 
@@ -941,3 +948,15 @@ def test_collector_archive_failure_preserves_owned_vm(tmp_path, monkeypatch, fai
         assert deleted == []
         assert all(n.recovery for n in nodes.values())
     assert len(_of(events, "undeploy")) == len(_deploy_order(tmp_path))
+
+
+def test_platform_loadgen_keeps_placement_without_a_logical_schedule(
+    tmp_path, monkeypatch
+):
+    events = []
+    built = _build(tmp_path, monkeypatch, events)
+    from nanolab.tasks.resource_tasks import acquire_now
+
+    resource = built.loadgen(run_dir=tmp_path / "run", vus=1, duration=1)
+    value = acquire_now(resource, TaskInputs.empty())
+    assert SEEN[value.deployed.instance]["cpuset"] == "0"

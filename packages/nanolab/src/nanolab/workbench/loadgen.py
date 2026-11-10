@@ -101,11 +101,15 @@ def loadgen_resource(
     vus: int,
     duration: float,
     settings: Any = None,
+    cpuset: str | None = None,
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[LoadgenRun]:
     """Own one bounded k6 run; the release stops it and undeploys it."""
     if host.node is not None:
         raise ValueError("the loadgen runs on the nanolab host (ruling 3)")
+    placement = getattr(settings, "host_cpu_placement", None)
+    if cpuset is None and placement is not None:
+        cpuset = ",".join(map(str, placement.operator_cpus))
     run_dir = run_dir.resolve()
     vars_dir = run_dir / "workbench" / "vars"
     grace = operational_limit(settings, "process_exit_seconds", 5)
@@ -113,7 +117,7 @@ def loadgen_resource(
     def component(name: str, config: dict[str, Any]) -> Resource[Deployed]:
         return component_resource(
             host,
-            Instance(name=name, component="loadgen"),
+            Instance(name=name, component="loadgen", cpuset=cpuset),
             url=None,
             vars_dir=vars_dir,
             installed=None,
