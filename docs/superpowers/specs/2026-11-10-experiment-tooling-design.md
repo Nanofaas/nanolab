@@ -21,3 +21,40 @@ Keep campaign finalization and signal coordination in the existing supervisor un
 Unit/contract tests cover cloud/site connection facts, runtime-only bootstrap, failed acquisition, cleanup errors, collection with a dead service, archive failure and preserved source/VM. Use real Ansible/Docker on Linux for collection and deployment; run a six-VM (five edge plus cloud) functional workflow after targeted tests, with calibration, qualification and experiment distinguished. Scientific acceptance requires compatible verified inputs and healthy telemetry; a failed gate must be reported, never bypassed.
 
 Alternatives considered: keeping Python Docker/SSH wrappers preserves current complexity; moving all polling to Ansible adds overhead and changes measurement timing. The selected boundary centralizes configuration and lifecycle while retaining the existing measurement path.
+
+## Separate architectural views
+
+The experiment data flow, resource lifecycle and deployment topology are distinct.
+A diagram must not make tools, machines and scientific stages siblings.
+
+Experiment data flow:
+
+```text
+prepared images ──────────────────────────────────────────┐
+                                                        │
+calibration ── profile ── qualification ── timing ── experiment
+                                                    baseline / oracle / ewma
+```
+
+Each stage owns a resource lifecycle: acquire infrastructure, configure/deploy,
+run measurements, then quiesce/collect/verify/release on success, failure or
+interruption. Evidence recovery is part of finalization, not a scientific stage
+that only executes after successful measurements. Unverified raw recovery blocks
+fleet destruction; scientific invalidity and raw recovery are separate decisions.
+
+Component responsibilities:
+
+```text
+Nanolab (experiment composition, measurements, validity, retention policy)
+    └── Sonata (dependencies, resource ownership, compensation)
+          ├── OpenTofu task → Multipass provider → VM lifecycle
+          ├── Ansible task
+          │     ├── Nanolab playbooks → NanoFaaS runtime lifecycle
+          │     └── Workbench roles → platform components and technical evidence
+          └── Nanolab tasks → NanoFaaS APIs, measurements, evaluation
+```
+
+Workbench supplies reusable technical capabilities; it does not decide scientific
+acceptance or VM retention. Nanolab's collector-evidence task composes collection
+and applies that policy. The operator host and five-edge-plus-cloud layout form
+a separate deployment view, not another layer in the experiment task graph.
