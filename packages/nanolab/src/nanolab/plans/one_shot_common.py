@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 import time
@@ -120,11 +121,9 @@ class OneShotTopology:
         )
 
 
-# A container check on a remote node crosses SSH and, on a site, its Multipass
-# client: under load one can stall without the container being in question.
-# Nothing is lost meanwhile (logs are buffered on disk, receipts are read later,
-# counters are cumulative), so only a node unreachable this long fails the run.
-REMOTE_UNREACHABLE_SECONDS = 300
+# The supervisor runs on the operator's loopback: unreachable this long, it is
+# down, not slow.
+SUPERVISOR_UNREACHABLE_SECONDS = 30
 
 
 def workbench_supervision(
@@ -136,16 +135,23 @@ def workbench_supervision(
     before any of them, or the platform, is stopped on purpose.
     """
 
-    def detach(_inputs: TaskInputs, _value: None) -> None:
+    def unwatch() -> None:
         for name in platform.targets:
             supervision.unwatch(name)
         supervision.unwatch("workbench")
+
+    def detach(inputs: TaskInputs, _value: None) -> None:
+        # Recorded while every target is still there; on failure the
+        # platform's own status step tries again.
+        with contextlib.suppress(Exception):
+            platform.record_supervisor_status(inputs.resource(platform.resource))
+        unwatch()
 
     def attach(inputs: TaskInputs) -> None:
         url = inputs.resource(platform.resource).of(platform.supervisor).url
         supervision.attach(
             SupervisorClient(url or "", timeout_seconds=min(supervision.cadence, 2.0)),
-            tolerated_seconds=REMOTE_UNREACHABLE_SECONDS,
+            tolerated_seconds=SUPERVISOR_UNREACHABLE_SECONDS,
         )
         try:
             # Only watched targets count; re-putting one already running
@@ -158,7 +164,7 @@ def workbench_supervision(
                     tolerated_seconds=target["toleratedSeconds"],
                 )
         except BaseException:
-            detach(inputs, None)
+            unwatch()
             raise
 
     return resource_of(

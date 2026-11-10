@@ -1601,11 +1601,20 @@ class RunOneShotLoadTask(Task[None]):
                             raise RuntimeError(
                                 "epoch exceeds its qualified wall/readiness budget"
                             )
-            if logical and getattr(run, "supervision", None) is not None:
-                # A completed shared-iterations generator can finish before the
-                # boundary. Keep collectors alive through the complete last slot.
+            # A completed shared-iterations generator can finish before the
+            # boundary. Keep collectors alive through the complete last slot,
+            # which the vm-resources export below covers.
+            if logical:
                 wait_until_monotonic(
                     mono_anchor + len(run.trace.windows) * manifest.period_seconds,
+                    clock=clock,
+                )
+            else:
+                wait_until(
+                    anchor
+                    + timedelta(
+                        seconds=len(run.trace.windows) * manifest.period_seconds
+                    ),
                     clock=clock,
                 )
             limit = anchor + timedelta(

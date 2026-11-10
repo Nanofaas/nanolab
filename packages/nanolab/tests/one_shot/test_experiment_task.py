@@ -281,7 +281,8 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
         "nanolab.tasks.one_shot.experiment.prepare_parallel_epoch", prepare
     )
     monkeypatch.setattr(
-        "nanolab.tasks.one_shot.experiment.wait_until", lambda *_args, **_kwargs: None
+        "nanolab.tasks.one_shot.experiment.wait_until",
+        lambda deadline, **_kwargs: waits.append(deadline),
     )
     if logical:
         monkeypatch.setattr(
@@ -311,8 +312,15 @@ def test_manual_epoch_preparation_is_once_and_rejects_censored_budget(
     else:
         task.run(inputs)
     assert calls == [0]
-    if logical and supervised and not (censored or (slow and enforce_budget)):
-        assert waits[-1] == 120.0
+    # Every run keeps its collectors through the complete last slot.
+    if not (censored or (slow and enforce_budget)):
+        from datetime import datetime, timedelta
+
+        assert waits[-1] == (
+            120.0
+            if logical
+            else datetime.fromisoformat(result.anchor) + timedelta(seconds=20)
+        )
 
 
 @pytest.mark.parametrize(

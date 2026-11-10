@@ -778,10 +778,7 @@ def test_the_supervisor_is_attached_once_the_control_planes_are_up():
 
     from sonata_engine import Members
 
-    from nanolab.plans.one_shot_common import (
-        REMOTE_UNREACHABLE_SECONDS,
-        workbench_supervision,
-    )
+    from nanolab.plans.one_shot_common import workbench_supervision
     from nanolab.workbench.components import Deployed
 
     composite = resource_of("platform", lambda _i: None, lambda _i, _v: None)
@@ -799,10 +796,13 @@ def test_the_supervisor_is_attached_once_the_control_planes_are_up():
             "toleratedSeconds": 0,
         },
     }
-    platform = SimpleNamespace(
-        resource=composite, supervisor=supervisor, targets=targets
-    )
     calls: list = []
+    platform = SimpleNamespace(
+        resource=composite,
+        supervisor=supervisor,
+        targets=targets,
+        record_supervisor_status=lambda values: calls.append(("status", values)),
+    )
 
     class Supervision:
         cadence = 5.0
@@ -826,7 +826,8 @@ def test_the_supervisor_is_attached_once_the_control_planes_are_up():
     inputs = cast(Any, SimpleNamespace(resource=lambda _r: members))
     acquire_now(resource, inputs)
     assert calls == [
-        ("attach", "http://127.0.0.1:8099", 2.0, REMOTE_UNREACHABLE_SECONDS),
+        # The supervisor is on the operator's loopback: not a remote node.
+        ("attach", "http://127.0.0.1:8099", 2.0, 30),
         ("watch", "up.node.edge-1", "scrape_up", {"job": "node"}, 300),
         (
             "watch",
@@ -839,7 +840,35 @@ def test_the_supervisor_is_attached_once_the_control_planes_are_up():
     calls.clear()
     release_now(resource, inputs, None)
     assert calls == [
+        # Recorded while every target is still there.
+        ("status", members),
         ("unwatch", "up.node.edge-1"),
         ("unwatch", "running.control-plane.edge-1"),
         ("unwatch", "workbench"),
     ]
+
+
+def test_an_unreadable_supervisor_status_still_detaches():
+    """The platform's own status step retries what detach could not record."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from nanolab.plans.one_shot_common import workbench_supervision
+
+    composite = resource_of("platform", lambda _i: None, lambda _i, _v: None)
+
+    def unreachable(_values):
+        raise OSError("connection refused")
+
+    platform = SimpleNamespace(
+        resource=composite,
+        supervisor=None,
+        targets={"up.node.edge-1": {}},
+        record_supervisor_status=unreachable,
+    )
+    unwatched: list = []
+    supervision = SimpleNamespace(unwatch=unwatched.append)
+    resource = workbench_supervision(cast(Any, platform), supervision, requires=())
+    inputs = cast(Any, SimpleNamespace(resource=lambda _r: None))
+    release_now(resource, inputs, None)
+    assert unwatched == ["up.node.edge-1", "workbench"]
