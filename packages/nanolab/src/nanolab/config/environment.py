@@ -10,7 +10,7 @@ from __future__ import annotations
 import ipaddress
 from ipaddress import IPv4Address
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -132,15 +132,26 @@ class MultipassSite(BaseModel):
 class OperatorLogging(BaseModel):
     """The single Loki a multi-site run owns on the operator.
 
-    Loki runs from a pinned release binary, listening on the operator's
-    loopback only; each site's VMs and the cloud reach it through a reverse
-    SSH tunnel. `cpus` keeps it off the generator's CPUs.
+    Loki is the workbench's container, published on the operator's loopback
+    only; each site's VMs and the cloud reach it through a reverse SSH tunnel.
+    `cpus` keeps it off the generator's CPUs.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    loki_binary: str = Field(alias="lokiBinary", min_length=1)
-    loki_sha256: str = Field(alias="lokiSha256", pattern=r"^[0-9a-f]{64}$")
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_removed_fields(cls, data: Any) -> Any:
+        """Name the pinned-binary fields the workbench Loki container replaced."""
+        if isinstance(data, dict):
+            for field in ("lokiBinary", "lokiSha256"):
+                if field in data:
+                    raise ValueError(
+                        f"logging.{field} was removed: the workbench runs Loki "
+                        "as a container; delete it from the environment file"
+                    )
+        return data
+
     port: int = Field(default=43100, ge=1024, le=65534)
     cpus: list[int] = Field(min_length=1)
 

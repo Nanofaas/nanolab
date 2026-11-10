@@ -32,11 +32,9 @@ azure:
   image_urn: Canonical:ubuntu-24_04-lts:server:24.04.202610210
   ssh_key_path: ~/.ssh/id_ed25519_azure_nanolab.pub
   work_dir: /path/outside/the/root/disk/tofu
-# The run's single Loki: a pinned release binary on this operator's loopback,
-# reached by sites and cloud through reverse SSH tunnels. Keep its CPUs apart
-# from the scenario's operatorCpus.
+# The run's single Loki: the workbench Loki container, published on this
+# operator's loopback and reached by sites and cloud through reverse SSH
+# tunnels. Keep its CPUs apart from the scenario's operatorCpus.
 logging:
-  lokiBinary: /path/to/loki-3.7.8
-  lokiSha256: <sha256 of the binary>
   port: 43100
   cpus: [6, 7]

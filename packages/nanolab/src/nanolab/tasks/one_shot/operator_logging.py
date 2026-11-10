@@ -2,37 +2,30 @@
 
 The run's Loki is the workbench platform's container, published on the
 operator's loopback (`OperatorLogging.port`): the operator is reachable from
-the sites only on a public address. (`operator_loki_resource`, the older
-pinned-binary form, stays until its last user moves.) Each site and the cloud
-reach it through a reverse
-SSH tunnel ending on their own loopback: a site publishes it on its Multipass
-bridge with socat, the cloud's collector (host network) pushes to it directly.
+the sites only on a public address. Each site and the cloud reach it through
+a reverse SSH tunnel ending on their own loopback: a site publishes it on its
+Multipass bridge with socat, the cloud's collector (host network) pushes to it directly.
 Fluent Bit buffers on disk and retries without limit, so a tunnel that drops is
 restarted without losing records; delivery is still verified per collector.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
 import signal
 import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
-import httpx
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.compensation import compensated_resource
 
 from nanolab.config.environment import OperatorLogging
-from nanolab.config.one_shot import OneShotLogs, operational_limit
+from nanolab.config.one_shot import operational_limit
 from nanolab.one_shot.sites import SiteForwarders, SiteHost
-from nanolab.tasks.one_shot.logging import verify_loki_ingestion
 from nanolab.tasks.resource_tasks import call, release_call
 
 PUSH_PATH = "/loki/api/v1/push"
@@ -44,23 +37,6 @@ SITE_BRIDGES = "mpqemubr"
 def operator_endpoint(logging: OperatorLogging) -> str:
     """Return the push URL of the operator's Loki, as the operator reaches it."""
     return f"http://127.0.0.1:{logging.port}{PUSH_PATH}"
-
-
-def loki_config(template: str) -> str:
-    """Point the shipped Loki configuration's storage at a run directory.
-
-    The container image keeps its data under `/loki`; the native process keeps
-    it under its working directory and advertises its loopback in the ring.
-    """
-    config, count = re.subn(r"(?m)(:\s+)/loki\b", r"\1.", template)
-    if count == 0 or "\ncommon:\n" not in config:
-        raise ValueError("unexpected Loki configuration template")
-    return config.replace("\ncommon:\n", "\ncommon:\n  instance_addr: 127.0.0.1\n", 1)
-
-
-def _sha256(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def _stop(process: subprocess.Popen, seconds: float) -> bool:
@@ -75,130 +51,6 @@ def _stop(process: subprocess.Popen, seconds: float) -> bool:
         os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=30)
         return False
-
-
-def operator_loki_resource(
-    logs: OneShotLogs,
-    logging: OperatorLogging,
-    *,
-    root: Path,
-    run_dir: Path,
-    operator: Resource | None = None,
-    settings=None,
-    supervision=None,
-) -> Resource[str]:
-    """Own the run's Loki as a pinned process; its data is the raw archive."""
-    if not logs.backend_owned:
-        raise ValueError("a multi-site run owns its logging backend")
-    endpoint = operator_endpoint(logging)
-    project = "nanolab-logs-" + uuid4().hex[:12]
-    directory = run_dir / "logging" / "backend"
-    data = directory / "backend-data"
-    state: dict[str, subprocess.Popen] = {}
-
-    def acquire(_inputs):
-        binary = Path(logging.loki_binary).expanduser()
-        if _sha256(binary) != logging.loki_sha256:
-            raise ValueError(f"Loki binary {binary} does not match its sha256")
-        data.mkdir(parents=True, exist_ok=False)
-        config = directory / "loki.yaml"
-        config.write_text(
-            loki_config((root / "deploy/observability/loki.yaml").read_text())
-        )
-        argv = [
-            "taskset",
-            "-c",
-            ",".join(map(str, logging.cpus)),
-            str(binary),
-            f"-config.file={config}",
-            "-server.http-listen-address=127.0.0.1",
-            f"-server.http-listen-port={logging.port}",
-            "-server.grpc-listen-address=127.0.0.1",
-            f"-server.grpc-listen-port={logging.port + 1}",
-            # As for the container: retain the WAL and check real IO instead of
-            # a percent-full cutoff on a disk shared with other data.
-            "-ingester.wal-disk-full-threshold=0",
-            "-ingester.wal-enabled=true",
-        ]
-        with (directory / "backend.log").open("ab") as log:
-            state["process"] = process = subprocess.Popen(
-                argv,
-                cwd=data,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-        (directory / "logging-host-placement.json").write_text(
-            json.dumps(
-                {
-                    "host": "operator",
-                    "pid": process.pid,
-                    "cpus": sorted(os.sched_getaffinity(process.pid)),
-                    "binary": str(binary),
-                    "binarySha256": logging.loki_sha256,
-                    "argv": argv,
-                },
-                indent=2,
-            )
-            + "\n"
-        )
-        deadline = time.monotonic() + operational_limit(
-            settings, "service_start_seconds", 90
-        )
-        ready = endpoint.removesuffix(PUSH_PATH) + "/ready"
-        with httpx.Client(trust_env=False) as http:
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    raise RuntimeError(f"Loki exited with status {process.returncode}")
-                try:
-                    http.get(ready, timeout=2).raise_for_status()
-                except httpx.HTTPError:
-                    time.sleep(0.5)
-                    continue
-                verify_loki_ingestion(endpoint, project, directory, settings)
-                return endpoint
-        raise RuntimeError("operator Loki readiness failed")
-
-    def release(_inputs, _value=None):
-        process = state.pop("process", None)
-        if process is None:
-            return
-        graceful = _stop(process, operational_limit(settings, "compose_seconds", 90))
-        hashes = {
-            str(path.relative_to(data)): _sha256(path)
-            for path in sorted(data.rglob("*"))
-            if path.is_file()
-        }
-        (directory / "backend-data-sha256.json").write_text(
-            json.dumps(hashes, indent=2) + "\n"
-        )
-        if not graceful:
-            raise RuntimeError("operator Loki ignored SIGTERM and was killed")
-
-    title = "Own operator Loki logging backend"
-    resource = compensated_resource(
-        title=title,
-        acquire=call(title, acquire),
-        release=release_call(title, release),
-        compensate=call(f"Compensate {title}", release),
-        requires=(operator,) if operator is not None else (),
-    )
-    if supervision is None:
-        return resource
-
-    def probe(_value):
-        process = state.get("process")
-        if process is None or process.poll() is not None:
-            raise RuntimeError("operator Loki stopped")
-        verify_loki_ingestion(endpoint, project, directory, settings)
-
-    return supervision.service_resource(
-        resource,
-        "logging-backend",
-        probe,
-        join_seconds=operational_limit(settings, "worker_join_seconds", 40),
-    )
 
 
 class ReverseTunnel:

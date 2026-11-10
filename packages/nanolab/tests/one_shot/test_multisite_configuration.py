@@ -97,11 +97,7 @@ def test_placement_without_sites_is_rejected():
         EnvironmentConfig.model_validate(data)
 
 
-LOGGING = {
-    "lokiBinary": "/opt/loki-3.7.8",
-    "lokiSha256": "d" * 64,
-    "cpus": [6, 7],
-}
+LOGGING = {"cpus": [6, 7]}
 
 
 def test_operator_logging_is_parsed_with_its_defaults():
@@ -121,10 +117,16 @@ def test_operator_logging_requires_a_placement():
         EnvironmentConfig.model_validate(data)
 
 
-def test_operator_logging_needs_a_pinned_binary_and_cpus():
-    for broken in ({"lokiSha256": "x"}, {"cpus": []}):
-        with pytest.raises(ValidationError):
-            EnvironmentConfig.model_validate(environment(logging={**LOGGING, **broken}))
+def test_operator_logging_needs_cpus():
+    with pytest.raises(ValidationError):
+        EnvironmentConfig.model_validate(environment(logging={"cpus": []}))
+
+
+@pytest.mark.parametrize("field", ["lokiBinary", "lokiSha256"])
+def test_the_removed_loki_binary_fields_are_named(field):
+    logging = {**LOGGING, field: "/opt/loki"}
+    with pytest.raises(ValidationError, match=f"{field} was removed"):
+        EnvironmentConfig.model_validate(environment(logging=logging))
 
 
 def one_shot(**overrides):

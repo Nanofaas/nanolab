@@ -527,9 +527,7 @@ def test_loki_store_hashes_today_format(tmp_path, monkeypatch):
 
 
 def test_multi_site_loki_lives_under_backend(tmp_path, monkeypatch):
-    operator_logging = OperatorLogging.model_validate(
-        {"lokiBinary": "/x", "lokiSha256": "0" * 64, "port": 43100, "cpus": [5]}
-    )
+    operator_logging = OperatorLogging.model_validate({"port": 43100, "cpus": [5]})
     events: list = []
     _run(
         _build(tmp_path, monkeypatch, events, operator_logging=operator_logging),

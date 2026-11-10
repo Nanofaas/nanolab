@@ -9,30 +9,12 @@ from types import SimpleNamespace
 import pytest
 
 from nanolab.config.environment import OperatorLogging
-from nanolab.config.one_shot import OneShotLogs
 from nanolab.one_shot import sites
 from nanolab.tasks.one_shot import operator_logging
 from nanolab.tasks.one_shot.operator_logging import (
     ReverseTunnel,
     log_routes,
-    loki_config,
-    operator_loki_resource,
 )
-from nanolab.tasks.resource_tasks import acquire_now
-
-TEMPLATE = """\
-auth_enabled: false
-server:
-  http_listen_port: 3100
-common:
-  path_prefix: /loki
-  storage:
-    filesystem:
-      chunks_directory: /loki/chunks
-      rules_directory: /loki/rules
-compactor:
-  working_directory: /loki/compactor
-"""
 
 SITE = sites.MultipassSite(
     ssh="spark", address="149.132.179.35", architecture="arm64", multipass="mp"
@@ -40,50 +22,8 @@ SITE = sites.MultipassSite(
 
 
 def logging_config(**overrides):
-    data = {"lokiBinary": "/opt/loki", "lokiSha256": "0" * 64, "cpus": [6, 7]}
+    data = {"cpus": [6, 7]}
     return OperatorLogging.model_validate({**data, **overrides})
-
-
-def test_loki_storage_moves_under_the_working_directory():
-    config = loki_config(TEMPLATE)
-    assert "/loki" not in config
-    assert "path_prefix: ." in config
-    assert "chunks_directory: ./chunks" in config
-    assert "common:\n  instance_addr: 127.0.0.1\n  path_prefix: ." in config
-
-
-def test_an_unexpected_loki_template_is_refused():
-    with pytest.raises(ValueError, match="unexpected Loki configuration"):
-        loki_config("server:\n  http_listen_port: 3100\n")
-
-
-def test_the_shipped_loki_template_is_rewritten(nanofaas_root):
-    path = nanofaas_root / "deploy/observability/loki.yaml"
-    assert "/loki" not in loki_config(path.read_text())
-
-
-def test_a_loki_binary_with_another_digest_never_starts(tmp_path):
-    binary = tmp_path / "loki"
-    binary.write_bytes(b"not loki")
-    root = tmp_path / "nanofaas"
-    (root / "deploy/observability").mkdir(parents=True)
-    (root / "deploy/observability/loki.yaml").write_text(TEMPLATE)
-    resource = operator_loki_resource(
-        OneShotLogs.model_validate(
-            {
-                "enabled": True,
-                "endpoint": "http://10.83.80.1:43100/loki/api/v1/push",
-                "backendOwned": True,
-                "backendBind": "10.83.80.1",
-            }
-        ),
-        logging_config(lokiBinary=str(binary)),
-        root=root,
-        run_dir=tmp_path / "run",
-    )
-    with pytest.raises(ValueError, match="does not match its sha256"):
-        acquire_now(resource, None)  # type: ignore[arg-type]
-    assert not (tmp_path / "run/logging/backend/backend-data").exists()
 
 
 def test_an_exited_tunnel_is_reopened_and_recorded(tmp_path):
