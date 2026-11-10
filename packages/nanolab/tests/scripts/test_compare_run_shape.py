@@ -119,7 +119,8 @@ def test_loki_kind_label_and_coverage_key_differences(tmp_path):
         "logging/edge-1/queue-events.jsonl: Loki event kinds: missing in NEW: DISPATCH",
         "metrics.jsonl: metrics labels: missing in NEW: replica",
         "metrics.jsonl: metrics labels: extra in NEW: pod",
-        "vm-resources/coverage.json: coverage keys: missing in NEW: nodes.edge-1.missingSeconds",
+        "vm-resources/coverage.json: coverage keys: missing in NEW: "
+        "nodes.edge-1.missingSeconds",
     ]
 
 
@@ -142,7 +143,8 @@ def test_fault_kinds_come_from_anomalies_and_failure_causes(tmp_path):
     )
     assert shape.compare(reference, new) == [
         "workbench/supervisor-status.json: extra file in NEW",
-        "supervision.jsonl: supervisor fault kinds: missing in NEW: required service stopped",
+        "supervision.jsonl: supervisor fault kinds: missing in NEW: "
+        "required service stopped",
     ]
 
 
@@ -163,7 +165,8 @@ def test_nodes_missing_in_new_are_reported(tmp_path):
     new = run(tmp_path / "new")
     assert shape.compare(reference, new) == [
         "vm-resources/cloud.jsonl: file missing in NEW",
-        "vm-resources/coverage.json: coverage keys: missing in NEW: nodes.cloud.missingSeconds",
+        "vm-resources/coverage.json: coverage keys: missing in NEW: "
+        "nodes.cloud.missingSeconds",
         "vm-resources/coverage.json cloud: node missing in NEW",
     ]
 

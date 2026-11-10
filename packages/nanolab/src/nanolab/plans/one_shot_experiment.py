@@ -153,6 +153,7 @@ def build_one_shot_experiment_plan(
             workflow.add(UploadForecastTask(freeze), requires=requires)
             # The margin these runs had while they also owned the VM sampler.
             sampled = settings.strict_memory and len(settings.functions) > 1
+            assert topology.platform is not None  # nosec B101 - builder supplies platform
             generator = topology.platform.loadgen(
                 run_dir=directory,
                 vus=experiment.generator_vus,
