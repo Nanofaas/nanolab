@@ -115,11 +115,16 @@ def _build(
         if fail in names and action in ("deploy", "collect"):
             raise RuntimeError(f"{action} failed")
         if action == "collect" and names[0].startswith("log-collector-"):
-            path = Path(saved["collect_dir"]) / names[0] / "metrics.txt"
+            path = Path(saved["collect_dir"]) / role / names[0] / "metrics.txt"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(metrics.get(role, DRAINED))
         if action == "collect" and names[0].startswith("prometheus-"):
-            path = Path(saved["collect_dir"]) / names[0] / "prometheus-snapshot.tar.gz"
+            path = (
+                Path(saved["collect_dir"])
+                / "localhost"
+                / names[0]
+                / "prometheus-snapshot.tar.gz"
+            )
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"snapshot")
         if action == "deploy":

@@ -480,7 +480,12 @@ def one_shot_platform(
     def drop_tsdb(_inputs: TaskInputs, _value: None) -> None:
         # Released after Prometheus: its TSDB goes once the snapshot is kept.
         # A failed undeploy leaves Prometheus up on its TSDB: keep it then.
-        kept = workbench_dir / prometheus_instance.name / "prometheus-snapshot.tar.gz"
+        kept = (
+            workbench_dir
+            / "localhost"
+            / prometheus_instance.name
+            / "prometheus-snapshot.tar.gz"
+        )
         if (
             kept.is_file()
             and tsdb.is_dir()
@@ -649,7 +654,7 @@ def one_shot_platform(
         host = nodes[key]
         node = topology.nodes[key]
         name = f"wb-{instance.name}"
-        metrics_file = workbench_dir / instance.name / "metrics.txt"
+        metrics_file = workbench_dir / host.key / instance.name / "metrics.txt"
 
         def run(values: Members, inputs: TaskInputs) -> None:
             # Today's teardown, step for step: bounded drain wait, graceful

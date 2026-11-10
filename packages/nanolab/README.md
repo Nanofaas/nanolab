@@ -423,3 +423,9 @@ scale-to-zero, using the same cached images and fixed runtime budgets. Five
 `idle-reactivation-*.yaml` scenarios cover the B5 runtimes. See
 [the protocol and CLI commands](../../docs/b6-idle-reactivation.md) for managed
 Spot provisioning, output under `/data`, evidence gates and offline reanalysis.
+
+Workbench collected evidence uses stable inventory aliases:
+`workbench/localhost/<instance>/...` for operator snapshots and
+`workbench/<node-key>/<instance>/...` for VM collector metrics and archives.
+Node keys remain distinct even when sites reuse private IP addresses. Readers
+of new runs require this format; historical archives are not rewritten.

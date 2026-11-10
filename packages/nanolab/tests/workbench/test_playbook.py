@@ -1,6 +1,9 @@
+import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
+from unittest.mock import Mock
 
 import pytest
 from sonata_engine import TaskInputs
@@ -72,7 +75,9 @@ def test_node_targets_its_vm(tmp_path, monkeypatch):
     _, (operation,), role = run(
         WorkbenchHost("edge-1", _node()), tmp_path, monkeypatch, "collect"
     )
-    assert operation.argv[2] == "10.0.0.5,"
+    assert json.loads(Path(operation.argv[2]).read_text()) == {
+        "all": {"hosts": {"edge-1": {"ansible_host": "10.0.0.5"}}}
+    }
     assert operation.argv[-1].endswith("playbooks/collect.yml")
     assert role == "edge-1"
     assert (tmp_path / "edge-1-collect.json").is_file()
@@ -89,3 +94,51 @@ def test_site_node_goes_through_site(tmp_path, monkeypatch):
     )
     assert "ProxyCommand=" in operation.env["ANSIBLE_SSH_COMMON_ARGS"]
     assert operation.env["ANSIBLE_COLLECTIONS_PATH"] == "/coll"
+
+
+@pytest.mark.parametrize("cloud", ["azure", "proxmox"])
+def test_stable_alias_preserves_provider_endpoint_and_ssh(tmp_path, monkeypatch, cloud):
+    from sonata_tasks.vm.azure import AzureVmProvider
+    from sonata_tasks.vm.proxmox import ProxmoxVmProvider
+
+    provider = Mock(spec=AzureVmProvider if cloud == "azure" else ProxmoxVmProvider)
+    if cloud == "azure":
+        provider.connection_host.return_value = "203.0.113.8"
+    else:
+        provider.ssh_endpoint.return_value = ("203.0.113.8", 2222)
+    provider.ssh_private_key_path.return_value = tmp_path / "key"
+    node = replace(_node(), provider=provider)
+    _, (operation,), _ = run(WorkbenchHost("edge-1", node), tmp_path, monkeypatch)
+    inventory = json.loads(Path(operation.argv[2]).read_text())
+    assert inventory["all"]["hosts"] == {"edge-1": {"ansible_host": "203.0.113.8"}}
+    assert operation.argv[operation.argv.index("-u") + 1] == "ubuntu"
+    assert operation.argv[operation.argv.index("--private-key") + 1] == str(
+        tmp_path / "key"
+    )
+    if cloud == "proxmox":
+        assert "ansible_port=2222" in operation.argv
+
+
+def test_sites_with_same_private_address_keep_distinct_aliases(tmp_path, monkeypatch):
+    inventories = []
+    for key, jump in (("edge-a", "site-a"), ("edge-b", "site-b")):
+        site = MultipassSite(
+            ssh=jump,
+            address="10.9.9.9",
+            architecture="arm64",
+            vmSshKey=str(tmp_path / jump),
+        )
+        _, (operation,), _ = run(
+            WorkbenchHost(key, _node(SiteHost(site))), tmp_path, monkeypatch
+        )
+        inventory = json.loads(Path(operation.argv[2]).read_text())
+        assert inventory["all"]["hosts"] == {key: {"ansible_host": "10.0.0.5"}}
+        assert jump in operation.env["ANSIBLE_SSH_COMMON_ARGS"]
+        inventories.append(operation.argv[2])
+    assert inventories[0] != inventories[1]
+
+
+@pytest.mark.parametrize("alias", ["../escape", "a/b", "a\\b", ".."])
+def test_workbench_host_rejects_unsafe_alias(alias):
+    with pytest.raises(ValueError, match="alias"):
+        WorkbenchHost(alias, _node())

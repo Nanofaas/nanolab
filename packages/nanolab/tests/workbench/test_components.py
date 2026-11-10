@@ -114,7 +114,14 @@ def test_release_from_journal_needs_no_live_resources(tmp_path, monkeypatch, nod
     revived = resource.revive(json.loads(json.dumps(asdict(value))))
     assert revived == value
     release_now(resource, TaskInputs._for_resource_values({}, ()), revived)
-    assert captured == [("workbench.undeploy", "10.0.0.5," if node else "localhost,")]
+    expected = (
+        str(tmp_path / "edge-1-undeploy-inventory.json") if node else "localhost,"
+    )
+    assert captured == [("workbench.undeploy", expected)]
+    if node:
+        assert json.loads(Path(expected).read_text())["all"]["hosts"] == {
+            "edge-1": {"ansible_host": "10.0.0.5"}
+        }
 
 
 def test_titles_name_instance_and_host(tmp_path, monkeypatch):
