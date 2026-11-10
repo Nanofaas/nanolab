@@ -522,10 +522,13 @@ def test_control_plane_namespace_and_compensated_cleanup(
     forecast_max_age_seconds,
     forecaster,
 ):
+    import json
+    from pathlib import Path
     from types import SimpleNamespace
 
     import httpx
     from sonata_engine import Resource, TaskInputs
+    from sonata_tasks.ansible import AnsiblePlaybookTask
 
     from nanolab.plans.one_shot_common import _control_plane
     from nanolab.tasks.vm.models import VmInfo
@@ -540,22 +543,32 @@ def test_control_plane_namespace_and_compensated_cleanup(
     monkeypatch.setattr(
         node.provider,
         "transfer_to",
-        lambda *args, **kwargs: Result(return_code=1 if failure == "transfer" else 0),
+        lambda *_a, **_k: pytest.fail("runtime transfer must use Ansible"),
+    )
+    monkeypatch.setattr(
+        node.provider,
+        "exec_argv",
+        lambda *_a, **_k: pytest.fail("runtime lifecycle must use Ansible"),
     )
     calls = []
 
-    def command(self, argv, **kwargs):
-        calls.append(argv)
-        stdout = (
-            ("bad" if failure == "socket" else "999")
-            if argv[0] == "stat"
-            else "sha256:" + ("b" if failure == "image" else "a") * 64
-            if argv[:3] == ("docker", "image", "inspect")
-            else ""
+    def execute(task, inputs):
+        path = next(
+            arg.removeprefix("runtime_vars=")
+            for arg in task.argv
+            if arg.startswith("runtime_vars=")
         )
-        return Result(stdout=stdout)
+        values = json.loads(Path(path).read_text())
+        calls.append(values)
+        if values["runtime_action"] == "deploy" and failure:
+            raise RuntimeError(f"{failure} failed")
+        if values["runtime_action"] == "undeploy":
+            Path(values["runtime_log_file"]).write_text("retained control-plane log")
 
-    monkeypatch.setattr("nanolab.one_shot.infrastructure.NodeResource.command", command)
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", execute)
+    monkeypatch.setattr(
+        "nanolab.one_shot.runtime.ensure_installed", lambda: Path("/coll")
+    )
     bootstrap = resource_of("bootstrap", lambda _: None, lambda *args: None)
     distribution: Resource[Any] = resource_of(
         "distribution", lambda _: None, lambda *args: None
@@ -579,6 +592,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
         )
         for other in resources.nodes.values()
     }
+    (tmp_path / "images.tar").write_bytes(b"image archive")
     values.update({distribution: built, archive: tmp_path / "images.tar"})
     http = httpx.Client(
         transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))
@@ -608,25 +622,25 @@ def test_control_plane_namespace_and_compensated_cleanup(
         baseline_depth=2 if baseline else None,
     )
 
-    def release_command(_request, argv, **_kwargs):
-        calls.append(argv)
-        return Result(stdout="retained control-plane log")
-
-    monkeypatch.setattr(node.provider, "exec_argv", release_command)
     inputs = TaskInputs._for_resources(values, set(values))
     if failure:
         with pytest.raises((RuntimeError, ValueError), match=r"transfer|image|socket"):
             acquire_now(resource, inputs)
     else:
         url = acquire_now(resource, inputs)
-        launch = next(argv for argv in calls if argv[:2] == ("docker", "run"))
+        deployed = next(call for call in calls if call["runtime_action"] == "deploy")
+        launch = deployed["runtime_command"]
+        assert deployed["runtime_control_image"] == "cp:tag"
+        assert deployed["runtime_images"] == [
+            {"reference": "cp:tag", "ids": [image.id]}
+        ]
         if scientific:
-            assert launch[launch.index("--cpus") + 1] == "0.35"
-            assert launch[launch.index("--memory") + 1] == "768m"
+            assert deployed["runtime_cpus"] == 0.35
+            assert deployed["runtime_memory"] == "768m"
         else:
-            assert "--cpus" not in launch
-        assert "--group-add" in launch
-        assert launch[launch.index("--group-add") + 1] == "999"
+            assert "runtime_cpus" not in deployed
+        assert deployed["runtime_logs"] == terminal_queueing
+        assert deployed["runtime_env"]["DOCKER_HOST"] == "unix:///var/run/docker.sock"
         queued = terminal_queueing or (baseline and node_id != "cloud")
         assert f"--sync-queue.enabled={str(queued).lower()}" in launch
         assert "--nanofaas.admission.profile=SYNC_QUEUE" in launch
@@ -670,7 +684,7 @@ def test_control_plane_namespace_and_compensated_cleanup(
     assert (
         tmp_path / f"{node.config.id}-control-plane.log"
     ).read_text() == "retained control-plane log"
-    assert any(argv[:2] == ("docker", "rm") for argv in calls)
+    assert calls[-1]["runtime_action"] == "undeploy"
 
 
 @pytest.mark.parametrize(

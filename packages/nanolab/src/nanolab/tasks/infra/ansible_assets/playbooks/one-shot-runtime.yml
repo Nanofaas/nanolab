@@ -1,0 +1,171 @@
+---
+- name: Manage a one-shot runtime
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - "{{ runtime_vars }}"
+  tasks:
+    - name: Check the requested action
+      ansible.builtin.assert:
+        that: runtime_action in ['deploy', 'undeploy']
+        quiet: true
+
+    - name: Look up the control plane
+      community.docker.docker_container_info:
+        name: "{{ runtime_name }}"
+      register: runtime_existing
+
+    - name: Refuse an unrelated container
+      ansible.builtin.assert:
+        that: >-
+          not runtime_existing.exists or
+          (runtime_existing.container.Config.Labels | default({}, true)).get('nanolab.run', '') == runtime_owner
+        fail_msg: "Refusing to adopt or remove an unrelated control-plane container"
+        quiet: true
+
+    - name: Deploy the runtime
+      when: runtime_action == 'deploy'
+      block:
+        - name: Read the guest architecture
+          ansible.builtin.command: uname -m
+          register: runtime_machine
+          changed_when: false
+          when: runtime_architecture is not none
+
+        - name: Verify the guest architecture
+          ansible.builtin.assert:
+            that: >-
+              {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'amd64', 'amd64': 'amd64'}.get(runtime_machine.stdout, '') == runtime_architecture
+            fail_msg: "VM architecture does not match the runtime images"
+            quiet: true
+          when: runtime_architecture is not none
+
+        - name: Copy the runtime archive
+          ansible.builtin.copy:
+            src: "{{ runtime_archive }}"
+            dest: "{{ runtime_remote_archive }}"
+            mode: "0644"
+          timeout: 600
+          register: runtime_copy
+          retries: 3
+          delay: 2
+          until: runtime_copy is succeeded
+
+        - name: Hash the received archive
+          ansible.builtin.stat:
+            path: "{{ runtime_remote_archive }}"
+            checksum_algorithm: sha256
+          register: runtime_archive_stat
+
+        - name: Verify archive checksum
+          ansible.builtin.assert:
+            that: runtime_archive_stat.stat.checksum == runtime_archive_sha256
+            fail_msg: "Runtime archive checksum mismatch"
+            quiet: true
+
+        - name: Load runtime images
+          community.docker.docker_image_load:
+            path: "{{ runtime_remote_archive }}"
+            timeout: 600
+
+        - name: Inspect runtime images
+          community.docker.docker_image_info:
+            name: "{{ item.reference }}"
+          loop: "{{ runtime_images }}"
+          register: runtime_loaded
+
+        - name: Verify loaded image identities
+          ansible.builtin.assert:
+            that:
+              - item.images | length == 1
+              - item.images[0].Id in item.item.ids
+            fail_msg: "Loaded image digest mismatch"
+            quiet: true
+          loop: "{{ runtime_loaded.results }}"
+          loop_control:
+            label: "{{ item.item.reference }}"
+
+        - name: Resolve the control-plane image ID
+          ansible.builtin.set_fact:
+            runtime_image_id: "{{ item.images[0].Id }}"
+          loop: "{{ runtime_loaded.results }}"
+          when: item.item.reference == runtime_control_image
+          loop_control:
+            label: "{{ item.item.reference }}"
+
+        - name: Read the Docker socket group
+          ansible.builtin.stat:
+            path: /var/run/docker.sock
+            get_checksum: false
+          register: runtime_socket
+
+        - name: Require a Docker socket
+          ansible.builtin.assert:
+            that:
+              - runtime_socket.stat.issock | default(false)
+              - runtime_socket.stat.gid is defined
+            fail_msg: "Invalid Docker socket"
+            quiet: true
+
+        # The nonroot control plane atomically replaces its state inside its owned VM.
+        - name: Create the peer state directory
+          ansible.builtin.file:
+            path: "{{ runtime_peer_dir }}"
+            state: directory
+            mode: "0777"
+          when: runtime_peer_dir is not none
+
+        - name: Copy initial peer state
+          ansible.builtin.copy:
+            src: "{{ runtime_peer_file }}"
+            dest: "{{ runtime_peer_dir }}/peers.yaml"
+            mode: "0666"
+          register: runtime_peers
+          when: runtime_peer_dir is not none
+
+        - name: Start the control plane
+          community.docker.docker_container:
+            name: "{{ runtime_name }}"
+            image: "{{ runtime_image_id }}"
+            pull: never
+            state: started
+            restart: "{{ runtime_peers.changed | default(false) }}"
+            detach: true
+            network_mode: host
+            groups: ["{{ runtime_socket.stat.gid | string }}"]
+            volumes: "{{ ['/var/run/docker.sock:/var/run/docker.sock'] + ([runtime_peer_dir ~ ':/tmp/one-shot-p2p'] if runtime_peer_dir is not none else []) }}"
+            command: "{{ runtime_command }}"
+            command_handling: correct
+            env: "{{ runtime_env }}"
+            cpus: "{{ runtime_cpus | default(omit) }}"
+            memory: "{{ runtime_memory | default(omit) }}"
+            log_driver: "{{ 'json-file' if runtime_logs else omit }}"
+            log_options: "{{ {'max-size': '10m', 'max-file': '3'} if runtime_logs else omit }}"
+            labels:
+              nanolab.run: "{{ runtime_owner }}"
+
+    - name: Collect and remove the runtime
+      when: runtime_action == 'undeploy'
+      block:
+        - name: Read the control-plane log
+          ansible.builtin.command:
+            argv: [docker, logs, "{{ runtime_name }}"]
+          changed_when: false
+          register: runtime_log
+          when: runtime_existing.exists
+
+        - name: Save the control-plane log
+          when: runtime_existing.exists
+          ansible.builtin.copy:
+            content: "{{ (runtime_log.stdout | default('')) ~ (runtime_log.stderr | default('')) }}"
+            dest: "{{ runtime_log_file }}"
+            mode: "0644"
+          delegate_to: localhost
+          become: false
+      always:
+        - name: Remove the owned control plane
+          community.docker.docker_container:
+            name: "{{ runtime_name }}"
+            state: absent
+            force_kill: true
+          when: runtime_existing.exists
