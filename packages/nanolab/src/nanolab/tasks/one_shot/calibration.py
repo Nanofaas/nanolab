@@ -981,6 +981,10 @@ class PublishCalibrationTask(
         self, inputs: TaskInputs
     ) -> TaskOutcome[CalibrationProfile | CalibrationProfiles]:
         """Bind raw bytes, image IDs, input and the measured configuration scope."""
+        platform = self.topology.platform
+        if platform is None:
+            raise ValueError("NOT_QUALIFIED: workbench supervisor is unavailable")
+        platform.require_healthy(inputs.resource(platform.resource))
         value = inputs.upstream()
         built = inputs.resource(self.topology.distribution)
         if self.settings.purpose == "scientific-experiment":

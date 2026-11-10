@@ -106,7 +106,13 @@ class OneShotPlatform:
     targets: Mapping[str, dict[str, Any]]
     export_vm_resources: Callable[[Path, datetime, datetime], None]
     loadgen: Callable[..., Resource[LoadgenRun]]
-    record_supervisor_status: Callable[[Members], None]
+    record_supervisor_status: Callable[[Members], dict[str, Any]]
+
+    def require_healthy(self, values: Members) -> None:
+        """Keep the final health evidence and reject unqualified measurements."""
+        status = self.record_supervisor_status(values)
+        if status.get("state") != "healthy" or not status.get("checkedAt"):
+            raise ValueError("NOT_QUALIFIED: workbench supervisor is not healthy")
 
 
 def _cpus(cpus: list[int] | None) -> str | None:
@@ -335,7 +341,7 @@ def one_shot_platform(
             | (
                 {"housekeeping_interval": HOUSEKEEPING}
                 if component == "cadvisor"
-                else {}
+                else {"cpufreq": False}
             ),
             url=None
             if key in direct
@@ -752,9 +758,11 @@ def one_shot_platform(
 
     status_file = workbench_dir / "supervisor-status.json"
 
-    def record_supervisor_status(values: Members) -> None:
+    def record_supervisor_status(values: Members) -> dict[str, Any]:
         url = values.of(supervisor).url or f"http://127.0.0.1:{SUPERVISOR_PORT}"
-        _write_json(status_file, SupervisorClient(url, timeout_seconds=10).status())
+        status = SupervisorClient(url, timeout_seconds=10).status()
+        _write_json(status_file, status)
+        return status
 
     def supervisor_status(values: Members, _inputs: TaskInputs) -> None:
         # A supervised run recorded it at detach, with every target still on.

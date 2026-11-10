@@ -781,6 +781,9 @@ def test_scientific_multi_calibration_publishes_joint_trials_and_cost(
         },
     )
     topology.distribution = "distribution"
+    topology.platform = SimpleNamespace(
+        resource="platform", require_healthy=lambda _: None
+    )
     built = SimpleNamespace(
         function=lambda *args: SimpleNamespace(
             image=SimpleNamespace(id="sha256:" + "c" * 64)

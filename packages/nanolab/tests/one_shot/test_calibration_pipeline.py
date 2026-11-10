@@ -16,9 +16,19 @@ from nanolab.tasks.one_shot.calibration import (
 )
 
 
-@pytest.mark.parametrize("capacity_drift", [False, True])
+@pytest.mark.parametrize(
+    ("capacity_drift", "supervisor_state"),
+    [
+        (False, "healthy"),
+        (True, "healthy"),
+        (False, "fault"),
+        (False, "degraded"),
+        (False, "unavailable"),
+        (False, "unchecked"),
+    ],
+)
 def test_independent_calibration_preserves_raw_and_refuses_capacity_drift(
-    tmp_path, monkeypatch, capacity_drift
+    tmp_path, monkeypatch, capacity_drift, supervisor_state
 ):
     settings = OneShotConfig.model_validate(
         {
@@ -54,7 +64,33 @@ def test_independent_calibration_preserves_raw_and_refuses_capacity_drift(
         distribution="distribution",
         endpoints={key: key for key in nodes},
     )
+    from nanolab.workbench.platform import OneShotPlatform
+
+    def record_status(_values):
+        if supervisor_state == "unavailable":
+            raise OSError("supervisor unavailable")
+        status = {
+            "state": "healthy" if supervisor_state == "unchecked" else supervisor_state,
+            "checkedAt": None
+            if supervisor_state == "unchecked"
+            else "2026-11-10T12:00:00Z",
+            "targets": {"up.node.operator": {"failing": False}},
+            "anomalies": [{"target": "up.node.operator"}]
+            if supervisor_state == "fault"
+            else [],
+        }
+        (tmp_path / "supervisor-status.json").write_text(json.dumps(status))
+        return status
+
+    platform = SimpleNamespace(
+        resource="platform", record_supervisor_status=record_status
+    )
+    platform.require_healthy = lambda values: OneShotPlatform.require_healthy(
+        cast(OneShotPlatform, platform), values
+    )
+    topology.platform = platform
     values = {
+        "platform": object(),
         "distribution": built,
         "clock": SimpleNamespace(require_healthy=lambda: None),
         **{key: "http://" + key for key in nodes},
@@ -136,13 +172,18 @@ def test_independent_calibration_preserves_raw_and_refuses_capacity_drift(
             assert not (tmp_path / "profile.json").exists()
         else:
             value = capacity.run(inputs).value
-            profile = (
-                PublishCalibrationTask(
-                    topology, settings, tmp_path, clock=cast(Any, "clock")
-                )
-                .run(inputs)
-                .value
+            publish = PublishCalibrationTask(
+                topology, settings, tmp_path, clock=cast(Any, "clock")
             )
+            if supervisor_state != "healthy":
+                with pytest.raises((ValueError, OSError), match="supervisor"):
+                    publish.run(inputs)
+                assert not (tmp_path / "profile.json").exists()
+                assert not (tmp_path / "profile-reference.json").exists()
+                assert (tmp_path / "samples.jsonl").is_file()
+                assert (tmp_path / "capacity.jsonl").is_file()
+                return
+            profile = publish.run(inputs).value
             assert json.loads(
                 (tmp_path / "cpu-runtime-observations.json").read_bytes()
             )["rawCpuInfo"]

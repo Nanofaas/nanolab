@@ -399,6 +399,14 @@ def test_forwarded_nodes_are_scraped_through_their_forwards(tmp_path, monkeypatc
             SEEN[f"{component}-{n}"]["config"]["bind"] == "0.0.0.0" for n in NODES
         )
         assert "bind" not in SEEN[_op(tmp_path, component)]["config"]
+    # cpufreq can block in the host kernel and is not part of these measurements.
+    for host in ("operator", *NODES):
+        name = (
+            _op(tmp_path, "node-exporter")
+            if host == "operator"
+            else f"node-exporter-{host}"
+        )
+        assert SEEN[name]["config"]["cpufreq"] is False
     # cAdvisor's 5 s default housekeeping aliases a 5 s irate.
     for host in ("operator", *NODES):
         name = _op(tmp_path, "cadvisor") if host == "operator" else f"cadvisor-{host}"
