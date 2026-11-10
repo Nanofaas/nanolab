@@ -18,6 +18,7 @@ build/
 packages/nanolab/runs/
 /runs/
 /profiles/
+/.ansible/
 /environments/*.yaml
 packages/nanolab/profiles/azure.toml
 packages/nanolab/profiles/proxmox.toml

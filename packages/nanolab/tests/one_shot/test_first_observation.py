@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import signal
+from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
 
@@ -641,8 +642,12 @@ def test_real_observation_preparation_and_workflow_compile_without_acquiring_vms
     assert frozen["qualified"] is False
     observer.verify_files(args.output, frozen)
     # The k6 script ships in the workbench collection; the frozen package pins it.
-    requirements = "package/nanolab/tasks/infra/ansible_assets/requirements.yml"
-    assert "nanofaas-workbench" in (args.output / requirements).read_text()
+    requirements = "nanolab/tasks/infra/ansible_assets/requirements.yml"
+    bundled = Path(str(files("nanolab"))).parent / requirements
+    assert (args.output / "package" / requirements).read_bytes() == (
+        bundled.read_bytes()
+    )
+    assert "version: v0.1.0" in bundled.read_text()
     config = json.loads((args.output / "operator-protocol.json").read_text())
     assert (
         config["performanceAcceptanceGates"] is False
