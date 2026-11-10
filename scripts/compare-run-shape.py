@@ -20,11 +20,16 @@ the run directory (nested campaign and capacity runs included):
   are left out: `SAMPLER_ONLY`.
 - coverage keys: top-level and per-node keys of `vm-resources/coverage.json`
   (`policy` is not descended into: it records the collector by design).
-- supervisor fault kinds: the `kind` of failure rows in `supervision.jsonl`,
-  the run's supervision event log.
+- supervisor fault kinds: the anomaly `kind`s in `workbench/supervisor-status.json`
+  and the kind in each `operational.failure` cause of `supervision.jsonl` (the
+  run's supervision event log; a one-shot run has no `events.jsonl`). A
+  workbench cause reads `target: kind: detail`; any other cause (a run on main,
+  without the supervisor) contributes its middle field the same way, or the
+  whole cause when it has no such fields.
 
-Values are only checked for plausibility: every vm-resources node file is
-non-empty, its median `memoryUsedBytes` is within 10x of the reference's, and
+Values are only checked for plausibility: every vm-resources node file and
+every coverage.json node of REFERENCE_RUN is present in NEW_RUN, every node file
+is non-empty, its median `memoryUsedBytes` is within 10x of the reference's, and
 `metrics.jsonl` has rows. Finally every report of NEW_RUN (a `manifest.json`
 with a `report.json` beside it) is regenerated in a temporary copy; that step
 alone imports nanolab, so run the script with `uv run python`.
@@ -126,6 +131,20 @@ def _loki_kinds(run: Path) -> set[str]:
     return kinds
 
 
+def _fault_kind(cause: str) -> str:
+    """Return `kind` from a `target: kind: detail` cause, else the whole cause."""
+    parts = cause.split(": ", 2)
+    return parts[1] if len(parts) == 3 else cause
+
+
+def _coverage_nodes(run: Path) -> set[str]:
+    return {
+        node
+        for path in run.rglob("vm-resources/coverage.json")
+        for node in json.loads(path.read_text()).get("nodes") or {}
+    }
+
+
 def facets(run: Path) -> dict[str, set[str]]:
     """Return each shape facet of `run` as a set of names."""
     series, labels, rows, coverage, faults = set(), set(), set(), set(), set()
@@ -143,8 +162,13 @@ def facets(run: Path) -> dict[str, set[str]]:
             coverage |= {f"nodes.*.{key}" for key in node}
     for path in run.rglob("supervision.jsonl"):
         faults |= {
-            str(row["kind"]) for row in _rows(path) if "fail" in str(row.get("kind"))
+            _fault_kind(str(row.get("cause")))
+            for row in _rows(path)
+            if row.get("kind") == "operational.failure"
         }
+    for path in run.rglob("workbench/supervisor-status.json"):
+        anomalies = json.loads(path.read_text()).get("anomalies") or []
+        faults |= {str(anomaly.get("kind")) for anomaly in anomalies}
     return {
         "metrics series": series,
         "metrics labels": labels,
@@ -179,6 +203,10 @@ def compare(reference: Path, new: Path) -> list[str]:
         if extra:
             differences.append(f"{name}: extra in NEW: {', '.join(sorted(extra))}")
     before, after = _medians(reference), _medians(new)
+    for node in sorted(before.keys() - after.keys()):
+        differences.append(f"vm-resources {node}: node file missing in NEW")
+    for node in sorted(_coverage_nodes(reference) - _coverage_nodes(new)):
+        differences.append(f"coverage.json {node}: node missing in NEW")
     for node, value in sorted(after.items()):
         if value is None:
             differences.append(f"vm-resources {node}: empty in NEW")

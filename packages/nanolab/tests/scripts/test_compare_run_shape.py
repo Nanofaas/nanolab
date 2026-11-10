@@ -99,3 +99,66 @@ def test_a_report_that_does_not_regenerate_is_reported(tmp_path):
     (new / "report.json").write_text("{}")
     (failure,) = shape.regenerate(new)
     assert failure.startswith("report.json does not regenerate in .:")
+
+
+def test_loki_kind_label_and_coverage_key_differences(tmp_path):
+    reference = run(tmp_path / "old")
+    new = run(tmp_path / "new")
+    write_jsonl(
+        new / "logging/edge-1/queue-events.jsonl", [{"attributes": {"event": "QUEUED"}}]
+    )
+    rows = new / "metrics.jsonl"
+    rows.write_text(rows.read_text().replace('"replica"', '"pod"'))
+    (new / "vm-resources/coverage.json").write_text(
+        json.dumps({"complete": True, "nodes": {"edge-1": {}}})
+    )
+    assert shape.compare(reference, new) == [
+        "metrics labels: missing in NEW: replica",
+        "metrics labels: extra in NEW: pod",
+        "Loki event kinds: missing in NEW: DISPATCH",
+        "coverage keys: missing in NEW: nodes.*.missingSeconds",
+    ]
+
+
+def test_fault_kinds_come_from_anomalies_and_failure_causes(tmp_path):
+    reference = run(tmp_path / "old")
+    with (reference / "supervision.jsonl").open("a") as stream:
+        stream.write(
+            json.dumps(
+                {
+                    "kind": "operational.failure",
+                    "cause": "edge-1: required service stopped: ['collector']",
+                }
+            )
+            + "\n"
+        )
+    new = run(tmp_path / "new")
+    (new / "workbench").mkdir()
+    (new / "workbench/supervisor-status.json").write_text(
+        json.dumps({"anomalies": [{"target": "edge-1", "kind": "scrape_up"}]})
+    )
+    assert shape.compare(reference, new) == [
+        "supervisor fault kinds: missing in NEW: required service stopped",
+        "supervisor fault kinds: extra in NEW: scrape_up",
+    ]
+
+
+def test_nodes_missing_in_new_are_reported(tmp_path):
+    reference = run(tmp_path / "old")
+    write_jsonl(reference / "vm-resources/cloud.jsonl", [{"memoryUsedBytes": 1}])
+    (reference / "vm-resources/coverage.json").write_text(
+        json.dumps(
+            {
+                "complete": True,
+                "nodes": {
+                    "edge-1": {"missingSeconds": []},
+                    "cloud": {"missingSeconds": []},
+                },
+            }
+        )
+    )
+    new = run(tmp_path / "new")
+    assert shape.compare(reference, new) == [
+        "vm-resources cloud: node file missing in NEW",
+        "coverage.json cloud: node missing in NEW",
+    ]
