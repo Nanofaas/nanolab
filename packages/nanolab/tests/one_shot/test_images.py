@@ -11,7 +11,7 @@ import pytest
 from nanolab.tasks.one_shot.images import archive_image_ids
 
 
-def archive(tmp_path, *, corrupt=False):
+def archive(tmp_path, *, corrupt=False, repo_tags=("fn:tag",)):
     config = b'{"architecture":"arm64"}'
     config_id = "sha256:" + hashlib.sha256(config).hexdigest()
     manifest = json.dumps(
@@ -23,7 +23,7 @@ def archive(tmp_path, *, corrupt=False):
             [
                 {
                     "Config": "blobs/sha256/" + config_id[7:],
-                    "RepoTags": ["fn:tag"],
+                    "RepoTags": repo_tags,
                     "Layers": [],
                 }
             ]
@@ -63,8 +63,9 @@ def test_corrupted_manifest_is_rejected_before_runtime_use(tmp_path):
         archive_image_ids(path, components)
 
 
-def test_archive_rejects_images_for_another_architecture(tmp_path):
-    path, components, _, _ = archive(tmp_path)
+@pytest.mark.parametrize("repo_tags", [["fn:tag"], None, ["other:tag"]])
+def test_archive_rejects_images_for_another_architecture(tmp_path, repo_tags):
+    path, components, _, _ = archive(tmp_path, repo_tags=repo_tags)
     assert archive_image_ids(path, components, architecture="arm64")
     with pytest.raises(ValueError, match="architecture"):
         archive_image_ids(path, components, architecture="amd64")

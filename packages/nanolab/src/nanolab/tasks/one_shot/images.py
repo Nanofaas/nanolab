@@ -21,20 +21,25 @@ def archive_image_ids(
                 raise ValueError("image archive blob is not a regular file")
             return file.read()
 
+        def verify_config(name: str, expected_id: str) -> str:
+            config = read(name)
+            digest = "sha256:" + hashlib.sha256(config).hexdigest()
+            if digest != expected_id:
+                raise ValueError("exported image config digest mismatch")
+            if (
+                architecture is not None
+                and json.loads(config).get("architecture") != architecture
+            ):
+                raise ValueError("exported image architecture mismatch")
+            return digest
+
         # Named saves retain every image in both legacy and OCI importers.
         for entry in json.loads(read("manifest.json")):
-            config = read(entry["Config"])
-            config_id = "sha256:" + hashlib.sha256(config).hexdigest()
             for reference in entry["RepoTags"] or []:
                 if reference in expected:
-                    if (
-                        architecture is not None
-                        and json.loads(config).get("architecture") != architecture
-                    ):
-                        raise ValueError("exported image architecture mismatch")
-                    if config_id != expected[reference]:
-                        raise ValueError("exported image config digest mismatch")
-                    identities[reference].add(config_id)
+                    identities[reference].add(
+                        verify_config(entry["Config"], expected[reference])
+                    )
         if "index.json" in archive.getnames():
             index = json.loads(read("index.json"))
             if index["schemaVersion"] != 2:
@@ -52,6 +57,10 @@ def archive_image_ids(
                 manifest = json.loads(body)
                 if manifest["config"]["digest"] != expected[reference]:
                     raise ValueError("manifest does not bind expected config digest")
+                verify_config(
+                    "blobs/sha256/" + expected[reference].removeprefix("sha256:"),
+                    expected[reference],
+                )
                 identities[reference].add(digest)
     if any(not values for values in identities.values()):
         raise ValueError("exported archive is missing selected images")

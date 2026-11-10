@@ -125,7 +125,11 @@ def test_stable_alias_preserves_provider_endpoint_and_ssh(tmp_path, monkeypatch,
 
 
 def test_sites_with_same_private_address_keep_distinct_aliases(tmp_path, monkeypatch):
+    from ansible.playbook.play_context import PlayContext
+    from ansible.plugins.loader import connection_loader
+
     inventories = []
+    control_paths = []
     for key, jump in (("edge-a", "site-a"), ("edge-b", "site-b")):
         site = MultipassSite(
             ssh=jump,
@@ -138,7 +142,22 @@ def test_sites_with_same_private_address_keep_distinct_aliases(tmp_path, monkeyp
         assert inventory["all"]["hosts"][key]["ansible_host"] == "10.0.0.5"
         assert jump in inventory["all"]["hosts"][key]["ansible_ssh_common_args"]
         inventories.append(inventory_of(task))
+        facts = inventory["all"]["hosts"][key]
+        context = PlayContext()
+        context.remote_addr, context.remote_user = facts["ansible_host"], "ubuntu"
+        connection = connection_loader.get("ssh", context, None)
+        connection.set_options(
+            var_options={
+                **facts,
+                "ansible_control_path_dir": str(tmp_path / "cp"),
+            }
+        )
+        command = connection._build_command("ssh", "ssh", facts["ansible_host"])
+        control_paths.append(
+            next(arg for arg in command if arg.startswith(b"ControlPath="))
+        )
     assert inventories[0] != inventories[1]
+    assert control_paths[0] != control_paths[1]
 
 
 @pytest.mark.parametrize("alias", ["../escape", "a/b", "a\\b", ".."])

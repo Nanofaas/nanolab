@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -99,6 +100,12 @@ class NodeResource:
             key = find_ssh_private_key_path(find_ssh_public_key())
         if key is not None:
             facts["ansible_private_key_file"] = str(key)
+        if self.site_host is not None:
+            # Ansible's default socket ignores the jump host and inventory alias.
+            identity = json.dumps({"vm": vm.name, **facts}, sort_keys=True).encode()
+            facts["ansible_control_path"] = (
+                "%(directory)s/nl-" + hashlib.sha256(identity).hexdigest()[:20]
+            )
         return facts
 
     def replica_url(self, vm: VmInfo, host_port: int) -> str:
