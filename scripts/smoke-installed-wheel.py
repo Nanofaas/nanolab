@@ -68,7 +68,6 @@ def main() -> None:
             ).is_file()
 
         for name in (
-            "k6/one-shot.js",
             "one-shot/contracts/service-profile.schema.json",
             "presets/environments/multipass-one-shot.yaml.example",
             "experiment02/funless-compose.yaml",

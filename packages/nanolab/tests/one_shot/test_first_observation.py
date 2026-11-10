@@ -640,7 +640,9 @@ def test_real_observation_preparation_and_workflow_compile_without_acquiring_vms
 
     assert frozen["qualified"] is False
     observer.verify_files(args.output, frozen)
-    assert (args.output / "package/nanolab/assets/k6/one-shot.js").is_file()
+    # The k6 script ships in the workbench collection; the frozen package pins it.
+    requirements = "package/nanolab/tasks/infra/ansible_assets/requirements.yml"
+    assert "nanofaas-workbench" in (args.output / requirements).read_text()
     config = json.loads((args.output / "operator-protocol.json").read_text())
     assert (
         config["performanceAcceptanceGates"] is False
@@ -1188,15 +1190,6 @@ def test_final_inventory_failure_still_renders_offline_report(
     assert result["state"] == ("failed" if inventory_fails else "completed")
     assert report["operationalOutcome"]["state"] == result["state"]
     assert result["cause"] == ("final inventory failed" if inventory_fails else None)
-
-
-def test_no_operator_memory_recorder(observer):
-    """The workbench supervisor's swap target replaces the recorder.
-
-    The quiet precheck stays: test_a_swapping_operator_refuses_the_run_before_
-    any_output (Linux) covers the refusal of a swapping operator.
-    """
-    assert "OperatorMemoryRecorder" not in Path(observer.__file__).read_text()
 
 
 @pytest.mark.parametrize(

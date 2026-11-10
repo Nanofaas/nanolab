@@ -59,7 +59,6 @@ def test_one_shot_runtime_assets_and_environment_example_ship_inside_package():
 
     assets = files("nanolab").joinpath("assets")
     for name in [
-        "k6/one-shot.js",
         "one-shot/profile-set.schema.json",
         "presets/scenarios/one-shot-heterogeneous-calibration.yaml",
         "presets/scenarios/one-shot-heterogeneous-qualification.yaml",
