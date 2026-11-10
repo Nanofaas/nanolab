@@ -1,4 +1,4 @@
 collections:
   - name: git+https://github.com/Nanofaas/nanofaas-workbench.git
     type: git
-    version: v0.1.1
+    version: v0.2.0

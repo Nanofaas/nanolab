@@ -1,7 +1,7 @@
-"""Opt-in Linux smoke against installed candidate wheels and collection.
+"""Opt-in Linux smoke against installed wheels and collection.
 
 Run with NANOLAB_WORKBENCH_INTEGRATION=1 and NANOLAB_WORKSPACE pointing to
-an isolated workspace with the candidate collection already installed.
+an isolated workspace with the pinned collection already installed.
 """
 
 import json
@@ -101,7 +101,7 @@ def test_installed_components_load_cpu_export_and_fault(tmp_path):
             name=names["ne"],
             component="node-exporter",
             cpuset=str(cpu),
-            config={"port": ports["ne"]},
+            config={"port": ports["ne"], "cpufreq": False},
         ),
         Instance(
             name=names["cad"],
@@ -324,7 +324,7 @@ def test_real_cpu_mismatch_refuses_acquire_and_removes_container(tmp_path, monke
         name=name,
         component="node-exporter",
         cpuset=str(cpus[0]),
-        config={"port": port()},
+        config={"port": port(), "cpufreq": False},
     )
     original = WorkbenchPlaybook.run
 

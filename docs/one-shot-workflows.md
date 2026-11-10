@@ -323,6 +323,13 @@ observations are recorded separately. Old hardware fingerprint formats require
 explicit recalibration. Forecast-only timing artifacts are rejected: each matrix
 cell must include accounted emissions and exact SDK occupancy under actual load.
 
+Calibration publishes a profile only after a completed, healthy Workbench
+supervisor check. A recorded fault remains disqualifying even if every target
+has recovered; raw samples are retained for diagnosis. Nanolab disables the
+unused node-exporter `cpufreq` collector to avoid blocking sysfs reads observed
+on the experiment host. CPU, memory and swap metrics remain enabled, and the
+hardware preflight still records frequency and governor independently.
+
 ## Heterogeneous scientific campaign
 
 Use the packaged `one-shot-heterogeneous-calibration`, `qualification`, and `pilot`
@@ -978,11 +985,9 @@ the VM architecture follows the Multipass host. Keep provider signature and
 checksum verification evidence with the run. The provider connects through SSH
 and uses the existing known-host policy; no Multipass TCP daemon is required.
 
-This feature requires the candidate `sonata-engine`/`sonata-tasks` 0.7.1. Publish
-those artifacts before updating Nanolab's public dependency pins. Until then,
-use the candidate wheels in an isolated development environment as described in
-the integration evidence; an installation with the released 0.7.0 tasks cannot
-select OpenTofu provisioning.
+This feature requires `sonata-engine`/`sonata-tasks` 0.7.1, pinned by Nanolab
+and available on PyPI. Install the workspace with `uv sync --locked --all-packages
+--all-groups`; no candidate wheel or local dependency override is required.
 
 Each run keeps its immutable module, local state, ownership record and private
 CLI diagnostics under `infrastructure/<site>`. Keep this directory until cleanup
