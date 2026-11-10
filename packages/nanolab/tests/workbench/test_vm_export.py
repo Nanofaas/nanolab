@@ -46,6 +46,12 @@ CONTROL = {
     "container_start_time_seconds": 1762646400.5,
 }
 CONTAINERS = [
+    (
+        "/docker/fff",
+        f"wb-log-collector-{NODE}",
+        {},
+        {"container_cpu_usage_seconds_total": 0.0, "container_memory_usage_bytes": 0},
+    ),
     # (cgroup id, name, extra labels, metric -> value)
     ("/system.slice/docker-aaa.scope", "nanolab-one-shot-control-plane", {}, CONTROL),
     (
@@ -222,13 +228,14 @@ def test_rows_have_the_summary_fields(prometheus, tmp_path):
         "swapFreeBytes": 70,
         "swapUsedBytes": 30,
     }
-    assert row["expectedContainerIds"] == ["aaa", "bbb", "ccc", "ddd", "eee"]
+    assert row["expectedContainerIds"] == ["aaa", "bbb", "ccc", "ddd", "eee", "fff"]
     assert [c["containerId"] for c in row["containerInventory"]] == [
         "aaa",
         "bbb",
         "ccc",
         "ddd",
         "eee",
+        "fff",
     ]
     control, function = row["containers"][:2]
     # The sampler's units: cores, fractions, per-sample deltas over one period.
@@ -286,6 +293,7 @@ def test_container_roles_mapped(prometheus, tmp_path):
         (f"wb-node-exporter-{NODE}", "other", None, None),
         (f"wb-cadvisor-{NODE}", "other", None, None),
         ("someone-else", "other", None, None),
+        (f"wb-log-collector-{NODE}", "collector", None, None),
     ]
 
 
@@ -306,7 +314,7 @@ def test_summary_complete_at_five_second_policy(prometheus, tmp_path):
     assert result["complete"], node
     assert node["expectedSamples"] == 4
     assert node["observedSeconds"] == 4
-    assert node["observedRoles"] == ["control-plane", "function", "other"]
+    assert node["observedRoles"] == ["collector", "control-plane", "function", "other"]
 
 
 @pytest.mark.usefixtures("collection")
@@ -314,7 +322,7 @@ def test_dropped_mapped_container_is_a_missing_sample(prometheus, tmp_path):
     stub = Stub(dropped={"nanolab-one-shot-control-plane": {5}, "fn-work-1": {5}})
     rows = export(prometheus(stub), tmp_path)
     # Only containers the role map names stay expected once they disappear.
-    assert rows[3]["expectedContainerIds"] == ["aaa", "ccc", "ddd", "eee"]
+    assert rows[3]["expectedContainerIds"] == ["aaa", "ccc", "ddd", "eee", "fff"]
     assert "aaa" not in [c["containerId"] for c in rows[3]["containers"]]
     node = summarize(tmp_path)["nodes"][NODE]
     assert node["missingContainerSamples"] == [{"second": 0, "containerIds": ["aaa"]}]
@@ -375,3 +383,56 @@ def test_v2_schedule_run_correlates_on_scrape_utc_and_charts_continuously(
     assert cpu is not None
     # Every scrape is a point, and 5 s apart is no gap: no null breaks the line.
     assert json.loads("[" + cpu.group(1) + "]") == [r["timestampUtc"] for r in rows]
+
+
+@pytest.mark.usefixtures("collection")
+@pytest.mark.parametrize("missing", ["all", "control", "collector"])
+def test_absent_mandatory_containers_make_coverage_incomplete(
+    prometheus, tmp_path, missing
+):
+    names = {name for _id, name, _labels, _metrics in CONTAINERS}
+    if missing == "control":
+        names = {"nanolab-one-shot-control-plane"}
+    elif missing == "collector":
+        names = {f"wb-log-collector-{NODE}"}
+    rows = export(
+        prometheus(Stub(dropped={name: set(STEPS) for name in names})), tmp_path
+    )
+    coverage = summarize(tmp_path)
+    assert not coverage["complete"]
+    errors = coverage["nodes"][NODE]["errors"]
+    assert errors
+    assert any(e.get("containerName") in names for e in errors)
+    assert all(row["memoryTotalBytes"] == 1000 for row in rows)
+    if missing == "all":
+        assert all(row["expectedContainerIds"] == [] for row in rows)
+
+
+@pytest.mark.usefixtures("collection")
+def test_recreated_role_and_late_function_do_not_expect_old_ids(
+    prometheus, tmp_path, monkeypatch
+):
+    original = canned
+
+    def recreated(query, stub):
+        result = original(query, stub)
+        for series in list(result):
+            if series["metric"].get("name") == "nanolab-one-shot-control-plane":
+                future = [v for v in series["values"] if v[0] >= ANCHOR.timestamp()]
+                series["values"] = [
+                    v for v in series["values"] if v[0] < ANCHOR.timestamp()
+                ]
+                result.append(
+                    {
+                        "metric": {**series["metric"], "id": "/docker/restarted"},
+                        "values": future,
+                    }
+                )
+        return result
+
+    monkeypatch.setattr(f"{__name__}.canned", recreated)
+    rows = export(prometheus(Stub(dropped={"fn-work-1": {-10, -5}})), tmp_path)
+    assert summarize(tmp_path)["complete"]
+    assert "aaa" not in rows[-1]["expectedContainerIds"]
+    assert "restarted" in rows[-1]["expectedContainerIds"]
+    assert "bbb" not in rows[0]["expectedContainerIds"]
