@@ -1,0 +1,26 @@
+{
+  "platform": "Linux-6.8.0-147-generic-aarch64-with-glibc2.39",
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "versions": {
+    "nanolab": "0.6.0",
+    "sonata-engine": "0.7.1",
+    "sonata-tasks": "0.7.1",
+    "ansible-core": "2.20.0"
+  },
+  "imports": {
+    "nanolab": "/home/ubuntu/installed-review/lib/python3.12/site-packages/nanolab/__init__.py",
+    "sonata_engine": "/home/ubuntu/installed-review/lib/python3.12/site-packages/sonata_engine/__init__.py",
+    "sonata_tasks": "/home/ubuntu/installed-review/lib/python3.12/site-packages/sonata_tasks/__init__.py"
+  },
+  "wheels": {
+    "sonata_tasks-0.7.1-py3-none-any.whl": "6f01c8047630c5ff8a88d4bd17e87df5644f3ad13fdd8b718bb802da133187db",
+    "sonata_engine-0.7.1-py3-none-any.whl": "028202796e85c07580b167754a7979796ce9808ee370c0b48f30fec2d401e160",
+    "nanolab-0.6.0-py3-none-any.whl": "732d0690ae11bcadfde41486b9e61cecfab08ebcc9957963ede5f847bad9547a",
+    "tui_toolkit-0.6.0-py3-none-any.whl": "8b2d5ad46e26b785fe99b2c16eca38df41b316923f622f96530ff19e896afa4b"
+  },
+  "terraform_assets": [
+    "nanolab/assets/terraform/multipass/.terraform.lock.hcl",
+    "nanolab/assets/terraform/multipass/main.tf"
+  ],
+  "collection": "0.2.0"
+}
