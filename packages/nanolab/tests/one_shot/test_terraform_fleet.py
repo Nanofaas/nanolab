@@ -57,7 +57,10 @@ def test_mapping_rejects_incomplete_or_foreign_outputs(values):
         )
 
 
-def test_collection_requires_verified_archive_and_no_recovery(tmp_path):
+@pytest.mark.parametrize("recovery_source", ["memory", "receipt"])
+def test_collection_requires_verified_archive_and_no_recovery(
+    tmp_path, recovery_source
+):
     node = SimpleNamespace(config=SimpleNamespace(id="edge"), recovery=[])
     assert not terraform.collection_complete(tmp_path, node)
     directory = tmp_path / "logging/edge"
@@ -71,6 +74,13 @@ def test_collection_requires_verified_archive_and_no_recovery(tmp_path):
         )
     )
     assert terraform.collection_complete(tmp_path, node)
+    if recovery_source == "memory":
+        node.recovery.append("pending raw recovery")
+    else:
+        (directory / "recovery.json").write_text('{"cleanupComplete": false}')
+    assert not terraform.collection_complete(tmp_path, node)
+    node.recovery.clear()
+    (directory / "recovery.json").unlink(missing_ok=True)
     archive.write_bytes(b"tampered")
     assert not terraform.collection_complete(tmp_path, node)
 

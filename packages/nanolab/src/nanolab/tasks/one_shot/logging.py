@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -511,7 +512,16 @@ def retain_collector_for_recovery(
 
 
 def export_collector(
-    *, node, name, run_dir, logs, session, final_metrics, archive_issue, issues=()
+    *,
+    node,
+    name,
+    run_dir,
+    logs,
+    session,
+    final_metrics,
+    archive_issue,
+    issues=(),
+    container_evidence: Path | None = None,
 ):
     """Export logs and bounded status without owning collector teardown.
 
@@ -538,12 +548,19 @@ def export_collector(
     write_error = None
     try:
         (directory / "collector-metrics.txt").write_text(final_metrics)
-        stats = node.command(
-            ("docker", "stats", "--no-stream", "--format={{json .}}", name)
-        )
-        (directory / "collector-stats.json").write_text(stats.stdout)
-        observed = node.command(("docker", "logs", name))
-        (directory / "collector.log").write_text(observed.stdout + observed.stderr)
+        if container_evidence is not None:
+            for source, target in (
+                ("container-stats.json", "collector-stats.json"),
+                ("container.log", "collector.log"),
+            ):
+                shutil.copyfile(container_evidence / source, directory / target)
+        else:
+            stats = node.command(
+                ("docker", "stats", "--no-stream", "--format={{json .}}", name)
+            )
+            (directory / "collector-stats.json").write_text(stats.stdout)
+            observed = node.command(("docker", "logs", name))
+            (directory / "collector.log").write_text(observed.stdout + observed.stderr)
     except OSError as error:
         write_error = write_error or error
         status["issues"].append(str(error))

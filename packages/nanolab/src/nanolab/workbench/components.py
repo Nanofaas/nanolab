@@ -249,3 +249,25 @@ def collect_task(
 ) -> Task[None]:
     """Run the `collect` playbook for `instances` into `collect_dir`."""
     return _Collect(host, instances, collect_dir, vars_dir, installed)
+
+
+def collect_deployed(
+    host: WorkbenchHost,
+    instance: Instance,
+    value: Deployed,
+    *,
+    vars_dir: Path,
+    collect_dir: Path,
+) -> WorkbenchPlaybook:
+    """Collect using journalled configuration and VM facts, including after restart."""
+    revive = None if host.node is None else host.node.vm.revive
+    return _playbook(
+        f"Collect {instance.name}",
+        host,
+        "collect",
+        (_with_config(instance, value.config),),
+        vars_dir,
+        ensure_installed(),
+        None if revive is None or value.vm is None else revive(value.vm),
+        collect_dir,
+    )

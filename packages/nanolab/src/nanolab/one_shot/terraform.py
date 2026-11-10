@@ -63,6 +63,8 @@ def collection_complete(run_dir: Path, node) -> bool:
     if node.recovery:
         return False
     directory = run_dir / "logging" / node.config.id
+    if (directory / "recovery.json").exists():
+        return False  # A restarted operator must still honor pending raw recovery.
     try:
         status = json.loads((directory / "status.json").read_text())
         hashes = json.loads((directory / "sha256.json").read_text())

@@ -27,7 +27,7 @@ from nanolab.one_shot.infrastructure import NodeResource
 from nanolab.tasks.one_shot import logging as one_shot_logging
 from nanolab.tasks.resource_tasks import resource_of
 from nanolab.tasks.vm.models import VmInfo, VmRequest
-from nanolab.workbench import components, platform
+from nanolab.workbench import components, evidence, platform
 from nanolab.workbench.components import Deployed
 from nanolab.workbench.platform import one_shot_platform
 from tests.workbench.playbook_fakes import action_of, host_of
@@ -103,6 +103,7 @@ def _build(
     log_endpoints=None,
     bootstraps=None,
     nodes=None,
+    collection_failure=None,
 ):
     """Build a platform whose playbooks and collect side effects only record."""
     vars_dir = tmp_path / "run" / "workbench" / "vars"
@@ -114,13 +115,53 @@ def _build(
         action = action_of(task)
         saved = json.loads((vars_dir / f"{role}-{action}.json").read_text())
         names = tuple(i["name"] for i in saved["instances"])
-        events.append((role, action, names))
+        mode = saved["instances"][0]["config"].get("collect_mode")
+        events.append((role, "collect-final" if mode == "final" else action, names))
         if fail in names and action in ("deploy", "collect"):
             raise RuntimeError(f"{action} failed")
         if action == "collect" and names[0].startswith("log-collector-"):
             path = Path(saved["collect_dir"]) / role / names[0] / "metrics.txt"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(metrics.get(role, DRAINED))
+            if mode == "final":
+                directory = path.parent
+                events.append((role, "stop", (f"wb-{names[0]}",)))
+                events.append(
+                    (
+                        "collect",
+                        "archive",
+                        (role, saved["instances"][0]["config"]["storage_dir"]),
+                    )
+                )
+                (directory / "storage.tar.gz").write_bytes(b"tar")
+                (directory / "collection.json").write_text(
+                    json.dumps(
+                        {
+                            "mode": "final",
+                            "quiesced": collection_failure != "stop",
+                            "metricsAvailable": True,
+                            "archiveSha256": "bad"
+                            if collection_failure
+                            else hashlib.sha256(b"tar").hexdigest(),
+                        }
+                    )
+                )
+                (directory / "container.json").write_text(
+                    json.dumps(
+                        {
+                            "Image": "sha256:i",
+                            "Config": {"Image": "collector:pin"},
+                            "HostConfig": {
+                                "CpusetCpus": "",
+                                "NanoCpus": round(LOGS.cpu * 1e9),
+                                "Memory": LOGS.memory_mib * 1024 * 1024,
+                            },
+                        }
+                    )
+                )
+                (directory / "container.log").write_text("collector log")
+                (directory / "container-stats.json").write_text("{}")
+
         if action == "collect" and names[0].startswith("prometheus-"):
             path = (
                 Path(saved["collect_dir"])
@@ -132,10 +173,6 @@ def _build(
             path.write_bytes(b"snapshot")
         if action == "deploy":
             SEEN.update({i["name"]: i for i in saved["instances"]})
-
-    def archive(node, source, path):
-        events.append(("collect", "archive", (node.config.id, source)))
-        path.write_bytes(b"tar")
 
     def failing_loki(**_kwargs):
         raise RuntimeError("no Loki in tests")
@@ -159,7 +196,6 @@ def _build(
     record = lambda name: lambda *_a, **k: events.append(("collect", name, k))  # noqa: E731
     monkeypatch.setattr(platform, "export_vm_resources", record("vm-resources"))
     monkeypatch.setattr(platform, "verify_loki_ingestion", record("loki-ingestion"))
-    monkeypatch.setattr(platform, "archive_node_dir", archive)
     monkeypatch.setattr(
         platform,
         "_as_root",
@@ -179,7 +215,7 @@ def _build(
     )
     monkeypatch.setattr(one_shot_logging, "httpx", SimpleNamespace(Client=failing_loki))
     monkeypatch.setattr(
-        platform,
+        evidence,
         "time",
         SimpleNamespace(time=time.time, time_ns=time.time_ns, sleep=lambda _s: None),
     )
@@ -452,9 +488,11 @@ COLLECT_ORDER = [
     ("collect", "supervisor"),
     ("operator", "collect"),  # Prometheus snapshot; vm-resources are in-workflow
     ("edge-1", "collect"),
+    ("edge-1", "collect-final"),
     ("edge-1", "stop"),
     ("collect", "archive"),
     ("cloud-1", "collect"),
+    ("cloud-1", "collect-final"),
     ("cloud-1", "stop"),
     ("collect", "archive"),
     ("collect", "loki-ingestion"),
@@ -513,7 +551,14 @@ def test_a_failing_node_keeps_the_others_evidence(tmp_path, monkeypatch):
 
     def flaky(task, inputs):
         role = host_of(task)
-        if role == "edge-1" and ("workbench." + action_of(task)) == "workbench.collect":
+        if (
+            role == "edge-1"
+            and action_of(task) == "collect"
+            and json.loads(
+                (tmp_path / "run/workbench/vars/edge-1-collect.json").read_text()
+            )["instances"][0]["config"].get("collect_mode")
+            == "metrics"
+        ):
             events.append((role, "collect", ()))
             raise RuntimeError("edge-1 unreachable")
         return original(task, inputs)
@@ -931,21 +976,15 @@ def test_collector_archive_failure_preserves_owned_vm(tmp_path, monkeypatch, fai
             pin=lambda *_a: None,
             stop_argv=None,
         )
-    built = _build(tmp_path, monkeypatch, events, nodes=nodes)
-    if failure is not None and failure != "stop":
-
-        def archive_failed(*_args):
-            raise OSError(
-                "checksum mismatch" if failure == "checksum" else "archive failed"
-            )
-
-        monkeypatch.setattr(platform, "archive_node_dir", archive_failed)
+    built = _build(
+        tmp_path, monkeypatch, events, nodes=nodes, collection_failure=failure
+    )
     if failure == "export":
 
         def export_failed(**_kwargs):
             raise RuntimeError("export failed too")
 
-        monkeypatch.setattr(platform, "export_collector", export_failed)
+        monkeypatch.setattr(evidence, "export_collector", export_failed)
     if failure == "receipt":
         original_write = Path.write_text
 
