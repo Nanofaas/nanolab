@@ -855,3 +855,89 @@ def test_the_loki_log_reads_the_run_container(tmp_path, monkeypatch):
     )
     _run(built, events)
     assert names == ["wb-" + _op(tmp_path, "loki")]
+
+
+@pytest.mark.parametrize(
+    "failure", ["archive", "checksum", "stop", "export", "receipt", None]
+)
+def test_collector_archive_failure_preserves_owned_vm(tmp_path, monkeypatch, failure):
+    from nanolab.config.one_shot import OneShotConfig
+    from nanolab.one_shot.infrastructure import _owned_node
+
+    events = []
+    deleted = []
+    config = OneShotConfig.model_validate(
+        {
+            "provider": "multipass",
+            "purpose": "workflow-validation",
+            "nodes": [
+                {"id": "edge-1", "kind": "edge"},
+                {"id": "edge-2", "kind": "edge"},
+                {"id": "cloud-1", "kind": "cloud"},
+            ],
+            "functions": {"f": {"input": {}}},
+        }
+    )
+    nodes = {}
+    for node in config.nodes:
+        if node.id not in NODES:
+            continue
+        fake = _node(node.id, events).provider
+        fake.vm_exists = lambda _r: False
+        fake.ensure_running = lambda _r: SimpleNamespace(return_code=0)
+        fake.connection_host = lambda _r: VM.host
+        fake.teardown = lambda r: (
+            deleted.append(r.name),
+            SimpleNamespace(return_code=0),
+        )[1]
+        if failure == "stop":
+            original_exec = fake.exec_argv
+            fake.exec_argv = lambda r, argv, remote_dir=None, execute=original_exec: (
+                SimpleNamespace(return_code=1, stdout="", stderr="stop failed")
+                if argv[:2] == ("docker", "stop")
+                else execute(r, argv, remote_dir)
+            )
+        nodes[node.id] = _owned_node(
+            node,
+            VmRequest(lifecycle="multipass", name=node.id, user="ubuntu"),
+            fake,
+            config=config,
+            generator=resource_of("generator", lambda _i: "host", lambda _i, _v: None),
+            target_cpus=None,
+            pin=lambda *_a: None,
+            stop_argv=None,
+        )
+    built = _build(tmp_path, monkeypatch, events, nodes=nodes)
+    if failure is not None and failure != "stop":
+
+        def archive_failed(*_args):
+            raise OSError(
+                "checksum mismatch" if failure == "checksum" else "archive failed"
+            )
+
+        monkeypatch.setattr(platform, "archive_node_dir", archive_failed)
+    if failure == "export":
+
+        def export_failed(**_kwargs):
+            raise RuntimeError("export failed too")
+
+        monkeypatch.setattr(platform, "export_collector", export_failed)
+    if failure == "receipt":
+        original_write = Path.write_text
+
+        def write(path, *args, **kwargs):
+            if path.name == "recovery.json":
+                raise OSError("receipt disk full")
+            return original_write(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", write)
+    if failure is None:
+        _run(built, events)
+        assert set(deleted) == set(NODES)
+        assert not any(n.recovery for n in nodes.values())
+    else:
+        with pytest.raises(Exception, match=r"failed|mismatch"):
+            _run(built, events)
+        assert deleted == []
+        assert all(n.recovery for n in nodes.values())
+    assert len(_of(events, "undeploy")) == len(_deploy_order(tmp_path))

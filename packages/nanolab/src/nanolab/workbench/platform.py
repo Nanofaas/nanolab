@@ -37,6 +37,7 @@ from nanolab.tasks.one_shot.logging import (
     archive_node_dir,
     collection_evidence,
     export_collector,
+    retain_collector_for_recovery,
     verify_loki_ingestion,
 )
 from nanolab.tasks.resource_tasks import call, resource_of
@@ -692,6 +693,9 @@ def one_shot_platform(
                 node.command(("sudo", "rm", "-rf", storage_dir))
             except Exception as error:
                 archive_issue = str(error)
+                retain_collector_for_recovery(
+                    node, run_dir=run_dir, storage=storage_dir, error=error
+                )
             export_collector(
                 node=node,
                 name=name,
