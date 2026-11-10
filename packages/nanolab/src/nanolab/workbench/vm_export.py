@@ -191,6 +191,9 @@ def export_vm_resources(
 ) -> None:
     """Write `vm-resources/<node>.jsonl` and `policy.json` from Prometheus."""
     directory = run_dir / "vm-resources"
+    # ponytail: one range query per series covers the whole window, so a window
+    # longer than Prometheus' 11000 points per series (~15 h at a 5 s step) is
+    # refused; chunk the window into sub-ranges if a run ever lasts longer.
     # Prometheus 3 range selectors are left-open, so a window of one scrape
     # period holds a single sample; irate over two periods is the last
     # scrape-to-scrape delta, the same interval the sampler differenced.
@@ -274,14 +277,8 @@ def export_vm_resources(
         # A node Prometheus never scraped gets an empty file: every slot is missing.
         write_immutable_artifact(directory / f"{node}.jsonl", b"".join(rows))
     policy = {
-        key: value
-        for key, value in telemetry_policy().items()
-        if key != "samplerSha256"
+        **telemetry_policy(),
+        "periodSeconds": step_seconds,
+        "exporterImages": _images(),
     }
-    policy.update(
-        periodSeconds=step_seconds,
-        transport="prometheus-node-exporter-cadvisor",
-        phaseCorrelation="prometheus-scrape-utc",
-        exporterImages=_images(),
-    )
     write_immutable_artifact(directory / "policy.json", canonical_bytes(policy))

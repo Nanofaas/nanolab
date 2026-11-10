@@ -30,6 +30,7 @@ from nanolab.config.one_shot import OneShotConfig, OneShotLogs, operational_limi
 from nanolab.one_shot.addresses import CADVISOR_PORT, NODE_EXPORTER_PORT
 from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
 from nanolab.one_shot.operator_memory import MAX_SWAP_PAGES, MIN_AVAILABLE_BYTES
+from nanolab.one_shot.vm_resources import SCRAPE_SECONDS
 from nanolab.tasks.one_shot.logging import (
     LogSession,
     archive_node_dir,
@@ -53,12 +54,11 @@ CONTROL_PLANE = "nanolab-one-shot-control-plane"
 COLLECTOR_PORT = 2020  # fluent-bit.conf's HTTP_Port
 PROMETHEUS_PORT = 9090
 SUPERVISOR_PORT = 8099
-SCRAPE_SECONDS = 5
 # cAdvisor housekeeping (5 s) plus scrape (5 s) jitter, with room to spare.
 STALE_SECONDS = 30
 PUSH_PATH = "/loki/api/v1/push"
-# As LivenessCheck tolerates today: a node behind a site or on Azure may be
-# unreachable this long before its checks fault.
+# As the in-process liveness checks tolerated: a node behind a site or on Azure
+# may be unreachable this long before its checks fault.
 REMOTE_UNREACHABLE_SECONDS = 300
 # Today's bounded drain wait: up to five metric reads two seconds apart.
 DRAIN_POLLS = 5

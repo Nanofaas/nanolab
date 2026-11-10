@@ -30,35 +30,6 @@ def test_external_runtime_asset_drift_is_rejected_before_use(tmp_path):
         verify_files(tmp_path, frozen)
 
 
-def test_precheck_registration_failure_closes_acquired_sampler(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    from typing import Any, cast
-
-    import pytest
-
-    from nanolab.tasks.one_shot import observation
-
-    closed = []
-    session = SimpleNamespace(close=lambda: closed.append(True))
-    monkeypatch.setattr(observation, "VmTelemetrySession", lambda *a, **k: session)
-
-    def failed_watch(*a, **k):
-        raise OSError("cannot register sampler")
-
-    supervision = SimpleNamespace(watch=failed_watch, unwatch=lambda *_: None)
-    run = SimpleNamespace(
-        run_dir=tmp_path,
-        topology=object(),
-        settings=object(),
-        clock=object(),
-        supervision=supervision,
-    )
-    inputs = SimpleNamespace(resource=lambda _: SimpleNamespace(refresh=lambda: None))
-    with pytest.raises(OSError, match="cannot register sampler"):
-        observation.ObserverPrecheck(run).run(cast(Any, inputs))
-    assert closed == [True]
-
-
 def test_added_external_source_file_invalidates_fingerprint(tmp_path):
     import subprocess
 

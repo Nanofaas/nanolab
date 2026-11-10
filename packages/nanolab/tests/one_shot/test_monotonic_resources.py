@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from nanolab.one_shot.vm_resources import summarize_resources
-from nanolab.one_shot.vm_sampler import correlate_sample
+from nanolab.one_shot.vm_resources import correlate_sample, summarize_resources
 
 
 def probe(host, guest):
@@ -191,38 +190,6 @@ def test_archived_raw_summary_retains_its_original_frozen_sampler_policy(tmp_pat
     assert result["policy"] == frozen
 
 
-@pytest.mark.parametrize("now", [100.5, 111.0])
-def test_owned_sampler_stall_detection_uses_monotonic_write_progress(
-    tmp_path, monkeypatch, now
-):
-    from types import SimpleNamespace
-
-    from nanolab.one_shot.vm_resources import VmTelemetrySession
-
-    path = tmp_path / "edge.jsonl"
-    path.write_text("{}\n")
-    sampler = VmTelemetrySession.__new__(VmTelemetrySession)
-    sampler.run = SimpleNamespace()
-    sampler.sessions = [
-        {
-            "node": SimpleNamespace(config=SimpleNamespace(id="edge")),
-            "output": SimpleNamespace(name=str(path)),
-            "process": SimpleNamespace(poll=lambda: None),
-            "readerErrors": [],
-            "lastWriteMonotonic": 100.0,
-        }
-    ]
-    monkeypatch.setattr(
-        "nanolab.one_shot.vm_resources.time.time", lambda: path.stat().st_mtime + 100
-    )
-    monkeypatch.setattr("nanolab.one_shot.vm_resources.time.monotonic", lambda: now)
-    if now > 110:
-        with pytest.raises(RuntimeError, match="stalled"):
-            sampler.require_healthy()
-    else:
-        sampler.require_healthy()
-
-
 @pytest.mark.parametrize("levels", [0, -1, True, 1.5, 1000])
 def test_nested_probe_scope_rejects_invalid_ancestor_levels(tmp_path, levels):
     from nanolab.one_shot.vm_resources import resource_probe_paths
@@ -284,34 +251,3 @@ def test_nested_capacity_scope_uses_original_workflow_probes_and_malformed_recor
     assert result["clockProbeMalformedLines"] == 1
     assert not result["complete"]
     assert (tmp_path / "clock-probes.jsonl").read_text() == raw
-
-
-@pytest.mark.parametrize(
-    ("now", "code", "expected"), [(99, 0, False), (101, 0, True), (101, 7, False)]
-)
-def test_sampler_natural_end_uses_frozen_horizon(
-    tmp_path, monkeypatch, now, code, expected
-):
-    from types import SimpleNamespace
-
-    from nanolab.one_shot.vm_resources import VmTelemetrySession
-
-    path = tmp_path / "raw.jsonl"
-    path.write_text("{}\n")
-    session = VmTelemetrySession.__new__(VmTelemetrySession)
-    session.run = SimpleNamespace(supervision=object())
-    session.expected_end = 100
-    session.sessions = [
-        {
-            "process": SimpleNamespace(poll=lambda: code),
-            "output": SimpleNamespace(name=str(path)),
-            "readerErrors": [],
-            "node": SimpleNamespace(config=SimpleNamespace(id="edge")),
-        }
-    ]
-    monkeypatch.setattr("nanolab.one_shot.vm_resources.time.monotonic", lambda: now)
-    if expected:
-        session.require_healthy()
-    else:
-        with pytest.raises(RuntimeError, match="stopped"):
-            session.require_healthy()

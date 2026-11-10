@@ -183,34 +183,6 @@ def test_dependency_is_not_inferred_by_supervision(tmp_path):
     assert json.loads((tmp_path / "result.json").read_text())["state"] == "failed"
 
 
-def test_sampler_loss_is_observed_but_required_service_exit_is_fault(tmp_path):
-    from types import SimpleNamespace
-
-    from nanolab.one_shot.supervision import check_sampler
-
-    path = tmp_path / "node.jsonl"
-    session = SimpleNamespace(
-        require_healthy=lambda: None,
-        sessions=[
-            {
-                "output": SimpleNamespace(name=str(path)),
-                "node": SimpleNamespace(config=SimpleNamespace(id="edge")),
-            }
-        ],
-    )
-    path.write_text(
-        '{"errors":[],"containers":[{"role":"control-plane"},{"role":"collector"}]}\n'
-    )
-    check_sampler(session)
-    path.write_text('{"partial":')
-    check_sampler(session)
-    path.write_text('{"errors":[{"error":"sample missing"}],"containers":[]}\n')
-    check_sampler(session)
-    path.write_text('{"errors":[],"containers":[{"role":"control-plane"}]}\n')
-    with pytest.raises(RuntimeError, match=r"edge.*collector"):
-        check_sampler(session)
-
-
 def test_archive_failure_retains_raw_and_returns_failure(tmp_path):
     archive = tmp_path / "already-existing"
     archive.mkdir()
@@ -223,27 +195,6 @@ def test_archive_failure_retains_raw_and_returns_failure(tmp_path):
     assert result["exitCode"] == 1
     assert result["archiveVerified"] is False
     assert (output / "partial.txt").read_text() == "retained"
-
-
-def test_missing_samples_are_not_an_operational_failure(tmp_path):
-    from types import SimpleNamespace
-
-    from nanolab.one_shot.vm_resources import VmTelemetrySession
-
-    path = tmp_path / "node.jsonl"
-    path.write_text('{"timestampUtc":"2026-10-12T00:00:00Z"}\n')
-    sampler = object.__new__(VmTelemetrySession)
-    sampler.run = SimpleNamespace(supervision=object())
-    sampler.sessions = [
-        {
-            "process": SimpleNamespace(poll=lambda: None),
-            "output": SimpleNamespace(name=str(path)),
-            "readerErrors": [],
-            "lastWriteMonotonic": time.monotonic() - 60,
-            "node": SimpleNamespace(config=SimpleNamespace(id="edge")),
-        }
-    ]
-    sampler.require_healthy()
 
 
 def test_background_thread_exit_without_reported_error_is_fault():
@@ -559,49 +510,6 @@ def test_reporting_io_failure_never_prevents_sonata_release(
         supervisor.run(workflow.run)
     assert released == ([] if failure_kind == "initial" else ["vm"])
     assert not supervisor.thread.is_alive()
-
-
-@pytest.mark.parametrize("cp_present", [True, False])
-def test_inventory_liveness_is_independent_of_cgroup_measurements(tmp_path, cp_present):
-    from types import SimpleNamespace
-
-    from nanolab.one_shot.supervision import check_sampler
-
-    path = tmp_path / "node.jsonl"
-    inventory = [{"role": "collector"}, {"role": "function"}]
-    if cp_present:
-        inventory.append({"role": "control-plane"})
-    path.write_text(
-        json.dumps(
-            {
-                "expectedContainerIds": ["collector", "function"]
-                + (["cp"] if cp_present else []),
-                "containerInventory": inventory,
-                "containers": [{"role": "collector"}],
-                "errors": [
-                    {
-                        "containerId": "cp" if cp_present else "function",
-                        "error": "cgroup unreadable",
-                    }
-                ],
-            }
-        )
-        + "\n"
-    )
-    session = SimpleNamespace(
-        require_healthy=lambda: None,
-        sessions=[
-            {
-                "output": SimpleNamespace(name=str(path)),
-                "node": SimpleNamespace(config=SimpleNamespace(id="edge")),
-            }
-        ],
-    )
-    if cp_present:
-        check_sampler(session)
-    else:
-        with pytest.raises(RuntimeError, match="control-plane"):
-            check_sampler(session)
 
 
 @pytest.mark.parametrize("fails", [False, True])

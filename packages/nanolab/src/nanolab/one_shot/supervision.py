@@ -309,7 +309,7 @@ class CampaignSupervision:
         self.watch("workbench", self._poll_workbench)
 
     def _liveness_row(self, check, started, outcome, detail="", unreachable=0.0):
-        """Append a row in the shape LivenessCheck writes, on outcome change only."""
+        """Append a row in the shape the old LivenessCheck wrote, on change only."""
         if self._remote_seen.get(check) == outcome:
             return
         self._remote_seen[check] = outcome
@@ -922,43 +922,6 @@ class CampaignSupervision:
                         != hashlib.file_digest(target, "sha256").digest()
                     ):
                         raise ValueError(f"archive hash mismatch: {path.name}")
-
-
-def check_sampler(session):
-    """Reuse raw inventories for service liveness; sample gaps remain observations."""
-    session.require_healthy()
-    for item in session.sessions:
-        path = Path(item["output"].name)
-        if not path.exists():
-            continue
-        # Read only a tail; ignore an unfinished line while its writer is active.
-        with path.open("rb") as stream:
-            stream.seek(max(0, path.stat().st_size - 131072))
-            lines = stream.read().splitlines()
-        for line in reversed(lines):
-            try:
-                row = json.loads(line)
-            except (ValueError, UnicodeDecodeError):
-                continue
-            if "containers" not in row or (
-                row.get("errors") and "expectedContainerIds" not in row
-            ):
-                break
-            if any(not error.get("containerId") for error in row.get("errors", [])):
-                break
-            inventory = row.get("containerInventory")
-            if inventory is None:
-                if row.get("errors"):
-                    break  # Old raw format cannot identify unreadable containers.
-                inventory = row["containers"]
-            roles = {container["role"] for container in inventory}
-            missing = {"control-plane", "collector"} - roles
-            if missing:
-                node = item["node"].config.id
-                raise RuntimeError(
-                    f"{node}: required service stopped: {sorted(missing)}"
-                )
-            break
 
 
 def check_background_worker(worker):

@@ -411,7 +411,6 @@ def run_observation_workflow(
         endpoints=endpoints,
         probes=probes,
         distribution=distribution,
-        collectors={},
         neighbor_graph=graph,
         function_settings=settings.functions,
         function_aliases={n: n for n in names},

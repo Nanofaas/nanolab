@@ -1,7 +1,5 @@
 """A run refuses a swapping operator and records its swap traffic."""
 
-import json
-import time
 from pathlib import Path
 
 import pytest
@@ -58,23 +56,3 @@ def test_old_swapped_pages_alone_do_not_refuse_a_run():
     operator_memory.require_quiet(measured)
     with pytest.raises(RuntimeError, match=r"2\.0 GiB available"):
         operator_memory.require_quiet({**measured, "memAvailableBytes": 2 * GIB})
-
-
-def test_the_recorder_appends_samples_until_closed(tmp_path):
-    proc = tmp_path / "proc"
-    write_proc(proc, pswpin=1, pswpout=1, available_kib=9, swap_free_kib=8_000_000)
-    path = tmp_path / "operator-memory.jsonl"
-    recorder = operator_memory.OperatorMemoryRecorder(
-        path, interval_seconds=0.05, proc=proc
-    )
-    recorder.start()
-    deadline = time.monotonic() + 5
-    while not path.exists() or len(path.read_text().splitlines()) < 2:
-        assert time.monotonic() < deadline
-        time.sleep(0.02)
-    (proc / "vmstat").unlink()
-    time.sleep(0.2)
-    recorder.close()
-    rows = [json.loads(line) for line in path.read_text().splitlines()]
-    assert rows[0]["swappedOutPages"] == 0 and rows[0]["memAvailableBytes"] == 9216
-    assert any("error" in row for row in rows)

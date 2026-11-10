@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import subprocess
-import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -84,11 +82,10 @@ class OneShotTopology:
     distribution: Resource[RecipeDistribution]
     function_settings: dict[str, OneShotFunction]
     function_aliases: dict[str, str]
-    # The run's workbench platform; `collectors` are its log-collector members.
+    # The run's workbench platform; `platform.collectors` are its log collectors.
     platform: OneShotPlatform | None = None
     # Attaches the workbench supervisor to the run's supervision, if any.
     supervised: Resource[None] | None = None
-    collectors: Mapping[str, Resource] = field(default_factory=dict)
     node_function_settings: dict[str, dict[str, OneShotFunction]] = field(
         default_factory=dict
     )
@@ -127,7 +124,6 @@ class OneShotTopology:
 # client: under load one can stall without the container being in question.
 # Nothing is lost meanwhile (logs are buffered on disk, receipts are read later,
 # counters are cumulative), so only a node unreachable this long fails the run.
-REMOTE_PROBE_SECONDS = 30
 REMOTE_UNREACHABLE_SECONDS = 300
 
 
@@ -171,78 +167,6 @@ def workbench_supervision(
         detach,
         requires=(platform.resource, *requires),
     )
-
-
-class LivenessCheck:
-    """`docker inspect` a container; tolerate a bounded spell of transport failures.
-
-    A container reported stopped or missing fails at once. Timeouts and failed
-    transports fail only once they have lasted `tolerated_seconds` without a
-    successful check in between (0: at the first one). Every check is recorded
-    with its duration, so slow transports are visible.
-    """
-
-    _lock = threading.Lock()
-
-    def __init__(
-        self, name: str, record: Path, *, timeout: float, tolerated_seconds: float
-    ):
-        """Name the check and where its outcomes are appended."""
-        self.name = name
-        self.record = record
-        self.timeout = timeout
-        self.tolerated_seconds = tolerated_seconds
-        self.unreachable_since: float | None = None
-
-    def run(self, argv: tuple[str, ...]) -> None:
-        """Run one check; raise when the container or its transport has failed."""
-        started = time.monotonic()
-        detail = ""
-        try:
-            observed = subprocess.run(
-                argv,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=self.timeout,
-            )
-        except subprocess.TimeoutExpired:
-            outcome = "timeout"
-        else:
-            detail = observed.stderr.strip()[-300:]
-            if observed.returncode == 0:
-                outcome = "running" if observed.stdout.strip() == "true" else "stopped"
-            elif "No such object" in observed.stderr:
-                outcome = "missing"
-            else:
-                outcome = "transport"
-        now = time.monotonic()
-        if outcome in ("timeout", "transport"):
-            if self.unreachable_since is None:
-                self.unreachable_since = started
-        else:
-            self.unreachable_since = None
-        unreachable = (
-            0.0 if self.unreachable_since is None else now - self.unreachable_since
-        )
-        row = {
-            "atUtc": datetime.now(UTC).isoformat(),
-            "check": self.name,
-            "seconds": round(now - started, 3),
-            "outcome": outcome,
-            "unreachableSeconds": round(unreachable, 1),
-        }
-        if detail and outcome != "running":
-            row["stderr"] = detail
-        with self._lock, self.record.open("a") as stream:
-            stream.write(json.dumps(row) + "\n")
-        if outcome in ("stopped", "missing"):
-            raise RuntimeError(f"{self.name} not running ({outcome}): {detail}")
-        if self.unreachable_since is not None and unreachable >= self.tolerated_seconds:
-            raise RuntimeError(
-                f"{self.name} unreachable for {unreachable:.0f} s "
-                f"(last: {outcome}): {detail}"
-            )
 
 
 def _bootstrap(
@@ -1019,7 +943,6 @@ def add_one_shot_platforms(
         else workbench_supervision(
             platform, supervision, requires=tuple(endpoints.values())
         ),
-        platform.collectors,
         node_functions,
         graph,
         node_distributions={

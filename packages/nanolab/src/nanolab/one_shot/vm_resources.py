@@ -1,50 +1,176 @@
-"""Owned VM telemetry streams, frozen policy and raw coverage accounting."""
+"""VM telemetry policy, phase correlation and raw coverage accounting."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import math
-import os
-import subprocess
-import time
-from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from threading import Thread
 from typing import Any
-from uuid import uuid4
 
-from sonata_engine import Resource
-
-from nanolab.config.one_shot import ArtifactReference, OneShotConfig, operational_limit
-from nanolab.one_shot import vm_sampler
+from nanolab.config.one_shot import ArtifactReference, OneShotConfig
 from nanolab.tasks.one_shot.artifacts import (
     canonical_bytes,
     package_fingerprint,
-    write_immutable_artifact,
 )
-from nanolab.tasks.resource_tasks import resource_of
+
+# The workbench Prometheus scrape period; vm-resources rows are one per scrape.
+SCRAPE_SECONDS = 5
 
 
 def telemetry_policy() -> dict:
-    """Bind sampler implementation and explicit units into the campaign freeze."""
+    """Return the policy a run freezes; `policy.json` adds the exporter images.
+
+    The images are pinned by the workbench collection version in the bundled
+    requirements.yml, which `package_fingerprint` already binds.
+    """
     return {
         "schemaVersion": 1,
-        "periodSeconds": 1,
+        "periodSeconds": SCRAPE_SECONDS,
         "scope": "whole-vm-and-all-running-docker-cgroups-v2",
         "cpuUnit": "fraction-of-vcpu-capacity",
         "memoryUnit": "bytes",
         "warmupIncluded": True,
-        "transport": "multipass-pipes-with-owned-drain-threads",
-        "samplerSha256": hashlib.sha256(
-            Path(vm_sampler.__file__).read_bytes()
-        ).hexdigest(),
-        "phaseCorrelation": "v2-host-guest-monotonic-brackets-with-explicit-ambiguity",
+        "transport": "prometheus-node-exporter-cadvisor",
+        "phaseCorrelation": "prometheus-scrape-utc",
     }
 
 
-correlate_sample = vm_sampler.correlate_sample
+# What the removed VM sampler froze: the policy of every run before the
+# workbench, and the default for an archived run without a policy.json.
+LEGACY_SAMPLER_POLICY = {
+    "schemaVersion": 1,
+    "periodSeconds": 1,
+    "scope": "whole-vm-and-all-running-docker-cgroups-v2",
+    "cpuUnit": "fraction-of-vcpu-capacity",
+    "memoryUnit": "bytes",
+    "warmupIncluded": True,
+    "transport": "multipass-pipes-with-owned-drain-threads",
+    "samplerSha256": (
+        "5517e0e1ff41853627da76f539b5c98131a16baf3d1795b1e2379fe2ab539b87"
+    ),
+    "phaseCorrelation": "v2-host-guest-monotonic-brackets-with-explicit-ambiguity",
+}
+
+
+def correlate_sample(
+    sample: dict,
+    *,
+    anchor: datetime,
+    warmup: int,
+    period: int,
+    epochs: int,
+    mode: str,
+    functions: list[str],
+    run_id: str,
+    host_anchor_monotonic: float | None = None,
+    clock_probes: list[dict] | None = None,
+) -> dict:
+    """Use bracketing monotonic clocks for v2, preserving ambiguous boundaries."""
+    timestamp = datetime.fromisoformat(sample["timestampUtc"])
+    if timestamp.tzinfo is None or anchor.tzinfo is None:
+        raise ValueError("resource timestamps must have UTC timezone")
+    row = {**sample, "runId": run_id, "mode": mode, "functions": functions}
+    if host_anchor_monotonic is not None:
+        monotonic = sample.get("monotonicSeconds")
+        boot = sample.get("bootId")
+        probes = [
+            probe
+            for probe in clock_probes or []
+            if probe.get("node") == sample.get("node")
+            and probe.get("remoteBootId") == boot
+            and boot
+            and probe.get("errorType") is None
+            and all(
+                isinstance(probe.get(key), (int, float))
+                and not isinstance(probe[key], bool)
+                and math.isfinite(probe[key])
+                for key in (
+                    "remoteMonotonicSeconds",
+                    "beforeMonotonicSeconds",
+                    "afterMonotonicSeconds",
+                )
+            )
+            and probe["beforeMonotonicSeconds"] <= probe["afterMonotonicSeconds"]
+        ]
+        if not isinstance(monotonic, (int, float)) or not math.isfinite(monotonic):
+            probes = []
+        previous = [p for p in probes if p["remoteMonotonicSeconds"] <= monotonic]
+        following = [p for p in probes if p["remoteMonotonicSeconds"] >= monotonic]
+        if not previous or not following:
+            return {
+                **row,
+                "phase": "uncorrelated",
+                "epoch": None,
+                "timeFromAnchorSeconds": None,
+                "epochCandidates": [],
+                "correlationMethod": "host-guest-monotonic-brackets",
+                "correlationError": "missing bracketing probes or boot identity",
+            }
+        before = max(previous, key=lambda p: p["remoteMonotonicSeconds"])
+        after = min(following, key=lambda p: p["remoteMonotonicSeconds"])
+        lower = before["beforeMonotonicSeconds"] - host_anchor_monotonic
+        upper = after["afterMonotonicSeconds"] - host_anchor_monotonic
+        if lower > upper:
+            raise ValueError("inconsistent host/guest monotonic ordering")
+        before_mid = (
+            before["beforeMonotonicSeconds"] + before["afterMonotonicSeconds"]
+        ) / 2
+        after_mid = (
+            after["beforeMonotonicSeconds"] + after["afterMonotonicSeconds"]
+        ) / 2
+        span = after["remoteMonotonicSeconds"] - before["remoteMonotonicSeconds"]
+        fraction = (monotonic - before["remoteMonotonicSeconds"]) / span if span else 0
+        offset = (
+            before_mid + fraction * (after_mid - before_mid) - host_anchor_monotonic
+        )
+        candidates = {
+            resource_phase(lower, warmup, period, epochs),
+            resource_phase(upper, warmup, period, epochs),
+        }
+        for boundary in [
+            -warmup,
+            *(range(0, period * epochs + 1, period) if period else [0]),
+        ]:
+            if lower <= boundary <= upper:
+                candidates.add(resource_phase(boundary, warmup, period, epochs))
+        phase, epoch = resource_phase(offset, warmup, period, epochs)
+        if len(candidates) > 1:
+            phase, epoch = "ambiguous", None
+        return {
+            **row,
+            "phase": phase,
+            "epoch": epoch,
+            "timeFromAnchorSeconds": offset,
+            "correlationBoundsSeconds": [lower, upper],
+            "epochCandidates": sorted({e for _, e in candidates if e is not None}),
+            "phaseCandidates": sorted({p for p, _ in candidates}),
+            "correlationMethod": "host-guest-monotonic-brackets",
+        }
+    offset = (timestamp - anchor).total_seconds()
+    phase, epoch = resource_phase(offset, warmup, period, epochs)
+    return {
+        **row,
+        "phase": phase,
+        "epoch": epoch,
+        "timeFromAnchorSeconds": offset,
+        "correlationMethod": "legacy-utc",
+    }
+
+
+def resource_phase(
+    offset: float, warmup: int, period: int, epochs: int
+) -> tuple[str, int | None]:
+    """Classify one point on the frozen experiment timeline."""
+    phase, epoch = ("before", None)
+    if -warmup <= offset < 0:
+        phase, epoch = "warmup", -1
+    elif 0 <= offset < period * epochs:
+        phase, epoch = "measurement", int(offset // period)
+    elif offset >= period * epochs:
+        phase = "after"
+    return phase, epoch
 
 
 def resource_clock_grid(run_dir: Path) -> dict | None:
@@ -76,9 +202,9 @@ def resource_probe_paths(run_dir: Path) -> tuple[Path, Path]:
 
 
 def resource_policy(run_dir: Path) -> dict:
-    """Return the run's frozen telemetry policy, or today's for runs without one."""
+    """Return the run's frozen telemetry policy; runs without one were sampled."""
     path = run_dir / "vm-resources" / "policy.json"
-    return json.loads(path.read_text()) if path.exists() else telemetry_policy()
+    return json.loads(path.read_text()) if path.exists() else LEGACY_SAMPLER_POLICY
 
 
 def resource_clock_context(run_dir: Path) -> dict:
@@ -252,340 +378,6 @@ def summarize_resources(
     return result
 
 
-class VmTelemetrySession:
-    """Stream VM-local samples to owned host files before generator acquisition."""
-
-    def __init__(
-        self, run, inputs, *, terminal_probe: Callable[[], None] | None = None
-    ):
-        """Stage frozen sampler bytes and own every started transport."""
-        self.run, self.inputs = run, inputs
-        self.sessions: list[dict] = []
-        self.closed = False
-        directory = run.run_dir / "vm-resources"
-        directory.mkdir(parents=True, exist_ok=True)
-        manifest = json.loads((run.run_dir / "manifest.json").read_text())
-        context = {
-            "anchor": manifest["anchor"],
-            "warmup": manifest["parameters"]["generator"]["warmupSeconds"],
-            "period": int(manifest["period_seconds"]),
-            "epochs": len(run.trace.windows),
-            "mode": run.mode,
-            "functions": list(run.settings.functions),
-            "run_id": manifest["run_id"],
-        }
-        grid = manifest["parameters"].get("logicalSchedule")
-        self.expected_end = (
-            grid["anchorMonotonicSeconds"]
-            + len(run.trace.windows) * run.trace.period_seconds
-            + operational_limit(run.settings, "generator_drain_seconds", 180)
-            if grid is not None
-            else float("inf")
-        )
-        self.terminal_probe = terminal_probe if grid is not None else None
-        if grid is not None:
-            # Final offline correlation uses continuing probes, including later
-            # brackets; no UTC guess is attached to live v2 raw samples.
-            context["host_anchor_monotonic"] = grid["anchorMonotonicSeconds"]
-        try:
-            for node in run.topology.resources.nodes.values():
-                vm = inputs.resource(node.vm)
-                remote = vm.home + "/nanolab-vm-sampler-" + uuid4().hex + ".py"
-                staged = node.provider.transfer_to(
-                    node.request, source=Path(vm_sampler.__file__), destination=remote
-                )
-                if staged.return_code:
-                    raise RuntimeError("VM sampler transfer failed")
-                actual = node.command(("sha256sum", remote)).stdout.split()[0]
-                if actual != telemetry_policy()["samplerSha256"]:
-                    raise ValueError("VM sampler hash mismatch")
-                if not node.request.name:
-                    raise ValueError("VM sampler requires owned VM name")
-                output = (directory / (node.config.id + ".jsonl")).open(
-                    "xb", buffering=0
-                )
-                errors = (directory / (node.config.id + ".stderr")).open(
-                    "xb", buffering=0
-                )
-                session = {
-                    "node": node,
-                    "remote": remote,
-                    "output": output,
-                    "errors": errors,
-                    "process": None,
-                    "readers": [],
-                    "readerErrors": [],
-                    "lastWriteMonotonic": time.monotonic(),
-                }
-                self.sessions.append(session)
-                process = subprocess.Popen(
-                    node.vm_argv(
-                        vm,
-                        "sudo",
-                        "python3",
-                        "-u",
-                        remote,
-                        "--node",
-                        node.config.id,
-                        "--duration",
-                        str(
-                            max(
-                                0,
-                                grid["anchorMonotonicSeconds"]
-                                + len(run.trace.windows) * run.trace.period_seconds
-                                - time.monotonic(),
-                            )
-                            + operational_limit(
-                                run.settings, "generator_drain_seconds", 180
-                            )
-                            if grid is not None
-                            else context["warmup"]
-                            + len(run.trace.windows) * run.trace.period_seconds
-                            + operational_limit(
-                                run.settings, "generator_drain_seconds", 180
-                            )
-                        ),
-                        "--context",
-                        json.dumps(context),
-                    ),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                session["process"] = process
-                # Multipass requires pollable descriptors; regular output files
-                # hang its transport. Drain both pipes concurrently into raw files.
-                for source, destination in (
-                    (process.stdout, output),
-                    (process.stderr, errors),
-                ):
-                    reader = Thread(
-                        target=self._drain,
-                        args=(source, destination, session),
-                        daemon=True,
-                    )
-                    session["readers"].append(reader)
-                    reader.start()
-            deadline = time.monotonic() + operational_limit(
-                run.settings, "worker_start_seconds", 30
-            )
-            while time.monotonic() < deadline:
-                self.require_healthy()
-                if all(
-                    read_samples(directory / (s["node"].config.id + ".jsonl"))[0]
-                    for s in self.sessions
-                ):
-                    break
-                time.sleep(0.1)
-            else:
-                if getattr(run, "supervision", None) is None:
-                    raise TimeoutError(
-                        "VM telemetry startup did not produce all node samples"
-                    )
-                self.require_healthy()
-                write_immutable_artifact(
-                    directory / "startup.json",
-                    canonical_bytes(
-                        {
-                            "atUtc": datetime.now(UTC).isoformat(),
-                            "measurementComplete": False,
-                            "missingNodes": [
-                                s["node"].config.id
-                                for s in self.sessions
-                                if not read_samples(
-                                    directory / (s["node"].config.id + ".jsonl")
-                                )[0]
-                            ],
-                        }
-                    ),
-                )
-            write_immutable_artifact(
-                directory / "policy.json", canonical_bytes(telemetry_policy())
-            )
-        except BaseException as error:
-            try:
-                self.close()
-            except Exception as cleanup:
-                error.add_note("VM telemetry startup cleanup: " + str(cleanup))
-            raise
-
-    @staticmethod
-    def _drain(source, destination, session):
-        """Preserve every byte, including partial lines, as soon as it arrives."""
-        try:
-            with source:
-                while chunk := source.read1(65536):
-                    destination.write(chunk)
-                    if destination is session["output"]:
-                        session["lastWriteMonotonic"] = time.monotonic()
-        except Exception as error:
-            session["readerErrors"].append(str(error))
-
-    def require_healthy(self):
-        """Treat terminated or stalled streams as visible collection failures."""
-        for session in self.sessions:
-            process = session["process"]
-            path = Path(session["output"].name)
-            if session["readerErrors"]:
-                raise RuntimeError(
-                    "VM telemetry raw write failed: "
-                    + "; ".join(session["readerErrors"])
-                )
-            code = process.poll() if process is not None else None
-            if code is not None and (
-                code != 0
-                or time.monotonic() < getattr(self, "expected_end", float("inf"))
-            ):
-                raise RuntimeError("VM telemetry stopped: " + session["node"].config.id)
-            if (
-                getattr(self.run, "supervision", None) is None
-                and path.stat().st_size
-                and time.monotonic() - session["lastWriteMonotonic"] > 10
-            ):
-                raise RuntimeError("VM telemetry stalled: " + session["node"].config.id)
-
-    def close(self, *, coverage_until: datetime | None = None):
-        """Reap transports and sync partial raw before releasing any VM resource."""
-        if self.closed:
-            return
-        failures = []
-        for session in self.sessions:
-            process = session["process"]
-            try:
-                # The unique uploaded script is the ownership token; only its PID
-                # is signalled. Remote cleanup completes before closing transport.
-                node = session["node"]
-                node.command(("sudo", "python3", session["remote"], "--stop"))
-                if process is not None:
-                    try:
-                        process.wait(
-                            timeout=operational_limit(
-                                self.run.settings, "process_drain_seconds", 10
-                            )
-                        )
-                    except subprocess.TimeoutExpired:
-                        process.terminate()
-                        try:
-                            process.wait(
-                                timeout=operational_limit(
-                                    self.run.settings, "process_exit_seconds", 5
-                                )
-                            )
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait(
-                                timeout=operational_limit(
-                                    self.run.settings, "process_exit_seconds", 5
-                                )
-                            )
-                        raise RuntimeError(
-                            "remote VM telemetry stop unconfirmed"
-                        ) from None
-            except Exception as error:
-                failures.append(str(error))
-                if process is not None and process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(
-                            timeout=operational_limit(
-                                self.run.settings, "process_exit_seconds", 5
-                            )
-                        )
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(
-                            timeout=operational_limit(
-                                self.run.settings, "process_exit_seconds", 5
-                            )
-                        )
-                elif process is not None:
-                    process.wait(
-                        timeout=operational_limit(
-                            self.run.settings, "process_exit_seconds", 5
-                        )
-                    )
-            finally:
-                # Process reaping produces EOF; readers must finish before fsync
-                # or closing raw files, otherwise terminal samples can be lost.
-                for reader in session["readers"]:
-                    reader.join(
-                        timeout=operational_limit(
-                            self.run.settings, "process_exit_seconds", 5
-                        )
-                    )
-                    if reader.is_alive():
-                        failures.append("VM telemetry pipe drain did not stop")
-                failures.extend(session["readerErrors"])
-                for stream in (session["output"], session["errors"]):
-                    try:
-                        os.fsync(stream.fileno())
-                    except OSError as error:
-                        failures.append(str(error))
-                    finally:
-                        stream.close()
-        self.closed = True
-        if self.terminal_probe is not None:
-            try:
-                self.terminal_probe()
-            except Exception as error:
-                failures.append("terminal clock probe failed: " + str(error))
-        manifest_path = self.run.run_dir / "manifest.json"
-        if manifest_path.exists():
-            manifest = json.loads(manifest_path.read_text())
-            generator = manifest["parameters"]["generator"]
-            expected_period = int(manifest["period_seconds"])
-            if coverage_until is not None:
-                expected_period = max(
-                    0,
-                    min(
-                        expected_period,
-                        int(
-                            (
-                                coverage_until
-                                - datetime.fromisoformat(manifest["anchor"])
-                            ).total_seconds()
-                        ),
-                    ),
-                )
-            coverage = summarize_resources(
-                self.run.run_dir,
-                anchor=datetime.fromisoformat(manifest["anchor"]),
-                warmup=generator["warmupSeconds"],
-                period=expected_period,
-                epochs=len(self.run.trace.windows),
-                nodes=list(self.run.topology.resources.nodes),
-                mode=self.run.mode,
-                functions=list(self.run.settings.functions),
-                run_id=manifest["run_id"],
-            )
-            coverage["measuredThroughUtc"] = (
-                coverage_until.isoformat() if coverage_until else None
-            )
-            coverage["cleanupErrors"] = failures
-            write_immutable_artifact(
-                self.run.run_dir / "vm-resources" / "coverage.json",
-                canonical_bytes(coverage),
-            )
-        if failures:
-            raise RuntimeError("VM telemetry cleanup failures: " + "; ".join(failures))
-
-
-def vm_telemetry_resource(run, *, clock: Resource | None = None) -> Resource:
-    """Reuse the owned topology lifetime and preserve legacy non-Multipass runs."""
-    return resource_of(
-        "Own continuous whole-VM and container telemetry",
-        lambda inputs: VmTelemetrySession(
-            run,
-            inputs,
-            terminal_probe=inputs.resource(clock).refresh
-            if clock is not None
-            else None,
-        ),
-        lambda _inputs, session: session.close(),
-        requires=(*run.topology.requires, *((clock,) if clock is not None else ())),
-    )
-
-
 def qualify_overhead(pairs: list[dict], *, expected_cells: set[str]) -> dict:
     """Require three independent paired tests and <=5% cost in every cell."""
     if len(pairs) != 3 or not expected_cells:
@@ -656,11 +448,16 @@ def require_resource_overhead(settings) -> dict | None:
             "whole-VM telemetry overhead qualification is required before measurements"
         )
     value = json.loads(reference.read_verified())
-
-    if (
-        value.get("policy") != telemetry_policy()
-        or value.get("nanolabPackageSha256") != package_fingerprint()
-    ):
+    policy = value.get("policy")
+    if not isinstance(policy, dict) or "samplerSha256" in policy:
+        raise ValueError(
+            "resource telemetry overhead qualification predates the workbench "
+            "(VM sampler policy): re-qualify it with the workbench exporters"
+        )
+    policy = {key: item for key, item in policy.items() if key != "exporterImages"}
+    if policy != telemetry_policy():
+        raise ValueError("resource telemetry overhead export policy changed")
+    if value.get("nanolabPackageSha256") != package_fingerprint():
         raise ValueError("resource telemetry overhead collector scope changed")
     if value.get("resourceScopeSha256") != resource_scope(settings):
         raise ValueError(

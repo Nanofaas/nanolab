@@ -226,8 +226,7 @@ def test_platform_builder_puts_logging_on_the_workbench_platform(tmp_path, monke
     assert platform is not None and platform.loki is not None
     assert platform.resource in topology.requires
     for node in topology.resources.nodes:
-        collector = topology.collectors[node]
-        assert collector is platform.collectors[node]
+        collector = platform.collectors[node]
         assert collector.title == f"Deploy log-collector-{node} on {node}"
         assert platform.loki in collector.requires
         # Collectors start before, and drain after, the control plane.
@@ -269,11 +268,7 @@ def test_site_nodes_are_scraped_through_their_published_exporters(
     environment = EnvironmentConfig.model_validate(
         {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
     ).model_copy(
-        update={
-            "operator_logging": OperatorLogging.model_validate(
-                {"lokiBinary": "/x", "lokiSha256": "0" * 64, "cpus": [5]}
-            )
-        }
+        update={"operator_logging": OperatorLogging.model_validate({"cpus": [5]})}
     )
     site = SiteHost(
         MultipassSite.model_validate(
@@ -345,8 +340,9 @@ def test_site_nodes_are_scraped_through_their_published_exporters(
     }
     assert seen["log_endpoints"] is routes
     assert seen["operator_logging"] is environment.operator_logging
+    assert topology.platform is not None
     for key, route in routes.items():
-        assert route in topology.collectors[key].requires
+        assert route in topology.platform.collectors[key].requires
 
 
 def test_bootstrap_uses_acquired_vm_address(tmp_path, monkeypatch):

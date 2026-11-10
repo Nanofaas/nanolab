@@ -3,14 +3,12 @@
 The epoch loop, the generator and the evidence collector all run on the
 operator. When it swaps (another heavy job on the same host), the loop wakes
 late, prepares are refused and every later epoch is lost, as in the fourth
-phase-1 run. A run refuses to start on a swapping or memory-short operator,
-and records the operator's swap traffic and available memory while it runs.
+phase-1 run. A run refuses to start on a swapping or memory-short operator;
+during the run, the workbench supervisor's swap target watches it.
 """
 
 from __future__ import annotations
 
-import json
-import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,40 +74,3 @@ def require_quiet(
             f"{measured['memAvailableBytes'] / 1024**3:.1f} GiB available, "
             f"below {min_available_bytes / 1024**3:.0f} GiB: free memory first"
         )
-
-
-class OperatorMemoryRecorder:
-    """Append one operator swap sample per interval to `path` until closed."""
-
-    def __init__(
-        self, path: Path, *, interval_seconds: float = 10, proc: Path = Path("/proc")
-    ) -> None:
-        """Store where and how often to record; nothing runs until `start`."""
-        self.path = path
-        self.interval_seconds = interval_seconds
-        self.proc = proc
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run, name="operator-memory", daemon=True
-        )
-
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            try:
-                row = sample(
-                    self.interval_seconds, proc=self.proc, sleep=self._stop.wait
-                )
-            except (OSError, KeyError, ValueError) as error:
-                row = {"atUtc": datetime.now(UTC).isoformat(), "error": str(error)}
-                self._stop.wait(self.interval_seconds)
-            with self.path.open("a") as stream:
-                stream.write(json.dumps(row) + "\n")
-
-    def start(self) -> None:
-        """Begin recording in the background."""
-        self._thread.start()
-
-    def close(self) -> None:
-        """Stop recording; the last sample may be shorter than the interval."""
-        self._stop.set()
-        self._thread.join(timeout=30)

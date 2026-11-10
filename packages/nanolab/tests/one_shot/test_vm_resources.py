@@ -11,110 +11,7 @@ from nanolab.one_shot.vm_resources import (
     summarize_resources,
     telemetry_policy,
 )
-from nanolab.one_shot.vm_sampler import (
-    container_delta,
-    container_identity,
-    cpu_delta,
-    memory_values,
-)
 from nanolab.tasks.resource_tasks import resource_of
-
-
-def test_cpu_excludes_guest_double_count_and_distinguishes_iowait_steal():
-    before = "cpu 100 0 20 500 10 0 0 0 30 0\ncpu0 0\ncpu1 0\n"
-    after = "cpu 160 0 30 520 15 2 3 5 60 0\ncpu0 0\ncpu1 0\n"
-    result = cpu_delta(before, after)
-    assert result["vcpuCount"] == 2
-    assert result["cpuUtilization"] == pytest.approx(75 / 105)
-    assert result["cpuUsedCores"] == pytest.approx(150 / 105)
-    assert result["cpuIowaitFraction"] == pytest.approx(5 / 105)
-    assert result["cpuStealFraction"] == pytest.approx(5 / 105)
-
-
-@pytest.mark.parametrize(
-    "after",
-    ["cpu 1 0 0 0 0 0 0 0\ncpu0 0\n", "cpu 100 0 20 500 10 0 0 0\ncpu0 0\ncpu1 0\n"],
-)
-def test_invalid_or_nonadvancing_cpu_counters_are_not_zero(after):
-    with pytest.raises(ValueError, match=r"invalid|unavailable|reset|scope|three"):
-        cpu_delta("cpu 100 0 20 500 10 0 0 0\ncpu0 0\ncpu1 0\n", after)
-
-
-def test_memory_uses_available_and_bytes_not_free_or_container_memory():
-    row = memory_values(
-        "MemTotal: 2048 kB\nMemAvailable: 512 kB\nMemFree: 64 kB\n"
-        "SwapTotal: 128 kB\nSwapFree: 32 kB\n"
-    )
-    assert row == {
-        "memoryTotalBytes": 2097152,
-        "memoryAvailableBytes": 524288,
-        "memoryUsedBytes": 1572864,
-        "swapTotalBytes": 131072,
-        "swapFreeBytes": 32768,
-        "swapUsedBytes": 98304,
-    }
-    with pytest.raises(ValueError, match=r"invalid|unavailable|reset|scope|three"):
-        memory_values("MemTotal: 2048 kB\n")
-
-
-def test_container_delta_preserves_core_quota_and_throttling_units():
-    previous = {
-        "cpuUsageUsec": 100,
-        "nrPeriods": 10,
-        "nrThrottled": 2,
-        "throttledUsec": 20,
-    }
-    current = {
-        "cpuUsageUsec": 250100,
-        "nrPeriods": 20,
-        "nrThrottled": 6,
-        "throttledUsec": 200020,
-    }
-    row = container_delta(previous, current, elapsed=1, vcpus=2, quota=0.5)
-    assert row["cpuUsedCores"] == 0.25
-    assert row["cpuVmFraction"] == 0.125
-    assert row["cpuQuotaFraction"] == 0.5
-    assert row["throttledPeriodsDelta"] == 4
-    assert row["throttledUsecDelta"] == 200000
-    with pytest.raises(ValueError, match=r"invalid|unavailable|reset|scope|three"):
-        container_delta(current, previous, elapsed=1, vcpus=2, quota=0.5)
-
-
-def test_distinct_container_roles_and_replicas():
-    assert (
-        container_identity(
-            {
-                "Id": "cp",
-                "Name": "/nanolab-one-shot-control-plane",
-                "Config": {"Labels": {}},
-            }
-        )["role"]
-        == "control-plane"
-    )
-    assert (
-        container_identity(
-            {"Id": "fb", "Name": "/nanolab-logs-edge1-abc", "Config": {"Labels": {}}}
-        )["role"]
-        == "collector"
-    )
-    row = container_identity(
-        {
-            "Id": "fn",
-            "Name": "/fn",
-            "Config": {
-                "Labels": {
-                    "io.nanofaas.managed": "true",
-                    "io.nanofaas.function": "edge1/arithmetic-rust",
-                    "io.nanofaas.replica": "3",
-                }
-            },
-        }
-    )
-    assert (row["role"], row["function"], row["replica"]) == (
-        "function",
-        "arithmetic-rust",
-        3,
-    )
 
 
 def test_warmup_and_all_nine_epochs_have_exact_boundary_correlation():
@@ -182,19 +79,6 @@ def test_missing_duplicate_and_failed_run_raw_are_preserved(tmp_path):
     assert result["nodes"]["edge1"]["rawSha256"]
 
 
-def test_frozen_policy_binds_the_actual_sampler_bytes():
-    import hashlib
-
-    from nanolab.one_shot import vm_sampler
-
-    policy = telemetry_policy()
-    assert policy["periodSeconds"] == 1
-    assert (
-        policy["samplerSha256"]
-        == hashlib.sha256(Path(vm_sampler.__file__).read_bytes()).hexdigest()
-    )
-
-
 def test_failed_run_report_reads_vm_raw_without_completion_evidence(tmp_path):
     from nanolab.one_shot.report import render_report
     from tests.one_shot.test_report import manifest
@@ -240,117 +124,6 @@ def test_failed_run_report_reads_vm_raw_without_completion_evidence(tmp_path):
     result = json.loads(output.with_suffix(".json").read_text())
     assert not result["vmResources"]["complete"]
     assert result["vmResources"]["nodes"]["cloud"]["missingSeconds"]
-
-
-@pytest.mark.parametrize("missing_initial", [False, True])
-def test_streams_start_before_load_and_failed_cleanup_reaps_all_transports(
-    tmp_path, monkeypatch, missing_initial
-):
-    from types import SimpleNamespace
-
-    import nanolab.one_shot.vm_resources as module
-    from nanolab.one_shot.vm_resources import VmTelemetrySession
-
-    processes = []
-
-    class Process:
-        def __init__(self, argv, stdout, stderr, stdin):
-            self.returncode = None
-            self.waited = False
-            processes.append(self)
-            from io import BytesIO
-
-            self.stdout = BytesIO(
-                (
-                    json.dumps(
-                        {
-                            "node": argv[argv.index("--node") + 1],
-                            "timestampUtc": "2026-10-10T00:00:00+00:00",
-                            "cpuUtilization": 0.8,
-                        }
-                    )
-                    + "\n"
-                ).encode()
-            )
-            self.stderr = BytesIO()
-
-        def poll(self):
-            return self.returncode
-
-        def wait(self, timeout):
-            self.waited = True
-            self.returncode = 0
-
-        def terminate(self):
-            self.returncode = -15
-
-        def kill(self):
-            self.returncode = -9
-
-    monkeypatch.setattr(module.subprocess, "Popen", Process)
-
-    class Node:
-        def __init__(self, name):
-            self.config = SimpleNamespace(id=name)
-            self.request = SimpleNamespace(name="owned-" + name)
-            self.vm = object()
-            self.provider = SimpleNamespace(
-                transfer_to=lambda *a, **k: SimpleNamespace(return_code=0)
-            )
-
-        def vm_argv(self, _vm, *argv):
-            return ["multipass", "exec", self.request.name, "--", *argv]
-
-        def command(self, argv):
-            if argv[0] == "sha256sum":
-                return SimpleNamespace(
-                    stdout=telemetry_policy()["samplerSha256"] + " file"
-                )
-            if self.config.id == "edge1":
-                raise RuntimeError("transport injected")
-            return SimpleNamespace(stdout="")
-
-    nodes = {name: Node(name) for name in ["edge1", "cloud"]}
-    value = {
-        "anchor": "2026-10-10T00:00:00+00:00",
-        "period_seconds": 3,
-        "run_id": "r",
-        "parameters": {"generator": {"warmupSeconds": 2}},
-    }
-    (tmp_path / "manifest.json").write_text(json.dumps(value))
-    run = SimpleNamespace(
-        run_dir=tmp_path,
-        mode="ewma",
-        settings=SimpleNamespace(functions={"a": {}}),
-        trace=SimpleNamespace(windows=[{}], period_seconds=3),
-        topology=SimpleNamespace(resources=SimpleNamespace(nodes=nodes)),
-    )
-    original = module.read_samples
-    if missing_initial:
-        run.supervision = object()
-        monotonic = [0.0]
-        monkeypatch.setattr(module.time, "monotonic", lambda: monotonic[0])
-        monkeypatch.setattr(
-            module.time,
-            "sleep",
-            lambda seconds: monotonic.__setitem__(0, monotonic[0] + seconds),
-        )
-        monkeypatch.setattr(module, "read_samples", lambda _: ([], 0))
-    session = VmTelemetrySession(
-        run, SimpleNamespace(resource=lambda _: SimpleNamespace(home="/home/ubuntu"))
-    )
-    if missing_initial:
-        monkeypatch.setattr(module, "read_samples", original)
-        assert json.loads((tmp_path / "vm-resources/startup.json").read_text())[
-            "missingNodes"
-        ] == ["edge1", "cloud"]
-    with pytest.raises(RuntimeError, match="cleanup failures"):
-        session.close()
-    assert all(p.waited for p in processes)
-    assert (tmp_path / "vm-resources/edge1.jsonl").read_text()
-    assert json.loads((tmp_path / "vm-resources/coverage.json").read_text())[
-        "cleanupErrors"
-    ]
 
 
 def test_overhead_requires_three_complete_pairs_and_checks_every_node_function():
@@ -399,8 +172,51 @@ def test_scientific_resource_gate_rejects_missing_or_changed_collector(tmp_path)
     settings.observability.vm_resource_overhead = ArtifactReference(
         path=path, sha256=hashlib.sha256(path.read_bytes()).hexdigest()
     )
-    with pytest.raises(ValueError, match=r"scope|changed"):
+    with pytest.raises(ValueError, match="predates the workbench"):
         require_resource_overhead(settings)
+
+
+def _gate(tmp_path, policy):
+    import hashlib
+    from types import SimpleNamespace
+
+    from nanolab.config.one_shot import ArtifactReference
+
+    path = tmp_path / "gate.json"
+    path.write_text(json.dumps({"qualified": True, "policy": policy}))
+    return SimpleNamespace(
+        strict_memory=True,
+        purpose="scientific-experiment",
+        functions={"a": {}, "b": {}},
+        observability=SimpleNamespace(
+            vm_resource_overhead=ArtifactReference(
+                path=path, sha256=hashlib.sha256(path.read_bytes()).hexdigest()
+            )
+        ),
+    )
+
+
+def test_sampler_era_overhead_qualification_must_be_requalified(tmp_path):
+    from nanolab.one_shot.vm_resources import (
+        LEGACY_SAMPLER_POLICY,
+        require_resource_overhead,
+    )
+
+    with pytest.raises(ValueError, match=r"predates the workbench.*re-qualif"):
+        require_resource_overhead(_gate(tmp_path, LEGACY_SAMPLER_POLICY))
+
+
+def test_overhead_qualification_compares_the_export_policy(tmp_path):
+    from nanolab.one_shot.vm_resources import require_resource_overhead
+
+    exported = {**telemetry_policy(), "exporterImages": {"cadvisor": "img@sha256:1"}}
+    # The policy matches (images are bound by the package fingerprint), so the
+    # next check, the package fingerprint, is the one that refuses it.
+    with pytest.raises(ValueError, match="collector scope changed"):
+        require_resource_overhead(_gate(tmp_path, exported))
+    changed = {**telemetry_policy(), "periodSeconds": 1}
+    with pytest.raises(ValueError, match="export policy changed"):
+        require_resource_overhead(_gate(tmp_path, changed))
 
 
 def test_capacity_collection_is_opted_into_by_qualified_resource_gate():
@@ -509,7 +325,7 @@ def test_protocol_rejects_changed_vm_sampling_period(tmp_path, monkeypatch):
     from tests.one_shot.test_synchronized_campaign import protocol_fixture
 
     protocol, _, _ = protocol_fixture(tmp_path, monkeypatch)
-    protocol["analysis"]["vmTelemetry"]["periodSeconds"] = 5
+    protocol["analysis"]["vmTelemetry"]["periodSeconds"] += 1
     with pytest.raises(ValueError, match="telemetry"):
         CampaignProtocol.model_validate(protocol)
 
@@ -546,69 +362,6 @@ def test_missing_gate_fails_before_any_vm_resource_is_composed(tmp_path, monkeyp
             repo_root=tmp_path,
         )
     assert not calls and not (tmp_path / "run").exists()
-
-
-def test_cgroup_read_preserves_memory_swap_and_rejects_pid_incarnation_change(
-    tmp_path, monkeypatch
-):
-    from nanolab.one_shot import vm_sampler
-
-    real_path = Path
-    monkeypatch.setattr(
-        vm_sampler, "Path", lambda value: real_path(tmp_path) / str(value).lstrip("/")
-    )
-    directory = tmp_path / "sys/fs/cgroup/owned"
-    directory.mkdir(parents=True)
-    proc = tmp_path / "proc/99"
-    proc.mkdir(parents=True)
-    (proc / "cgroup").write_text("0::/owned\n")
-    for name, text in {
-        "cpu.stat": (
-            "usage_usec 1000000\nnr_periods 12\nnr_throttled 6\n"
-            "throttled_usec 1500000\n"
-        ),
-        "cpu.max": "10000 100000",
-        "memory.current": "12000000",
-        "memory.max": "67108864",
-        "memory.peak": "24000000",
-        "memory.swap.current": "0",
-        "memory.swap.max": "0",
-        "memory.events": "oom 0\noom_kill 0\n",
-    }.items():
-        (directory / name).write_text(text)
-    identities = iter(["99:123", "99:123"])
-    monkeypatch.setattr(vm_sampler, "process_identity", lambda _: next(identities))
-    inspect = {
-        "Id": "abc",
-        "Name": "/fn",
-        "State": {"Pid": 99, "Running": True},
-        "Config": {
-            "Labels": {
-                "io.nanofaas.managed": "true",
-                "io.nanofaas.function": "edge1/a",
-                "io.nanofaas.replica": "2",
-            }
-        },
-    }
-    row = vm_sampler.read_container(inspect)
-    assert row["memoryLimitBytes"] == 67108864 and row["memoryCurrentBytes"] == 12000000
-    assert row["swapLimitBytes"] == 0 and row["cpuQuotaCores"] == 0.1
-    assert row["throttledUsec"] == 1500000
-    identities = iter(["99:123", "99:124"])
-    with pytest.raises(ValueError, match="incarnation"):
-        vm_sampler.read_container(inspect)
-
-
-def test_cached_docker_pid_cannot_be_reused_as_another_container(monkeypatch):
-    from nanolab.one_shot import vm_sampler
-    from nanolab.one_shot.vm_sampler import read_container
-
-    # Fail before touching a cgroup when a recycled PID disagrees with the
-    # process incarnation captured with the Docker inventory.
-    monkeypatch.setattr(vm_sampler, "process_identity", lambda _: "99:124")
-    inspect = {"State": {"Pid": 99, "Running": True}, "_samplerIncarnation": "99:123"}
-    with pytest.raises(ValueError, match="cached Docker PID"):
-        read_container(inspect)
 
 
 def test_missing_container_counters_invalidate_resource_coverage(tmp_path):
@@ -648,93 +401,6 @@ def test_missing_container_counters_invalidate_resource_coverage(tmp_path):
     ]
 
 
-def test_pipe_only_transport_streams_before_exit_and_retains_terminal_bytes(
-    tmp_path, monkeypatch
-):
-    import subprocess
-    import sys
-    from types import SimpleNamespace
-
-    import nanolab.one_shot.vm_resources as module
-
-    # Multipass rejects nonpollable output descriptors. Use real child pipes,
-    # including a stderr payload larger than pipe capacity before the first row.
-    child = tmp_path / "pipe_only_transport.py"
-    child.write_text(
-        "import json, os, signal, stat, sys, time\n"
-        "if not all(stat.S_ISFIFO(os.fstat(fd).st_mode) for fd in (1, 2)):\n"
-        "    sys.exit(7)\n"
-        "def stop(*args):\n"
-        "    print(json.dumps({'node':'edge1','terminal':True}), flush=True)\n"
-        "    sys.stderr.write('terminal-partial'); sys.stderr.flush()\n"
-        "    sys.exit(0)\n"
-        "signal.signal(signal.SIGTERM, stop)\n"
-        "sys.stderr.write('x' * 131072); sys.stderr.flush()\n"
-        "print(json.dumps({'node':'edge1','timestampUtc':"
-        "'2026-10-10T00:00:00+00:00','cpuUtilization':0.8}), flush=True)\n"
-        "while True: time.sleep(.1)\n"
-    )
-    processes = []
-    popen = subprocess.Popen
-
-    def start(_argv, **kwargs):
-        process = popen((sys.executable, "-u", str(child)), **kwargs)
-        processes.append(process)
-        return process
-
-    monkeypatch.setattr(module.subprocess, "Popen", start)
-
-    class Node:
-        config = SimpleNamespace(id="edge1")
-        request = SimpleNamespace(name="owned-edge1")
-        vm = object()
-        provider = SimpleNamespace(
-            transfer_to=lambda *args, **kwargs: SimpleNamespace(return_code=0)
-        )
-
-        def vm_argv(self, _vm, *argv):
-            return ["multipass", "exec", self.request.name, "--", *argv]
-
-        def command(self, argv):
-            if argv[0] == "sha256sum":
-                return SimpleNamespace(stdout=telemetry_policy()["samplerSha256"])
-            processes[0].terminate()
-            return SimpleNamespace(stdout="")
-
-    (tmp_path / "manifest.json").write_text(
-        json.dumps(
-            {
-                "anchor": "2026-10-10T00:00:00+00:00",
-                "period_seconds": 3,
-                "run_id": "transport",
-                "parameters": {"generator": {"warmupSeconds": 2}},
-            }
-        )
-    )
-    run = SimpleNamespace(
-        run_dir=tmp_path,
-        mode="ewma",
-        settings=SimpleNamespace(functions={"a": {}}),
-        trace=SimpleNamespace(windows=[{}], period_seconds=3),
-        topology=SimpleNamespace(resources=SimpleNamespace(nodes={"edge1": Node()})),
-    )
-    session = module.VmTelemetrySession(
-        run, SimpleNamespace(resource=lambda _: SimpleNamespace(home="/home/ubuntu"))
-    )
-    assert processes[0].poll() is None
-    directory = tmp_path / "vm-resources"
-    assert json.loads((directory / "edge1.jsonl").read_text())["node"] == "edge1"
-    session.close()
-    assert processes[0].returncode == 0
-    rows = [
-        json.loads(row) for row in (directory / "edge1.jsonl").read_text().splitlines()
-    ]
-    assert rows[-1]["terminal"] is True
-    assert (
-        directory / "edge1.stderr"
-    ).read_bytes() == b"x" * 131072 + b"terminal-partial"
-
-
 @pytest.mark.parametrize(
     ("off_goodput", "on_goodput", "off_p95", "on_p95"),
     [
@@ -772,37 +438,6 @@ def test_excess_cost_is_rejected(off_goodput, on_goodput, off_p95, on_p95):
         "on": {"cell": {"goodput": on_goodput, "p95Seconds": on_p95}},
     }
     assert not qualify_overhead([pair] * 3, expected_cells={"cell"})["qualified"]
-
-
-def test_sampler_preserves_inventory_when_all_cgroup_reads_fail(monkeypatch, capsys):
-    from nanolab.one_shot import vm_sampler
-
-    class Socket:
-        def get_json(self, path):
-            if path == "/containers/json":
-                return [
-                    {
-                        "Id": "cp",
-                        "Names": ["/nanolab-one-shot-control-plane"],
-                        "Labels": {},
-                    },
-                    {"Id": "log", "Names": ["/nanolab-logs-edge"], "Labels": {}},
-                ]
-            raise OSError("container counters unavailable")
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(vm_sampler, "DockerSocket", Socket)
-    monkeypatch.setattr(vm_sampler.signal, "signal", lambda *_: None)
-    vm_sampler.sample_loop("edge", duration=0.01)
-    row = json.loads(capsys.readouterr().out.splitlines()[0])
-    assert {item["role"] for item in row["containerInventory"]} == {
-        "control-plane",
-        "collector",
-    }
-    assert row["containers"] == []
-    assert len(row["errors"]) == 2
 
 
 def test_one_second_policy_summary_unchanged(tmp_path):
