@@ -156,6 +156,7 @@ def _build(
         lambda ports: events.append(("operator", "preflight", tuple(ports))),
     )
     monkeypatch.setattr(platform, "_loki_log", lambda _name: "loki says hi\n")
+    monkeypatch.setattr(platform, "_operator_container_exists", lambda _name: False)
     monkeypatch.setattr(
         platform,
         "_pull_loadgen",
@@ -610,6 +611,23 @@ def test_the_tsdb_is_removed_once_its_snapshot_is_in_the_run(tmp_path, monkeypat
         ("operator", "undeploy", (_op(tmp_path, "prometheus"),))
     )
     assert not tsdb.parent.exists()
+
+
+def test_the_tsdb_stays_while_prometheus_is_still_up(tmp_path, monkeypatch):
+    """A failed undeploy leaves the container on the TSDB: nothing is deleted."""
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    asked: list[str] = []
+    monkeypatch.setattr(
+        platform, "_operator_container_exists", lambda name: asked.append(name) or True
+    )
+    run = _op(tmp_path, "x").removeprefix("x-operator-")
+    tsdb = tmp_path / "workspace" / ".workbench" / run / "prometheus"
+    tsdb.mkdir(parents=True)
+    _run(built, events)
+    assert asked == [f"wb-{_op(tmp_path, 'prometheus')}"]
+    assert tsdb.is_dir()
+    assert not any(action == "find" for _h, action, _p in events)
 
 
 def test_the_tsdb_stays_without_a_snapshot(tmp_path, monkeypatch):

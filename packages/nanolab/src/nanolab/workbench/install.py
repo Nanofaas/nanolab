@@ -40,6 +40,7 @@ def ensure_installed() -> Path:
     collections = workbench_collections_path()
     if _installed_version(collections) == _pinned_version():
         return collections
+    _ansible_python()  # galaxy on the wrong ansible fails less legibly
     done = subprocess.run(
         [
             "ansible-galaxy",
@@ -76,13 +77,8 @@ def _run(*argv: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 127, "", str(error))
 
 
-def check_operator(ports: Iterable[tuple[str, int]]) -> None:
-    """Refuse a run the operator host cannot hold, before anything deploys.
-
-    ansible-core 2.20 on PATH whose Python imports `requests` (the
-    community.docker modules need it), a reachable Docker, and every
-    operator-side port (`(address, port)`) still free.
-    """
+def _ansible_python() -> str:
+    """Refuse an ansible other than core 2.20; return the Python it runs on."""
     version = _run("ansible", "--version").stdout
     core = re.search(r"core (\d+\.\d+)\.", version)
     python = re.search(r"python version = .*\((/[^)]+)\)\s*$", version, re.M)
@@ -91,9 +87,20 @@ def check_operator(ports: Iterable[tuple[str, int]]) -> None:
             f"the workbench needs ansible-core {ANSIBLE_CORE}.x on PATH; "
             f"`ansible --version` says: {version.strip()[:200] or 'nothing'}"
         )
-    if _run(python[1], "-c", "import requests").returncode:
+    return python[1]
+
+
+def check_operator(ports: Iterable[tuple[str, int]]) -> None:
+    """Refuse a run the operator host cannot hold, before anything deploys.
+
+    ansible-core 2.20 on PATH whose Python imports `requests` (the
+    community.docker modules need it), a reachable Docker, and every
+    operator-side port (`(address, port)`) still free.
+    """
+    python = _ansible_python()
+    if _run(python, "-c", "import requests").returncode:
         raise RuntimeError(
-            f"ansible's Python ({python[1]}) cannot import requests, which "
+            f"ansible's Python ({python}) cannot import requests, which "
             "community.docker needs: install it there"
         )
     if (docker := _run("docker", "info")).returncode:

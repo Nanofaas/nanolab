@@ -152,6 +152,19 @@ def _loki_log(name: str) -> str:
     return done.stdout + done.stderr
 
 
+def _operator_container_exists(name: str) -> bool:
+    """Whether a container named `name` is still on the operator."""
+    return (
+        subprocess.run(
+            ("docker", "container", "inspect", name),
+            capture_output=True,
+            check=False,
+            timeout=30,
+        ).returncode
+        == 0
+    )
+
+
 def _as_root(path: Path, *argv: str) -> None:
     """Run `argv` as root on `path`, mounted at /data.
 
@@ -460,8 +473,13 @@ def one_shot_platform(
 
     def drop_tsdb(_inputs: TaskInputs, _value: None) -> None:
         # Released after Prometheus: its TSDB goes once the snapshot is kept.
+        # A failed undeploy leaves Prometheus up on its TSDB: keep it then.
         kept = workbench_dir / prometheus_instance.name / "prometheus-snapshot.tar.gz"
-        if kept.is_file() and tsdb.is_dir():
+        if (
+            kept.is_file()
+            and tsdb.is_dir()
+            and not _operator_container_exists(f"wb-{prometheus_instance.name}")
+        ):
             _as_root(tsdb, "find", "/data", "-mindepth", "1", "-delete")
             shutil.rmtree(tsdb.parent)
 

@@ -28,6 +28,27 @@ def _manifest(path, version):
     )
 
 
+@pytest.fixture
+def ansible_ok(monkeypatch):
+    monkeypatch.setattr(install, "_ansible_python", lambda: "/usr/bin/python3")
+
+
+def test_install_refuses_the_wrong_ansible_before_galaxy(tmp_path, monkeypatch):
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
+    seen = []
+    monkeypatch.setattr(
+        install.subprocess,
+        "run",
+        lambda argv, **k: (
+            seen.append(argv[0])
+            or subprocess.CompletedProcess(argv, 0, "ansible [core 2.16.3]\n", "")
+        ),
+    )
+    with pytest.raises(RuntimeError, match=r"needs ansible-core 2\.20"):
+        install.InstallWorkbench().run(INPUTS)
+    assert "ansible-galaxy" not in seen
+
+
 def test_install_skipped_when_version_present(tmp_path, monkeypatch):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
     _manifest(tmp_path / ".ansible/collections", "0.1.0")
@@ -38,7 +59,7 @@ def test_install_skipped_when_version_present(tmp_path, monkeypatch):
     assert outcome.value == tmp_path / ".ansible/collections"
 
 
-def test_install_runs_galaxy_with_pin(tmp_path, monkeypatch):
+def test_install_runs_galaxy_with_pin(tmp_path, monkeypatch, ansible_ok):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
     seen = []
     monkeypatch.setattr(
@@ -55,7 +76,7 @@ def test_install_runs_galaxy_with_pin(tmp_path, monkeypatch):
     assert argv[argv.index("-p") + 1] == str(outcome.value)
 
 
-def test_install_failure_raises(tmp_path, monkeypatch):
+def test_install_failure_raises(tmp_path, monkeypatch, ansible_ok):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
     monkeypatch.setattr(
         install.subprocess,
@@ -66,7 +87,7 @@ def test_install_failure_raises(tmp_path, monkeypatch):
         install.InstallWorkbench().run(INPUTS)
 
 
-def test_install_forces_over_a_stale_version(tmp_path, monkeypatch):
+def test_install_forces_over_a_stale_version(tmp_path, monkeypatch, ansible_ok):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
     _manifest(tmp_path / ".ansible/collections", "0.0.9")
     seen = []
