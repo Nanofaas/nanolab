@@ -88,6 +88,9 @@
         append: true
       when: vm_user != "root"
 
+    - name: Refresh SSH session to apply Docker group membership
+      ansible.builtin.meta: reset_connection
+
     - name: Download uv installer
       ansible.builtin.get_url:
         url: https://astral.sh/uv/install.sh

@@ -1,0 +1,20 @@
+# Adapt node IDs to the scenario; copy this file outside the installed package.
+provider: multipass
+provisioning: opentofu
+opentofu:
+  binary: tofu
+  cliConfigFile: /absolute/path/to/multipass-mirror.tfrc
+  # storagePath: /var/snap/multipass/common/data/multipassd
+roles:
+  stack:
+    name: one-shot
+sites:
+  lab:
+    ssh: michele@149.132.179.35
+    address: 149.132.179.35
+    architecture: arm64
+    vmSshKey: ~/.ssh/id_ed25519_nanolab_vm
+placement:
+  edge-0: lab
+  edge-1: lab
+  cloud: lab

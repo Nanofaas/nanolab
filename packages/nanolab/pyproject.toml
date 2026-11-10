@@ -19,8 +19,8 @@ dependencies = [
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
-    "sonata-engine==0.7.0",
-    "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.7.0",
+    "sonata-engine==0.7.1",
+    "sonata-tasks[shell,prometheus,multipass,azure,proxmox]==0.7.1",
     "tui-toolkit>=0.6.0,<0.7",
     "jsonschema>=4.23",
 ]
@@ -54,6 +54,8 @@ nanolab = [
     # They must resolve from
     # the installed distribution and not from a checkout beside it.
     "assets/k6/*",
+    "assets/terraform/multipass/*.tf",
+    "assets/terraform/multipass/.terraform.lock.hcl",
     "assets/diagnostics/*",
     "assets/containerd-rootless/*",
     "assets/experiment02/*",

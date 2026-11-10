@@ -85,10 +85,10 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
             requires=(resource,),
             endpoints=dict.fromkeys(["edge-0", "edge-1", "cloud"], resource),
             probes={},
+            platform=SimpleNamespace(loadgen=lambda **_: resource),
         ),
     )
     monkeypatch.setattr(target + "clock_health_resource", lambda **_: resource)
-    monkeypatch.setattr(target + "loadgen_resource", lambda *_, **__: resource)
     monkeypatch.setattr(target + "evidence_collector_resource", lambda *_: resource)
 
     class Preflight(Task):
@@ -162,9 +162,9 @@ def test_plan_passes_preflight_and_evidence_through_explicit_step_scopes(
             resources=topology.resources,
             endpoints=dict.fromkeys(["edge-0", "edge-1", "cloud"], resource),
             probes={},
+            platform=SimpleNamespace(loadgen=lambda **_: resource),
             distribution=resource,
             function_settings={},
-            platform=None,
             neighbor_graph={},
             node_function_settings={},
         )

@@ -115,11 +115,16 @@ def _build(
         if fail in names and action in ("deploy", "collect"):
             raise RuntimeError(f"{action} failed")
         if action == "collect" and names[0].startswith("log-collector-"):
-            path = Path(saved["collect_dir"]) / names[0] / "metrics.txt"
+            path = Path(saved["collect_dir"]) / role / names[0] / "metrics.txt"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(metrics.get(role, DRAINED))
         if action == "collect" and names[0].startswith("prometheus-"):
-            path = Path(saved["collect_dir"]) / names[0] / "prometheus-snapshot.tar.gz"
+            path = (
+                Path(saved["collect_dir"])
+                / "localhost"
+                / names[0]
+                / "prometheus-snapshot.tar.gz"
+            )
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"snapshot")
         if action == "deploy":
@@ -132,6 +137,13 @@ def _build(
     def failing_loki(**_kwargs):
         raise RuntimeError("no Loki in tests")
 
+    monkeypatch.setattr(
+        components.subprocess,
+        "run",
+        lambda argv, **_kwargs: SimpleNamespace(
+            stdout=SEEN[argv[-1].removeprefix("wb-")].get("cpuset") or ""
+        ),
+    )
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path / "workspace"))
     monkeypatch.setattr(playbook, "run_bootstrap_operations", bootstrap)
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
@@ -387,6 +399,14 @@ def test_forwarded_nodes_are_scraped_through_their_forwards(tmp_path, monkeypatc
             SEEN[f"{component}-{n}"]["config"]["bind"] == "0.0.0.0" for n in NODES
         )
         assert "bind" not in SEEN[_op(tmp_path, component)]["config"]
+    # cpufreq can block in the host kernel and is not part of these measurements.
+    for host in ("operator", *NODES):
+        name = (
+            _op(tmp_path, "node-exporter")
+            if host == "operator"
+            else f"node-exporter-{host}"
+        )
+        assert SEEN[name]["config"]["cpufreq"] is False
     # cAdvisor's 5 s default housekeeping aliases a 5 s irate.
     for host in ("operator", *NODES):
         name = _op(tmp_path, "cadvisor") if host == "operator" else f"cadvisor-{host}"
@@ -418,9 +438,9 @@ def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
         assert collector["config"]["cpus"] == LOGS.cpu
         assert collector["config"]["memory_mib"] == LOGS.memory_mib
     assert all(
-        "cpuset" not in SEEN[name]
+        SEEN[name].get("cpuset") == "0"
         for name in SEEN
-        if not name.startswith(("loki-", "log-collector-"))
+        if "-operator-" in name and not name.startswith("loki-")
     )
 
 
@@ -855,3 +875,101 @@ def test_the_loki_log_reads_the_run_container(tmp_path, monkeypatch):
     )
     _run(built, events)
     assert names == ["wb-" + _op(tmp_path, "loki")]
+
+
+@pytest.mark.parametrize(
+    "failure", ["archive", "checksum", "stop", "export", "receipt", None]
+)
+def test_collector_archive_failure_preserves_owned_vm(tmp_path, monkeypatch, failure):
+    from nanolab.config.one_shot import OneShotConfig
+    from nanolab.one_shot.infrastructure import _owned_node
+
+    events = []
+    deleted = []
+    config = OneShotConfig.model_validate(
+        {
+            "provider": "multipass",
+            "purpose": "workflow-validation",
+            "nodes": [
+                {"id": "edge-1", "kind": "edge"},
+                {"id": "edge-2", "kind": "edge"},
+                {"id": "cloud-1", "kind": "cloud"},
+            ],
+            "functions": {"f": {"input": {}}},
+        }
+    )
+    nodes = {}
+    for node in config.nodes:
+        if node.id not in NODES:
+            continue
+        fake = _node(node.id, events).provider
+        fake.vm_exists = lambda _r: False
+        fake.ensure_running = lambda _r: SimpleNamespace(return_code=0)
+        fake.connection_host = lambda _r: VM.host
+        fake.teardown = lambda r: (
+            deleted.append(r.name),
+            SimpleNamespace(return_code=0),
+        )[1]
+        if failure == "stop":
+            original_exec = fake.exec_argv
+            fake.exec_argv = lambda r, argv, remote_dir=None, execute=original_exec: (
+                SimpleNamespace(return_code=1, stdout="", stderr="stop failed")
+                if argv[:2] == ("docker", "stop")
+                else execute(r, argv, remote_dir)
+            )
+        nodes[node.id] = _owned_node(
+            node,
+            VmRequest(lifecycle="multipass", name=node.id, user="ubuntu"),
+            fake,
+            config=config,
+            generator=resource_of("generator", lambda _i: "host", lambda _i, _v: None),
+            target_cpus=None,
+            pin=lambda *_a: None,
+            stop_argv=None,
+        )
+    built = _build(tmp_path, monkeypatch, events, nodes=nodes)
+    if failure is not None and failure != "stop":
+
+        def archive_failed(*_args):
+            raise OSError(
+                "checksum mismatch" if failure == "checksum" else "archive failed"
+            )
+
+        monkeypatch.setattr(platform, "archive_node_dir", archive_failed)
+    if failure == "export":
+
+        def export_failed(**_kwargs):
+            raise RuntimeError("export failed too")
+
+        monkeypatch.setattr(platform, "export_collector", export_failed)
+    if failure == "receipt":
+        original_write = Path.write_text
+
+        def write(path, *args, **kwargs):
+            if path.name == "recovery.json":
+                raise OSError("receipt disk full")
+            return original_write(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", write)
+    if failure is None:
+        _run(built, events)
+        assert set(deleted) == set(NODES)
+        assert not any(n.recovery for n in nodes.values())
+    else:
+        with pytest.raises(Exception, match=r"failed|mismatch"):
+            _run(built, events)
+        assert deleted == []
+        assert all(n.recovery for n in nodes.values())
+    assert len(_of(events, "undeploy")) == len(_deploy_order(tmp_path))
+
+
+def test_platform_loadgen_keeps_placement_without_a_logical_schedule(
+    tmp_path, monkeypatch
+):
+    events = []
+    built = _build(tmp_path, monkeypatch, events)
+    from nanolab.tasks.resource_tasks import acquire_now
+
+    resource = built.loadgen(run_dir=tmp_path / "run", vus=1, duration=1)
+    value = acquire_now(resource, TaskInputs.empty())
+    assert SEEN[value.deployed.instance]["cpuset"] == "0"

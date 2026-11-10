@@ -333,14 +333,19 @@ def _owned_node(
     ordinal: int = 0,
     architecture: str | None = None,
     tunnel_journal: Path | None = None,
+    acquired_vm: Resource[VmInfo] | None = None,
 ) -> NodeResource:
     """Own one node's VM: refuse adoption, pin it, retain it for raw recovery."""
     # Ownership is checked at acquire time, including partial launch compensation.
-    base = provisioned_vm(
-        title=f"Acquire {node.id} VM",
-        request=request,
-        provider=provider,
-        after_ensure=after_ensure,
+    base = (
+        acquired_vm
+        if acquired_vm is not None
+        else provisioned_vm(
+            title=f"Acquire {node.id} VM",
+            request=request,
+            provider=provider,
+            after_ensure=after_ensure,
+        )
     )
     recovery: list[str] = []
     live: list[VmInfo] = []
@@ -372,7 +377,7 @@ def _owned_node(
                 forwarders.stop()
 
     def acquire(inputs):
-        if provider.vm_exists(request):
+        if acquired_vm is None and provider.vm_exists(request):
             raise RuntimeError(f"refusing to adopt existing VM {request.name}")
         value = acquire_now(base, inputs)
         try:
@@ -480,20 +485,44 @@ def build_one_shot_resources(
     placement = config.host_cpu_placement
     facts = host_cpu.validate_host_placement(placement) if placement else None
     generator = operator_generator(namespace, placement)
-    nodes = {
-        node.id: _owned_node(
-            node,
-            request,
-            provider_for(request, root),
+    requests = {node.id: _multipass_request(namespace, node) for node in config.nodes}
+    providers = {key: provider_for(request, root) for key, request in requests.items()}
+    nodes: dict[str, NodeResource] = {}
+    bindings = {}
+    if environment.provisioning == "opentofu":
+        from nanolab.one_shot.terraform import prepare_fleet
+
+        if run_dir is None:
+            raise ValueError(
+                "OpenTofu provisioning requires a persistent run directory"
+            )
+        bindings = prepare_fleet(
             config=config,
-            generator=generator,
-            target_cpus=placement.nodes[node.id].cpus if placement else None,
-            pin=host_cpu.pin_vm,
-            stop_argv=lambda name: ("multipass", "stop", name),
+            environment=environment,
+            namespace=namespace,
+            name="local",
+            requests=requests,
+            provider=next(iter(providers.values())),
+            run_dir=run_dir,
+            resources=nodes,
         )
-        for node in config.nodes
-        for request in (_multipass_request(namespace, node),)
-    }
+    nodes.update(
+        {
+            node.id: _owned_node(
+                node,
+                request,
+                providers[node.id],
+                config=config,
+                generator=generator,
+                target_cpus=placement.nodes[node.id].cpus if placement else None,
+                pin=host_cpu.pin_vm,
+                stop_argv=lambda name: ("multipass", "stop", name),
+                acquired_vm=bindings.get(node.id),
+            )
+            for node in config.nodes
+            for request in (requests[node.id],)
+        }
+    )
     return OneShotResources(
         nodes, generator, host_cpu_placement=placement, host_cpu_facts=facts
     )

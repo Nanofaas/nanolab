@@ -27,3 +27,16 @@ def test_concurrent_different_publications_do_not_overwrite(tmp_path):
         results = list(pool.map(publish, [b"a", b"b"]))
     assert sum(result is not None for result in results) == 1
     assert path.read_bytes() in (b"a", b"b")
+
+
+@pytest.mark.parametrize("filename", ["main.tf", ".terraform.lock.hcl"])
+def test_campaign_fingerprint_binds_terraform_assets(tmp_path, monkeypatch, filename):
+    from nanolab.tasks.one_shot import artifacts
+
+    monkeypatch.setattr(artifacts, "files", lambda _: tmp_path)
+    asset = tmp_path / "assets/terraform/multipass" / filename
+    asset.parent.mkdir(parents=True)
+    asset.write_text("original")
+    before = artifacts.package_fingerprint()
+    asset.write_text("changed")
+    assert artifacts.package_fingerprint() != before

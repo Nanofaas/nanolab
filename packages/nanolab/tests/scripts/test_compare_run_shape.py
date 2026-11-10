@@ -2,7 +2,10 @@
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
+
+import pytest
 
 SCRIPT = Path(__file__).parents[4] / "scripts/compare-run-shape.py"
 spec = importlib.util.spec_from_file_location("compare_run_shape", SCRIPT)
@@ -67,7 +70,7 @@ def test_missing_series_reported(tmp_path):
     reference = run(tmp_path / "old")
     new = run(tmp_path / "new", metrics={"nanofaas_runtime_active_handlers": 1})
     assert shape.compare(reference, new) == [
-        "metrics series: missing in NEW: queue_depth"
+        "metrics.jsonl: metrics series: missing in NEW: queue_depth"
     ]
 
 
@@ -75,7 +78,7 @@ def test_extra_row_key_reported(tmp_path):
     reference = run(tmp_path / "old")
     new = run(tmp_path / "new", row_extra={"surprise": 1})
     assert shape.compare(reference, new) == [
-        "vm-resources row keys: extra in NEW: surprise"
+        "vm-resources/edge-1.jsonl: vm-resources row keys: extra in NEW: surprise"
     ]
 
 
@@ -86,11 +89,11 @@ def test_sampler_only_keys_and_implausible_values(tmp_path):
     rows = new / "vm-resources/edge-1.jsonl"
     rows.write_text(rows.read_text().replace("600000000", "6"))
     assert shape.compare(reference, new) == [
-        "vm-resources edge-1 median memoryUsedBytes: 6e+08 vs 6: "
+        "vm-resources/edge-1.jsonl median memoryUsedBytes: 6e+08 vs 6: "
         "not the same order of magnitude"
     ]
     rows.write_text("")
-    assert "vm-resources edge-1: empty in NEW" in shape.compare(reference, new)
+    assert "vm-resources/edge-1.jsonl: empty in NEW" in shape.compare(reference, new)
 
 
 def test_a_report_that_does_not_regenerate_is_reported(tmp_path):
@@ -113,10 +116,11 @@ def test_loki_kind_label_and_coverage_key_differences(tmp_path):
         json.dumps({"complete": True, "nodes": {"edge-1": {}}})
     )
     assert shape.compare(reference, new) == [
-        "metrics labels: missing in NEW: replica",
-        "metrics labels: extra in NEW: pod",
-        "Loki event kinds: missing in NEW: DISPATCH",
-        "coverage keys: missing in NEW: nodes.*.missingSeconds",
+        "logging/edge-1/queue-events.jsonl: Loki event kinds: missing in NEW: DISPATCH",
+        "metrics.jsonl: metrics labels: missing in NEW: replica",
+        "metrics.jsonl: metrics labels: extra in NEW: pod",
+        "vm-resources/coverage.json: coverage keys: missing in NEW: "
+        "nodes.edge-1.missingSeconds",
     ]
 
 
@@ -138,8 +142,9 @@ def test_fault_kinds_come_from_anomalies_and_failure_causes(tmp_path):
         json.dumps({"anomalies": [{"target": "edge-1", "kind": "scrape_up"}]})
     )
     assert shape.compare(reference, new) == [
-        "supervisor fault kinds: missing in NEW: required service stopped",
-        "supervisor fault kinds: extra in NEW: scrape_up",
+        "workbench/supervisor-status.json: extra file in NEW",
+        "supervision.jsonl: supervisor fault kinds: missing in NEW: "
+        "required service stopped",
     ]
 
 
@@ -159,6 +164,47 @@ def test_nodes_missing_in_new_are_reported(tmp_path):
     )
     new = run(tmp_path / "new")
     assert shape.compare(reference, new) == [
-        "vm-resources cloud: node file missing in NEW",
-        "coverage.json cloud: node missing in NEW",
+        "vm-resources/cloud.jsonl: file missing in NEW",
+        "vm-resources/coverage.json: coverage keys: missing in NEW: "
+        "nodes.cloud.missingSeconds",
+        "vm-resources/coverage.json cloud: node missing in NEW",
     ]
+
+
+@pytest.mark.parametrize(
+    "damage", ["missing-trial", "empty-metrics", "memory", "coverage", "schema"]
+)
+def test_nested_trials_do_not_cover_each_others_missing_evidence(tmp_path, damage):
+    old, new = tmp_path / "old", tmp_path / "new"
+    for root in (old, new):
+        for trial in ("trial-a", "trial-b"):
+            run(root / trial)
+    target = new / "trial-b"
+    if damage == "missing-trial":
+        shutil.rmtree(target)
+    elif damage == "empty-metrics":
+        (target / "metrics.jsonl").write_text("")
+    elif damage == "memory":
+        # A global median across trials used to hide this impossible value.
+        path = target / "vm-resources/edge-1.jsonl"
+        path.write_text(path.read_text().replace("600000000", "6"))
+    elif damage == "coverage":
+        (target / "vm-resources/coverage.json").write_text(
+            json.dumps({"complete": True, "nodes": {}})
+        )
+    else:
+        path = target / "metrics.jsonl"
+        path.write_text(path.read_text().replace('"queue_depth": 3', '"different": 3'))
+        # Both runs have the same global union, but opposite schema per trial.
+        path = old / "trial-a/metrics.jsonl"
+        path.write_text(path.read_text().replace('"queue_depth": 3', '"different": 3'))
+    differences = shape.compare(old, new)
+    assert differences
+    assert any("trial-b/" in message for message in differences)
+
+
+def test_identical_nested_trials_pass(tmp_path):
+    for root in (tmp_path / "old", tmp_path / "new"):
+        run(root / "capacity/trial-a")
+        run(root / "campaign/trial-b")
+    assert shape.compare(tmp_path / "old", tmp_path / "new") == []

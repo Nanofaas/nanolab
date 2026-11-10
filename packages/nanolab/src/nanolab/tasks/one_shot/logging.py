@@ -482,6 +482,34 @@ def archive_node_dir(node, source: str, archive: Path) -> None:
     node.command(("rmdir", private))
 
 
+def retain_collector_for_recovery(
+    node, *, run_dir: Path, storage: str, error: Exception
+) -> None:
+    """Protect the VM before best-effort reporting of unarchived collector data."""
+    node.recovery.append(f"collector storage {storage}: {error}")
+    directory = run_dir / "logging" / node.config.id
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "recovery.json").write_text(
+            json.dumps(
+                {
+                    "node": node.config.id,
+                    "vm": getattr(node.request, "name", None),
+                    "storage": storage,
+                    "reason": str(error),
+                    "cleanupComplete": False,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    except OSError as receipt_error:
+        error.add_note(f"Recovery receipt unavailable: {receipt_error}")
+        logging.getLogger(__name__).error(
+            "Recovery receipt unavailable: %s", receipt_error
+        )
+
+
 def export_collector(
     *, node, name, run_dir, logs, session, final_metrics, archive_issue, issues=()
 ):
@@ -694,7 +722,9 @@ def collector_resource(
             archive_state()
         except Exception as error:
             archive_issue = str(error)
-            node.recovery.append(f"collector volume {volume}: {archive_issue}")
+            retain_collector_for_recovery(
+                node, run_dir=run_dir, storage=volume, error=error
+            )
             logging.getLogger(__name__).error(
                 "Recoverable collector state archive failed for %s: %s",
                 node.config.id,
@@ -733,24 +763,6 @@ def collector_resource(
                 raise RuntimeError("collector volume cleanup unconfirmed")
         created = False
         if archive_issue:
-            try:
-                (run_dir / "logging" / node.config.id / "recovery.json").write_text(
-                    json.dumps(
-                        {
-                            "node": node.config.id,
-                            "vm": getattr(node.request, "name", None),
-                            "volume": volume,
-                            "reason": archive_issue,
-                            "cleanupComplete": False,
-                        },
-                        indent=2,
-                    )
-                    + "\n"
-                )
-            except OSError as error:
-                logging.getLogger(__name__).error(
-                    "Recovery receipt unavailable: %s", error
-                )
             raise RuntimeError(
                 "collector state archive failed; volume and containing VM retained: "
                 + archive_issue

@@ -2,8 +2,8 @@
 """Compare the evidence shape of two one-shot runs: REFERENCE_RUN NEW_RUN.
 
 Exit 0 when the runs have the same shape; otherwise print every difference and
-exit 1. Each facet is a set of names gathered from every matching file under
-the run directory (nested campaign and capacity runs included):
+exit 1. Each facet is compared within the same relative evidence file, including
+nested campaign and capacity trials; evidence in another trial cannot fill a gap:
 
 - metrics series / metrics labels: the Prometheus series names and label keys
   the reports read. `report.py` reads them only from `metrics.jsonl`
@@ -107,27 +107,26 @@ def _row_keys(row: dict) -> set[str]:
     return keys
 
 
-def _loki_kinds(run: Path) -> set[str]:
-    kinds = set()
-    for path in run.rglob("logging/*/queue-events.jsonl"):
-        kinds |= {
+def _loki_kinds(path: Path) -> set[str]:
+    if path.name == "queue-events.jsonl":
+        return {
             str(row["attributes"]["event"])
             for row in _rows(path)
             if isinstance(row.get("attributes"), dict) and "event" in row["attributes"]
         }
-    for path in run.rglob("logging/*/loki-query.json"):
-        try:
-            streams = json.loads(path.read_text())["data"]["result"]
-        except (ValueError, KeyError, TypeError):
-            continue
-        for stream in streams:
-            for _stamp, line in stream.get("values", []):
-                try:
-                    logger = json.loads(line).get("logger")
-                except (ValueError, AttributeError):
-                    continue
-                if logger:
-                    kinds.add(f"logger:{logger}")
+    kinds = set()
+    try:
+        streams = json.loads(path.read_text())["data"]["result"]
+    except (ValueError, KeyError, TypeError):
+        return kinds
+    for stream in streams:
+        for _stamp, line in stream.get("values", []):
+            try:
+                logger = json.loads(line).get("logger")
+            except (ValueError, AttributeError):
+                continue
+            if logger:
+                kinds.add(f"logger:{logger}")
     return kinds
 
 
@@ -137,53 +136,58 @@ def _fault_kind(cause: str) -> str:
     return parts[1] if len(parts) == 3 else cause
 
 
-def _coverage_nodes(run: Path) -> set[str]:
+def _coverage_nodes(run: Path) -> set[tuple[str, str]]:
     return {
-        node
+        (str(path.relative_to(run)), node)
         for path in run.rglob("vm-resources/coverage.json")
         for node in json.loads(path.read_text()).get("nodes") or {}
     }
 
 
-def facets(run: Path) -> dict[str, set[str]]:
-    """Return each shape facet of `run` as a set of names."""
-    series, labels, rows, coverage, faults = set(), set(), set(), set(), set()
+def facets(run: Path) -> dict[tuple[str, str], set[str]]:
+    """Return shape facets keyed by relative evidence path and facet name."""
+    found = {}
     for path in run.rglob("metrics.jsonl"):
+        series, labels = set(), set()
         for row in _rows(path):
             series |= set(row.get("metrics") or {})
             labels |= set(row) - {"metrics"}
+        relative = str(path.relative_to(run))
+        found[relative, "metrics series"] = series
+        found[relative, "metrics labels"] = labels
     for path in _vm_files(run):
+        keys = set()
         for row in _rows(path):
-            rows |= _row_keys(row) - SAMPLER_ONLY
+            keys |= _row_keys(row) - SAMPLER_ONLY
+        found[str(path.relative_to(run)), "vm-resources row keys"] = keys
     for path in run.rglob("vm-resources/coverage.json"):
         value = json.loads(path.read_text())
-        coverage |= set(value)
-        for node in (value.get("nodes") or {}).values():
-            coverage |= {f"nodes.*.{key}" for key in node}
+        keys = set(value)
+        for node, data in (value.get("nodes") or {}).items():
+            keys |= {f"nodes.{node}.{key}" for key in data}
+        found[str(path.relative_to(run)), "coverage keys"] = keys
+    for pattern in ("logging/*/queue-events.jsonl", "logging/*/loki-query.json"):
+        for path in run.rglob(pattern):
+            found[str(path.relative_to(run)), "Loki event kinds"] = _loki_kinds(path)
     for path in run.rglob("supervision.jsonl"):
-        faults |= {
+        found[str(path.relative_to(run)), "supervisor fault kinds"] = {
             _fault_kind(str(row.get("cause")))
             for row in _rows(path)
             if row.get("kind") == "operational.failure"
         }
     for path in run.rglob("workbench/supervisor-status.json"):
         anomalies = json.loads(path.read_text()).get("anomalies") or []
-        faults |= {str(anomaly.get("kind")) for anomaly in anomalies}
-    return {
-        "metrics series": series,
-        "metrics labels": labels,
-        "Loki event kinds": _loki_kinds(run),
-        "vm-resources row keys": rows,
-        "coverage keys": coverage,
-        "supervisor fault kinds": faults,
-    }
+        found[str(path.relative_to(run)), "supervisor fault kinds"] = {
+            str(anomaly.get("kind")) for anomaly in anomalies
+        }
+    return found
 
 
 def _medians(run: Path) -> dict[str, float | None]:
     """Median memoryUsedBytes per node file (None when the file has no rows)."""
     found: dict[str, list[float]] = {}
     for path in _vm_files(run):
-        values = found.setdefault(path.stem, [])
+        values = found.setdefault(str(path.relative_to(run)), [])
         values += [
             row["memoryUsedBytes"]
             for row in _rows(path)
@@ -196,29 +200,42 @@ def compare(reference: Path, new: Path) -> list[str]:
     """Return every shape difference of `new` against `reference`."""
     differences = []
     old, now = facets(reference), facets(new)
-    for name, expected in old.items():
-        missing, extra = expected - now[name], now[name] - expected
+    old_paths = {path for path, _name in old}
+    new_paths = {path for path, _name in now}
+    for path in sorted(old_paths - new_paths):
+        differences.append(f"{path}: file missing in NEW")
+    for path in sorted(new_paths - old_paths):
+        differences.append(f"{path}: extra file in NEW")
+    for key in sorted(old.keys() & now.keys()):
+        path, name = key
+        missing, extra = old[key] - now[key], now[key] - old[key]
         if missing:
-            differences.append(f"{name}: missing in NEW: {', '.join(sorted(missing))}")
+            differences.append(
+                f"{path}: {name}: missing in NEW: {', '.join(sorted(missing))}"
+            )
         if extra:
-            differences.append(f"{name}: extra in NEW: {', '.join(sorted(extra))}")
+            differences.append(
+                f"{path}: {name}: extra in NEW: {', '.join(sorted(extra))}"
+            )
     before, after = _medians(reference), _medians(new)
-    for node in sorted(before.keys() - after.keys()):
-        differences.append(f"vm-resources {node}: node file missing in NEW")
-    for node in sorted(_coverage_nodes(reference) - _coverage_nodes(new)):
-        differences.append(f"coverage.json {node}: node missing in NEW")
-    for node, value in sorted(after.items()):
+    for path, node in sorted(_coverage_nodes(reference) - _coverage_nodes(new)):
+        differences.append(f"{path} {node}: node missing in NEW")
+    for path, value in sorted(after.items()):
         if value is None:
-            differences.append(f"vm-resources {node}: empty in NEW")
+            differences.append(f"{path}: empty in NEW")
             continue
-        base = before.get(node)
+        base = before.get(path)
         if base and not (base / 10 <= value <= base * 10):
             differences.append(
-                f"vm-resources {node} median memoryUsedBytes: {base:g} vs {value:g}: "
+                f"{path} median memoryUsedBytes: {base:g} vs {value:g}: "
                 "not the same order of magnitude"
             )
-    if not any(any(_rows(path)) for path in new.rglob("metrics.jsonl")):
+    metrics = sorted(new.rglob("metrics.jsonl"))
+    if not metrics:
         differences.append("metrics.jsonl: empty in NEW")
+    for path in metrics:
+        if not any(_rows(path)):
+            differences.append(f"{path.relative_to(new)}: empty in NEW")
     return differences
 
 

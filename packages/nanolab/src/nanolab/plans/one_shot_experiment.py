@@ -27,8 +27,6 @@ from nanolab.tasks.one_shot.experiment import (
 from nanolab.tasks.one_shot.preflight import CollectTopologyTask
 from nanolab.tasks.one_shot.qualification import read_profile
 from nanolab.tasks.one_shot.trace import experiment_trace
-from nanolab.workbench.loadgen import loadgen_resource
-from nanolab.workbench.platform import OPERATOR
 from nanolab.workspace.paths import default_tool_paths
 
 
@@ -155,8 +153,8 @@ def build_one_shot_experiment_plan(
             workflow.add(UploadForecastTask(freeze), requires=requires)
             # The margin these runs had while they also owned the VM sampler.
             sampled = settings.strict_memory and len(settings.functions) > 1
-            generator = loadgen_resource(
-                OPERATOR,
+            assert topology.platform is not None  # nosec B101 - builder supplies platform
+            generator = topology.platform.loadgen(
                 run_dir=directory,
                 vus=experiment.generator_vus,
                 duration=len(trace.windows) * trace.period_seconds

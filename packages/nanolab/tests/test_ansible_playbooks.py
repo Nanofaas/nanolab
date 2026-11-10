@@ -29,3 +29,16 @@ def test_ansible_config_preserves_ssh_connection_multiplexing() -> None:
 
     assert "ControlMaster=auto" in content
     assert "ControlPersist=60s" in content
+
+
+def test_provision_base_refreshes_ssh_after_docker_group_change() -> None:
+    import yaml
+
+    playbook = _ANSIBLE_ROOT / "playbooks" / "provision-base.yml"
+    tasks = yaml.safe_load(playbook.read_text())[0]["tasks"]
+    group_index = next(
+        i
+        for i, task in enumerate(tasks)
+        if task.get("ansible.builtin.user", {}).get("groups") == "docker"
+    )
+    assert tasks[group_index + 1].get("ansible.builtin.meta") == "reset_connection"

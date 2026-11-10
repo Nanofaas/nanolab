@@ -219,15 +219,15 @@ def export_vm_resources(
             )
             for field, (metric, rate) in _CONTAINER_SERIES.items()
         }
-        # Containers the role map names are expected for the whole window, so
-        # one that drops out shows as a missing container sample.
-        expected = {
-            _identity(labels, roles)["containerId"]
-            for by_step in containers.values()
-            for samples in by_step.values()
-            for _value, labels in samples
-            if labels["name"] in roles.roles
-        }
+        # Keep the current ID per mandatory name; a recreated container replaces it.
+        expected: dict[str, str] = {}
+        for by_step in containers.values():
+            for step in sorted(by_step):
+                for _value, labels in by_step[step]:
+                    if labels["name"] in roles.roles:
+                        expected.setdefault(
+                            labels["name"], _identity(labels, roles)["containerId"]
+                        )
         rows = []
         previous = None
         for step in sorted(scrapes):
@@ -249,11 +249,27 @@ def export_vm_resources(
                 vcpus=row.get("vcpuCount"),
                 step=step_seconds,
             )
+            present = {entry["containerName"] for entry in found.values()}
+            row["errors"] = [
+                {
+                    "containerName": name,
+                    "role": roles.roles[name],
+                    "error": "mandatory container missing from cAdvisor",
+                }
+                for name in sorted(roles.roles.keys() - present)
+            ]
+            expected.update(
+                {
+                    entry["containerName"]: entry["containerId"]
+                    for entry in found.values()
+                    if entry["containerName"] in roles.roles
+                }
+            )
             keys = ("containerId", "containerName", "role", "function", "replica")
             row["containerInventory"] = [
                 {key: entry[key] for key in keys} for entry in found.values()
             ]
-            row["expectedContainerIds"] = sorted(expected | found.keys())
+            row["expectedContainerIds"] = sorted(set(expected.values()) | found.keys())
             row["containers"] = list(found.values())
             observers = [
                 entry

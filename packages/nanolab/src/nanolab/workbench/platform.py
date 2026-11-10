@@ -37,6 +37,7 @@ from nanolab.tasks.one_shot.logging import (
     archive_node_dir,
     collection_evidence,
     export_collector,
+    retain_collector_for_recovery,
     verify_loki_ingestion,
 )
 from nanolab.tasks.resource_tasks import call, resource_of
@@ -105,7 +106,13 @@ class OneShotPlatform:
     targets: Mapping[str, dict[str, Any]]
     export_vm_resources: Callable[[Path, datetime, datetime], None]
     loadgen: Callable[..., Resource[LoadgenRun]]
-    record_supervisor_status: Callable[[Members], None]
+    record_supervisor_status: Callable[[Members], dict[str, Any]]
+
+    def require_healthy(self, values: Members) -> None:
+        """Keep the final health evidence and reject unqualified measurements."""
+        status = self.record_supervisor_status(values)
+        if status.get("state") != "healthy" or not status.get("checkedAt"):
+            raise ValueError("NOT_QUALIFIED: workbench supervisor is not healthy")
 
 
 def _cpus(cpus: list[int] | None) -> str | None:
@@ -288,6 +295,9 @@ def one_shot_platform(
     hosts = {"operator": OPERATOR, **nodes}
     direct = {k: n for k, n in topology.nodes.items() if k not in forwards}
 
+    placement = settings.host_cpu_placement
+    operator_cpus = _cpus(placement.operator_cpus) if placement else None
+
     def member(
         host: WorkbenchHost,
         component: str,
@@ -300,6 +310,8 @@ def one_shot_platform(
     ) -> tuple[Resource[Deployed], Instance]:
         if host.node is not None and host.key in bootstraps:
             requires = (bootstraps[host.key], *requires)
+        if host.node is None and component != "loki" and cpuset is None:
+            cpuset = operator_cpus
         instance = Instance.model_validate(
             {
                 "name": f"{component}-{host.key}"
@@ -329,7 +341,7 @@ def one_shot_platform(
             | (
                 {"housekeeping_interval": HOUSEKEEPING}
                 if component == "cadvisor"
-                else {}
+                else {"cpufreq": False}
             ),
             url=None
             if key in direct
@@ -474,7 +486,12 @@ def one_shot_platform(
     def drop_tsdb(_inputs: TaskInputs, _value: None) -> None:
         # Released after Prometheus: its TSDB goes once the snapshot is kept.
         # A failed undeploy leaves Prometheus up on its TSDB: keep it then.
-        kept = workbench_dir / prometheus_instance.name / "prometheus-snapshot.tar.gz"
+        kept = (
+            workbench_dir
+            / "localhost"
+            / prometheus_instance.name
+            / "prometheus-snapshot.tar.gz"
+        )
         if (
             kept.is_file()
             and tsdb.is_dir()
@@ -643,7 +660,7 @@ def one_shot_platform(
         host = nodes[key]
         node = topology.nodes[key]
         name = f"wb-{instance.name}"
-        metrics_file = workbench_dir / instance.name / "metrics.txt"
+        metrics_file = workbench_dir / host.key / instance.name / "metrics.txt"
 
         def run(values: Members, inputs: TaskInputs) -> None:
             # Today's teardown, step for step: bounded drain wait, graceful
@@ -692,6 +709,9 @@ def one_shot_platform(
                 node.command(("sudo", "rm", "-rf", storage_dir))
             except Exception as error:
                 archive_issue = str(error)
+                retain_collector_for_recovery(
+                    node, run_dir=run_dir, storage=storage_dir, error=error
+                )
             export_collector(
                 node=node,
                 name=name,
@@ -738,9 +758,11 @@ def one_shot_platform(
 
     status_file = workbench_dir / "supervisor-status.json"
 
-    def record_supervisor_status(values: Members) -> None:
+    def record_supervisor_status(values: Members) -> dict[str, Any]:
         url = values.of(supervisor).url or f"http://127.0.0.1:{SUPERVISOR_PORT}"
-        _write_json(status_file, SupervisorClient(url, timeout_seconds=10).status())
+        status = SupervisorClient(url, timeout_seconds=10).status()
+        _write_json(status_file, status)
+        return status
 
     def supervisor_status(values: Members, _inputs: TaskInputs) -> None:
         # A supervised run recorded it at detach, with every target still on.
@@ -775,6 +797,6 @@ def one_shot_platform(
         collector_identity,
         targets,
         export,
-        partial(loadgen_resource, OPERATOR),
+        partial(loadgen_resource, OPERATOR, cpuset=operator_cpus),
         record_supervisor_status,
     )

@@ -1,0 +1,14 @@
+{
+  "requires the actual runtime source and JDK": 1,
+  "requires preserved observation/tuning/runtime artifacts": 4,
+  "requires actual native source and JDK": 1,
+  "prebuilt images not present": 1,
+  "requires the isolated original Python reference environment": 3,
+  "set ONE_SHOT_CURVE_PYTHON to the existing SciPy environment": 2,
+  "k6 is not available": 1,
+  "opt-in k6 loopback fixture": 2,
+  "opt-in real k6 loopback check": 1,
+  "Installed libraries belong to JVM": 1,
+  "ELF requirement belongs to native": 2,
+  "opt-in installed workbench integration": 3
+}

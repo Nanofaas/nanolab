@@ -291,6 +291,7 @@ def test_publish_node_profiles_preserves_local_demand_and_immutable_bytes(tmp_pa
         function_settings=model.functions,
         function_aliases={"f": "f"},
         distribution="distribution",
+        platform=SimpleNamespace(resource="platform", require_healthy=lambda _: None),
     )
     inputs = cast(
         Any, SimpleNamespace(upstream=lambda: value, resource=lambda _: built)

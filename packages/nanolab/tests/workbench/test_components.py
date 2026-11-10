@@ -114,7 +114,14 @@ def test_release_from_journal_needs_no_live_resources(tmp_path, monkeypatch, nod
     revived = resource.revive(json.loads(json.dumps(asdict(value))))
     assert revived == value
     release_now(resource, TaskInputs._for_resource_values({}, ()), revived)
-    assert captured == [("workbench.undeploy", "10.0.0.5," if node else "localhost,")]
+    expected = (
+        str(tmp_path / "edge-1-undeploy-inventory.json") if node else "localhost,"
+    )
+    assert captured == [("workbench.undeploy", expected)]
+    if node:
+        assert json.loads(Path(expected).read_text())["all"]["hosts"] == {
+            "edge-1": {"ansible_host": "10.0.0.5"}
+        }
 
 
 def test_titles_name_instance_and_host(tmp_path, monkeypatch):
@@ -191,3 +198,31 @@ def test_a_failed_deploy_undeploys_best_effort(tmp_path, monkeypatch, undeploy_f
     assert events == ["workbench.deploy", "workbench.undeploy"]
     notes = getattr(caught.value, "__notes__", [])
     assert any("undeploy" in note for note in notes) is undeploy_fails
+
+
+@pytest.mark.parametrize("observed", ["0-1", "2-3", ""])
+def test_deploy_refuses_incorrect_operator_cpuset(tmp_path, monkeypatch, observed):
+    import subprocess
+
+    events = []
+    _record(monkeypatch, events)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: SimpleNamespace(stdout=observed)
+    )
+    resource = component_resource(
+        HOST,
+        PROM.model_copy(update={"cpuset": "0,1"}),
+        url=None,
+        vars_dir=tmp_path,
+        installed=None,
+    )
+    workflow = Workflow("placement")
+    workflow.add(Consume(events), requires=(resource,))
+    if observed == "0-1":
+        workflow.run()
+        assert "consume" in events
+    else:
+        with pytest.raises(ValueError, match="CPU placement"):
+            workflow.run()
+        assert "consume" not in events
+        assert any(e.startswith("workbench.undeploy:") for e in events)

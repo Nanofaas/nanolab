@@ -39,7 +39,16 @@ SITE_COMMAND_SECONDS = 600
 
 def control_path() -> str:
     """Return the shared SSH control socket pattern (short: sockets have a limit)."""
-    return str(Path(tempfile.gettempdir()) / "nl-ssh-%C")
+    base = Path(tempfile.gettempdir())
+    directory = base / f"nl-ssh-{os.getuid()}"
+    # OpenSSH adds a 40-byte hash and a temporary 17-byte suffix; macOS allows 103.
+    if len(os.fsencode(str(directory / "nl-ssh-"))) + 57 > 103:
+        directory = Path("/tmp") / f"nl-ssh-{os.getuid()}"  # nosec B108 - private owner-checked directory
+    directory.mkdir(mode=0o700, exist_ok=True)
+    if directory.is_symlink() or directory.stat().st_uid != os.getuid():
+        raise RuntimeError("SSH control directory is not owned by this user")
+    directory.chmod(0o700)
+    return str(directory / "nl-ssh-%C")
 
 
 def site_ssh(site: MultipassSite) -> tuple[str, ...]:

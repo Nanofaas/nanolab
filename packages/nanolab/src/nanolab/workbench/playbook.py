@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import getpass
-from dataclasses import dataclass
+import json
+import re
+from dataclasses import dataclass, replace
 from importlib.resources import files
 from pathlib import Path
 from types import MappingProxyType
@@ -33,6 +35,11 @@ class WorkbenchHost:
     key: str
     node: NodeResource | None
 
+    def __post_init__(self) -> None:
+        """Keep inventory aliases safe as evidence path segments."""
+        if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", self.key) is None:
+            raise ValueError(f"invalid workbench host alias: {self.key!r}")
+
 
 class WorkbenchPlaybook(Task[None]):
     """Write the host's vars file and run `<action>.yml` of the installed collection."""
@@ -55,7 +62,7 @@ class WorkbenchPlaybook(Task[None]):
         self.host = host
         self.action = action
         self.host_vars = host_vars
-        self.vars_dir = vars_dir
+        self.vars_dir = vars_dir.resolve()
         self.collections = collections
         self.vm = vm
 
@@ -121,5 +128,26 @@ class WorkbenchPlaybook(Task[None]):
             operations = through_site(
                 operations, context=context, host=vm.host, site=node.site_host.site
             )
-        run_bootstrap_operations(node.provider, operations, role=node.config.id)
+        # Preserve the provider's SSH flags/env; only replace its inline inventory.
+        (operation,) = operations
+        argv = list(operation.argv)
+        target = argv.index("-i") + 1
+        inventory = self.vars_dir / f"{self.host.key}-{self.action}-inventory.json"
+        inventory.write_text(
+            json.dumps(
+                {
+                    "all": {
+                        "hosts": {
+                            self.host.key: {
+                                "ansible_host": argv[target].removesuffix(",")
+                            }
+                        }
+                    }
+                }
+            )
+        )
+        argv[target] = str(inventory)
+        run_bootstrap_operations(
+            node.provider, (replace(operation, argv=tuple(argv)),), role=node.config.id
+        )
         return TaskOutcome()

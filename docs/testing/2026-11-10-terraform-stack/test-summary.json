@@ -1,0 +1,86 @@
+{
+  "sonata_engine": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "266",
+      "time": "3.736",
+      "timestamp": "2026-11-10T16:09:58.931710+01:00",
+      "hostname": "nl-os-tf-review-20261110-edge-0"
+    }
+  ],
+  "sonata_tasks": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "2",
+      "tests": "858",
+      "time": "7.646",
+      "timestamp": "2026-11-10T16:10:02.880956+01:00",
+      "hostname": "nl-os-tf-review-20261110-edge-0"
+    }
+  ],
+  "nanolab_full_after_path_fix": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "22",
+      "tests": "6678",
+      "time": "1018.678",
+      "timestamp": "2026-11-10T16:40:58.524011+01:00",
+      "hostname": "nl-os-tf-review-20261110-edge-0"
+    }
+  ],
+  "nanolab_latest_targeted": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "3",
+      "tests": "186",
+      "time": "12.509",
+      "timestamp": "2026-11-10T16:50:09.111417+01:00",
+      "hostname": "nl-os-tf-review-20261110-edge-0"
+    }
+  ],
+  "installed_latest_docker": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "3",
+      "time": "70.273",
+      "timestamp": "2026-11-10T16:49:08.935280+01:00",
+      "hostname": "nl-os-tf-review-20261110-edge-0"
+    }
+  ],
+  "workbench_docker_exact_deps": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "198",
+      "time": "379.242",
+      "timestamp": "2026-11-10T16:19:24.485908+01:00",
+      "hostname": "nl-os-tf-review-20261110-edge-0"
+    }
+  ],
+  "workbench_kind_exact_deps": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "3",
+      "time": "312.580",
+      "timestamp": "2026-11-10T16:25:43.996678+01:00",
+      "hostname": "nl-os-tf-review-20261110-edge-0"
+    }
+  ]
+}
