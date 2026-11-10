@@ -674,7 +674,7 @@ def run_observation_workflow(
                 + "\n"
             )
 
-    topology.platform = SimpleNamespace(export_vm_resources=export)
+    topology.platform = SimpleNamespace(export_vm_resources=export, collectors={})
     if failure == "precheck":
 
         def failed_precheck(self, inputs):
