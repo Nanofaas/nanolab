@@ -56,10 +56,11 @@ def ensure_installed() -> Path:
         text=True,
         check=False,
     )
-    if done.returncode != 0:
+    # galaxy exits 0 when no candidate fits (a requires_ansible conflict).
+    if done.returncode != 0 or _installed_version(collections) != _pinned_version():
         raise RuntimeError(
             f"installing the workbench collection failed: "
-            f"{(done.stderr or done.stdout).strip()}"
+            f"{(done.stderr or done.stdout).strip()[-500:]}"
         )
     return collections
 

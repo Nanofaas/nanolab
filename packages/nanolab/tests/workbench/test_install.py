@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -17,7 +18,7 @@ def test_requirements_pin_the_tag():
     (entry,) = data["collections"]
     assert entry["name"] == "git+https://github.com/Nanofaas/nanofaas-workbench.git"
     assert entry["type"] == "git"
-    assert entry["version"] == "v0.1.0"
+    assert entry["version"] == "v0.1.1"
 
 
 def _manifest(path, version):
@@ -26,6 +27,20 @@ def _manifest(path, version):
     (folder / "MANIFEST.json").write_text(
         json.dumps({"collection_info": {"version": version}})
     )
+
+
+def _galaxy(seen):
+    """Record each argv and install the pinned version, as galaxy would."""
+
+    def run(argv, **_kwargs):
+        seen.append(argv)
+        target = Path(argv[argv.index("-p") + 1])
+        manifest = target / "ansible_collections/nanofaas/workbench/MANIFEST.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps({"collection_info": {"version": "0.1.1"}}))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return run
 
 
 @pytest.fixture
@@ -51,7 +66,7 @@ def test_install_refuses_the_wrong_ansible_before_galaxy(tmp_path, monkeypatch):
 
 def test_install_skipped_when_version_present(tmp_path, monkeypatch):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
-    _manifest(tmp_path / ".ansible/collections", "0.1.0")
+    _manifest(tmp_path / ".ansible/collections", "0.1.1")
     monkeypatch.setattr(
         install.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError)
     )
@@ -65,9 +80,7 @@ def test_install_runs_galaxy_with_pin(tmp_path, monkeypatch, ansible_ok):
     monkeypatch.setattr(
         install.subprocess,
         "run",
-        lambda argv, **k: (
-            seen.append(argv) or subprocess.CompletedProcess(argv, 0, "", "")
-        ),
+        _galaxy(seen),
     )
     outcome = install.InstallWorkbench().run(INPUTS)
     (argv,) = seen
@@ -87,6 +100,18 @@ def test_install_failure_raises(tmp_path, monkeypatch, ansible_ok):
         install.InstallWorkbench().run(INPUTS)
 
 
+def test_install_that_installs_nothing_raises(tmp_path, monkeypatch, ansible_ok):
+    """Galaxy exits 0 when requires_ansible rules every candidate out."""
+    monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(
+        install.subprocess,
+        "run",
+        lambda argv, **k: subprocess.CompletedProcess(argv, 0, "conflict", ""),
+    )
+    with pytest.raises(RuntimeError, match="conflict"):
+        install.InstallWorkbench().run(INPUTS)
+
+
 def test_install_forces_over_a_stale_version(tmp_path, monkeypatch, ansible_ok):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
     _manifest(tmp_path / ".ansible/collections", "0.0.9")
@@ -94,9 +119,7 @@ def test_install_forces_over_a_stale_version(tmp_path, monkeypatch, ansible_ok):
     monkeypatch.setattr(
         install.subprocess,
         "run",
-        lambda argv, **k: (
-            seen.append(argv) or subprocess.CompletedProcess(argv, 0, "", "")
-        ),
+        _galaxy(seen),
     )
     install.InstallWorkbench().run(INPUTS)
     assert "--force" in seen[0]

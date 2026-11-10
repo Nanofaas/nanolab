@@ -647,7 +647,7 @@ def test_real_observation_preparation_and_workflow_compile_without_acquiring_vms
     assert (args.output / "package" / requirements).read_bytes() == (
         bundled.read_bytes()
     )
-    assert "version: v0.1.0" in bundled.read_text()
+    assert "version: v0.1.1" in bundled.read_text()
     config = json.loads((args.output / "operator-protocol.json").read_text())
     assert (
         config["performanceAcceptanceGates"] is False
