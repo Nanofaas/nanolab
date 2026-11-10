@@ -62,7 +62,7 @@ class WorkbenchPlaybook(Task[None]):
         self.host = host
         self.action = action
         self.host_vars = host_vars
-        self.vars_dir = vars_dir
+        self.vars_dir = vars_dir.resolve()
         self.collections = collections
         self.vm = vm
 

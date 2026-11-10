@@ -585,6 +585,7 @@ def add_one_shot_platforms(
 
     if not observer_bootstrap:
         require_resource_overhead(settings)
+    run_dir = run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     graph = validate_neighbor_graph(settings)
     resources = build_one_shot_resources(

@@ -142,3 +142,9 @@ def test_sites_with_same_private_address_keep_distinct_aliases(tmp_path, monkeyp
 def test_workbench_host_rejects_unsafe_alias(alias):
     with pytest.raises(ValueError, match="alias"):
         WorkbenchHost(alias, _node())
+
+
+def test_relative_vars_directory_is_resolved_before_ansible(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _, (operation,), _ = run(WorkbenchHost("operator", None), Path("vars"), monkeypatch)
+    assert f"workbench_vars={tmp_path / 'vars/operator-deploy.json'}" in operation.argv

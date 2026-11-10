@@ -121,7 +121,10 @@ def test_existing_vm_is_neither_adopted_nor_deleted(tmp_path, monkeypatch):
     assert provider.released == []
 
 
-def test_runtime_plan_keeps_each_registration_on_its_own_vm(tmp_path, monkeypatch):
+@pytest.mark.parametrize("relative", [False, True])
+def test_runtime_plan_keeps_each_registration_on_its_own_vm(
+    tmp_path, monkeypatch, relative
+):
     from nanolab.config.scenario import ScenarioConfig
     from nanolab.plans.one_shot_common import add_one_shot_platforms
 
@@ -154,9 +157,25 @@ def test_runtime_plan_keeps_each_registration_on_its_own_vm(tmp_path, monkeypatc
         {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
     )
     (tmp_path / "functions/rust/one-shot-workload").mkdir(parents=True)
+    from pathlib import Path
+
+    from nanolab.plans import one_shot_common
+
+    original = one_shot_common.one_shot_platform
+
+    def check_paths(*args, **kwargs):
+        assert kwargs["run_dir"] == tmp_path
+        return original(*args, **kwargs)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(one_shot_common, "one_shot_platform", check_paths)
     workflow = Workflow("runtime-preview")
     topology = add_one_shot_platforms(
-        workflow, scenario, environment, run_dir=tmp_path, repo_root=tmp_path
+        workflow,
+        scenario,
+        environment,
+        run_dir=Path() if relative else tmp_path,
+        repo_root=tmp_path,
     )
     assert len(topology.platforms) == 3
     assert len({node.request.name for node in topology.resources.nodes.values()}) == 3
