@@ -1005,3 +1005,70 @@ including after process restart. A failed/uncertain apply preserves its recovery
 record even if best-effort cleanup emptied the known state: inspect Multipass
 inventory for untracked resources before explicit recovery. Never run a global
 `multipass purge` as experiment cleanup.
+
+## Unified operator workflow and build reuse
+
+For a five-edge experiment configure five `kind: edge` nodes and one `kind: cloud`
+node: OpenTofu creates six VMs. The operator, build tools, generator, Prometheus,
+Loki and supervisor remain on the Linux operator host. A dedicated operator VM
+would be additional infrastructure; it is not silently counted as an edge.
+
+Use `uv sync --locked --all-packages --all-groups` in the Nanolab checkout.
+Ansible runs in that same Python environment. Its preflight and the pinned
+Workbench installation run before VM acquisition. OpenTofu owns VM creation and
+release; Ansible bootstraps the guests, loads images, deploys the runtime and
+collects evidence. Sonata orders those operations and their compensation.
+Guests receive runtime dependencies only; Java, Buildx, Skopeo and Helm are not
+installed on every edge. The existing Docker image archive needs no registry.
+
+Prepare the selected recipe once on the operator/build host, using a clean
+NanoFaaS checkout and the same recipe selected by the scenarios:
+
+```sh
+./gradlew assembleRecipe -Precipe=/absolute/path/one-shot-jvm.yaml \
+  -PrecipeTag=experiment-build -PrecipeOutput=/absolute/path/prepared/arm64 \
+  --no-daemon
+```
+
+Save all image references listed in that `distribution.json` together with
+`docker save --output /absolute/path/prepared/arm64/images-arm64.tar IMAGE...`.
+Keep the entire distribution directory, including its build metadata. An
+existing successful run's distribution and `images.tar` can also be reused:
+place the archive beside its distribution as `images-arm64.tar`. There is no
+need to rebuild or re-export it for each stage. Use `amd64` instead for that
+architecture and prepare a separate distribution when mixing architectures.
+
+In all three scenarios set the same immutable reference:
+
+```yaml
+oneShot:
+  runtimeDistributions:
+    arm64:
+      path: /absolute/path/prepared/arm64/distribution.json
+      sha256: REPLACE_WITH_SHA256_OF_DISTRIBUTION_JSON
+```
+
+Nanolab verifies the distribution hash, recipe, selected modules/functions,
+image config digests and architecture. The transfer separately checks the
+archive SHA-256. A missing or mismatched archive fails; it does not rebuild.
+
+Run the stages with the existing command:
+
+```sh
+uv run --locked nanolab run calibration.yaml --environment environment.yaml
+uv run --locked nanolab run qualification.yaml --environment environment.yaml
+uv run --locked nanolab run experiment.yaml --environment environment.yaml
+```
+
+Between stages, set qualification's `oneShot.profile` to the calibration's
+`profile.json` path and SHA-256; set experiment's `profile` and `qualification`
+to the verified profile and timing artifacts. Keep the node topology, function
+inputs and resource budgets compatible. These are independent owned runs and
+may recreate their six VMs; immutable image preparation is shared. Failed
+calibration or qualification is a stop condition, never permission to fabricate
+a freeze or weaken an acceptance threshold.
+
+Final raw recovery is implemented by Workbench `collect_mode: final`. Nanolab's
+focused collector-evidence task checks the fresh receipt and archive before
+allowing fleet release. Missing or unverified raw evidence retains the fleet,
+including after restart. Scientific acceptance remains Nanolab's responsibility.

@@ -8,7 +8,9 @@ import tarfile
 from pathlib import Path
 
 
-def archive_image_ids(path: Path, expected: dict[str, str]) -> dict[str, set[str]]:
+def archive_image_ids(
+    path: Path, expected: dict[str, str], *, architecture: str | None = None
+) -> dict[str, set[str]]:
     """Accept target IDs only when their manifests bind the expected config bytes."""
     identities = {reference: set() for reference in expected}
     with tarfile.open(path) as archive:
@@ -21,9 +23,15 @@ def archive_image_ids(path: Path, expected: dict[str, str]) -> dict[str, set[str
 
         # Named saves retain every image in both legacy and OCI importers.
         for entry in json.loads(read("manifest.json")):
-            config_id = "sha256:" + hashlib.sha256(read(entry["Config"])).hexdigest()
+            config = read(entry["Config"])
+            config_id = "sha256:" + hashlib.sha256(config).hexdigest()
             for reference in entry["RepoTags"] or []:
                 if reference in expected:
+                    if (
+                        architecture is not None
+                        and json.loads(config).get("architecture") != architecture
+                    ):
+                        raise ValueError("exported image architecture mismatch")
                     if config_id != expected[reference]:
                         raise ValueError("exported image config digest mismatch")
                     identities[reference].add(config_id)

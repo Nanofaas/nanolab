@@ -492,6 +492,7 @@ def _architecture_images(
             archive_image_ids(
                 path,
                 {c.image.reference: c.image.id for c in checked.components},
+                architecture=architecture,
             )
             (run_dir / f"runtime-distribution-{architecture}.json").write_bytes(
                 checked.report.read_bytes()
@@ -579,15 +580,7 @@ def add_one_shot_platforms(
                 run=staged,
                 executor=executor,
                 functions=selected,
-                required_modules=frozenset(
-                    {
-                        "offload",
-                        "forecasting",
-                        "p2p-discovery",
-                        "container-deployment-provider",
-                        "sync-queue",
-                    }
-                ),
+                required_modules=REQUIRED_MODULES,
             )
         else:
             raw = settings.runtime_distribution.read_verified()
@@ -601,15 +594,7 @@ def add_one_shot_platforms(
             require_validation_distribution(
                 checked,
                 functions=selected,
-                required_modules=frozenset(
-                    {
-                        "offload",
-                        "forecasting",
-                        "p2p-discovery",
-                        "container-deployment-provider",
-                        "sync-queue",
-                    }
-                ),
+                required_modules=REQUIRED_MODULES,
             )
             distribution = resource_of(
                 "Reuse immutable one-shot runtime distribution",

@@ -19,7 +19,7 @@ def test_requirements_pin_the_tag():
     (entry,) = data["collections"]
     assert entry["name"] == "git+https://github.com/Nanofaas/nanofaas-workbench.git"
     assert entry["type"] == "git"
-    assert entry["version"] == "v0.2.0"
+    assert entry["version"] == "v0.3.0"
 
 
 def _manifest(path, version):
@@ -38,7 +38,7 @@ def _galaxy(seen):
         target = Path(argv[argv.index("-p") + 1])
         manifest = target / "ansible_collections/nanofaas/workbench/MANIFEST.json"
         manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(json.dumps({"collection_info": {"version": "0.2.0"}}))
+        manifest.write_text(json.dumps({"collection_info": {"version": "0.3.0"}}))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     return run
@@ -67,7 +67,7 @@ def test_install_refuses_the_wrong_ansible_before_galaxy(tmp_path, monkeypatch):
 
 def test_install_skipped_when_version_present(tmp_path, monkeypatch):
     monkeypatch.setenv("NANOLAB_WORKSPACE", str(tmp_path))
-    _manifest(tmp_path / ".ansible/collections", "0.2.0")
+    _manifest(tmp_path / ".ansible/collections", "0.3.0")
     monkeypatch.setattr(
         install.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError)
     )
