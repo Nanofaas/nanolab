@@ -98,10 +98,13 @@ def ansible_operation(
     )
 
 
-def base_provision_vars(user: str, *, install_uv: bool = False) -> dict[str, str]:
+def base_provision_vars(
+    user: str, *, install_uv: bool = False, runtime_only: bool = False
+) -> dict[str, str]:
     """Variables shared by planned and acquired-VM bootstrap paths."""
     return {
-        "install_helm": "true",
+        "install_helm": str(not runtime_only).lower(),
+        "install_build_tools": str(not runtime_only).lower(),
         "install_uv": str(install_uv).lower(),
         "helm_version": "3.16.4",
         "vm_user": user,

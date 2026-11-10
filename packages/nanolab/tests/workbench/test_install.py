@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -84,7 +85,13 @@ def test_install_runs_galaxy_with_pin(tmp_path, monkeypatch, ansible_ok):
     )
     outcome = install.InstallWorkbench().run(INPUTS)
     (argv,) = seen
-    assert argv[:3] == ["ansible-galaxy", "collection", "install"]
+    assert argv[:5] == [
+        sys.executable,
+        "-m",
+        "ansible.cli.galaxy",
+        "collection",
+        "install",
+    ]
     assert argv[argv.index("-r") + 1].endswith("ansible_assets/requirements.yml")
     assert argv[argv.index("-p") + 1] == str(outcome.value)
 
@@ -138,9 +145,9 @@ def _operator(monkeypatch, *, version=ANSIBLE, requests=0, docker=0):
 
     def run(argv, **_kwargs):
         seen.append(tuple(argv))
-        if argv[0] == "ansible":
+        if "ansible.cli.adhoc" in argv:
             return subprocess.CompletedProcess(argv, 0, version, "")
-        code = requests if argv[0].endswith("python3") else docker
+        code = requests if argv[0] == sys.executable else docker
         return subprocess.CompletedProcess(argv, code, "", "boom")
 
     monkeypatch.setattr(install.subprocess, "run", run)
@@ -151,8 +158,8 @@ def test_operator_preflight_passes(monkeypatch):
     seen = _operator(monkeypatch)
     install.check_operator([("127.0.0.1", 0)])
     assert seen == [
-        ("ansible", "--version"),
-        ("/opt/ansible/bin/python3", "-c", "import requests"),
+        (sys.executable, "-m", "ansible.cli.adhoc", "--version"),
+        (sys.executable, "-c", "import requests"),
         ("docker", "info"),
     ]
 
@@ -198,3 +205,49 @@ def test_a_missing_ansible_is_refused(monkeypatch):
 def test_an_address_not_up_yet_is_not_a_bound_port(monkeypatch):
     _operator(monkeypatch)
     install.check_operator([("192.0.2.1", 3100)])  # TEST-NET: never local
+
+
+def test_preflight_failure_prevents_resource_acquisition(monkeypatch):
+    from sonata_engine import Workflow
+
+    from nanolab.tasks.resource_tasks import call, resource_of
+
+    acquired = []
+    vm = resource_of("VM", lambda _: acquired.append("vm"), lambda *_: None)
+    monkeypatch.setattr(
+        install,
+        "check_operator",
+        lambda _: (_ for _ in ()).throw(RuntimeError("Docker unavailable")),
+    )
+    workflow = Workflow("preflight")
+    workflow.add(install.OperatorPreflight())
+    workflow.add(call("Use VM", lambda _: None), requires=(vm,))
+    with pytest.raises(RuntimeError, match="Docker unavailable"):
+        workflow.run()
+    assert acquired == []
+
+
+def test_preflight_uses_the_operator_python_instead_of_path(monkeypatch):
+    import sys
+
+    seen = []
+
+    def run(*argv):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, ANSIBLE, "")
+
+    monkeypatch.setattr(install, "_run", run)
+    assert install._ansible_python() == sys.executable
+    assert seen == [(sys.executable, "-m", "ansible.cli.adhoc", "--version")]
+
+
+def test_preflight_passes_platform_ports_before_install(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        install, "check_operator", lambda ports: seen.append(tuple(ports))
+    )
+    monkeypatch.setattr(
+        install, "ensure_installed", lambda: seen.append("install") or Path("/coll")
+    )
+    install.OperatorPreflight((("127.0.0.1", 9090),)).run(INPUTS)
+    assert seen == [(("127.0.0.1", 9090),), "install"]

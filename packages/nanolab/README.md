@@ -32,9 +32,9 @@ One-shot runs (calibration, qualification, experiment, observation) deploy the
 `nanofaas.workbench` collection on the operator host and every node, and need
 there:
 
-- ansible-core 2.20.x on `PATH`, from its own install (nanolab's virtualenv
-  does not provide it), whose Python can `import requests` (community.docker
-  needs it);
+- ansible-core 2.20.x and requests, installed with nanolab in the same Python
+  environment. `uv sync --locked --all-packages --all-groups` reproduces the
+  workspace versions; no separate global Ansible installation is required.
 - Docker reachable by the operator user;
 - git and network access for the first `ansible-galaxy` install of the
   collection into the workspace;
@@ -42,8 +42,9 @@ there:
   (node-exporter), 8089 (cAdvisor) and the Loki port (the scenario's logging
   endpoint port, or the environment's `logging.port` on multi-site runs).
 
-A preflight checks all of these before the run's first workbench member
-deploys, and fails with the missing one.
+A preflight checks tools, collection installation and ports before creating the
+run's VMs. Ports are checked again before the first Workbench member deploys.
+One-shot guests install runtime packages only; compilation runs on the operator.
 
 For containerd workflows, set `containerdMavenRepository` to the isolated Maven
 repository produced by NanoFaaS's `scripts/bootstrap-containerd-dependencies.sh`.

@@ -63,6 +63,7 @@ from nanolab.tasks.recipes.workflow import (
     require_validation_distribution,
 )
 from nanolab.tasks.resource_tasks import call, release_call, resource_of
+from nanolab.workbench.install import OperatorPreflight
 from nanolab.workbench.platform import OneShotPlatform, one_shot_platform
 from nanolab.workbench.supervisor import SupervisorClient
 from nanolab.workspace.paths import operator_workspace_root
@@ -205,7 +206,7 @@ def _bootstrap(
             / "ansible"
             / f"{node.config.id}-bootstrap-inventory.json",
             hosts={node.config.id: node.ansible_vars(vm)},
-            extra_vars=base_provision_vars(vm.user),
+            extra_vars=base_provision_vars(vm.user, runtime_only=True),
             shell=getattr(node.provider, "shell", None),
         ).run(inputs)
         node.reset_shared_ssh(vm)
@@ -763,6 +764,8 @@ def add_one_shot_platforms(
         log_endpoints=routes,
         bootstraps=bootstraps,
     )
+
+    workflow.add(OperatorPreflight(platform.operator_ports))
 
     endpoints = {
         key: _control_plane(

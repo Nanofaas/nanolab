@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -55,5 +56,11 @@ def playbook_task(
         options=CommandOptions(env=dict(env or {}), remote_dir=None),
     )
     assert not callable(task.argv)  # AnsiblePlaybookTask builds a static command.
-    task.argv = (*OWN_STDIN, *task.argv)
+    task.argv = (
+        *OWN_STDIN,
+        sys.executable,
+        "-m",
+        "ansible.cli.playbook",
+        *task.argv[1:],
+    )
     return task

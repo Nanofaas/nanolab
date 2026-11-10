@@ -181,7 +181,7 @@ def test_runtime_plan_keeps_each_registration_on_its_own_vm(
     assert len({node.request.name for node in topology.resources.nodes.values()}) == 3
     assert all(len(platform.functions) == 1 for platform in topology.platforms.values())
     workflow.add(Observe(), requires=topology.requires)
-    assert workflow.compile().tasks
+    assert workflow.compile().tasks[0].task.title == "Prepare the experiment operator"
 
 
 def test_platform_builder_puts_logging_on_the_workbench_platform(tmp_path, monkeypatch):

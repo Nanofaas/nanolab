@@ -1,4 +1,5 @@
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.ansible import AnsiblePlaybookTask
+from sonata_tasks.shell import ShellExecutionResult
 
 from nanolab.config.environment import MultipassSite
 from nanolab.one_shot.infrastructure import NodeResource
@@ -46,9 +48,9 @@ def run(
 def test_operator_host_runs_locally(tmp_path, monkeypatch):
     task = run(WorkbenchHost("operator", None), tmp_path, monkeypatch)
     argv = task.argv[4:]
-    assert argv[:2] == ("ansible-playbook", "-i")
+    assert argv[:4] == (sys.executable, "-m", "ansible.cli.playbook", "-i")
     assert (
-        json.loads(Path(argv[2]).read_text())["all"]["hosts"]["localhost"][
+        json.loads(Path(inventory_of(task)).read_text())["all"]["hosts"]["localhost"][
             "ansible_connection"
         ]
         == "local"
@@ -178,7 +180,9 @@ def test_playbook_runner_isolates_stdin_and_reports_failure(tmp_path, monkeypatc
     class Shell:
         def run(self, argv, **kwargs):
             seen.append(argv)
-            return SimpleNamespace(return_code=2, stdout="details", stderr="failed")
+            return ShellExecutionResult(
+                command=argv, return_code=2, stdout="details", stderr="failed"
+            )
 
     task = playbook_task(
         title="Deploy",

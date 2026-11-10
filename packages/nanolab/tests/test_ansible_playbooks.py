@@ -42,3 +42,26 @@ def test_provision_base_refreshes_ssh_after_docker_group_change() -> None:
         if task.get("ansible.builtin.user", {}).get("groups") == "docker"
     )
     assert tasks[group_index + 1].get("ansible.builtin.meta") == "reset_connection"
+
+
+def test_runtime_packages_do_not_pull_in_a_build_toolchain():
+    import yaml
+
+    document = yaml.safe_load(
+        (_ANSIBLE_ROOT / "playbooks/provision-base.yml").read_text()
+    )[0]
+    tasks = document["tasks"]
+    common = next(
+        task["ansible.builtin.apt"]["name"]
+        for task in tasks
+        if task["name"] == "Install base packages"
+    )
+    assert {"docker.io", "python3-requests"} <= set(common)
+    assert not {"openjdk-25-jdk-headless", "docker-buildx", "skopeo"} & set(common)
+    build = next(task for task in tasks if task["name"] == "Install guest build tools")
+    assert build["when"] == "install_build_tools | bool"
+    assert set(build["ansible.builtin.apt"]["name"]) == {
+        "openjdk-25-jdk-headless",
+        "docker-buildx",
+        "skopeo",
+    }

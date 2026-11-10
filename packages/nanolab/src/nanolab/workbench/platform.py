@@ -107,6 +107,7 @@ class OneShotPlatform:
     export_vm_resources: Callable[[Path, datetime, datetime], None]
     loadgen: Callable[..., Resource[LoadgenRun]]
     record_supervisor_status: Callable[[Members], dict[str, Any]]
+    operator_ports: tuple[tuple[str, int], ...]
 
     def require_healthy(self, values: Members) -> None:
         """Keep the final health evidence and reject unqualified measurements."""
@@ -799,4 +800,5 @@ def one_shot_platform(
         export,
         partial(loadgen_resource, OPERATOR, cpuset=operator_cpus),
         record_supervisor_status,
+        tuple(operator_ports),
     )
