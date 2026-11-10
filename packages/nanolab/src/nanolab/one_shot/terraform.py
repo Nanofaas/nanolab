@@ -232,6 +232,7 @@ def prepare_fleet(
             acquire,
             release,
             requires=(stack,),
+            revive=lambda raw: VmInfo(**raw),
             idempotent=True,
         )
 

@@ -151,6 +151,28 @@ def test_fleet_guard_preserves_started_node_across_reconstruction(
     }
     bindings = terraform.prepare_fleet(**args)
     fleet = bindings["edge"].requires[0]
+    owned = _owned_node(
+        config().nodes[0],
+        requests["edge"],
+        args["provider"],
+        config=config(),
+        generator=resource_of(
+            "Acquire generator", lambda _: "operator", lambda *_: None
+        ),
+        target_cpus=None,
+        pin=lambda *_: None,
+        stop_argv=None,
+        acquired_vm=bindings["edge"],
+    )
+    assert owned.vm.revive is not None
+    assert owned.vm.revive(
+        {
+            "name": "run-edge",
+            "host": "10.0.0.2",
+            "user": "ubuntu",
+            "home": "/home/ubuntu",
+        }
+    ) == VmInfo("run-edge", "10.0.0.2", "ubuntu", "/home/ubuntu")
     value = fleet.acquire.run(TaskInputs.empty()).value
     inputs = TaskInputs._for_resource_values({id(fleet): value}, (fleet,))
     bindings["edge"].acquire.run(inputs)
