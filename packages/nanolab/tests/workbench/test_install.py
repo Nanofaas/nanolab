@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from typing import Any, cast
 
@@ -78,3 +79,78 @@ def test_install_forces_over_a_stale_version(tmp_path, monkeypatch):
     )
     install.InstallWorkbench().run(INPUTS)
     assert "--force" in seen[0]
+
+
+ANSIBLE = (
+    "ansible [core 2.20.1]\n"
+    "  config file = None\n"
+    "  python version = 3.12.3 (main) [GCC 13.2.0] (/opt/ansible/bin/python3)\n"
+)
+
+
+def _operator(monkeypatch, *, version=ANSIBLE, requests=0, docker=0):
+    """Answer the preflight's commands; record every argv."""
+    seen = []
+
+    def run(argv, **_kwargs):
+        seen.append(tuple(argv))
+        if argv[0] == "ansible":
+            return subprocess.CompletedProcess(argv, 0, version, "")
+        code = requests if argv[0].endswith("python3") else docker
+        return subprocess.CompletedProcess(argv, code, "", "boom")
+
+    monkeypatch.setattr(install.subprocess, "run", run)
+    return seen
+
+
+def test_operator_preflight_passes(monkeypatch):
+    seen = _operator(monkeypatch)
+    install.check_operator([("127.0.0.1", 0)])
+    assert seen == [
+        ("ansible", "--version"),
+        ("/opt/ansible/bin/python3", "-c", "import requests"),
+        ("docker", "info"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("answers", "message"),
+    [
+        ({"version": ANSIBLE.replace("2.20.1", "2.19.4")}, r"ansible-core 2\.20"),
+        ({"version": "nonsense"}, r"ansible-core 2\.20"),
+        ({"requests": 1}, "requests"),
+        ({"docker": 1}, "docker info"),
+    ],
+)
+def test_operator_preflight_refuses(monkeypatch, answers, message):
+    _operator(monkeypatch, **answers)
+    with pytest.raises(RuntimeError, match=message):
+        install.check_operator([])
+
+
+def test_operator_preflight_refuses_a_bound_port(monkeypatch):
+    import socket
+
+    _operator(monkeypatch)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        port = held.getsockname()[1]
+        with pytest.raises(
+            RuntimeError, match=re.escape(f"127.0.0.1:{port} is already bound")
+        ):
+            install.check_operator([("127.0.0.1", port)])
+
+
+def test_a_missing_ansible_is_refused(monkeypatch):
+    def run(argv, **_kwargs):
+        raise FileNotFoundError(argv[0])
+
+    monkeypatch.setattr(install.subprocess, "run", run)
+    with pytest.raises(RuntimeError, match=r"ansible-core 2\.20"):
+        install.check_operator([])
+
+
+def test_an_address_not_up_yet_is_not_a_bound_port(monkeypatch):
+    _operator(monkeypatch)
+    install.check_operator([("192.0.2.1", 3100)])  # TEST-NET: never local
