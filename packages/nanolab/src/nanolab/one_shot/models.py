@@ -222,7 +222,13 @@ class CampaignProtocol(BaseModel):
             from nanolab.one_shot.campaign import analysis_denominator, analysis_epochs
             from nanolab.one_shot.vm_resources import telemetry_policy
 
-            if self.analysis.get("vmTelemetry") != telemetry_policy():
+            frozen = self.analysis.get("vmTelemetry")
+            if isinstance(frozen, dict) and "samplerSha256" in frozen:
+                raise ValueError(
+                    "frozen campaign predates the workbench (VM sampler policy): "
+                    "re-freeze it and re-qualify its overhead"
+                )
+            if frozen != telemetry_policy():
                 raise ValueError("frozen VM telemetry policy/asset differs")
             aliases = self.analysis.get("functionAliases")
             if (

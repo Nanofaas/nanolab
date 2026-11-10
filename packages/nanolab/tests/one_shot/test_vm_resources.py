@@ -330,6 +330,17 @@ def test_protocol_rejects_changed_vm_sampling_period(tmp_path, monkeypatch):
         CampaignProtocol.model_validate(protocol)
 
 
+def test_a_sampler_era_campaign_freeze_must_be_refrozen(tmp_path, monkeypatch):
+    from nanolab.one_shot.models import CampaignProtocol
+    from nanolab.one_shot.vm_resources import LEGACY_SAMPLER_POLICY
+    from tests.one_shot.test_synchronized_campaign import protocol_fixture
+
+    protocol, _, _ = protocol_fixture(tmp_path, monkeypatch)
+    protocol["analysis"]["vmTelemetry"] = LEGACY_SAMPLER_POLICY
+    with pytest.raises(ValueError, match=r"predates the workbench.*re-freeze"):
+        CampaignProtocol.model_validate(protocol)
+
+
 def test_missing_gate_fails_before_any_vm_resource_is_composed(tmp_path, monkeypatch):
     from sonata_engine import Workflow
 
