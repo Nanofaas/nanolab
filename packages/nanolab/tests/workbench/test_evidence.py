@@ -29,6 +29,10 @@ def test_final_collection_requires_verified_quiesced_archive(
     )
     value = Deployed("edge", "collector-edge", "log-collector", None, deployed_at=1)
     resource = resource_of("collector", lambda _: value, lambda *_: None)
+    source = Deployed(
+        "edge", "node-exporter-edge", "node-exporter", None, deployed_at=0.5
+    )
+    since = resource_of("first source", lambda _: source, lambda *_: None)
     instance = Instance(
         name="collector-edge",
         component="log-collector",
@@ -90,6 +94,7 @@ def test_final_collection_requires_verified_quiesced_archive(
 
     def export(**kwargs):
         if fault is None:
+            assert kwargs["session"].started_ns == 500_000_000
             assert any("diagnostic timeout" in issue for issue in kwargs["issues"])
             assert any("logsExitCode=1" in issue for issue in kwargs["issues"])
         if fault == "export":
@@ -100,6 +105,7 @@ def test_final_collection_requires_verified_quiesced_archive(
         WorkbenchHost("edge", cast(Any, node)),
         instance,
         resource,
+        since=since,
         run_dir=tmp_path,
         vars_dir=tmp_path / "vars",
         storage_dir="/buffer",
@@ -108,7 +114,12 @@ def test_final_collection_requires_verified_quiesced_archive(
         budget=lambda: {},
     )
     inputs = cast(
-        Any, SimpleNamespace(upstream=lambda: SimpleNamespace(of=lambda _: value))
+        Any,
+        SimpleNamespace(
+            upstream=lambda: SimpleNamespace(
+                of=lambda r: source if r is since else value
+            )
+        ),
     )
     if fault:
         with pytest.raises(RuntimeError, match="state archive") as caught:

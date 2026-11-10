@@ -225,3 +225,19 @@ def test_deploy_refuses_incorrect_operator_cpuset(tmp_path, monkeypatch, observe
             workflow.run()
         assert "consume" not in events
         assert any(e.startswith("workbench.undeploy:") for e in events)
+
+
+def test_deployment_window_includes_container_startup(tmp_path, monkeypatch):
+    from nanolab.tasks.resource_tasks import acquire_now
+
+    clock = [1.0]
+    _record(monkeypatch, [])
+    monkeypatch.setattr(components.time, "time", lambda: clock[0])
+    monkeypatch.setattr(
+        AnsiblePlaybookTask, "run", lambda *_: clock.__setitem__(0, 2.0)
+    )
+    value = acquire_now(
+        _resource(tmp_path),
+        TaskInputs._for_resources({INSTALLED: Path("/coll")}, {INSTALLED}),
+    )
+    assert value.deployed_at == 1.0

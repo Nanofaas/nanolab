@@ -47,6 +47,7 @@ class CollectorEvidence(Task[None]):
     host: WorkbenchHost
     instance: Instance
     resource: Resource[Deployed]
+    since: Resource[Deployed]
     run_dir: Path
     vars_dir: Path
     storage_dir: str
@@ -65,7 +66,10 @@ class CollectorEvidence(Task[None]):
         node = self.host.node
         if node is None:
             raise ValueError("collector recovery requires a VM")
-        value = cast(Members, inputs.upstream()).of(self.resource)
+        values = cast(Members, inputs.upstream())
+        value = values.of(self.resource)
+        # The collector also delivers logs emitted before it was installed.
+        started_ns = int((values.of(self.since).deployed_at or 0) * 1e9)
         workbench_dir = self.run_dir / "workbench"
         collected = workbench_dir / self.host.key / self.instance.name
         name = f"wb-{self.instance.name}"
@@ -179,7 +183,7 @@ class CollectorEvidence(Task[None]):
                     self.host.key,
                     name,
                     self.storage_dir,
-                    int((value.deployed_at or 0) * 1e9),
+                    started_ns,
                     identity,
                 ),
                 final_metrics=final_metrics,

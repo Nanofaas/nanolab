@@ -27,11 +27,10 @@ Alternatives considered: keeping Python Docker/SSH wrappers preserves current co
 The experiment data flow, resource lifecycle and deployment topology are distinct.
 A diagram must not make tools, machines and scientific stages siblings.
 
-Experiment data flow:
+Prepared images are a shared immutable input to all three stages. Experiment
+data flow:
 
 ```text
-prepared images ──────────────────────────────────────────┐
-                                                        │
 calibration ── profile ── qualification ── timing ── experiment
                                                     baseline / oracle / ewma
 ```

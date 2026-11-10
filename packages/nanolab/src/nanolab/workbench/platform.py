@@ -317,8 +317,8 @@ def one_shot_platform(
         return resource, instance
 
     exporter_ports = {"node-exporter": NODE_EXPORTER_PORT, "cadvisor": CADVISOR_PORT}
-    exporters = [
-        member(
+    exporters = {
+        (key, component): member(
             host,
             component,
             ({} if host.node is None else {"bind": "0.0.0.0"})  # nosec B104 - docstring
@@ -334,14 +334,17 @@ def one_shot_platform(
         )
         for key, host in hosts.items()
         for component, port in exporter_ports.items()
-    ]
+    }
     pull = resource_of(
         "Pull the loadgen image",
         lambda inputs: _pull_loadgen(inputs.resource(installed)),
         lambda _inputs, _value: None,
         requires=(installed,),
     )
-    members: list[Resource[Any]] = [pull, *(resource for resource, _ in exporters)]
+    members: list[Resource[Any]] = [
+        pull,
+        *(resource for resource, _ in exporters.values()),
+    ]
     operator_ports = [
         ("127.0.0.1", port)
         for port in (PROMETHEUS_PORT, SUPERVISOR_PORT, *exporter_ports.values())
@@ -670,6 +673,7 @@ def one_shot_platform(
             nodes[key],
             instance,
             resource,
+            since=exporters[key, "node-exporter"][0],
             run_dir=run_dir,
             vars_dir=vars_dir,
             storage_dir=storage_dir,
