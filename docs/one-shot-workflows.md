@@ -953,3 +953,50 @@ Future normal preparations fingerprint the new NanoLab modules, active launcher,
 Rich, TUI toolkit and Typer sources and versions. Existing freezes and historical
 fingerprints are unchanged; code drift still stops before inventory/acquisition.
 See [verification evidence](testing/one-shot-reporting-separation.md).
+
+
+## OpenTofu-owned Multipass fleets
+
+Use `provisioning: opentofu` in the environment to create all requested nodes in
+one owned stack per Multipass site. The default remains `direct`. Local Multipass
+and remote sites use the same node setup, CPU placement, transfers and collectors.
+CPU/RAM admission is unchanged; OpenTofu also reserves the requested disk sizes
+plus 5 GiB on the storage filesystem before creating a new stack.
+
+Start from `multipass-opentofu.yaml.example` in the bundled environments and
+adapt its site, SSH key and placement to your scenario. The operator needs
+OpenTofu and SSH access to the site. Its VM public key must exist alongside the
+configured private key (`key.pub`). A local fleet uses the SDK's SSH public-key
+discovery. `opentofu.storagePath` selects the filesystem used for disk admission;
+set it when Multipass storage is relocated.
+
+The bundled module pins `Nanofaas/terraform-provider-multipass` 0.1.0 and ships
+its provider lock file. While registry enrollment is pending, install the signed
+release into an OpenTofu filesystem mirror and pass the absolute CLI config path
+as `opentofu.cliConfigFile`. The mirror must provide the operator's platform;
+the VM architecture follows the Multipass host. Keep provider signature and
+checksum verification evidence with the run. The provider connects through SSH
+and uses the existing known-host policy; no Multipass TCP daemon is required.
+
+This feature requires the candidate `sonata-engine`/`sonata-tasks` 0.7.1. Publish
+those artifacts before updating Nanolab's public dependency pins. Until then,
+use the candidate wheels in an isolated development environment as described in
+the integration evidence; an installation with the released 0.7.0 tasks cannot
+select OpenTofu provisioning.
+
+Each run keeps its immutable module, local state, ownership record and private
+CLI diagnostics under `infrastructure/<site>`. Keep this directory until cleanup
+is confirmed. Never copy state into another run or edit it to bypass ownership.
+A repeated acquisition refreshes the same stack and requires a no-change plan;
+configuration changes and drift require explicit recovery instead of replacing
+VMs holding experiment evidence. Provisioning is serial by default to avoid the
+Multipass 1.17 concurrent-launch issue.
+
+Only the fleet resource destroys VMs. Node resources borrow them, and collection
+finishes before fleet release. When logging is enabled, destruction additionally
+requires the verified raw archive and matching checksum for every started node.
+A collection error or missing completion receipt retains the entire site stack,
+including after process restart. A failed/uncertain apply preserves its recovery
+record even if best-effort cleanup emptied the known state: inspect Multipass
+inventory for untracked resources before explicit recovery. Never run a global
+`multipass purge` as experiment cleanup.

@@ -62,6 +62,7 @@ def package_fingerprint() -> str:
         str(path.relative_to(root)): content_hash(path.read_bytes())
         for path in sorted(root.rglob("*"))
         if path.is_file()
-        and path.suffix in {".py", ".js", ".json", ".yaml", ".yml", ".example"}
+        and path.suffix
+        in {".py", ".js", ".json", ".yaml", ".yml", ".example", ".tf", ".hcl"}
     }
     return content_hash(canonical_bytes(entries))

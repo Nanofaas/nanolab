@@ -159,6 +159,15 @@ class OperatorLogging(BaseModel):
 AZURE_SITE = "azure"
 
 
+class OpenTofuConfig(BaseModel):
+    """Executable, provider mirror and VM storage for one-shot fleet provisioning."""
+
+    model_config = ConfigDict(extra="forbid")
+    binary: str = Field(default="tofu", min_length=1)
+    cli_config_file: str | None = Field(default=None, alias="cliConfigFile")
+    storage_path: str | None = Field(default=None, alias="storagePath")
+
+
 class EnvironmentConfig(BaseModel):
     """A parsed environment file: the provider, its roles and its settings.
 
@@ -174,6 +183,8 @@ class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: ProviderName
+    provisioning: Literal["direct", "opentofu"] = "direct"
+    opentofu: OpenTofuConfig = Field(default_factory=OpenTofuConfig)
     roles: dict[ExecutionRole, RoleTarget] = Field(default_factory=dict)
     azure: AzureEnvironment | None = None
     proxmox: ProxmoxEnvironment | None = None
@@ -197,6 +208,8 @@ class EnvironmentConfig(BaseModel):
         An after-validator, so it returns the instance unchanged once every
         requirement of the selected provider is satisfied.
         """
+        if self.provisioning == "opentofu" and self.provider != "multipass":
+            raise ValueError("OpenTofu fleet provisioning currently requires Multipass")
         for role, target in self.roles.items():
             if target.provider is None:
                 continue

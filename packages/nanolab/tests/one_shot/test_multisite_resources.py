@@ -576,3 +576,20 @@ def test_a_site_upload_still_goes_through_the_provider(tmp_path):
     vm = VmInfo(name="e", host="10.0.0.2", user="ubuntu", home="/home/ubuntu")
     infrastructure.transfer_to_vm(cast(Any, node), vm, tmp_path / "f", "/home/ubuntu/f")
     assert sent == [(tmp_path / "f", "/home/ubuntu/f")]
+
+
+def test_control_socket_fits_even_with_long_macos_temp_directory(monkeypatch, tmp_path):
+    import socket
+
+    long_temp = tmp_path / ("x" * 50)
+    long_temp.mkdir()
+    monkeypatch.setattr(sites.tempfile, "gettempdir", lambda: str(long_temp))
+    socket_path = Path(
+        sites.control_path().replace("%C", "a" * 40) + ".0123456789abcdef"
+    )
+    try:
+        with socket.socket(socket.AF_UNIX) as sock:
+            sock.bind(str(socket_path))
+        assert socket_path.parent.stat().st_mode & 0o077 == 0
+    finally:
+        socket_path.unlink(missing_ok=True)

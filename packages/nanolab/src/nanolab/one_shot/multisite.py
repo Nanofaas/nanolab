@@ -222,6 +222,27 @@ def build_multisite_resources(
                 [],
             )
         provider = SiteVmOrchestrator(repo_root, host.site)
+        bindings = {}
+        if environment.provisioning == "opentofu":
+            from nanolab.one_shot.terraform import prepare_fleet
+
+            if run_dir is None:
+                raise ValueError(
+                    "OpenTofu provisioning requires a persistent run directory"
+                )
+            bindings = prepare_fleet(
+                config=config,
+                environment=environment,
+                namespace=namespace,
+                name=site,
+                requests={
+                    node.id: _multipass_request(namespace, node) for node in members
+                },
+                provider=provider,
+                run_dir=run_dir,
+                resources=nodes,
+                site=host.site,
+            )
         for node in members:
             nodes[node.id] = _owned_node(
                 node,
@@ -235,6 +256,7 @@ def build_multisite_resources(
                     host.multipass_argv("stop", name)
                 ),
                 site_host=host,
+                acquired_vm=bindings.get(node.id),
                 ordinal=ordinals[node.id],
                 architecture=host.site.architecture,
                 tunnel_journal=run_dir / "tunnels.jsonl" if run_dir else None,

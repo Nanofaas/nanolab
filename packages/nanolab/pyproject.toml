@@ -54,6 +54,8 @@ nanolab = [
     # They must resolve from
     # the installed distribution and not from a checkout beside it.
     "assets/k6/*",
+    "assets/terraform/multipass/*.tf",
+    "assets/terraform/multipass/.terraform.lock.hcl",
     "assets/diagnostics/*",
     "assets/containerd-rootless/*",
     "assets/experiment02/*",
