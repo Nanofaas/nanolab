@@ -1,5 +1,8 @@
 # Terraform/OpenTofu: implementazione e collaudo del 10 novembre 2026
 
+> Questo è il dossier del collaudo iniziale. Il [seguito sulla salute della
+> calibrazione](health-followup.md) aggiorna il rilievo, i test, i rilasci e il cleanup.
+
 Il task generico vive in `sonata-tasks`; Nanolab configura e consuma una flotta
 Multipass per sito. Il task non conosce Nanolab, nomi dei nodi o dettagli Multipass.
 La flotta possiede lo stato e distrugge le VM; i nodi prendono in prestito le VM
