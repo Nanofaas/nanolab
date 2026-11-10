@@ -344,7 +344,7 @@ class CampaignSupervision:
         for name in list(self.remote_retired):  # best effort, retried every poll
             try:
                 client.delete(name)
-            except Exception:
+            except Exception:  # nosec B112 - best effort, retried next poll
                 continue
             self.remote_retired.discard(name)
         try:
