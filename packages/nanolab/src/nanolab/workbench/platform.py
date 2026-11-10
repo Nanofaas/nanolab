@@ -1,9 +1,9 @@
 """The one-shot platform: every workbench instance of a run as one composite.
 
-Members deploy in order (the loadgen image pull, exporters, Loki, log
-collectors, Prometheus, the supervisor) and undeploy in reverse; the collect
-steps run first at release and read only the journalled member values, so a
-later process can run them.
+Members deploy in order (the operator preflight, the loadgen image pull,
+exporters, Loki, log collectors, Prometheus, the supervisor) and undeploy in
+reverse; the collect steps run first at release and read only the journalled
+member values, so a later process can run them.
 Without logs the platform is the exporters, Prometheus and the supervisor.
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Callable, Mapping
@@ -29,7 +30,7 @@ from nanolab.config.environment import OperatorLogging
 from nanolab.config.one_shot import OneShotConfig, OneShotLogs, operational_limit
 from nanolab.one_shot.addresses import CADVISOR_PORT, NODE_EXPORTER_PORT
 from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
-from nanolab.one_shot.operator_memory import MAX_SWAP_PAGES, MIN_AVAILABLE_BYTES
+from nanolab.one_shot.operator_memory import MAX_SWAP_PAGES
 from nanolab.one_shot.vm_resources import SCRAPE_SECONDS
 from nanolab.tasks.one_shot.logging import (
     LogSession,
@@ -40,7 +41,11 @@ from nanolab.tasks.one_shot.logging import (
 )
 from nanolab.tasks.resource_tasks import call, resource_of
 from nanolab.workbench.components import Deployed, component_resource
-from nanolab.workbench.install import ensure_installed, workbench_resource
+from nanolab.workbench.install import (
+    check_operator,
+    ensure_installed,
+    workbench_resource,
+)
 from nanolab.workbench.inventory import HostVars, Instance
 from nanolab.workbench.loadgen import LoadgenRun, loadgen_resource
 from nanolab.workbench.playbook import WorkbenchHost, WorkbenchPlaybook
@@ -54,8 +59,13 @@ CONTROL_PLANE = "nanolab-one-shot-control-plane"
 COLLECTOR_PORT = 2020  # fluent-bit.conf's HTTP_Port
 PROMETHEUS_PORT = 9090
 SUPERVISOR_PORT = 8099
-# cAdvisor housekeeping (5 s) plus scrape (5 s) jitter, with room to spare.
+# cAdvisor housekeeping plus scrape (5 s) jitter, with room to spare.
 STALE_SECONDS = 30
+# cAdvisor's 5 s default, jittered and backed off, aliases a 5 s irate.
+HOUSEKEEPING = "1s"
+# Swap traffic may last this long before a run faults: memory headroom is
+# checked before the run, while the operator hosts Prometheus, Loki and k6.
+SWAP_TOLERATED_SECONDS = 30
 PUSH_PATH = "/loki/api/v1/push"
 # As the in-process liveness checks tolerated: a node behind a site or on Azure
 # may be unreachable this long before its checks fault.
@@ -64,6 +74,8 @@ REMOTE_UNREACHABLE_SECONDS = 300
 DRAIN_POLLS = 5
 DRAIN_POLL_SECONDS = 2
 LOKI_STORE = "Own the Loki store"
+PROMETHEUS_STORE = "Own the Prometheus store"
+PREFLIGHT = "Check the operator prerequisites"
 
 type Step = Callable[[Members, TaskInputs], None]
 
@@ -79,7 +91,9 @@ class OneShotPlatform:
     are registered once those are up. `export_vm_resources(into, start, end)`
     writes a window's vm-resources rows under `into`. `loadgen(...)` is
     `loadgen_resource` on the nanolab host, for tasks that may not import the
-    workbench.
+    workbench. `record_supervisor_status(values)` writes the supervisor's
+    status into the run, from the composite's values; a supervised run calls
+    it before removing its targets.
     """
 
     resource: Resource[Members]
@@ -91,6 +105,7 @@ class OneShotPlatform:
     targets: Mapping[str, dict[str, Any]]
     export_vm_resources: Callable[[Path, datetime, datetime], None]
     loadgen: Callable[..., Resource[LoadgenRun]]
+    record_supervisor_status: Callable[[Members], None]
 
 
 def _cpus(cpus: list[int] | None) -> str | None:
@@ -126,9 +141,9 @@ def _inspect(host: WorkbenchHost, name: str) -> dict[str, Any]:
     }
 
 
-def _loki_log() -> str:
+def _loki_log(name: str) -> str:
     done = subprocess.run(
-        ("docker", "logs", "wb-loki-operator"),
+        ("docker", "logs", name),
         capture_output=True,
         text=True,
         check=False,
@@ -137,8 +152,11 @@ def _loki_log() -> str:
     return done.stdout + done.stderr
 
 
-def _chown_back(path: Path) -> None:
-    """Give a store Loki (uid 10001) wrote back to the operator's user."""
+def _as_root(path: Path, *argv: str) -> None:
+    """Run `argv` as root on `path`, mounted at /data.
+
+    For a store a component's own uid wrote (Loki 10001, Prometheus nobody).
+    """
     defaults = (
         ensure_installed()
         / "ansible_collections/nanofaas/workbench/roles/common/defaults/main.yml"
@@ -156,10 +174,7 @@ def _chown_back(path: Path) -> None:
             "-v",
             f"{path}:/data",
             image,
-            "chown",
-            "-R",
-            f"{os.getuid()}:{os.getgid()}",
-            "/data",
+            *argv,
         ),
         capture_output=True,
         check=True,
@@ -251,6 +266,8 @@ def one_shot_platform(
         )
     bootstraps = bootstraps or {}
     run_id = run_dir.name
+    # Operator instances are run-unique: runs share the host, VMs are run-owned.
+    operator_id = hashlib.sha256(str(run_dir.resolve()).encode()).hexdigest()[:8]
     workbench_dir = run_dir / "workbench"
     vars_dir = workbench_dir / "vars"
     installed = workbench_resource()
@@ -272,7 +289,8 @@ def one_shot_platform(
             requires = (bootstraps[host.key], *requires)
         instance = Instance.model_validate(
             {
-                "name": f"{component}-{host.key}",
+                "name": f"{component}-{host.key}"
+                + ("" if host.node is not None else f"-{operator_id}"),
                 "component": component,
                 "cpuset": cpuset,
                 "config": config,
@@ -294,7 +312,12 @@ def one_shot_platform(
         member(
             host,
             component,
-            {} if host.node is None else {"bind": "0.0.0.0"},  # nosec B104 - docstring
+            ({} if host.node is None else {"bind": "0.0.0.0"})  # nosec B104 - docstring
+            | (
+                {"housekeeping_interval": HOUSEKEEPING}
+                if component == "cadvisor"
+                else {}
+            ),
             url=None
             if key in direct
             else "http://"
@@ -310,6 +333,10 @@ def one_shot_platform(
         requires=(installed,),
     )
     members: list[Resource[Any]] = [pull, *(resource for resource, _ in exporters)]
+    operator_ports = [
+        ("127.0.0.1", port)
+        for port in (PROMETHEUS_PORT, SUPERVISOR_PORT, *exporter_ports.values())
+    ]
 
     # Logging: Loki on the operator, a collector on every node.
     loki: Resource[Deployed] | None = None
@@ -319,6 +346,7 @@ def one_shot_platform(
     else:
         logging_dir = run_dir / "logging"
     loki_url = ""
+    loki_container = ""
     config_files = {
         name: nanofaas_root / "deploy/observability" / name
         for name in ("fluent-bit.conf", "parsers.conf")
@@ -334,12 +362,13 @@ def one_shot_platform(
             loki_port = urlsplit(logs.endpoint or "").port or 80
             loki_cpus = placement.logging_cpus if placement else None
         loki_url = f"http://{loki_bind}:{loki_port}"
+        operator_ports.append((loki_bind, loki_port))
         data = logging_dir / "backend-data"
 
         def hand_back(_inputs: TaskInputs, _value: None) -> None:
             if not data.is_dir():
                 return
-            _chown_back(data)
+            _as_root(data, "chown", "-R", f"{os.getuid()}:{os.getgid()}", "/data")
             hashes = {}
             for path in sorted(data.rglob("*")):
                 if path.is_file():
@@ -351,7 +380,7 @@ def one_shot_platform(
 
         # Released after Loki, so the store it hashes is final.
         store = resource_of(LOKI_STORE, lambda _inputs: None, hand_back)
-        loki, _ = member(
+        loki, loki_instance = member(
             OPERATOR,
             "loki",
             {
@@ -370,6 +399,7 @@ def one_shot_platform(
             requires=(store,),
         )
         members += [store, loki]
+        loki_container = f"wb-{loki_instance.name}"
         for key, host in nodes.items():
             route = (log_endpoints or {}).get(key)
             collectors[key] = member(
@@ -425,19 +455,27 @@ def one_shot_platform(
         }
 
     prometheus_url = f"http://127.0.0.1:{PROMETHEUS_PORT}"
+    # Only the snapshot belongs in the run directory.
+    tsdb = operator_workspace_root() / ".workbench" / operator_id / "prometheus"
+
+    def drop_tsdb(_inputs: TaskInputs, _value: None) -> None:
+        # Released after Prometheus: its TSDB goes once the snapshot is kept.
+        kept = workbench_dir / prometheus_instance.name / "prometheus-snapshot.tar.gz"
+        if kept.is_file() and tsdb.is_dir():
+            _as_root(tsdb, "find", "/data", "-mindepth", "1", "-delete")
+            shutil.rmtree(tsdb.parent)
+
+    tsdb_store = resource_of(PROMETHEUS_STORE, lambda _inputs: None, drop_tsdb)
     prometheus, prometheus_instance = member(
         OPERATOR,
         "prometheus",
         {
             "port": PROMETHEUS_PORT,
-            # Only the snapshot belongs in the run directory.
-            "data_dir": str(
-                operator_workspace_root() / ".workbench" / run_id / "prometheus"
-            ),
+            "data_dir": str(tsdb),
             "scrape_interval": f"{SCRAPE_SECONDS}s",
         },
         url=prometheus_url,
-        requires=tuple(node.vm for node in direct.values()),
+        requires=(tsdb_store, *(node.vm for node in direct.values())),
         config_from_inputs=scrape_jobs,
     )
 
@@ -468,10 +506,25 @@ def one_shot_platform(
         "params": {
             "node": "operator",
             "maxSwapPages": MAX_SWAP_PAGES,
-            "minAvailableBytes": MIN_AVAILABLE_BYTES,
+            "minAvailableBytes": 0,
         },
-        "toleratedSeconds": 0,
+        "toleratedSeconds": SWAP_TOLERATED_SECONDS,
     }
+    if logs.enabled:
+        targets["running.loki.operator"] = {
+            "kind": "container_running",
+            "params": {
+                "name": loki_container,
+                "node": "operator",
+                "staleSeconds": STALE_SECONDS,
+            },
+            "toleratedSeconds": 0,
+        }
+        targets["ready.loki.operator"] = {
+            "kind": "http_ok",
+            "params": {"url": f"{loki_url}/ready"},
+            "toleratedSeconds": 0,
+        }
     supervisor, _ = member(
         OPERATOR,
         "supervisor",
@@ -487,7 +540,11 @@ def one_shot_platform(
         url=f"http://127.0.0.1:{SUPERVISOR_PORT}",
         requires=(prometheus,),
     )
-    members += [prometheus, supervisor]
+    members += [tsdb_store, prometheus, supervisor]
+    preflight = resource_of(
+        PREFLIGHT, lambda _inputs: check_operator(operator_ports), lambda _i, _v: None
+    )
+    members.insert(0, preflight)
 
     def collect(
         inputs: TaskInputs, host: WorkbenchHost, instance: Instance, value: Deployed
@@ -646,32 +703,41 @@ def one_shot_platform(
             logging_dir if operator_logging is not None else run_dir
         ) / "logging-host-placement.json"
         try:
-            facts = _inspect(OPERATOR, "wb-loki-operator")
+            facts = _inspect(OPERATOR, loki_container)
             facts["cpus"] = _cpu_list(facts["cpuset"])
         except Exception as error:
             facts = {"error": str(error)}
         _write_json(placement_file, {"host": "operator", **facts})
         logging_dir.mkdir(parents=True, exist_ok=True)
-        (logging_dir / "backend.log").write_text(_loki_log())
+        try:
+            log = _loki_log(loki_container)
+        except Exception as error:  # e.g. TimeoutExpired: still verify below
+            log = f"docker logs {loki_container} failed: {error}\n"
+        (logging_dir / "backend.log").write_text(log)
         verify_loki_ingestion(
             loki_url + PUSH_PATH, f"nanolab-logs-{run_id}", logging_dir, settings
         )
 
-    def supervisor_status(values: Members, _inputs: TaskInputs) -> None:
+    status_file = workbench_dir / "supervisor-status.json"
+
+    def record_supervisor_status(values: Members) -> None:
         url = values.of(supervisor).url or f"http://127.0.0.1:{SUPERVISOR_PORT}"
-        _write_json(
-            workbench_dir / "supervisor-status.json",
-            SupervisorClient(url, timeout_seconds=10).status(),
-        )
+        _write_json(status_file, SupervisorClient(url, timeout_seconds=10).status())
+
+    def supervisor_status(values: Members, _inputs: TaskInputs) -> None:
+        # A supervised run recorded it at detach, with every target still on.
+        if not status_file.exists():
+            record_supervisor_status(values)
 
     steps: list[tuple[str, Step]] = [
+        # First: stopping a collector would fault its target.
+        ("Record the supervisor status", supervisor_status),
         ("Snapshot the workbench Prometheus", snapshot),
         *(
             (f"Collect the {key} log collector", collector_step(key))
             for key in collectors
         ),
         *((("Export and verify Loki", loki_step),) if logs.enabled else ()),
-        ("Record the supervisor status", supervisor_status),
     ]
 
     def step(fn: Step) -> Callable[[TaskInputs], None]:
@@ -692,4 +758,5 @@ def one_shot_platform(
         targets,
         export,
         partial(loadgen_resource, OPERATOR),
+        record_supervisor_status,
     )

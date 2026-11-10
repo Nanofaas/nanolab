@@ -163,3 +163,9 @@ def test_an_unknown_loadgen_blocks_the_archive(tmp_path, monkeypatch):
     supervision.writers.append(run)
     with pytest.raises(RuntimeError, match="still running or its state unknown"):
         supervision._require_writers_stopped()
+
+
+def test_an_unreadable_exit_code_is_unknown_not_an_error(monkeypatch):
+    run = _run(["exited ?"], monkeypatch)
+    assert run.poll() is None  # never raises under the supervision lock
+    assert run.error and run.returncode is None

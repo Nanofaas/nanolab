@@ -72,12 +72,12 @@ class LoadgenRun:
                     check=True,
                     timeout=INSPECT_SECONDS,
                 ).stdout.split()
+                exited = int(code) if status in ("exited", "dead") else None
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 self.error = f"docker inspect {self.container}: {error}"
                 return None
             self.error = None
-            if status in ("exited", "dead"):
-                self.returncode = int(code)
+            self.returncode = exited
         return self.returncode
 
     def stop(self) -> None:

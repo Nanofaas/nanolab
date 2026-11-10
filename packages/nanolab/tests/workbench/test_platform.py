@@ -1,5 +1,6 @@
 import hashlib
 import json
+import subprocess
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ import pytest
 import yaml
 from sonata_engine import (
     JournalConfig,
+    Members,
     Task,
     TaskInputs,
     TaskOutcome,
@@ -116,6 +118,10 @@ def _build(
             path = Path(saved["collect_dir"]) / names[0] / "metrics.txt"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(metrics.get(role, DRAINED))
+        if action == "collect" and names[0].startswith("prometheus-"):
+            path = Path(saved["collect_dir"]) / names[0] / "prometheus-snapshot.tar.gz"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"snapshot")
         if action == "deploy":
             SEEN.update({i["name"]: i for i in saved["instances"]})
 
@@ -140,9 +146,16 @@ def _build(
     monkeypatch.setattr(platform, "verify_loki_ingestion", record("loki-ingestion"))
     monkeypatch.setattr(platform, "archive_node_dir", archive)
     monkeypatch.setattr(
-        platform, "_chown_back", lambda path: events.append(("operator", "chown", path))
+        platform,
+        "_as_root",
+        lambda path, *argv: events.append(("operator", argv[0], path)),
     )
-    monkeypatch.setattr(platform, "_loki_log", lambda: "loki says hi\n")
+    monkeypatch.setattr(
+        platform,
+        "check_operator",
+        lambda ports: events.append(("operator", "preflight", tuple(ports))),
+    )
+    monkeypatch.setattr(platform, "_loki_log", lambda _name: "loki says hi\n")
     monkeypatch.setattr(
         platform,
         "_pull_loadgen",
@@ -214,19 +227,26 @@ def _run(built, events) -> None:
     workflow.run()
 
 
-DEPLOY_ORDER = [
-    ("operator", "node-exporter-operator"),
-    ("operator", "cadvisor-operator"),
-    ("edge-1", "node-exporter-edge-1"),
-    ("edge-1", "cadvisor-edge-1"),
-    ("cloud-1", "node-exporter-cloud-1"),
-    ("cloud-1", "cadvisor-cloud-1"),
-    ("operator", "loki-operator"),
-    ("edge-1", "log-collector-edge-1"),
-    ("cloud-1", "log-collector-cloud-1"),
-    ("operator", "prometheus-operator"),
-    ("operator", "supervisor-operator"),
-]
+def _deploy_order(tmp_path):
+    return [
+        ("operator", _op(tmp_path, "node-exporter")),
+        ("operator", _op(tmp_path, "cadvisor")),
+        ("edge-1", "node-exporter-edge-1"),
+        ("edge-1", "cadvisor-edge-1"),
+        ("cloud-1", "node-exporter-cloud-1"),
+        ("cloud-1", "cadvisor-cloud-1"),
+        ("operator", _op(tmp_path, "loki")),
+        ("edge-1", "log-collector-edge-1"),
+        ("cloud-1", "log-collector-cloud-1"),
+        ("operator", _op(tmp_path, "prometheus")),
+        ("operator", _op(tmp_path, "supervisor")),
+    ]
+
+
+def _op(tmp_path, component):
+    """Name an operator instance: run-unique, as two runs share the host."""
+    run = hashlib.sha256(str((tmp_path / "run").resolve()).encode()).hexdigest()
+    return f"{component}-operator-{run[:8]}"
 
 
 def _of(events, action):
@@ -236,18 +256,18 @@ def _of(events, action):
 def test_member_order_and_reverse_release(tmp_path, monkeypatch):
     events: list = []
     _run(_build(tmp_path, monkeypatch, events), events)
-    assert _of(events, "deploy") == DEPLOY_ORDER
-    assert _of(events, "undeploy") == DEPLOY_ORDER[::-1]
+    assert _of(events, "deploy") == _deploy_order(tmp_path)
+    assert _of(events, "undeploy") == _deploy_order(tmp_path)[::-1]
 
 
 def test_failed_platform_acquire_undeploys_earlier_members(tmp_path, monkeypatch):
     events: list = []
-    built = _build(tmp_path, monkeypatch, events, fail="prometheus-operator")
+    built = _build(tmp_path, monkeypatch, events, fail=_op(tmp_path, "prometheus"))
     with pytest.raises(Exception, match="deploy failed"):
         _run(built, events)
-    assert _of(events, "deploy") == DEPLOY_ORDER[:10]  # the last one failed
+    assert _of(events, "deploy") == _deploy_order(tmp_path)[:10]  # the last one failed
     # The failed member cleans itself up first, then the others in reverse.
-    assert _of(events, "undeploy") == DEPLOY_ORDER[:10][::-1]
+    assert _of(events, "undeploy") == _deploy_order(tmp_path)[:10][::-1]
     assert ("consume", "", ()) not in events
 
 
@@ -260,10 +280,12 @@ def test_platform_release_from_journal(tmp_path, monkeypatch):
             Deployed(host, title, "x", None, None if host == "operator" else asdict(VM))
         )
         for host, title in (
-            (host, f"Deploy {name} on {host}") for host, name in DEPLOY_ORDER
+            (host, f"Deploy {name} on {host}") for host, name in _deploy_order(tmp_path)
         )
     }
     members["Own the Loki store"] = None
+    members["Own the Prometheus store"] = None
+    members["Check the operator prerequisites"] = None
     members["Pull the loadgen image"] = None
     journal = tmp_path / "journal.jsonl"
     journal.write_text(
@@ -281,14 +303,14 @@ def test_platform_release_from_journal(tmp_path, monkeypatch):
         {built.resource.title: built.resource}, JournalConfig(journal)
     )
     assert released == (built.resource.title,)
-    assert _of(events, "undeploy") == DEPLOY_ORDER[::-1]
+    assert _of(events, "undeploy") == _deploy_order(tmp_path)[::-1]
 
 
 def test_supervisor_targets_cover_every_node(tmp_path, monkeypatch):
     events: list = []
     built = _build(tmp_path, monkeypatch, events)
     _run(built, events)
-    config = SEEN["supervisor-operator"]["config"]
+    config = SEEN[_op(tmp_path, "supervisor")]["config"]
     assert config["port"] == 8099
     assert config["prometheus_url"] == "http://127.0.0.1:9090"
     targets = built.targets
@@ -321,22 +343,33 @@ def test_supervisor_targets_cover_every_node(tmp_path, monkeypatch):
             "node": node,
             "staleSeconds": 30,
         }
+    # Swapping broke runs; memory headroom is checked before the run.
     assert targets["swap.operator"] == {
         "kind": "swap_quiet",
+        "params": {"node": "operator", "maxSwapPages": 256, "minAvailableBytes": 0},
+        "toleratedSeconds": 30,
+    }
+    assert targets["running.loki.operator"] == {
+        "kind": "container_running",
         "params": {
+            "name": "wb-" + _op(tmp_path, "loki"),
             "node": "operator",
-            "maxSwapPages": 256,
-            "minAvailableBytes": 8 * 1024**3,
+            "staleSeconds": 30,
         },
         "toleratedSeconds": 0,
     }
-    assert len(targets) == 2 * len(hosts) + 2 * len(NODES) + 1
+    assert targets["ready.loki.operator"] == {
+        "kind": "http_ok",
+        "params": {"url": "http://10.0.0.1:3100/ready"},
+        "toleratedSeconds": 0,
+    }
+    assert len(targets) == 2 * len(hosts) + 2 * len(NODES) + 3
 
 
 def test_forwarded_nodes_are_scraped_through_their_forwards(tmp_path, monkeypatch):
     events: list = []
     _run(_build(tmp_path, monkeypatch, events), events)
-    jobs = SEEN["prometheus-operator"]["config"]["jobs"]
+    jobs = SEEN[_op(tmp_path, "prometheus")]["config"]["jobs"]
     assert jobs["node"] == [
         {"target": "127.0.0.1:9100", "labels": {"node": "operator"}},
         {"target": "127.0.0.1:19100", "labels": {"node": "edge-1"}},
@@ -352,14 +385,18 @@ def test_forwarded_nodes_are_scraped_through_their_forwards(tmp_path, monkeypatc
         assert all(
             SEEN[f"{component}-{n}"]["config"]["bind"] == "0.0.0.0" for n in NODES
         )
-        assert "bind" not in SEEN[f"{component}-operator"]["config"]
+        assert "bind" not in SEEN[_op(tmp_path, component)]["config"]
+    # cAdvisor's 5 s default housekeeping aliases a 5 s irate.
+    for host in ("operator", *NODES):
+        name = _op(tmp_path, "cadvisor") if host == "operator" else f"cadvisor-{host}"
+        assert SEEN[name]["config"]["housekeeping_interval"] == "1s"
 
 
 def test_unforwarded_nodes_are_scraped_at_the_vm_address(tmp_path, monkeypatch):
     events: list = []
     forwards = {"edge-1": FORWARDS["edge-1"]}
     _run(_build(tmp_path, monkeypatch, events, forwards=forwards), events)
-    jobs = SEEN["prometheus-operator"]["config"]["jobs"]
+    jobs = SEEN[_op(tmp_path, "prometheus")]["config"]["jobs"]
     assert [t["target"] for t in jobs["node"]] == [
         "127.0.0.1:9100",
         "127.0.0.1:19100",
@@ -373,7 +410,7 @@ def test_unforwarded_nodes_are_scraped_at_the_vm_address(tmp_path, monkeypatch):
 def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
     events: list = []
     _run(_build(tmp_path, monkeypatch, events), events)
-    assert SEEN["loki-operator"]["cpuset"] == "6,7"
+    assert SEEN[_op(tmp_path, "loki")]["cpuset"] == "6,7"
     for node in NODES:
         collector = SEEN[f"log-collector-{node}"]
         assert "cpuset" not in collector  # host CPU ids mean nothing in the VM
@@ -387,6 +424,8 @@ def test_cpusets_follow_host_cpu_placement(tmp_path, monkeypatch):
 
 
 COLLECT_ORDER = [
+    # First, before any collector stops: its target would fault.
+    ("collect", "supervisor"),
     ("operator", "collect"),  # Prometheus snapshot; vm-resources are in-workflow
     ("edge-1", "collect"),
     ("edge-1", "stop"),
@@ -395,7 +434,6 @@ COLLECT_ORDER = [
     ("cloud-1", "stop"),
     ("collect", "archive"),
     ("collect", "loki-ingestion"),
-    ("collect", "supervisor"),
 ]
 
 
@@ -413,7 +451,7 @@ def test_collect_runs_before_undeploy(tmp_path, monkeypatch):
     status = run / "workbench" / "supervisor-status.json"
     assert json.loads(status.read_text()) == {"state": "healthy"}
     placement = json.loads((run / "logging-host-placement.json").read_text())
-    assert placement["container"] == "wb-loki-operator"
+    assert placement["container"] == "wb-" + _op(tmp_path, "loki")
     assert (run / "logging" / "backend.log").read_text() == "loki says hi\n"
     for node in NODES:
         directory = run / "logging" / node
@@ -477,8 +515,8 @@ def test_logs_disabled_omits_logging(tmp_path, monkeypatch):
     assert not any(name.startswith("running.log-collector.") for name in targets)
     assert "running.control-plane.edge-1" in targets
     assert _collects(events) == [
-        ("operator", "collect"),
         ("collect", "supervisor"),
+        ("operator", "collect"),
     ]
     built.export_vm_resources(tmp_path, datetime.now(UTC), datetime.now(UTC))
     (export,) = [k for _h, a, k in events if a == "vm-resources"]
@@ -501,16 +539,16 @@ def test_loki_store_is_handed_back_after_loki(tmp_path, monkeypatch):
     data = tmp_path / "run" / "logging" / "backend-data"
     data.mkdir(parents=True)
     _run(built, events)
-    assert SEEN["loki-operator"]["config"]["data_dir"] == str(data)
+    assert SEEN[_op(tmp_path, "loki")]["config"]["data_dir"] == str(data)
     undeploys = [names for _h, action, names in events if action == "undeploy"]
     after = [
         (host, action)
         for host, action, _ in events[
-            events.index(("operator", "undeploy", ("loki-operator",))) :
+            events.index(("operator", "undeploy", (_op(tmp_path, "loki"),))) :
         ]
     ]
     assert after[1] == ("operator", "chown")
-    assert undeploys[-1] == ("node-exporter-operator",)
+    assert undeploys[-1] == (_op(tmp_path, "node-exporter"),)
 
 
 def test_loki_store_hashes_today_format(tmp_path, monkeypatch):
@@ -533,7 +571,7 @@ def test_multi_site_loki_lives_under_backend(tmp_path, monkeypatch):
         _build(tmp_path, monkeypatch, events, operator_logging=operator_logging),
         events,
     )
-    loki = SEEN["loki-operator"]
+    loki = SEEN[_op(tmp_path, "loki")]
     backend = tmp_path / "run" / "logging" / "backend"
     assert loki["config"]["data_dir"] == str(backend / "backend-data")
     assert loki["config"]["port"] == 43100
@@ -545,7 +583,7 @@ def test_multi_site_loki_lives_under_backend(tmp_path, monkeypatch):
 def test_loki_config_keeps_the_wal_settings(tmp_path, monkeypatch):
     events: list = []
     _run(_build(tmp_path, monkeypatch, events), events)
-    path = Path(SEEN["loki-operator"]["config"]["config_file"])
+    path = Path(SEEN[_op(tmp_path, "loki")]["config"]["config_file"])
     assert path.parent == tmp_path / "run" / "logging"
     config = yaml.safe_load(path.read_text())
     assert config["ingester"]["wal"] == {"enabled": True, "disk_full_threshold": 0}
@@ -555,9 +593,47 @@ def test_loki_config_keeps_the_wal_settings(tmp_path, monkeypatch):
 def test_prometheus_data_stays_out_of_the_run(tmp_path, monkeypatch):
     events: list = []
     _run(_build(tmp_path, monkeypatch, events), events)
-    assert SEEN["prometheus-operator"]["config"]["data_dir"] == str(
-        tmp_path / "workspace" / ".workbench" / "run" / "prometheus"
+    run = _op(tmp_path, "x").removeprefix("x-operator-")
+    tsdb = tmp_path / "workspace" / ".workbench" / run / "prometheus"
+    assert SEEN[_op(tmp_path, "prometheus")]["config"]["data_dir"] == str(tsdb)
+
+
+def test_the_tsdb_is_removed_once_its_snapshot_is_in_the_run(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    run = _op(tmp_path, "x").removeprefix("x-operator-")
+    tsdb = tmp_path / "workspace" / ".workbench" / run / "prometheus"
+    tsdb.mkdir(parents=True)
+    _run(built, events)
+    assert ("operator", "find", tsdb) in events  # as root: Prometheus is nobody
+    assert events.index(("operator", "find", tsdb)) > events.index(
+        ("operator", "undeploy", (_op(tmp_path, "prometheus"),))
     )
+    assert not tsdb.parent.exists()
+
+
+def test_the_tsdb_stays_without_a_snapshot(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events, fail=_op(tmp_path, "prometheus"))
+    run = _op(tmp_path, "x").removeprefix("x-operator-")
+    tsdb = tmp_path / "workspace" / ".workbench" / run / "prometheus"
+    tsdb.mkdir(parents=True)
+    with pytest.raises(Exception, match="deploy failed"):
+        _run(built, events)
+    assert tsdb.is_dir()
+    assert not any(action == "find" for _h, action, _p in events)
+
+
+def test_two_runs_never_share_an_operator_instance(tmp_path, monkeypatch):
+    """Tearing down an old run's operator containers cannot match a live run's."""
+    events: list = []
+    _run(_build(tmp_path / "a", monkeypatch, events), events)
+    first = {name for host, name in _of(events, "deploy") if host == "operator"}
+    events.clear()
+    _run(_build(tmp_path / "b", monkeypatch, events), events)
+    second = {name for host, name in _of(events, "deploy") if host == "operator"}
+    assert len(first) == len(second) == 5
+    assert not first & second
 
 
 def test_collectors_push_through_their_route(tmp_path, monkeypatch):
@@ -683,3 +759,81 @@ def test_pull_loadgen_pulls_the_pinned_image(tmp_path, monkeypatch):
     )
     platform._pull_loadgen(tmp_path)
     assert calls == [("docker", "pull", "grafana/k6@sha256:a")]
+
+
+def test_a_recorded_supervisor_status_is_kept(tmp_path, monkeypatch):
+    """Supervised runs record it at detach, before the targets are removed."""
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    status = tmp_path / "run" / "workbench" / "supervisor-status.json"
+    status.parent.mkdir(parents=True)
+    status.write_text('{"state": "fault"}\n')
+    _run(built, events)
+    assert ("collect", "supervisor", ()) not in events
+    assert json.loads(status.read_text()) == {"state": "fault"}
+
+
+def test_record_supervisor_status_writes_the_status(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    built.record_supervisor_status(
+        Members(
+            {
+                built.supervisor.title: Deployed(
+                    "operator", "s", "supervisor", "http://127.0.0.1:1"
+                )
+            }
+        )
+    )
+    status = tmp_path / "run" / "workbench" / "supervisor-status.json"
+    assert json.loads(status.read_text()) == {"state": "healthy"}
+
+
+@pytest.mark.parametrize(
+    "failure", [subprocess.TimeoutExpired("docker", 60), OSError("no docker")]
+)
+def test_a_failed_loki_log_still_verifies_ingestion(tmp_path, monkeypatch, failure):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+
+    def broken(_name):
+        raise failure
+
+    monkeypatch.setattr(platform, "_loki_log", broken)
+    _run(built, events)
+    assert ("collect", "loki-ingestion") in _collects(events)
+    log = (tmp_path / "run" / "logging" / "backend.log").read_text()
+    assert str(failure) in log
+
+
+def test_the_operator_prerequisites_are_checked_first(tmp_path, monkeypatch):
+    events: list = []
+    _run(_build(tmp_path, monkeypatch, events), events)
+    preflight = [e for e in events if e[1] == "preflight"]
+    assert preflight == [
+        (
+            "operator",
+            "preflight",
+            (
+                ("127.0.0.1", 9090),
+                ("127.0.0.1", 8099),
+                ("127.0.0.1", 9100),
+                ("127.0.0.1", 8089),
+                ("10.0.0.1", 3100),
+            ),
+        )
+    ]
+    assert events.index(preflight[0]) < next(
+        i for i, e in enumerate(events) if e[1] in ("pull", "deploy")
+    )
+
+
+def test_the_loki_log_reads_the_run_container(tmp_path, monkeypatch):
+    events: list = []
+    built = _build(tmp_path, monkeypatch, events)
+    names = []
+    monkeypatch.setattr(
+        platform, "_loki_log", lambda name: names.append(name) or "log\n"
+    )
+    _run(built, events)
+    assert names == ["wb-" + _op(tmp_path, "loki")]
