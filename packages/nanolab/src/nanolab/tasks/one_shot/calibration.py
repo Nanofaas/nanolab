@@ -28,6 +28,7 @@ from nanolab.one_shot.capacity import (
 )
 from nanolab.one_shot.models import CalibrationProfile
 from nanolab.one_shot.profiles import CalibrationProfiles, ProfileSet
+from nanolab.one_shot.topology import p2p_request_limit
 from nanolab.tasks.one_shot.artifacts import (
     append_observation,
     canonical_bytes,
@@ -237,6 +238,9 @@ def environment_identity(
         },
         "flowQuantum": settings.flow_quantum,
     }
+    transport_limit = p2p_request_limit(settings.nodes)
+    if transport_limit > 4:  # Smaller topologies keep their recipe setting.
+        identity["p2pMaxConcurrentRequests"] = transport_limit
     if settings.strict_memory:
         identity["strictMemory"] = True
     if settings.protocol_version == 2:

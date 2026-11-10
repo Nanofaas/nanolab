@@ -502,6 +502,7 @@ def test_image_archive_keeps_all_named_images_for_oci_import(
     assert saved[-2:] == ("cp:tag", "fn:tag")
 
 
+@pytest.mark.parametrize("edge_count", [2, 5])
 @pytest.mark.parametrize("failure", [None, "transfer", "image", "socket"])
 @pytest.mark.parametrize("node_id", ["edge-0", "cloud"])
 @pytest.mark.parametrize("terminal_queueing", [False, True])
@@ -513,6 +514,7 @@ def test_image_archive_keeps_all_named_images_for_oci_import(
 )
 def test_control_plane_namespace_and_compensated_cleanup(
     tmp_path,
+    edge_count,
     monkeypatch,
     failure,
     node_id,
@@ -536,8 +538,13 @@ def test_control_plane_namespace_and_compensated_cleanup(
     environment = EnvironmentConfig.model_validate(
         {"provider": "multipass", "roles": {"stack": {"name": "one-shot"}}}
     )
+    settings = config()
+    settings.nodes.extend(
+        settings.nodes[0].model_copy(update={"id": f"edge-{index}"})
+        for index in range(2, edge_count)
+    )
     resources = build_one_shot_resources(
-        config(), environment, run_id="socket", repo_root=tmp_path
+        settings, environment, run_id="socket", repo_root=tmp_path
     )
     node = resources.nodes[node_id]
     monkeypatch.setattr(
@@ -630,6 +637,10 @@ def test_control_plane_namespace_and_compensated_cleanup(
         url = acquire_now(resource, inputs)
         deployed = next(call for call in calls if call["runtime_action"] == "deploy")
         launch = deployed["runtime_command"]
+        if edge_count == 5:
+            assert "--nanofaas.p2p.max-concurrent-requests=8" in launch
+        else:
+            assert not any("max-concurrent-requests" in arg for arg in launch)
         assert deployed["runtime_control_image"] == "cp:tag"
         assert deployed["runtime_images"] == [
             {"reference": "cp:tag", "ids": [image.id]}

@@ -40,7 +40,11 @@ from nanolab.one_shot.infrastructure import (
     build_one_shot_resources,
 )
 from nanolab.one_shot.runtime import run_runtime
-from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_graph
+from nanolab.one_shot.topology import (
+    operator_peer_modes,
+    p2p_request_limit,
+    validate_neighbor_graph,
+)
 from nanolab.one_shot.vm_resources import require_resource_overhead
 from nanolab.tasks.components.bootstrap import base_provision_vars
 from nanolab.tasks.infra.ansible import bundled_ansible_root, playbook_task
@@ -290,6 +294,7 @@ def _control_plane(
             )
             peer_dir = f"{vm.home}/one-shot-p2p"
         boolean = str(edge).lower()
+        request_limit = p2p_request_limit(n.config for n in topology.nodes.values())
         args = [
             *(
                 ["--nanofaas.p2p.state-file=/tmp/one-shot-p2p/peers.yaml"]
@@ -324,6 +329,11 @@ def _control_plane(
             *advertised_arguments(addresses),
             "--nanofaas.p2p.ping-interval=250ms",
             "--nanofaas.p2p.ping-timeout=1s",
+            *(
+                [f"--nanofaas.p2p.max-concurrent-requests={request_limit}"]
+                if request_limit > 4
+                else []
+            ),
             f"--nanofaas.forecasting.enabled={boolean}",
             f"--nanofaas.forecasting.node-id={node.config.id}",
             f"--nanofaas.forecasting.provider={forecast_provider}",

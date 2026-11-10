@@ -219,6 +219,12 @@ co-location and environment fingerprints further restrict reuse. A changed
 recipe or image requires explicit recalibration and requalification. No workflow
 silently updates service time during a comparison.
 
+For four or more edges, deployment sets the shared P2P request limit to
+`2 * (edge_count - 1)`: one fan-out for endpoint discovery and one for auctions.
+Five edges therefore use eight slots. This override is part of the environment
+fingerprint and requires fresh calibration and qualification. Smaller topologies
+keep their recipe setting; auction deadlines and acceptance thresholds are unchanged.
+
 ## Run the three workflows
 
 From a NanoLab checkout use the public launcher; an installed wheel exposes the
