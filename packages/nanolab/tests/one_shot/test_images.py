@@ -128,3 +128,79 @@ def test_prebuilt_distribution_reuses_archive_without_docker(
     else:
         assert acquire_now(archives[architecture], inputs) == path
         assert acquire_now(archives[architecture], inputs) == path
+
+
+@pytest.mark.parametrize("identity", ["config", "manifest", "index"])
+@pytest.mark.parametrize(
+    "fault", [None, "config", "manifest", "architecture", "platforms"]
+)
+def test_containerd_index_binds_runtime_config_and_architecture(
+    tmp_path, identity, fault
+):
+    path, _, config, manifest = archive(tmp_path, corrupt=fault == "manifest")
+    with tarfile.open(path) as source:
+        entries = {}
+        for member in source:
+            content = source.extractfile(member)
+            assert content is not None
+            entries[member.name] = content.read()
+    index = json.dumps(
+        {
+            "schemaVersion": 2,
+            "manifests": [
+                {
+                    "digest": manifest,
+                    "platform": {"os": "linux", "architecture": "arm64"},
+                },
+                {
+                    "digest": "sha256:" + "f" * 64,
+                    "annotations": {
+                        "vnd.docker.reference.type": "attestation-manifest"
+                    },
+                },
+            ],
+        }
+    ).encode()
+    if fault == "platforms":
+        multiple = json.loads(index)
+        multiple["manifests"].append(multiple["manifests"][0])
+        index = json.dumps(multiple).encode()
+    index_id = "sha256:" + hashlib.sha256(index).hexdigest()
+    entries["blobs/sha256/" + index_id[7:]] = index
+    entries["index.json"] = json.dumps(
+        {
+            "schemaVersion": 2,
+            "manifests": [
+                {
+                    "digest": index_id,
+                    "annotations": {"io.containerd.image.name": "fn:tag"},
+                }
+            ],
+        }
+    ).encode()
+    if fault == "config":
+        entries["blobs/sha256/" + config[7:]] = b'{"architecture":"amd64"}'
+    with tarfile.open(path, "w") as output:
+        for name, content in entries.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            output.addfile(info, io.BytesIO(content))
+    expected = {
+        "fn:tag": {"config": config, "manifest": manifest, "index": index_id}[identity]
+    }
+    if fault:
+        with pytest.raises(
+            ValueError,
+            match={"architecture": "architecture", "platforms": "platform"}.get(
+                fault, "digest"
+            ),
+        ):
+            archive_image_ids(
+                path,
+                expected,
+                architecture="amd64" if fault == "architecture" else "arm64",
+            )
+    else:
+        assert archive_image_ids(path, expected, architecture="arm64") == {
+            "fn:tag": {config, manifest, index_id}
+        }

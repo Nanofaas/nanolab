@@ -21,25 +21,20 @@ def archive_image_ids(
                 raise ValueError("image archive blob is not a regular file")
             return file.read()
 
-        def verify_config(name: str, expected_id: str) -> str:
-            config = read(name)
-            digest = "sha256:" + hashlib.sha256(config).hexdigest()
-            if digest != expected_id:
-                raise ValueError("exported image config digest mismatch")
+        def blob(digest: str) -> bytes:
+            content = read("blobs/sha256/" + digest.removeprefix("sha256:"))
+            if "sha256:" + hashlib.sha256(content).hexdigest() != digest:
+                raise ValueError("exported blob digest mismatch")
+            return content
+
+        def config_identity(content: bytes) -> str:
             if (
                 architecture is not None
-                and json.loads(config).get("architecture") != architecture
+                and json.loads(content).get("architecture") != architecture
             ):
                 raise ValueError("exported image architecture mismatch")
-            return digest
+            return "sha256:" + hashlib.sha256(content).hexdigest()
 
-        # Named saves retain every image in both legacy and OCI importers.
-        for entry in json.loads(read("manifest.json")):
-            for reference in entry["RepoTags"] or []:
-                if reference in expected:
-                    identities[reference].add(
-                        verify_config(entry["Config"], expected[reference])
-                    )
         if "index.json" in archive.getnames():
             index = json.loads(read("index.json"))
             if index["schemaVersion"] != 2:
@@ -51,17 +46,39 @@ def archive_image_ids(
                 if reference not in expected:
                     continue
                 digest = descriptor["digest"]
-                body = read("blobs/sha256/" + digest.removeprefix("sha256:"))
-                if "sha256:" + hashlib.sha256(body).hexdigest() != digest:
-                    raise ValueError("exported manifest digest mismatch")
-                manifest = json.loads(body)
-                if manifest["config"]["digest"] != expected[reference]:
-                    raise ValueError("manifest does not bind expected config digest")
-                verify_config(
-                    "blobs/sha256/" + expected[reference].removeprefix("sha256:"),
-                    expected[reference],
-                )
-                identities[reference].add(digest)
+                manifest = json.loads(blob(digest))
+                chain = {digest}
+                if "manifests" in manifest:
+                    # BuildKit attestations are not runnable platform images.
+                    platforms = [
+                        child
+                        for child in manifest["manifests"]
+                        if child.get("annotations", {}).get("vnd.docker.reference.type")
+                        != "attestation-manifest"
+                    ]
+                    if len(platforms) != 1:
+                        raise ValueError(
+                            "image archive must contain one runtime platform"
+                        )
+                    digest = platforms[0]["digest"]
+                    manifest = json.loads(blob(digest))
+                    chain.add(digest)
+                if manifest.get("schemaVersion") != 2 or "config" not in manifest:
+                    raise ValueError("unsupported OCI runtime manifest")
+                config = config_identity(blob(manifest["config"]["digest"]))
+                chain.add(config)
+                if expected[reference] not in chain:
+                    raise ValueError("manifest does not bind expected image digest")
+                identities[reference].update(chain)
+
+        for entry in json.loads(read("manifest.json")):
+            for reference in entry["RepoTags"] or []:
+                if reference not in expected:
+                    continue
+                config = config_identity(read(entry["Config"]))
+                if config not in identities[reference] | {expected[reference]}:
+                    raise ValueError("exported image config digest mismatch")
+                identities[reference].add(config)
     if any(not values for values in identities.values()):
         raise ValueError("exported archive is missing selected images")
     return identities
