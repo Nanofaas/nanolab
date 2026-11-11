@@ -2,6 +2,7 @@ workflow: one-shot-qualification
 backend: container
 functions: [one-shot-workload-rust]
 oneShot:
+  protocolVersion: 2
   provider: multipass
   purpose: workflow-validation
   nodes:
@@ -19,20 +20,20 @@ oneShot:
   # Replace both fields with the independent measured profile reference.
   profile: {path: ./profile.json, sha256: "0000000000000000000000000000000000000000000000000000000000000000"}
   timing:
-    periodCandidatesSeconds: [20, 30]
-    maxTraceResolutionSeconds: 30
+    periodCandidatesSeconds: [120, 180]
+    maxTraceResolutionSeconds: 180
     minSamples: 10
     quantile: 0.9
     marginSeconds: 0.2
     readyMarginSeconds: 0.3
     epsilon: 0.1
-    measurementLeadSeconds: 3
+    measurementLeadSeconds: 10
     maxCensoredFraction: 0
     protocol:
-      auctionSeconds: 0.6
-      peerSeconds: 0.15
-      solverSeconds: 0.15
-      preparationSeconds: 1
+      auctionSeconds: 5
+      peerSeconds: 0.5
+      solverSeconds: 1
+      preparationSeconds: 5
       maxRounds: 8
       parallelism: 4
       queueCapacity: 64

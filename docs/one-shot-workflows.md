@@ -581,7 +581,8 @@ that the entire RTT is actual clock skew.
 
 ### Logical protocol v2
 
-The five-function live presets declare `oneShot.protocolVersion: 2`; omitted
+The generic calibration/qualification/experiment and five-function live presets
+declare `oneShot.protocolVersion: 2`; omitted
 versions remain v1 for existing scenarios and archived artifacts. V2 requires
 NanoFaaS logical session APIs. NanoLab configures every edge with one shared
 session and UTC grid labels, negotiates the configured number of rounds in
@@ -1057,6 +1058,22 @@ oneShot:
 Nanolab verifies the distribution hash, recipe, selected modules/functions,
 image config digests and architecture. The transfer separately checks the
 archive SHA-256. A missing or mismatched archive fails; it does not rebuild.
+
+The generic presets explicitly select logical protocol v2. Their qualification
+uses the current JVM recipe budgets: auction 5 seconds, peer RPC 0.5 seconds,
+solver 1 second and physical preparation 5 seconds. Candidate periods are 120
+and 180 seconds, with a 10-second measurement lead; the 10% operational fraction,
+ten samples per load cell and zero-censoring rule remain unchanged. Runtime API
+configuration overrides recipe bootstrap values, so inspect the recorded
+`api.jsonl` and `timing.json` rather than inferring timeouts from the
+image recipe. This strict experiment qualification is separate from the runtime's
+v2 policy, which does not gate logical epoch admission on timing qualification.
+
+Resolve the desired NanoFaaS revision before building and verify that
+`distribution.json` records that exact `source.revision` with `dirty: false`.
+Updating the source checkout alone does not update a prebuilt image. A new source
+revision or protocol requires fresh calibration and qualification; retain old
+runs as evidence of their original configuration.
 
 Run the stages with the existing command:
 
