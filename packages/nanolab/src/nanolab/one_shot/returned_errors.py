@@ -62,7 +62,13 @@ def classify_response(row: dict[str, Any]) -> str:
             or str(body.get("message", "")).startswith(f"remote {target} returned 429:")
         )
     )
-    if status == 429 or remote_refusal or proxy_refusal:
+    managed_refusal = (
+        status == 503
+        and response_status == "ERROR"
+        and isinstance(error, dict)
+        and error.get("code") == "RUNTIME_HANDLER_SATURATED"
+    )
+    if status == 429 or remote_refusal or proxy_refusal or managed_refusal:
         return "reject"
     if not isinstance(status, int) or status == 0:
         return "unresolved"
