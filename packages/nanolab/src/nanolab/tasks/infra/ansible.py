@@ -38,7 +38,7 @@ def playbook_task(
     inventory: Path,
     hosts: Mapping[str, Mapping[str, Any]],
     extra_vars: Mapping[str, str],
-    shell: HostCommandRunner | None = None,
+    runner: HostCommandRunner | None = None,
     env: Mapping[str, str] | None = None,
 ) -> AnsiblePlaybookTask:
     """Run a playbook with resolved connection facts and its own stdin."""
@@ -50,12 +50,13 @@ def playbook_task(
         playbook=playbook,
         inventory=str(inventory),
         user=getpass.getuser(),
-        executor=HostCommandTaskExecutor(shell or SubprocessShell()),
+        executor=HostCommandTaskExecutor(runner or SubprocessShell()),
         extra_vars=extra_vars,
         ansible_config=bundled_ansible_root() / "ansible.cfg",
         options=CommandOptions(env=dict(env or {}), remote_dir=None),
     )
-    assert not callable(task.argv)  # AnsiblePlaybookTask builds a static command.
+    # AnsiblePlaybookTask builds a static command; narrow its inherited union type.
+    assert not callable(task.argv)  # nosec B101
     task.argv = (
         *OWN_STDIN,
         sys.executable,

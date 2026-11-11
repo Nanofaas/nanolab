@@ -209,7 +209,7 @@ def test_playbook_runner_isolates_stdin_and_reports_failure(tmp_path, monkeypatc
         inventory=tmp_path / "inventory.json",
         hosts={"localhost": {"ansible_connection": "local"}},
         extra_vars={},
-        shell=Shell(),
+        runner=Shell(),
     )
     with pytest.raises(
         RuntimeError,

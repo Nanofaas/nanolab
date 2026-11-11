@@ -211,7 +211,7 @@ def _bootstrap(
             / f"{node.config.id}-bootstrap-inventory.json",
             hosts={node.config.id: node.ansible_vars(vm)},
             extra_vars=base_provision_vars(vm.user, runtime_only=True),
-            shell=getattr(node.provider, "shell", None),
+            runner=getattr(node.provider, "shell", None),
         ).run(inputs)
         node.reset_shared_ssh(vm)
 

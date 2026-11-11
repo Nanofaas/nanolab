@@ -84,7 +84,7 @@ class WorkbenchPlaybook(Task[None]):
             inventory=self.vars_dir / f"{self.host.key}-{self.action}-inventory.json",
             hosts=hosts,
             extra_vars={"workbench_vars": str(vars_file)},
-            shell=None if node is None else getattr(node.provider, "shell", None),
+            runner=None if node is None else getattr(node.provider, "shell", None),
             env={"ANSIBLE_COLLECTIONS_PATH": str(collections)},
         ).run(inputs)
         return TaskOutcome()

@@ -56,6 +56,6 @@ def run_runtime(
         inventory=inventory,
         hosts=hosts,
         extra_vars={"runtime_vars": str(values)},
-        shell=getattr(node.provider, "shell", None),
+        runner=getattr(node.provider, "shell", None),
         env={"ANSIBLE_COLLECTIONS_PATH": str(ensure_installed())},
     ).run(inputs)
