@@ -82,6 +82,64 @@
         state: present
       when: install_build_tools | bool
 
+    - name: Preserve container logs independently of container lifetime
+      when: persistent_container_logs | default(false) | bool
+      block:
+        - name: Create persistent journal and configuration directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: "0755"
+          loop: [/var/log/journal, /etc/systemd/journald.conf.d, /etc/docker]
+
+        - name: Configure bounded persistent journal without event rate drops
+          ansible.builtin.copy:
+            dest: /etc/systemd/journald.conf.d/nanolab.conf
+            mode: "0644"
+            content: |
+              [Journal]
+              Storage=persistent
+              SystemMaxUse=512M
+              SystemKeepFree=256M
+              RateLimitIntervalSec=0
+          register: journal_config
+
+        - name: Apply journal storage configuration
+          ansible.builtin.systemd:
+            name: systemd-journald
+            state: restarted
+          when: journal_config.changed
+
+        - name: Flush volatile journal to persistent storage
+          ansible.builtin.command: journalctl --flush
+          changed_when: false
+
+        - name: Inspect existing Docker configuration
+          ansible.builtin.stat:
+            path: /etc/docker/daemon.json
+          register: docker_config_file
+
+        - name: Read existing Docker configuration
+          ansible.builtin.slurp:
+            src: /etc/docker/daemon.json
+          register: docker_config
+          when: docker_config_file.stat.exists
+
+        - name: Select journald for newly created containers
+          ansible.builtin.copy:
+            dest: /etc/docker/daemon.json
+            mode: "0644"
+            content: >-
+              {{ ((docker_config.content | b64decode | from_json) if docker_config_file.stat.exists else {})
+                 | combine({'log-driver': 'journald', 'log-opts': {}}) | to_nice_json }}
+          register: docker_logging
+
+        - name: Apply Docker logging before creating experiment containers
+          ansible.builtin.systemd:
+            name: docker
+            state: restarted
+          when: docker_logging.changed
+
     - name: Enable and start Docker
       ansible.builtin.systemd:
         name: docker

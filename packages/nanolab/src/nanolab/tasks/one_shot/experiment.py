@@ -58,6 +58,7 @@ from nanolab.tasks.one_shot.qualification import (
     wait_until_monotonic,
 )
 from nanolab.tasks.one_shot.queue_telemetry import QueueTelemetryCollector
+from nanolab.tasks.one_shot.receipts import collect_log_receipts, receipt_endpoint
 from nanolab.tasks.one_shot.trace import oracle_entries, request_schedule, warmup_trace
 from nanolab.tasks.one_shot.verification import (
     realized_utility,
@@ -780,6 +781,18 @@ class LiveEvidenceCollector:
         """Retry missing proofs while retaining observations and metric samples."""
         while not self.stop.wait(0.5):
             try:
+                if receipt_endpoint(self.run):
+                    collect_runtime_evidence(
+                        self.run,
+                        self.inputs,
+                        [],
+                        deadline=time.monotonic()
+                        + operational_limit(
+                            self.run.settings, "process_drain_seconds", 30
+                        ),
+                    )
+                    self.collect_events()
+                    continue
                 seen = {
                     row["originalId"]
                     for row in physical_attempts(self.run.run_dir / "physical.jsonl")
@@ -1670,9 +1683,20 @@ class RunOneShotLoadTask(Task[None]):
                     {"failure": failure, "exitCode": process.returncode},
                 )
             )
-            if primary_error is None and not secondary:
+            if receipt_endpoint(run) or (primary_error is None and not secondary):
 
                 def final_snapshot():
+                    if receipt_endpoint(run):
+                        collect_log_receipts(
+                            run,
+                            inputs,
+                            generator_rows(run.run_dir / "generator.jsonl"),
+                            deadline=time.monotonic()
+                            + operational_limit(
+                                run.settings, "process_drain_seconds", 30
+                            ),
+                        )
+                        return
                     proven = {
                         row["originalId"]
                         for row in physical_attempts(run.run_dir / "physical.jsonl")

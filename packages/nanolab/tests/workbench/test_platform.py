@@ -238,7 +238,7 @@ def _build(
     monkeypatch.setattr(platform.SupervisorClient, "status", status)
     observability = tmp_path / "nanofaas" / "deploy" / "observability"
     observability.mkdir(parents=True, exist_ok=True)
-    for name in ("fluent-bit.conf", "parsers.conf"):
+    for name in ("fluent-bit-journal.conf", "parsers.conf"):
         (observability / name).write_text(name)
     (observability / "loki.yaml").write_text(
         "auth_enabled: false\nserver:\n  http_listen_port: 3100\n"
@@ -770,7 +770,7 @@ def test_collector_identity_is_the_running_collector(tmp_path, monkeypatch):
 
     def command(argv, **_kwargs):
         commands.append(argv)
-        return SimpleNamespace(stdout="json-file\n")
+        return SimpleNamespace(stdout="journald\n")
 
     monkeypatch.setattr(NodeResource, "command", lambda _self, argv: command(argv))
     built = _build(tmp_path, monkeypatch, events, nodes=nodes)
@@ -778,7 +778,7 @@ def test_collector_identity_is_the_running_collector(tmp_path, monkeypatch):
     assert identity == {
         "image": "sha256:i",
         "configSha256": {
-            "fluent-bit.conf": hashlib.sha256(b"fluent-bit.conf").hexdigest(),
+            "fluent-bit.conf": hashlib.sha256(b"fluent-bit-journal.conf").hexdigest(),
             "parsers.conf": hashlib.sha256(b"parsers.conf").hexdigest(),
         },
         "cpu": LOGS.cpu,
@@ -789,9 +789,9 @@ def test_collector_identity_is_the_running_collector(tmp_path, monkeypatch):
     monkeypatch.setattr(
         NodeResource,
         "command",
-        lambda _self, argv: SimpleNamespace(stdout="journald\n"),
+        lambda _self, argv: SimpleNamespace(stdout="json-file\n"),
     )
-    with pytest.raises(ValueError, match="json-file"):
+    with pytest.raises(ValueError, match="journald"):
         built.collector_identity("edge-1")
     monkeypatch.setattr(NodeResource, "command", lambda _self, argv: command(argv))
     monkeypatch.setattr(
