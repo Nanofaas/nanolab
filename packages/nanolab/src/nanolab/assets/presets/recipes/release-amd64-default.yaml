@@ -10,6 +10,7 @@ controlPlane:
   - build-metadata
   - concurrency-control
   - forecasting
+  - forecasting-wasm
   - k8s-deployment-provider
   - offload
   - p2p-discovery
