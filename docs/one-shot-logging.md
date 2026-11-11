@@ -115,3 +115,13 @@ or replay. A disk failure can prevent writing a receipt; it does not authorize
 deletion of the sole raw copy. External Loki
 is never stopped or deleted by NanoLab. Final archive copying runs after all
 writers join, with no concurrent archive mutation.
+
+Final collection uses Workbench's `collect_mode: final`: stop the owned collector,
+archive its storage, verify SHA-256 at both ends, and preserve the source.
+`workbench/<host>/<instance>/collection.json` records the outcome; Nanolab decides
+whether that evidence permits infrastructure release. Metrics or diagnostic
+failures remain visible even when raw recovery succeeds.
+
+A pending `logging/<node>/recovery.json` blocks fleet destruction after a process
+restart too. Remove that marker only after explicitly recovering and verifying
+the retained state; a previous successful receipt does not clear it automatically.

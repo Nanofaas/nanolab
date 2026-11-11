@@ -569,6 +569,7 @@ MODULES_WITHOUT_QUERIES: frozenset[str] = frozenset(
         "runtime-config",
         "offload",
         "forecasting",  # No independent Micrometer meters; one-shot owns its timers.
+        "forecasting-wasm",  # Optional predictor; no independent meters.
         "k8s-deployment-provider",
         "container-deployment-provider",
         "containerd-deployment-provider",

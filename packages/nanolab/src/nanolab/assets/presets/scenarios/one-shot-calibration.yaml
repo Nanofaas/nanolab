@@ -2,6 +2,7 @@ workflow: one-shot-calibration
 backend: container
 functions: [one-shot-workload-rust]
 oneShot:
+  protocolVersion: 2
   provider: multipass
   purpose: workflow-validation
   nodes:

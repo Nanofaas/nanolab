@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from nanolab.config.one_shot import OneShotConfig
+from collections.abc import Iterable
+
+from nanolab.config.one_shot import OneShotConfig, OneShotNode
+
+
+def p2p_request_limit(nodes: Iterable[OneShotNode]) -> int:
+    """Reserve shared transport slots for discovery and auction fan-out together."""
+    peers = sum(node.kind == "edge" for node in nodes) - 1
+    return max(4, 2 * peers)
 
 
 def validate_neighbor_graph(settings: OneShotConfig) -> dict[str, tuple[str, ...]]:

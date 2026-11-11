@@ -184,7 +184,8 @@ def test_existing_bootstrap_operations_unchanged() -> None:
     root = bs.bundled_ansible_root()
     assert operation.argv == (
         "ansible-playbook", "-i", "vm.test,", "-u", "ubuntu",
-        "-e", "install_helm=true", "-e", "install_uv=false",
+        "-e", "install_helm=true", "-e", "install_build_tools=true",
+        "-e", "install_uv=false",
         "-e", "helm_version=3.16.4", "-e", "vm_user=ubuntu",
         str(root / "playbooks" / "provision-base.yml"),
     )  # fmt: skip
@@ -203,3 +204,15 @@ def test_ansible_operation_merges_env_over_the_config() -> None:
     )
     assert operation.argv[-1] == "/p.yml"
     assert set(operation.env) == {"ANSIBLE_CONFIG", "ANSIBLE_COLLECTIONS_PATH"}
+
+
+def test_runtime_profile_excludes_guest_build_tools():
+    from nanolab.tasks.components.bootstrap import base_provision_vars
+
+    runtime = base_provision_vars("ubuntu", runtime_only=True)
+    assert runtime["install_build_tools"] == "false"
+    assert runtime["install_helm"] == "false"
+    assert runtime["install_uv"] == "false"
+    legacy = base_provision_vars("builder")
+    assert legacy["install_build_tools"] == "true"
+    assert legacy["install_helm"] == "true"

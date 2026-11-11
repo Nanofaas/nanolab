@@ -4,6 +4,7 @@
   gather_facts: false
   become: true
   vars:
+    install_build_tools: true
     install_helm: false
     install_uv: false
     helm_version: "3.16.4"
@@ -64,16 +65,22 @@
           - ca-certificates
           - tar
           - unzip
-          - openjdk-25-jdk-headless
           - docker.io
-          - docker-buildx
-          - skopeo
           - socat
           # community.docker's API client (the workbench's container form).
           - python3-requests
         state: present
         update_cache: true
         cache_valid_time: 3600
+
+    - name: Install guest build tools
+      ansible.builtin.apt:
+        name:
+          - openjdk-25-jdk-headless
+          - docker-buildx
+          - skopeo
+        state: present
+      when: install_build_tools | bool
 
     - name: Enable and start Docker
       ansible.builtin.systemd:

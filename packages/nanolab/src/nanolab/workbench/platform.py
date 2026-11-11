@@ -14,7 +14,6 @@ import json
 import os
 import shutil
 import subprocess
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,29 +26,23 @@ import yaml
 from sonata_engine import Members, Resource, TaskInputs, compose
 
 from nanolab.config.environment import OperatorLogging
-from nanolab.config.one_shot import OneShotConfig, OneShotLogs, operational_limit
+from nanolab.config.one_shot import OneShotConfig, OneShotLogs
 from nanolab.one_shot.addresses import CADVISOR_PORT, NODE_EXPORTER_PORT
 from nanolab.one_shot.infrastructure import NodeResource, OneShotResources
 from nanolab.one_shot.operator_memory import MAX_SWAP_PAGES
 from nanolab.one_shot.vm_resources import SCRAPE_SECONDS
-from nanolab.tasks.one_shot.logging import (
-    LogSession,
-    archive_node_dir,
-    collection_evidence,
-    export_collector,
-    retain_collector_for_recovery,
-    verify_loki_ingestion,
-)
+from nanolab.tasks.one_shot.logging import verify_loki_ingestion
 from nanolab.tasks.resource_tasks import call, resource_of
-from nanolab.workbench.components import Deployed, component_resource
+from nanolab.workbench.components import Deployed, collect_deployed, component_resource
+from nanolab.workbench.evidence import CollectorEvidence, container_identity
 from nanolab.workbench.install import (
     check_operator,
     ensure_installed,
     workbench_resource,
 )
-from nanolab.workbench.inventory import HostVars, Instance
+from nanolab.workbench.inventory import Instance
 from nanolab.workbench.loadgen import LoadgenRun, loadgen_resource
-from nanolab.workbench.playbook import WorkbenchHost, WorkbenchPlaybook
+from nanolab.workbench.playbook import WorkbenchHost
 from nanolab.workbench.supervisor import SupervisorClient
 from nanolab.workbench.vm_export import NodeRoles, export_vm_resources
 from nanolab.workspace.paths import operator_workspace_root
@@ -71,9 +64,6 @@ PUSH_PATH = "/loki/api/v1/push"
 # As the in-process liveness checks tolerated: a node behind a site or on Azure
 # may be unreachable this long before its checks fault.
 REMOTE_UNREACHABLE_SECONDS = 300
-# Today's bounded drain wait: up to five metric reads two seconds apart.
-DRAIN_POLLS = 5
-DRAIN_POLL_SECONDS = 2
 LOKI_STORE = "Own the Loki store"
 PROMETHEUS_STORE = "Own the Prometheus store"
 PREFLIGHT = "Check the operator prerequisites"
@@ -107,6 +97,7 @@ class OneShotPlatform:
     export_vm_resources: Callable[[Path, datetime, datetime], None]
     loadgen: Callable[..., Resource[LoadgenRun]]
     record_supervisor_status: Callable[[Members], dict[str, Any]]
+    operator_ports: tuple[tuple[str, int], ...]
 
     def require_healthy(self, values: Members) -> None:
         """Keep the final health evidence and reject unqualified measurements."""
@@ -138,14 +129,7 @@ def _inspect(host: WorkbenchHost, name: str) -> dict[str, Any]:
     else:
         out = host.node.command(argv).stdout
     inspected = json.loads(out)[0]
-    return {
-        "container": name,
-        "image": inspected["Image"],
-        "imageReference": inspected["Config"]["Image"],
-        "cpuset": inspected["HostConfig"].get("CpusetCpus") or None,
-        "nanoCpus": inspected["HostConfig"].get("NanoCpus"),
-        "memoryBytes": inspected["HostConfig"].get("Memory"),
-    }
+    return container_identity(inspected, name)
 
 
 def _loki_log(name: str) -> str:
@@ -333,8 +317,8 @@ def one_shot_platform(
         return resource, instance
 
     exporter_ports = {"node-exporter": NODE_EXPORTER_PORT, "cadvisor": CADVISOR_PORT}
-    exporters = [
-        member(
+    exporters = {
+        (key, component): member(
             host,
             component,
             ({} if host.node is None else {"bind": "0.0.0.0"})  # nosec B104 - docstring
@@ -350,14 +334,17 @@ def one_shot_platform(
         )
         for key, host in hosts.items()
         for component, port in exporter_ports.items()
-    ]
+    }
     pull = resource_of(
         "Pull the loadgen image",
         lambda inputs: _pull_loadgen(inputs.resource(installed)),
         lambda _inputs, _value: None,
         requires=(installed,),
     )
-    members: list[Resource[Any]] = [pull, *(resource for resource, _ in exporters)]
+    members: list[Resource[Any]] = [
+        pull,
+        *(resource for resource, _ in exporters.values()),
+    ]
     operator_ports = [
         ("127.0.0.1", port)
         for port in (PROMETHEUS_PORT, SUPERVISOR_PORT, *exporter_ports.values())
@@ -584,18 +571,8 @@ def one_shot_platform(
     def collect(
         inputs: TaskInputs, host: WorkbenchHost, instance: Instance, value: Deployed
     ) -> None:
-        revive = None if host.node is None else host.node.vm.revive
-        resolved = instance.model_copy(
-            update={"config": {**instance.config, **(value.config or {})}}
-        )
-        WorkbenchPlaybook(
-            f"Collect {instance.name}",
-            host,
-            "collect",
-            HostVars(instances=(resolved,), collect_dir=str(workbench_dir)),
-            vars_dir=vars_dir,
-            collections=ensure_installed(),
-            vm=None if revive is None or value.vm is None else revive(value.vm),
+        collect_deployed(
+            host, instance, value, vars_dir=vars_dir, collect_dir=workbench_dir
         ).run(inputs)
 
     def snapshot(values: Members, inputs: TaskInputs) -> None:
@@ -655,87 +632,6 @@ def one_shot_platform(
             raise ValueError("collector resource budget mismatch")
         return {"image": inspected["image"], **collector_budget()}
 
-    def collector_step(key: str) -> Step:
-        resource, instance = collectors[key]
-        host = nodes[key]
-        node = topology.nodes[key]
-        name = f"wb-{instance.name}"
-        metrics_file = workbench_dir / host.key / instance.name / "metrics.txt"
-
-        def run(values: Members, inputs: TaskInputs) -> None:
-            # Today's teardown, step for step: bounded drain wait, graceful
-            # stop, state archive, then the Loki and queue-event export. Every
-            # failure is an issue in this node's status.json.
-            value = values.of(resource)
-            issues: list[str] = []
-            final_metrics = ""
-            try:
-                for _ in range(DRAIN_POLLS):
-                    time.sleep(DRAIN_POLL_SECONDS)
-                    collect(inputs, host, instance, value)
-                    final_metrics = metrics_file.read_text()
-                    if collection_evidence(final_metrics)["status"] == "drained":
-                        break
-            except Exception as error:
-                issues.append(f"collector metrics: {error}")
-            identity: dict[str, Any] | None = None
-            try:
-                identity = {**_inspect(host, name), **collector_budget()}
-            except Exception as error:
-                issues.append(f"docker inspect: {error}")
-            archive_issue = None
-            try:
-                stopped = node.provider.exec_argv(
-                    node.request,
-                    (
-                        "docker",
-                        "stop",
-                        "-t",
-                        str(
-                            int(
-                                operational_limit(settings, "process_drain_seconds", 15)
-                            )
-                        ),
-                        name,
-                    ),
-                )
-                if stopped.return_code:
-                    raise RuntimeError("collector graceful stop failed")
-                directory = run_dir / "logging" / key
-                directory.mkdir(parents=True, exist_ok=True)
-                archive_node_dir(
-                    node, storage_dir, directory / "collector-state.tar.gz"
-                )
-                node.command(("sudo", "rm", "-rf", storage_dir))
-            except Exception as error:
-                archive_issue = str(error)
-                retain_collector_for_recovery(
-                    node, run_dir=run_dir, storage=storage_dir, error=error
-                )
-            export_collector(
-                node=node,
-                name=name,
-                run_dir=run_dir,
-                logs=export_logs,
-                session=LogSession(
-                    key,
-                    name,
-                    storage_dir,
-                    int((value.deployed_at or 0) * 1e9),
-                    identity or {},
-                ),
-                final_metrics=final_metrics,
-                archive_issue=archive_issue,
-                issues=issues,
-            )
-            if archive_issue is not None:
-                raise RuntimeError(
-                    f"{key}: collector state archive failed; {storage_dir} "
-                    f"retained on the VM: {archive_issue}"
-                )
-
-        return run
-
     def loki_step(_values: Members, _inputs: TaskInputs) -> None:
         placement_file = (
             logging_dir if operator_logging is not None else run_dir
@@ -769,26 +665,36 @@ def one_shot_platform(
         if not status_file.exists():
             record_supervisor_status(values)
 
-    steps: list[tuple[str, Step]] = [
-        # First: stopping a collector would fault its target.
-        ("Record the supervisor status", supervisor_status),
-        ("Snapshot the workbench Prometheus", snapshot),
-        *(
-            (f"Collect the {key} log collector", collector_step(key))
-            for key in collectors
-        ),
-        *((("Export and verify Loki", loki_step),) if logs.enabled else ()),
-    ]
+    def step(title: str, fn: Step):
+        return call(title, lambda inputs: fn(cast(Members, inputs.upstream()), inputs))
 
-    def step(fn: Step) -> Callable[[TaskInputs], None]:
-        # Collect steps get the members' values as their upstream.
-        return lambda inputs: fn(cast(Members, inputs.upstream()), inputs)
+    collectors_evidence = tuple(
+        CollectorEvidence(
+            nodes[key],
+            instance,
+            resource,
+            since=exporters[key, "node-exporter"][0],
+            run_dir=run_dir,
+            vars_dir=vars_dir,
+            storage_dir=storage_dir,
+            logs=export_logs,
+            settings=settings,
+            budget=collector_budget,
+        )
+        for key, (resource, instance) in collectors.items()
+    )
+    collect_steps = (
+        step("Record the supervisor status", supervisor_status),
+        step("Snapshot the workbench Prometheus", snapshot),
+        *collectors_evidence,
+        *((step("Export and verify Loki", loki_step),) if logs.enabled else ()),
+    )
 
     return OneShotPlatform(
         compose(
             "Acquire the one-shot workbench platform",
             tuple(members),
-            collect=tuple(call(title, step(fn)) for title, fn in steps),
+            collect=collect_steps,
         ),
         loki,
         prometheus,
@@ -799,4 +705,5 @@ def one_shot_platform(
         export,
         partial(loadgen_resource, OPERATOR, cpuset=operator_cpus),
         record_supervisor_status,
+        tuple(operator_ports),
     )

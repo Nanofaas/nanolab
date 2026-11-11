@@ -261,6 +261,12 @@ def test_environment_fingerprint_includes_vm_os_but_not_run_addresses(
     )
     current = environment_identity(settings, topology, built)[0]
     assert (current != first) == (purpose == "scientific-experiment")
+    monkeypatch.setattr(
+        "nanolab.tasks.one_shot.calibration.p2p_request_limit",
+        lambda _: 8,
+        raising=False,
+    )
+    assert environment_identity(settings, topology, built)[0] != current
 
 
 def test_output_oracle_matches_the_measured_rust_workload_golden():

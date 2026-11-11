@@ -24,6 +24,7 @@ def frozen_run(tmp_path, monkeypatch, *, mode="oracle"):
     settings = OneShotConfig.model_validate(
         yaml.safe_load(preset.read_text())["oneShot"]
     )
+    settings.protocol_version = 1  # The archived timing fixture below is v1.
     doc = json.loads(contract_asset("examples/synthetic-profile.json").read_bytes())
     doc.update(provider="multipass", synthetic=False)
     doc["functions"] = [doc["functions"][0]]

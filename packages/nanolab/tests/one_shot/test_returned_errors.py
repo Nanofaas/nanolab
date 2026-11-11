@@ -261,3 +261,45 @@ def test_wrapped_external_timeout_is_reported_without_proving_execution_end():
     )
     assert classify_response(row) == "applicationError"
     assert not classify_result(row, expected="42", physical=[])["terminalError"]
+
+
+def test_direct_managed_refusal_is_terminal_without_a_physical_attempt():
+    from nanolab.tasks.one_shot.experiment import classify_result
+
+    row = {
+        "statusCode": 503,
+        "responseStatus": "error",
+        "outputJson": None,
+        "offloadedTarget": "http://cloud:8080",
+        "responseBody": json.dumps(
+            {
+                "executionId": "origin-execution",
+                "status": "error",
+                "error": {
+                    "code": "RUNTIME_HANDLER_SATURATED",
+                    "message": "No admissible managed replica",
+                },
+                "statusCode": 503,
+                "headers": {"X-NanoFaaS-Terminal-Execution-Id": "cloud-execution"},
+            }
+        ),
+    }
+    assert classify_response(row) == "reject"
+    classified = classify_result(row, expected="42", physical=[])
+    assert classified["terminalError"] and not classified["success"]
+    for status, response_status, code in [
+        (503, "error", "EXTERNAL_ERROR"),
+        (503, "error", "HANDLER_ERROR"),
+        (503, "success", "RUNTIME_HANDLER_SATURATED"),
+        (504, "error", "RUNTIME_HANDLER_SATURATED"),
+    ]:
+        ambiguous = dict(
+            row,
+            statusCode=status,
+            responseStatus=response_status,
+            responseBody=json.dumps({"error": {"code": code}}),
+        )
+        assert classify_response(ambiguous) != "reject"
+        assert not classify_result(ambiguous, expected="42", physical=[])[
+            "terminalError"
+        ]

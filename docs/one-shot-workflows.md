@@ -219,6 +219,12 @@ co-location and environment fingerprints further restrict reuse. A changed
 recipe or image requires explicit recalibration and requalification. No workflow
 silently updates service time during a comparison.
 
+For four or more edges, deployment sets the shared P2P request limit to
+`2 * (edge_count - 1)`: one fan-out for endpoint discovery and one for auctions.
+Five edges therefore use eight slots. This override is part of the environment
+fingerprint and requires fresh calibration and qualification. Smaller topologies
+keep their recipe setting; auction deadlines and acceptance thresholds are unchanged.
+
 ## Run the three workflows
 
 From a NanoLab checkout use the public launcher; an installed wheel exposes the
@@ -575,7 +581,8 @@ that the entire RTT is actual clock skew.
 
 ### Logical protocol v2
 
-The five-function live presets declare `oneShot.protocolVersion: 2`; omitted
+The generic calibration/qualification/experiment and five-function live presets
+declare `oneShot.protocolVersion: 2`; omitted
 versions remain v1 for existing scenarios and archived artifacts. V2 requires
 NanoFaaS logical session APIs. NanoLab configures every edge with one shared
 session and UTC grid labels, negotiates the configured number of rounds in
@@ -1005,3 +1012,86 @@ including after process restart. A failed/uncertain apply preserves its recovery
 record even if best-effort cleanup emptied the known state: inspect Multipass
 inventory for untracked resources before explicit recovery. Never run a global
 `multipass purge` as experiment cleanup.
+
+## Unified operator workflow and build reuse
+
+For a five-edge experiment configure five `kind: edge` nodes and one `kind: cloud`
+node: OpenTofu creates six VMs. The operator, build tools, generator, Prometheus,
+Loki and supervisor remain on the Linux operator host. A dedicated operator VM
+would be additional infrastructure; it is not silently counted as an edge.
+
+Use `uv sync --locked --all-packages --all-groups` in the Nanolab checkout.
+Ansible runs in that same Python environment. Its preflight and the pinned
+Workbench installation run before VM acquisition. OpenTofu owns VM creation and
+release; Ansible bootstraps the guests, loads images, deploys the runtime and
+collects evidence. Sonata orders those operations and their compensation.
+Guests receive runtime dependencies only; Java, Buildx, Skopeo and Helm are not
+installed on every edge. The existing Docker image archive needs no registry.
+
+Prepare the selected recipe once on the operator/build host, using a clean
+NanoFaaS checkout and the same recipe selected by the scenarios:
+
+```sh
+./gradlew assembleRecipe -Precipe=/absolute/path/one-shot-jvm.yaml \
+  -PrecipeTag=experiment-build -PrecipeOutput=/absolute/path/prepared/arm64 \
+  --no-daemon
+```
+
+Save all image references listed in that `distribution.json` together with
+`docker save --output /absolute/path/prepared/arm64/images-arm64.tar IMAGE...`.
+Keep the entire distribution directory, including its build metadata. An
+existing successful run's distribution and `images.tar` can also be reused:
+place the archive beside its distribution as `images-arm64.tar`. There is no
+need to rebuild or re-export it for each stage. Use `amd64` instead for that
+architecture and prepare a separate distribution when mixing architectures.
+
+In all three scenarios set the same immutable reference:
+
+```yaml
+oneShot:
+  runtimeDistributions:
+    arm64:
+      path: /absolute/path/prepared/arm64/distribution.json
+      sha256: REPLACE_WITH_SHA256_OF_DISTRIBUTION_JSON
+```
+
+Nanolab verifies the distribution hash, recipe, selected modules/functions,
+image config digests and architecture. The transfer separately checks the
+archive SHA-256. A missing or mismatched archive fails; it does not rebuild.
+
+The generic presets explicitly select logical protocol v2. Their qualification
+uses the current JVM recipe budgets: auction 5 seconds, peer RPC 0.5 seconds,
+solver 1 second and physical preparation 5 seconds. Candidate periods are 120
+and 180 seconds, with a 10-second measurement lead; the 10% operational fraction,
+ten samples per load cell and zero-censoring rule remain unchanged. Runtime API
+configuration overrides recipe bootstrap values, so inspect the recorded
+`api.jsonl` and `timing.json` rather than inferring timeouts from the
+image recipe. This strict experiment qualification is separate from the runtime's
+v2 policy, which does not gate logical epoch admission on timing qualification.
+
+Resolve the desired NanoFaaS revision before building and verify that
+`distribution.json` records that exact `source.revision` with `dirty: false`.
+Updating the source checkout alone does not update a prebuilt image. A new source
+revision or protocol requires fresh calibration and qualification; retain old
+runs as evidence of their original configuration.
+
+Run the stages with the existing command:
+
+```sh
+uv run --locked nanolab run calibration.yaml --environment environment.yaml
+uv run --locked nanolab run qualification.yaml --environment environment.yaml
+uv run --locked nanolab run experiment.yaml --environment environment.yaml
+```
+
+Between stages, set qualification's `oneShot.profile` to the calibration's
+`profile.json` path and SHA-256; set experiment's `profile` and `qualification`
+to the verified profile and timing artifacts. Keep the node topology, function
+inputs and resource budgets compatible. These are independent owned runs and
+may recreate their six VMs; immutable image preparation is shared. Failed
+calibration or qualification is a stop condition, never permission to fabricate
+a freeze or weaken an acceptance threshold.
+
+Final raw recovery is implemented by Workbench `collect_mode: final`. Nanolab's
+focused collector-evidence task checks the fresh receipt and archive before
+allowing fleet release. Missing or unverified raw evidence retains the fleet,
+including after restart. Scientific acceptance remains Nanolab's responsibility.

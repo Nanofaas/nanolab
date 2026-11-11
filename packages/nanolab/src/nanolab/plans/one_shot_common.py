@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import subprocess
 import time
@@ -37,13 +38,16 @@ from nanolab.one_shot.infrastructure import (
     NodeResource,
     OneShotResources,
     build_one_shot_resources,
-    machine_architecture,
-    transfer_to_vm,
 )
-from nanolab.one_shot.sites import through_site
-from nanolab.one_shot.topology import operator_peer_modes, validate_neighbor_graph
+from nanolab.one_shot.runtime import run_runtime
+from nanolab.one_shot.topology import (
+    operator_peer_modes,
+    p2p_request_limit,
+    validate_neighbor_graph,
+)
 from nanolab.one_shot.vm_resources import require_resource_overhead
-from nanolab.tasks.components.bootstrap import plan_vm_provision_base
+from nanolab.tasks.components.bootstrap import base_provision_vars
+from nanolab.tasks.infra.ansible import bundled_ansible_root, playbook_task
 from nanolab.tasks.one_shot.images import archive_image_ids
 from nanolab.tasks.one_shot.operator_logging import log_routes
 from nanolab.tasks.one_shot.resources import node_probe_resource
@@ -54,11 +58,6 @@ from nanolab.tasks.platform import (
     PlatformRequest,
     add_platform,
 )
-from nanolab.tasks.provisioning.bootstrap import (
-    retarget_cloud_operations,
-    run_bootstrap_operations,
-    scenario_context,
-)
 from nanolab.tasks.recipes.workflow import (
     RecipeBinding,
     RecipeDistribution,
@@ -68,8 +67,10 @@ from nanolab.tasks.recipes.workflow import (
     require_validation_distribution,
 )
 from nanolab.tasks.resource_tasks import call, release_call, resource_of
+from nanolab.workbench.install import OperatorPreflight
 from nanolab.workbench.platform import OneShotPlatform, one_shot_platform
 from nanolab.workbench.supervisor import SupervisorClient
+from nanolab.workspace.paths import operator_workspace_root
 
 
 @dataclass(frozen=True)
@@ -202,19 +203,16 @@ def _bootstrap(
             )
         if ready.returncode != 0 or json.loads(ready.stdout).get("status") != "done":
             raise RuntimeError(f"{node.config.id}: cloud-init is not complete")
-        request = node.request.model_copy(
-            update={"host": vm.host, "user": vm.user, "home": vm.home}
-        )
-        assets = Path(str(files("nanolab").joinpath("assets")))
-        context = scenario_context(root, request, assets)
-        operations = retarget_cloud_operations(
-            node.provider, context, plan_vm_provision_base(context)
-        )
-        if node.site_host is not None:
-            operations = through_site(
-                operations, context=context, host=vm.host, site=node.site_host.site
-            )
-        run_bootstrap_operations(node.provider, operations, role=node.config.id)
+        playbook_task(
+            title=f"Bootstrap {node.config.id} container VM",
+            playbook=bundled_ansible_root() / "playbooks/provision-base.yml",
+            inventory=(run_dir or operator_workspace_root())
+            / "ansible"
+            / f"{node.config.id}-bootstrap-inventory.json",
+            hosts={node.config.id: node.ansible_vars(vm)},
+            extra_vars=base_provision_vars(vm.user, runtime_only=True),
+            runner=getattr(node.provider, "shell", None),
+        ).run(inputs)
         node.reset_shared_ssh(vm)
 
     return resource_of(
@@ -258,31 +256,14 @@ def _control_plane(
     settings=None,
     architecture: str | None = None,
 ) -> Resource[str]:
-    name = "nanolab-one-shot-control-plane"
-
-    def release(_inputs: TaskInputs, _url: str | None = None) -> None:
-        log = node.provider.exec_argv(node.request, ("docker", "logs", name))
-        (run_dir / f"{node.config.id}-control-plane.log").write_text(
-            log.stdout + log.stderr
-        )
-        removed = node.provider.exec_argv(node.request, ("docker", "rm", "-f", name))
-        if removed.return_code != 0 and "No such container" not in removed.stderr:
-            raise RuntimeError("one-shot control-plane cleanup unconfirmed")
+    def release(inputs: TaskInputs, _url: str | None = None) -> None:
+        run_runtime(node, run_dir, "undeploy", inputs)
 
     def acquire(inputs: TaskInputs) -> str:
         vm = inputs.resource(node.vm)
         addresses = node.addresses(vm)
-        if architecture is not None:
-            machine = node.command(("uname", "-m")).stdout.strip()
-            if machine_architecture(machine) != architecture:
-                raise ValueError(
-                    f"{node.config.id}: VM is {machine}, images are {architecture}"
-                )
         built = inputs.resource(distribution)
         image_archive = inputs.resource(archive)
-        remote = f"{vm.home}/one-shot-images.tar"
-        transfer_to_vm(node, vm, image_archive, remote)
-        node.command(("docker", "load", "--input", remote))
         identities = archive_image_ids(
             image_archive,
             {
@@ -290,27 +271,9 @@ def _control_plane(
                 for component in built.components
             },
         )
-        loaded_ids = {}
-        for component in built.components:
-            actual = node.command(
-                (
-                    "docker",
-                    "image",
-                    "inspect",
-                    "--format={{.Id}}",
-                    component.image.reference,
-                )
-            ).stdout.strip()
-            if actual not in identities[component.image.reference]:
-                raise ValueError("loaded image digest mismatch")
-            loaded_ids[component.image.reference] = actual
-        socket_group = node.command(
-            ("stat", "-c", "%g", "/var/run/docker.sock")
-        ).stdout.strip()
-        if not socket_group.isdigit():
-            raise ValueError("invalid Docker socket group")
         edge = node.config.kind == "edge"
-        peer_mount = []
+        peer_dir = None
+        operator_file = None
         if edge and neighbor_graph is not None:
             operator_file = run_dir / f"{node.config.id}-p2p-operator.yaml"
             operator_file.write_text(
@@ -329,58 +292,13 @@ def _control_plane(
                 )
                 + "\n"
             )
-            remote_dir = f"{vm.home}/one-shot-p2p"
-            node.command(("mkdir", "-p", remote_dir))
-            transfer_to_vm(node, vm, operator_file, remote_dir + "/peers.yaml")
-            # The nonroot platform must atomically replace its state file; this
-            # directory exists only inside the run-owned VM.
-            node.command(("chmod", "777", remote_dir))
-            node.command(("chmod", "666", remote_dir + "/peers.yaml"))
-            peer_mount = ["-v", remote_dir + ":/tmp/one-shot-p2p"]
+            peer_dir = f"{vm.home}/one-shot-p2p"
         boolean = str(edge).lower()
+        request_limit = p2p_request_limit(n.config for n in topology.nodes.values())
         args = [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            name,
-            "--network",
-            "host",
-            "--group-add",
-            socket_group,
-            "-v",
-            "/var/run/docker.sock:/var/run/docker.sock",
-            "-e",
-            "DOCKER_HOST=unix:///var/run/docker.sock",
-            *(
-                [
-                    "--log-driver",
-                    "json-file",
-                    "--log-opt",
-                    "max-size=10m",
-                    "--log-opt",
-                    "max-file=3",
-                    "-e",
-                    "NANOFAAS_LOG_FORMAT=json",
-                ]
-                if logs_enabled
-                else []
-            ),
-            *(
-                [
-                    "--cpus",
-                    str(SCIENTIFIC_CONTROL_PLANE_CPUS),
-                    "--memory",
-                    f"{SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB}m",
-                ]
-                if scientific
-                else []
-            ),
-            *peer_mount,
-            loaded_ids[built.control_plane().image.reference],
             *(
                 ["--nanofaas.p2p.state-file=/tmp/one-shot-p2p/peers.yaml"]
-                if peer_mount
+                if peer_dir
                 else []
             ),
             "--server.port=8080",
@@ -411,6 +329,11 @@ def _control_plane(
             *advertised_arguments(addresses),
             "--nanofaas.p2p.ping-interval=250ms",
             "--nanofaas.p2p.ping-timeout=1s",
+            *(
+                [f"--nanofaas.p2p.max-concurrent-requests={request_limit}"]
+                if request_limit > 4
+                else []
+            ),
             f"--nanofaas.forecasting.enabled={boolean}",
             f"--nanofaas.forecasting.node-id={node.config.id}",
             f"--nanofaas.forecasting.provider={forecast_provider}",
@@ -451,7 +374,40 @@ def _control_plane(
                     ]
                 )
             )
-        node.command(tuple(args))
+        with image_archive.open("rb") as stream:
+            archive_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+        run_runtime(
+            node,
+            run_dir,
+            "deploy",
+            inputs,
+            vm=vm,
+            variables={
+                "runtime_archive": str(image_archive.resolve()),
+                "runtime_archive_sha256": archive_sha256,
+                "runtime_remote_archive": f"{vm.home}/one-shot-images.tar",
+                "runtime_architecture": architecture,
+                "runtime_images": [
+                    {"reference": reference, "ids": sorted(ids)}
+                    for reference, ids in identities.items()
+                ],
+                "runtime_control_image": built.control_plane().image.reference,
+                "runtime_command": args,
+                "runtime_env": {"DOCKER_HOST": "unix:///var/run/docker.sock"}
+                | ({"NANOFAAS_LOG_FORMAT": "json"} if logs_enabled else {}),
+                "runtime_logs": logs_enabled,
+                "runtime_peer_dir": peer_dir,
+                "runtime_peer_file": str(operator_file) if operator_file else None,
+                **(
+                    {
+                        "runtime_cpus": SCIENTIFIC_CONTROL_PLANE_CPUS,
+                        "runtime_memory": f"{SCIENTIFIC_CONTROL_PLANE_MEMORY_MIB}m",
+                    }
+                    if scientific
+                    else {}
+                ),
+            },
+        )
         deadline = time.monotonic() + operational_limit(
             settings, "service_start_seconds", 90
         )
@@ -546,6 +502,7 @@ def _architecture_images(
             archive_image_ids(
                 path,
                 {c.image.reference: c.image.id for c in checked.components},
+                architecture=architecture,
             )
             (run_dir / f"runtime-distribution-{architecture}.json").write_bytes(
                 checked.report.read_bytes()
@@ -633,15 +590,7 @@ def add_one_shot_platforms(
                 run=staged,
                 executor=executor,
                 functions=selected,
-                required_modules=frozenset(
-                    {
-                        "offload",
-                        "forecasting",
-                        "p2p-discovery",
-                        "container-deployment-provider",
-                        "sync-queue",
-                    }
-                ),
+                required_modules=REQUIRED_MODULES,
             )
         else:
             raw = settings.runtime_distribution.read_verified()
@@ -655,15 +604,7 @@ def add_one_shot_platforms(
             require_validation_distribution(
                 checked,
                 functions=selected,
-                required_modules=frozenset(
-                    {
-                        "offload",
-                        "forecasting",
-                        "p2p-discovery",
-                        "container-deployment-provider",
-                        "sync-queue",
-                    }
-                ),
+                required_modules=REQUIRED_MODULES,
             )
             distribution = resource_of(
                 "Reuse immutable one-shot runtime distribution",
@@ -770,6 +711,8 @@ def add_one_shot_platforms(
         log_endpoints=routes,
         bootstraps=bootstraps,
     )
+
+    workflow.add(OperatorPreflight(platform.operator_ports))
 
     endpoints = {
         key: _control_plane(

@@ -489,6 +489,7 @@ def test_bootstrap_waits_for_cloud_init_before_installing_packages(
         vm_argv=lambda vm, *argv: ("multipass", "exec", vm.name, "--", *argv),
         site_host=None,
         reset_shared_ssh=lambda _vm: None,
+        ansible_vars=lambda vm: {"ansible_host": vm.host},
     )
     vm = SimpleNamespace(
         name="owned", host="127.0.0.1", user="ubuntu", home="/home/ubuntu"
@@ -504,20 +505,10 @@ def test_bootstrap_waits_for_cloud_init_before_installing_packages(
         )
 
     monkeypatch.setattr("nanolab.plans.one_shot_common.subprocess.run", command)
-    monkeypatch.setattr(
-        "nanolab.plans.one_shot_common.scenario_context", lambda *_: object()
-    )
-    monkeypatch.setattr(
-        "nanolab.plans.one_shot_common.plan_vm_provision_base", lambda _: ()
-    )
-    monkeypatch.setattr(
-        "nanolab.plans.one_shot_common.retarget_cloud_operations", lambda *_: ()
-    )
-    monkeypatch.setattr(
-        "nanolab.plans.one_shot_common.run_bootstrap_operations",
-        lambda *_args, **_kwargs: calls.append("install"),
-    )
-    resource = _bootstrap(cast(Any, node), tmp_path)
+    from sonata_tasks.ansible import AnsiblePlaybookTask
+
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", lambda *_: calls.append("install"))
+    resource = _bootstrap(cast(Any, node), tmp_path, run_dir=tmp_path)
     inputs = SimpleNamespace(resource=lambda _: vm)
     if ready:
         acquire_now(resource, cast(Any, inputs))

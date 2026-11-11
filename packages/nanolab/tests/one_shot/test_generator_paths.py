@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 from sonata_engine import TaskInputs
+from sonata_tasks.ansible import AnsiblePlaybookTask
 
 from nanolab.tasks.resource_tasks import acquire_now
-from nanolab.workbench import components, loadgen, playbook
+from nanolab.workbench import components, loadgen
 from nanolab.workbench.platform import OPERATOR
+from tests.workbench.playbook_fakes import host_of
 
 
 def test_generator_captures_invocation_directory(tmp_path, monkeypatch):
@@ -20,11 +22,12 @@ def test_generator_captures_invocation_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path.parent)
     configs = []
 
-    def deploy(_provider, _operations, *, role):
+    def deploy(task, inputs):
+        role = host_of(task)
         saved = run_dir / "workbench" / "vars" / f"{role}-deploy.json"
         configs.append(json.loads(saved.read_text())["instances"][0]["config"])
 
-    monkeypatch.setattr(playbook, "run_bootstrap_operations", deploy)
+    monkeypatch.setattr(AnsiblePlaybookTask, "run", deploy)
     monkeypatch.setattr(components, "ensure_installed", lambda: Path("/coll"))
     acquire_now(resource, TaskInputs._for_resource_values({}, ()))
     (config,) = configs

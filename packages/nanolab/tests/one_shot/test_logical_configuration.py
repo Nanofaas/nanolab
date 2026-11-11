@@ -1,10 +1,12 @@
 """New live v2 runs have explicit version/session identity; archives stay v1."""
 
 from datetime import UTC, datetime
+from importlib.resources import files
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
+import yaml
 
 from nanolab.config.one_shot import OneShotConfig, ProtocolSettings
 from nanolab.one_shot.client import NanoFaasOneShotClient
@@ -86,3 +88,62 @@ def test_missing_explicit_version_is_legacy_and_invalid_versions_are_rejected():
     assert OneShotConfig.model_validate(original).protocol_version == 1
     with pytest.raises(ValueError, match="protocolVersion"):
         settings(3)
+
+
+@pytest.mark.parametrize("stage", ["calibration", "qualification", "experiment"])
+def test_generic_presets_emit_logical_configuration_with_current_recipe_budgets(stage):
+    root = files("nanolab").joinpath("assets/presets")
+    data = yaml.safe_load(root.joinpath(f"scenarios/one-shot-{stage}.yaml").read_text())
+    config = OneShotConfig.model_validate(data["oneShot"])
+    qualification = OneShotConfig.model_validate(
+        yaml.safe_load(
+            root.joinpath("scenarios/one-shot-qualification.yaml").read_text()
+        )["oneShot"]
+    )
+    timing = qualification.timing
+    assert timing is not None
+    function = next(iter(config.functions))
+    profile = SimpleNamespace(
+        profile_id="profile",
+        environment_fingerprint="sha256:" + "a" * 64,
+        functions=[
+            {
+                "function": function,
+                "imageDigest": "sha256:" + "b" * 64,
+                "inputHash": "sha256:" + "c" * 64,
+            }
+        ],
+    )
+    topology = SimpleNamespace(
+        resources=SimpleNamespace(
+            nodes={n.id: SimpleNamespace(config=n) for n in config.nodes}
+        ),
+        function_settings=config.functions,
+    )
+    client = SimpleNamespace(
+        status=lambda: SimpleNamespace(catalog_generations={function: 1})
+    )
+    payload = configuration_for_node(
+        topology,
+        config,
+        cast(CalibrationProfile, profile),
+        "edge-0",
+        client=cast(NanoFaasOneShotClient, client),
+        cloud_uri="http://cloud:8080",
+        period=timing.period_candidates[0],
+        lead=timing.lead_seconds,
+        epsilon=timing.epsilon,
+        protocol=timing.protocol,
+        anchor=datetime(2026, 11, 11, tzinfo=UTC),
+        session_id="shared-session",
+    )
+    assert payload["schemaVersion"] == 2
+    assert payload["sessionId"] == "shared-session"
+    assert payload["negotiation"]["auctionBudget"] == "PT5.000000000S"
+    assert payload["negotiation"]["peerTimeout"] == "PT0.500000000S"
+    assert payload["negotiation"]["solverBudget"] == "PT1.000000000S"
+    assert payload["preparationBudget"] == "PT5.000000000S"
+    assert timing.protocol.auction_seconds < timing.lead_seconds
+    assert timing.protocol.auction_seconds + timing.protocol.preparation_seconds <= (
+        timing.epsilon * min(timing.period_candidates)
+    )

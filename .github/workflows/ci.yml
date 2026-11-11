@@ -52,7 +52,7 @@ jobs:
       - name: Install the pinned workbench collection
         if: ${{ !cancelled() && steps.sync.outcome == 'success' && matrix.package == 'nanolab' }}
         run: >-
-          uvx --from 'ansible-core>=2.20,<2.21' ansible-galaxy collection install
+          uv run --locked --all-packages --all-groups ansible-galaxy collection install
           -r packages/nanolab/src/nanolab/tasks/infra/ansible_assets/requirements.yml
           -p .ansible/collections
 

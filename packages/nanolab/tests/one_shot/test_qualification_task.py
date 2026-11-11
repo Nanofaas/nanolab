@@ -19,6 +19,19 @@ def task_fixture(tmp_path, monkeypatch, *, censored=False, release=True):
         / "src/nanolab/assets/presets/scenarios/one-shot-qualification.yaml"
     )
     data = yaml.safe_load(preset.read_text())["oneShot"]
+    # These archived v1 fixtures exercise qualification independently of live presets.
+    data["protocolVersion"] = 1
+    data["timing"].update(
+        periodCandidatesSeconds=[20, 30],
+        maxTraceResolutionSeconds=30,
+        measurementLeadSeconds=3,
+        protocol={
+            "auctionSeconds": 0.6,
+            "peerSeconds": 0.15,
+            "solverSeconds": 0.15,
+            "preparationSeconds": 1,
+        },
+    )
     data["profile"] = {"path": str(tmp_path / "profile.json"), "sha256": "a" * 64}
     settings = OneShotConfig.model_validate(data)
     document = json.loads(

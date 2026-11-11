@@ -7,6 +7,7 @@ import json
 import re
 import socket
 import subprocess
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, override
@@ -43,7 +44,9 @@ def ensure_installed() -> Path:
     _ansible_python()  # galaxy on the wrong ansible fails less legibly
     done = subprocess.run(
         [
-            "ansible-galaxy",
+            sys.executable,
+            "-m",
+            "ansible.cli.galaxy",
             "collection",
             "install",
             "--force",
@@ -55,6 +58,7 @@ def ensure_installed() -> Path:
         capture_output=True,
         text=True,
         check=False,
+        timeout=600,
     )
     # galaxy exits 0 when no candidate fits (a requires_ansible conflict).
     if done.returncode != 0 or _installed_version(collections) != _pinned_version():
@@ -79,22 +83,21 @@ def _run(*argv: str) -> subprocess.CompletedProcess[str]:
 
 
 def _ansible_python() -> str:
-    """Refuse an ansible other than core 2.20; return the Python it runs on."""
-    version = _run("ansible", "--version").stdout
+    """Check the Ansible installed with NanoLab, independent of PATH."""
+    version = _run(sys.executable, "-m", "ansible.cli.adhoc", "--version").stdout
     core = re.search(r"core (\d+\.\d+)\.", version)
-    python = re.search(r"python version = .*\((/[^)]+)\)\s*$", version, re.M)
-    if core is None or core[1] != ANSIBLE_CORE or python is None:
+    if core is None or core[1] != ANSIBLE_CORE:
         raise RuntimeError(
-            f"the workbench needs ansible-core {ANSIBLE_CORE}.x on PATH; "
-            f"`ansible --version` says: {version.strip()[:200] or 'nothing'}"
+            f"the workbench needs ansible-core {ANSIBLE_CORE}.x in {sys.executable}; "
+            f"Ansible reports: {version.strip()[:200] or 'nothing'}"
         )
-    return python[1]
+    return sys.executable
 
 
 def check_operator(ports: Iterable[tuple[str, int]]) -> None:
     """Refuse a run the operator host cannot hold, before anything deploys.
 
-    ansible-core 2.20 on PATH whose Python imports `requests` (the
+    ansible-core 2.20 in NanoLab's Python with `requests` (the
     community.docker modules need it), a reachable Docker, and every
     operator-side port (`(address, port)`) still free.
     """
@@ -131,6 +134,22 @@ class InstallWorkbench(Task[Path]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[Path]:
         del inputs
         return TaskOutcome(value=ensure_installed())
+
+
+class OperatorPreflight(InstallWorkbench):
+    """Check tools and install collections before acquiring experiment VMs."""
+
+    title = "Prepare the experiment operator"
+    idempotent = False
+
+    def __init__(self, ports: Iterable[tuple[str, int]] = ()) -> None:
+        """Keep the platform ports to check before infrastructure acquisition."""
+        self.ports = tuple(ports)
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[Path]:
+        check_operator(self.ports)
+        return super().run(inputs)
 
 
 def workbench_resource() -> Resource[Path]:
