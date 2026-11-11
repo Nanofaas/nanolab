@@ -98,6 +98,7 @@ class OneShotPlatform:
     loadgen: Callable[..., Resource[LoadgenRun]]
     record_supervisor_status: Callable[[Members], dict[str, Any]]
     operator_ports: tuple[tuple[str, int], ...]
+    receipt_endpoint: str | None = None
 
     def require_healthy(self, values: Members) -> None:
         """Keep the final health evidence and reject unqualified measurements."""
@@ -360,7 +361,9 @@ def one_shot_platform(
     loki_url = ""
     loki_container = ""
     config_files = {
-        name: nanofaas_root / "deploy/observability" / name
+        name: nanofaas_root
+        / "deploy/observability"
+        / ("fluent-bit-journal.conf" if name == "fluent-bit.conf" else name)
         for name in ("fluent-bit.conf", "parsers.conf")
     }
     storage_dir = f"/var/tmp/nanolab-logs-{run_id}"  # nosec B108 - on the node VM
@@ -422,6 +425,7 @@ def one_shot_platform(
                     "config_files": {k: str(v) for k, v in config_files.items()},
                     **({} if route else {"loki": _loki_target(logs.endpoint or "")}),
                     "storage_dir": storage_dir,
+                    "journal": True,
                     "cpus": logs.cpu,
                     "memory_mib": logs.memory_mib,
                     "env": {
@@ -616,13 +620,13 @@ def one_shot_platform(
 
     def collector_identity(key: str) -> dict[str, Any]:
         node = topology.nodes[key]
-        # Fluent Bit tails the json-file logs under the Docker root.
+        # Journal records survive removal of the producing container.
         driver = node.command(
             ("docker", "info", "--format={{.LoggingDriver}}")
         ).stdout.strip()
-        if driver != "json-file":
+        if driver != "journald":
             raise ValueError(
-                "managed function collection requires Docker json-file driver"
+                "managed function collection requires Docker journald driver"
             )
         inspected = _inspect(nodes[key], f"wb-log-collector-{key}")
         if (
@@ -706,4 +710,5 @@ def one_shot_platform(
         partial(loadgen_resource, OPERATOR, cpuset=operator_cpus),
         record_supervisor_status,
         tuple(operator_ports),
+        export_logs.endpoint if logs.enabled else None,
     )

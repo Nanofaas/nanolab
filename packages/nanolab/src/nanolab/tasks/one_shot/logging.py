@@ -33,8 +33,8 @@ def query_url(endpoint: str) -> str:
     return endpoint.removesuffix("/push") + "/query_range"
 
 
-def export_queue_events(http, url, query, start, end, limit, path) -> int:
-    """Page queue observations with overlapping boundaries; fail on truncation."""
+def export_log_events(http, url, query, start, end, limit, path) -> int:
+    """Page structured log events with overlapping boundaries; fail on truncation."""
     count = 0
     boundary = set()
     while start <= end:
@@ -63,9 +63,7 @@ def export_queue_events(http, url, query, start, end, limit, path) -> int:
         if len(values) < limit:
             return count
         if not fresh:
-            raise RuntimeError(
-                "queue log timestamp boundary cannot be paged completely"
-            )
+            raise RuntimeError("log timestamp boundary cannot be paged completely")
         start = values[-1][0]
         boundary = {value for value in values if value[0] == start}
     return count
@@ -612,7 +610,7 @@ def export_collector(
             + ' | logger="it.unimib.datai.nanofaas.execution.QueueObservation"'
         )
         with httpx.Client(trust_env=False) as http:
-            count = export_queue_events(
+            count = export_log_events(
                 http,
                 query_url(logs.endpoint),
                 query,
