@@ -6,6 +6,7 @@ an isolated workspace with the pinned collection already installed.
 
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -36,6 +37,13 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("NANOLAB_WORKBENCH_INTEGRATION") != "1",
     reason="opt-in installed workbench integration",
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_operator_workspace():
+    """Use the explicitly selected integration workspace and its collection."""
+    if not os.environ.get("NANOLAB_WORKSPACE"):
+        pytest.fail("integration tests require an isolated NANOLAB_WORKSPACE")
 
 
 def docker(*args, check=True):
@@ -353,3 +361,153 @@ def test_real_cpu_mismatch_refuses_acquire_and_removes_container(tmp_path, monke
         assert docker("inspect", "wb-" + name, check=False).returncode != 0
     finally:
         docker("rm", "-f", "wb-" + name, check=False)
+
+
+def test_receipts_from_production_journal_config_survive_container_removal(tmp_path):
+    """Exercise the real NanoFaaS parser and Nanolab correlation after deletion."""
+    from types import SimpleNamespace
+
+    from nanolab.tasks.one_shot.receipts import collect_log_receipts
+
+    source = Path(os.environ["NANOLAB_JOURNAL_CONFIG"]).parent
+    collections = ensure_installed()
+    token = "receipts-" + uuid4().hex[:10]
+    loki_port, collector_port = port(), port()
+    config = (source / "fluent-bit-journal.conf").read_text()
+    config = re.sub(r"(HTTP_Port\s+)2020", rf"\g<1>{collector_port}", config)
+    config_file = tmp_path / "fluent-bit.conf"
+    config_file.write_text(config)
+    loki = Instance(
+        name=token + "-loki",
+        component="loki",
+        config={"port": loki_port, "data_dir": str(tmp_path / "loki")},
+    )
+    collector = Instance(
+        name=token + "-collector",
+        component="log-collector",
+        config={
+            "port": collector_port,
+            "journal": True,
+            "storage_dir": str(tmp_path / "buffer"),
+            "config_files": {
+                "fluent-bit.conf": str(config_file),
+                "parsers.conf": str(source / "parsers.conf"),
+            },
+            "loki": {"host": "127.0.0.1", "port": loki_port},
+            "env": {
+                "NANOFAAS_NODE_ID": "edge",
+                "NANOFAAS_ENVIRONMENT": token,
+                "NANOFAAS_CAMPAIGN_ID": token,
+                "NANOFAAS_RUN_ID": tmp_path.name,
+                "NANOFAAS_MODE": "test",
+                "NANOFAAS_NODE_ROLE": "edge",
+                "NANOFAAS_LOG_BUFFER_SIZE": "16M",
+            },
+        },
+    )
+
+    def play(action, instances):
+        WorkbenchPlaybook(
+            "Journal receipts " + action,
+            OPERATOR,
+            action,
+            HostVars(instances=tuple(instances)),
+            vars_dir=tmp_path / "vars",
+            collections=collections,
+            vm=None,
+        ).run(TaskInputs.empty())
+
+    url = f"http://127.0.0.1:{loki_port}"
+    try:
+        play("deploy", [loki])
+        started = time.time()
+        rows, events = [], []
+        for i in range(50):
+            identity = f"{token}-{i}"
+            rows.append(
+                {
+                    "event": "result",
+                    "phase": "campaign",
+                    "originalId": identity,
+                    "executionId": identity,
+                    "terminalExecutionId": identity,
+                    "origin": "edge",
+                    "executionNode": "edge",
+                    "function": "work",
+                    "statusCode": 200,
+                    "responseStatus": "success",
+                    "scheduledAt": started,
+                }
+            )
+            events.append(
+                {
+                    "schemaVersion": 1,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "service": "function-runtime",
+                    "logger": "nanofaas::receipt",
+                    "executionId": identity,
+                    "attributes": {
+                        "event": "runtime.execution.released",
+                        "receiptSchemaVersion": 1,
+                        "incarnation": token,
+                        "dispatchAttempt": "1",
+                        "state": "RELEASED",
+                        "occupancySeconds": 0.25,
+                        "responseStatus": "success",
+                        "handlerStarted": True,
+                    },
+                }
+            )
+        produced = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                token,
+                "--log-driver=journald",
+                "-i",
+                "busybox:1.36",
+                "cat",
+            ],
+            input="".join(json.dumps(e) + "\n" for e in events),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert produced.returncode == 0, produced.stderr
+        assert docker("inspect", token, check=False).returncode != 0
+        play("deploy", [collector])
+
+        def ready():
+            try:
+                with urlopen(url + "/ready", timeout=2) as response:
+                    return response.status == 200
+            except OSError:
+                return False
+
+        wait_for(ready)
+        run = SimpleNamespace(
+            run_dir=tmp_path,
+            topology=SimpleNamespace(
+                platform=SimpleNamespace(receipt_endpoint=url + "/loki/api/v1/push"),
+                endpoints={"edge": "http://edge"},
+            ),
+            settings=SimpleNamespace(
+                observability=SimpleNamespace(logs=SimpleNamespace(export_limit=100))
+            ),
+        )
+        collect_log_receipts(
+            run,
+            SimpleNamespace(resource=lambda value: value),
+            rows,
+            deadline=time.monotonic() + 30,
+        )
+        proofs = [
+            json.loads(line)
+            for line in (tmp_path / "physical.jsonl").read_text().splitlines()
+        ]
+        assert {p["executionId"] for p in proofs} == {r["executionId"] for r in rows}
+        assert len(proofs) == 50
+    finally:
+        play("undeploy", [collector, loki])

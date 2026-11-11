@@ -75,7 +75,7 @@ def test_sampler_keeps_errors_and_restart_without_inventing_zero(tmp_path):
 
 
 def test_queue_log_export_pages_without_losing_timestamp_boundary(tmp_path):
-    from nanolab.tasks.one_shot.logging import export_queue_events
+    from nanolab.tasks.one_shot.logging import export_log_events
 
     def event(n):
         return json.dumps({"attributes": {"event": "QUEUED", "executionId": str(n)}})
@@ -94,7 +94,7 @@ def test_queue_log_export_pages_without_losing_timestamp_boundary(tmp_path):
         )
 
     with httpx.Client(transport=httpx.MockTransport(respond)) as http:
-        count = export_queue_events(
+        count = export_log_events(
             http,
             "http://logs/query_range",
             "query",
