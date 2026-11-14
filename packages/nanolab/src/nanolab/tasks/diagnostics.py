@@ -23,6 +23,7 @@ from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
 
 from nanolab.core.execution import ExecutionRole
+from nanolab.tasks.containerd_rootless import RootlessRun
 
 CONTROL_PLANE_DEPLOYMENT = "deploy/nanofaas-control-plane"
 
@@ -63,5 +64,24 @@ def collect_control_plane_log(
         role=role,
         options=CommandOptions(remote_dir=remote_dir),
         semantic_key=f"nanolab.diagnostics.control-plane-log:{namespace}:v1",
+        verify=partial(write_control_plane_log, destination),
+    )
+
+
+def collect_rootless_control_plane_log(
+    *,
+    run: RootlessRun,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    destination: Path,
+    title: str = "Collect the control-plane log",
+) -> CommandTask:
+    """Read the rootless control plane's log: a systemd user unit, so its journal."""
+    return CommandTask(
+        title=title,
+        argv=("bash", str(run.script), "control-log", run.run_id, str(run.repo_root)),
+        executor=executor,
+        role=role,
+        semantic_key=f"nanolab.diagnostics.control-plane-log:{run.run_id}:v1",
         verify=partial(write_control_plane_log, destination),
     )

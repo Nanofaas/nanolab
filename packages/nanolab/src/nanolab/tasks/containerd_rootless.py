@@ -60,10 +60,12 @@ def _resource(
     role: ExecutionRole,
     requires: tuple[Resource[Any], ...] = (),
     start_args: tuple[str, ...] = (),
+    start_env: tuple[str, ...] = (),
 ) -> Resource[RootlessRun]:
     acquire = CommandTask(
         title=f"Start {name}",
         argv=(
+            *(("env", *start_env) if start_env else ()),
             "bash",
             str(run.script),
             start,
@@ -125,6 +127,7 @@ def control_plane_resource(
     artifact: Path | None = None,
     cpu: float | None = None,
     memory_bytes: int | None = None,
+    metrics_profile: str | None = None,
 ) -> Resource[RootlessRun]:
     """Start and later stop the control-plane unit and owned publications."""
     if artifact is not None and (
@@ -155,6 +158,9 @@ def control_plane_resource(
         role=role,
         requires=requires,
         start_args=(str(cpuset_cores), budget, *extra),
+        start_env=(
+            (f"NANOFAAS_METRICS_PROFILE={metrics_profile}",) if metrics_profile else ()
+        ),
     )
 
 

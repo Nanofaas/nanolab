@@ -111,7 +111,10 @@ from nanolab.tasks.containerd_rootless import (
     registry_resource,
     run_for_environment,
 )
-from nanolab.tasks.diagnostics import collect_control_plane_log
+from nanolab.tasks.diagnostics import (
+    collect_control_plane_log,
+    collect_rootless_control_plane_log,
+)
 from nanolab.tasks.k6 import K6Task
 from nanolab.tasks.loadtest import (
     CapturePrometheusTask,
@@ -955,6 +958,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     fixed_concurrency: int | None = None,
     completion_latency: bool = False,
     function_runtime: bool = False,
+    rootless_run: RootlessRun | None = None,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     # First, because it has to sample while the stack is still up and before the
@@ -1020,7 +1024,14 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
         after.append(
             SideCommandTask(
                 title="Collect the control-plane log",
-                command=collect_control_plane_log(
+                command=collect_rootless_control_plane_log(
+                    run=rootless_run,
+                    executor=executor,
+                    role="stack",
+                    destination=run_dir / "control-plane.log",
+                )
+                if rootless_run is not None
+                else collect_control_plane_log(
                     executor=executor,
                     role="stack",
                     namespace=request.namespace,
@@ -1555,6 +1566,7 @@ def build_loadtest_plan(
         hpa_metrics=hpa,
         snapshot_lead_seconds=snapshot_lead_seconds,
         heap_metrics_required=heap_metrics_required,
+        rootless_run=rootless_run,
     )
     if request.recipe is not None:
         binding = request.recipe
@@ -1626,6 +1638,8 @@ def build_loadtest_plan(
                         CONCURRENCY_FUNCTION_CPUS if shared_cpuset(config) else 0
                     ),
                     budget=concurrency_budget(config),
+                    # As Helm sets it on k8s: the thresholds require its series.
+                    metrics_profile="advanced",
                 )
             )
             if rootless_run is not None

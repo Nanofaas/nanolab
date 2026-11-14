@@ -36,7 +36,7 @@ class RecordingExecutor:
         # can register against it.
         argv = " ".join(task.argv)
         stdout = "10.43.0.7" if "get service control-plane" in argv else ""
-        if "logs deploy/nanofaas-control-plane" in argv:
+        if "logs deploy/nanofaas-control-plane" in argv or " control-log " in argv:
             stdout = CONTROL_PLANE_LOG
         return TaskResult(
             task_id=task.task_id, status="passed", return_code=0, stdout=stdout
@@ -251,6 +251,69 @@ def test_containerd_loadtest_starts_rootless_runtime_without_compose(
         arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")
         for arg in build
     )
+
+
+@pytest.mark.nanofaas
+def test_containerd_loadtest_reads_the_control_plane_log_from_its_user_unit(
+    tmp_path: Path,
+) -> None:
+    # The rootless control plane is a systemd user unit, not a Kubernetes
+    # deployment: asking kubectl failed every containerd load test at the end.
+    executor = RecordingExecutor()
+    plan = build_loadtest_plan(
+        ScenarioConfig(
+            workflow="loadtest", backend="containerd", functions=["word-stats-java"]
+        ),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
+        ),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    commands = _run(plan, executor)
+
+    assert not any("kubectl" in command for command in commands)
+    assert any(" control-log " in command for command in commands)
+    assert (tmp_path / "control-plane.log").read_text() == CONTROL_PLANE_LOG
+
+
+@pytest.mark.nanofaas
+def test_containerd_loadtest_runs_the_control_plane_on_the_advanced_profile(
+    tmp_path: Path,
+) -> None:
+    # Helm sets it on k8s. Without it the thresholds found 30 required series
+    # missing, from process_uptime_seconds to the JVM and Netty gauges.
+    executor = RecordingExecutor()
+    plan = build_loadtest_plan(
+        ScenarioConfig(
+            workflow="loadtest", backend="containerd", functions=["word-stats-java"]
+        ),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
+        ),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    start = next(
+        command for command in _run(plan, executor) if " control-start " in command
+    )
+    assert start.startswith("env NANOFAAS_METRICS_PROFILE=advanced bash ")
 
 
 @pytest.mark.nanofaas

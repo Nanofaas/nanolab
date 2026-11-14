@@ -126,6 +126,9 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["127.0.0.1:8081"]
+        # The metric catalogue selects this label, as k8s and Compose set it.
+        labels:
+          app: nanofaas-control-plane
 PROMETHEUS
     touch "$state/prometheus-owned"
     nerdctl --namespace "$registry_namespace" run -d \
@@ -206,6 +209,11 @@ PY
     if [[ -n $budget ]]; then
       printf 'NANOFAAS_CONCURRENCYCONTROL_TOTALBUDGET=%s\n' "$budget" >> "$env_file"
     fi
+    # Only when asked: a soak keeps the profile its recipe chose, which this would override.
+    if [[ -n ${NANOFAAS_METRICS_PROFILE:-} ]]; then
+      [[ $NANOFAAS_METRICS_PROFILE =~ ^[a-z]+$ ]] || { echo "invalid metrics profile" >&2; exit 2; }
+      printf 'NANOFAAS_METRICS_PROFILE=%s\n' "$NANOFAAS_METRICS_PROFILE" >> "$env_file"
+    fi
     python3 - "$repo_root/deploy/containerd-rootless/nanofaas.service" "$unit_path" "$repo_root" "$env_file" <<'PY'
 from pathlib import Path
 import sys
@@ -226,6 +234,9 @@ PY
     ;;
   control-stop)
     control_stop
+    ;;
+  control-log)
+    journalctl --user --unit "$unit_name" --no-pager --output short-iso
     ;;
   control-restart)
     [[ -f $unit_path ]] || { echo "no owned unit $unit_name" >&2; exit 1; }

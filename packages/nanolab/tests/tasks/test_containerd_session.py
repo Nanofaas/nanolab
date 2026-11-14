@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 import pytest
+import yaml
 from sonata_engine import TaskInputs
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -449,3 +450,90 @@ def test_session_leaves_the_snapshotter_to_containerd(
     result = _run("managed-ids", home, env, "word-stats-java")
 
     assert result.stdout.strip() == "unset"
+
+
+def test_control_log_reads_the_run_units_journal(
+    session_home: tuple[Path, dict[str, str]],
+) -> None:
+    # The rootless control plane is a systemd user unit; its log is the journal.
+    home, env = session_home
+    binary = Path(env["PATH"].split(":", 1)[0]) / "journalctl"
+    binary.write_text('#!/bin/sh\nprintf "%s\\n" "$*"\n')
+    binary.chmod(0o755)
+
+    result = _run("control-log", home, env)
+
+    assert result.stdout.strip() == (
+        "--user --unit nanofaas-run123.service --no-pager --output short-iso"
+    )
+
+
+@pytest.mark.parametrize("profile", ["advanced", None])
+def test_control_start_passes_a_requested_metrics_profile_only(
+    session_home: tuple[Path, dict[str, str]], tmp_path: Path, profile: str | None
+) -> None:
+    # A load test needs the advanced profile, as Helm sets it on k8s; a soak keeps
+    # the one its recipe chose, which an environment variable would override.
+    home, env = session_home
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    script = runner / "session.sh"
+    script.write_bytes(SESSION.read_bytes())
+    (runner / "provision.sh").write_text("#!/bin/sh\nexit 0\n")
+    repo = tmp_path / "repo"
+    template = repo / "deploy/containerd-rootless/nanofaas.service"
+    template.parent.mkdir(parents=True)
+    template.write_text(
+        "[Service]\nEnvironmentFile=@NANOLAB_ENV_FILE@\nExecStart=@NANOFAAS_ROOT@/start-control-plane.sh\n"
+    )
+    if profile is not None:
+        env = {**env, "NANOFAAS_METRICS_PROFILE": profile}
+
+    result = subprocess.run(
+        ["bash", str(script), "control-start", "run123", str(repo), "0", ""],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    state = home / ".local/share/nanolab/containerd-rootless/run123"
+    values = dict(
+        line.split("=", 1)
+        for line in (state / "control-plane.env").read_text().splitlines()
+    )
+    assert values.get("NANOFAAS_METRICS_PROFILE") == profile
+
+
+def test_prometheus_labels_the_control_plane_as_the_catalogue_selects_it(
+    session_home: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
+    # The catalogue selects app="nanofaas-control-plane", which k8s gets from the
+    # pod label and Compose from its static target: unlabelled, 23 required
+    # series matched nothing.
+    home, env = session_home
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    script = runner / "session.sh"
+    script.write_bytes(SESSION.read_bytes())
+    (runner / "provision.sh").write_text("#!/bin/sh\nexit 0\n")
+    nerdctl = Path(env["PATH"].split(":", 1)[0]) / "nerdctl"
+    nerdctl.write_text("#!/bin/sh\nexit 0\n")
+
+    result = subprocess.run(
+        ["bash", str(script), "prometheus-start", "run123", str(tmp_path / "repo")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    config = yaml.safe_load(
+        (
+            home / ".local/share/nanolab/containerd-rootless/run123/prometheus.yml"
+        ).read_text()
+    )
+    [target] = config["scrape_configs"][0]["static_configs"]
+    assert target["labels"] == {"app": "nanofaas-control-plane"}
