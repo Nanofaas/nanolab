@@ -435,9 +435,12 @@ def test_inspect_owned_rejects_missing_or_ambiguous_matches(
     assert "expected exactly one" in result.stderr
 
 
-def test_session_pins_native_snapshotter_for_nerdctl(
+def test_session_leaves_the_snapshotter_to_containerd(
     session_home: tuple[Path, dict[str, str]],
 ) -> None:
+    # containerd's default, overlayfs. The native snapshotter copied every root
+    # filesystem and containerd prepares snapshots one at a time, so replicas
+    # started together were created one after another.
     home, env = session_home
     binary = Path(env["PATH"].split(":", 1)[0]) / "nerdctl"
     binary.write_text('#!/bin/sh\nprintf "%s\\n" "${CONTAINERD_SNAPSHOTTER:-unset}"\n')
@@ -445,4 +448,4 @@ def test_session_pins_native_snapshotter_for_nerdctl(
 
     result = _run("managed-ids", home, env, "word-stats-java")
 
-    assert result.stdout.strip() == "native"
+    assert result.stdout.strip() == "unset"

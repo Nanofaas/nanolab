@@ -118,7 +118,6 @@ HOSTS
 python3 - "$HOME/.config/containerd/config.toml" "$HOME/.config/containerd/certs.d" <<'PY'
 from pathlib import Path
 import sys
-import platform
 
 path, hosts = Path(sys.argv[1]), sys.argv[2]
 config = path.read_text() if path.exists() else 'version = 3\n'
@@ -129,12 +128,6 @@ if section + '\n' not in config:
     config = config.replace('version = 3\n', f'version = 3\n{section}\n', 1)
 if f'config_path = "{hosts}"' not in config:
     config = config.replace(section + '\n', section + f'\n  config_path = "{hosts}"\n', 1)
-if 'unpack_config' not in config:
-    arch = {'aarch64': 'arm64', 'x86_64': 'amd64'}.get(platform.machine())
-    if arch is None:
-        raise SystemExit(f'unsupported containerd architecture: {platform.machine()}')
-    config += '\n[[plugins."io.containerd.transfer.v1.local".unpack_config]]\n'
-    config += f'  platform = "linux/{arch}"\n  snapshotter = "native"\n  differ = "walking"\n'
 path.write_text(config)
 PY
 
